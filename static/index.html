@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EXP · Compare ticket prices</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">EXP · one event, every marketplace</div>
+      <h1>Compare ticket prices</h1>
+      <p>Search an event, pick how many seats you need, and see the cheapest total on each marketplace we track, with a link to buy it there.</p>
+    </header>
+
+    <form class="search" id="searchForm" role="search" autocomplete="off">
+      <label for="q" class="eyebrow" style="flex-basis:100%;margin:0">Event, team, artist or venue</label>
+      <input id="q" name="q" type="search" placeholder="Yankees, Doja Cat, Madison Square Garden…" minlength="2" required>
+      <button type="submit" id="searchBtn">Search</button>
+    </form>
+
+    <section id="resultsSection" hidden>
+      <div class="eyebrow">Upcoming events</div>
+      <ul class="results" id="results"></ul>
+      <p class="note" id="resultsNote" hidden></p>
+    </section>
+
+    <section id="compareSection" hidden>
+      <div class="event-head">
+        <div>
+          <div class="eyebrow">Price ladder</div>
+          <h2 id="evName"></h2>
+          <div class="meta" id="evMeta"></div>
+        </div>
+        <div class="controls">
+          <label for="qty">Seats</label>
+          <select id="qty">
+            <option>1</option><option selected>2</option><option>3</option><option>4</option>
+            <option>5</option><option>6</option><option>8</option>
+          </select>
+          <button type="button" class="quiet" id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="ladder" id="ladder"></div>
+      <p class="note" id="feesNote"></p>
+    </section>
+
+    <p class="error" id="error" hidden></p>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
