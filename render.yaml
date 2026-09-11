@@ -1,0 +1,16 @@
+# Render blueprint for the EXP compare service. Applying it is an operator action.
+services:
+  - type: web
+    name: exp-compare
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: EXP_DATABASE_URL
+        sync: false
+      - key: EXP_STOREFRONT_BASE_URL
+        sync: false
+      - key: EXP_OWN_BROKERAGE_ID
+        value: "1768"
