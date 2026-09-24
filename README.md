@@ -59,6 +59,8 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/onboarding.md`](docs/onboarding.md): start here as a developer
 - [`docs/payments-go-live.md`](docs/payments-go-live.md): switching Stripe on (operator runbook)
 - [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
+- [`docs/strategy.md`](docs/strategy.md): where Exos is going and the phased build plan
+- [`docs/gtm-nyc.md`](docs/gtm-nyc.md): go-to-market, NYC first
 - [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
 
 ## Repository layout

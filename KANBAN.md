@@ -4,6 +4,7 @@
 
 - **DB caught up.** Applied to prod 2026-09-24: the 2026-09-11 Stage 2/3 set and
   `20260924200848_exos_audit_hardening_quota_transfer_waitlist` (which also carries the transfer secret leak fix).
+  Then the P0 set and all-in pricing: `20260924205115`, `205508`, `205916`, `210103`, `211840` (verified on prod).
   `20260702121000` and `20260911130000` were not applied on their own; later migrations supersede them (see their headers).
 - **The `/bridge/` bundle (Terminal-2 `static/bridge/`, built 07-27) still works**, and it's now safe to rebuild it from
   this repo and copy `dist/` over.
@@ -19,7 +20,7 @@
 - The storefront (event page, tier list, add-ons, home / org / profile "from" prices, price-rise
   nudges) shows the same figure, via `allInPrice` (client) and `allInCents` (server), which are
   parity-tested.
-- The public views expose `exclusive_tax_percent` (mig `20260924211840`, **not applied yet**).
+- The public views expose `exclusive_tax_percent` (mig `20260924211840`, applied).
 - The storefront discount-code box was removed: it lowered the displayed price but checkout never
   applied it, so the charge could be higher than shown. Server-validated vouchers remain.
 - Listing cards now load tiers, so "from $X" is no longer $0.
@@ -28,10 +29,22 @@
   - A "buyers will see $X" preview in the organizer tier editor.
   - Counsel review of fee and tax display per market.
 
+## Phases (plan: `docs/strategy.md`, go-to-market: `docs/gtm-nyc.md`)
+
+| Phase | Theme | Status |
+|---|---|---|
+| 0 | Payments go-live + P1 audit fixes | 🟡 in progress: P0 live; P1 items below |
+| 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 started (SEO/share metadata, Maps, in-app browser handling) |
+| 2 | Face-value resale exchange + pricing intelligence (read-only from Terminal-2) | ⬜ |
+| 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | ⬜ |
+| 4 | Channel hub (Otter): one inventory across own channels, then authorized marketplaces (item 8) | ⬜ |
+| 5 | Platform: DB split, public API, plugins, new cities | ⬜ |
+
 ## Roadmap (operator, 2026-09-24)
 
-P0 (paid-ticketing blockers) is done in code; see the audit list below. The operator still has to
-apply the migrations and go through `docs/payments-go-live.md`. P1 is in the audit list. Beyond
+P0 (paid-ticketing blockers) is done and its migrations are live. Payments go live when the operator
+works through `docs/payments-go-live.md`. **The phased build plan is `docs/strategy.md`; go-to-market
+(NYC first) is `docs/gtm-nyc.md`.** P1 is in the audit list. Beyond
 that:
 
 **7. Social commerce, maps and SEO**
@@ -65,7 +78,7 @@ that:
 ## Audit 2026-09-24 — open findings
 
 Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,
-Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else is open. The ✅ DB fixes are live in prod; the ✅ edge-function fixes ship when payments go live.
+Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else is open. The ✅ DB fixes (including P0) are live in prod; the ✅ edge-function fixes ship when payments go live.
 
 **Payments (edge functions)**
 - ✅ H — auto-refunds on destination charges didn't set `reverse_transfer` / `refund_application_fee`, so the
