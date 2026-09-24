@@ -13,6 +13,8 @@ import AddToCalendar from '../components/AddToCalendar';
 import { shareEventToStory } from '../lib/poster';
 import { useToast } from '../context/ToastContext';
 import ShareModal from '../components/ShareModal';
+import { myReferralCode, myReferralStats, type ReferralStats } from '../lib/referrals';
+import { buildShareUrl } from '../lib/shareLinks';
 import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import { useT } from '../context/LanguageContext';
@@ -39,6 +41,22 @@ export default function TicketDetail() {
   useEffect(() => {
     setNameDraft(null);
   }, [currentTicketId]);
+
+  // "Bring your friends": this holder's referral code for the event and how
+  // many friends bought through it (mig 20260924234500). Missing = no card.
+  const [referral, setReferral] = useState<ReferralStats | null>(null);
+  const eventIdForReferral = event?.id;
+  useEffect(() => {
+    if (!eventIdForReferral || !user) return undefined;
+    let alive = true;
+    (async () => {
+      const code = await myReferralCode(eventIdForReferral);
+      if (!code) return;
+      const stats = await myReferralStats(eventIdForReferral);
+      if (alive) setReferral(stats ?? { code, friends: 0, tickets: 0 });
+    })().catch(() => { /* feature is optional */ });
+    return () => { alive = false; };
+  }, [eventIdForReferral, user]);
 
   useEffect(() => {
     async function fetchData() {
@@ -194,13 +212,17 @@ export default function TicketDetail() {
         venue: event.location,
         role: 'fan',
         promoter: currentTicket?.promoterId || undefined,
+        ref: referral?.code,
       },
       toast,
     );
   };
 
   const handleSMSShare = () => {
-    const text = `I just secured tickets for ${event.title}! Join me: ${publicUrl(`event/${event.id}`)}`;
+    const link = buildShareUrl(publicUrl(`event/${event.id}`), {
+      role: 'fan', channel: 'sms', promoter: currentTicket?.promoterId || undefined, ref: referral?.code,
+    });
+    const text = `I just secured tickets for ${event.title}! Join me: ${link}`;
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
@@ -414,6 +436,18 @@ export default function TicketDetail() {
                     </div>
                  </div>
 
+                 {referral && (
+                   <div className="mb-6 border border-brand-primary/40 bg-brand-primary/5 p-5">
+                     <p className="type text-[10px] uppercase tracking-widest text-brand-primary mb-1">Bring your friends</p>
+                     <p className="disp text-2xl tracking-wide text-white">
+                       {referral.friends === 0 ? 'Nobody yet' : `${referral.friends} friend${referral.friends === 1 ? '' : 's'} coming`}
+                     </p>
+                     <p className="text-xs text-white/60 mt-1">
+                       Share from here: your links are tagged, so we count everyone who gets tickets through you.
+                     </p>
+                   </div>
+                 )}
+
                  <div className="space-y-3 mb-10">
                     <div className="grid grid-cols-2 gap-3">
                        <button onClick={handleSMSShare} className="type flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 py-3.5 text-[11px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
@@ -538,6 +572,7 @@ export default function TicketDetail() {
           text={`I'm going to ${event.title}!`}
           role="fan"
           promoterId={currentTicket?.promoterId || undefined}
+          referralCode={referral?.code}
         />
       )}
     </div>

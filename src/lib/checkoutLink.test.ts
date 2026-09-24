@@ -27,6 +27,10 @@ describe('parseCheckoutLink', () => {
     const p = parseCheckoutLink(`?products=${T}&promoter=dj-kay&utm_source=instagram&utm_medium=story&utm_campaign=%3Cx%3Efall`);
     expect(p.attribution).toEqual({ promoter: 'dj-kay', utm_source: 'instagram', utm_medium: 'story', utm_campaign: 'xfall' });
   });
+  it('keeps a valid fan referral code', () => {
+    expect(parseCheckoutLink(`?products=${T}&ref=abc123def0`).attribution).toEqual({ ref: 'abc123def0' });
+    expect(parseCheckoutLink(`?products=${T}&ref=ABC`).attribution).toEqual({});
+  });
   it('refuses a bad promoter code and unknown cart_origin', () => {
     const p = parseCheckoutLink(`?products=${T}&promoter=a%20b&cart_origin=tiktok`);
     expect(p.attribution).toEqual({});

@@ -9,6 +9,12 @@ describe('shareAttribution', () => {
     expect(shareAttribution({ role: 'fan', channel: 'instagram_story', promoter: 'dj-kay' }))
       .toEqual({ utm_source: 'instagram', utm_medium: 'fan_share', promoter: 'dj-kay' });
   });
+  it("carries the fan's own referral code, but never a promoter's", () => {
+    expect(shareAttribution({ role: 'fan', channel: 'whatsapp', promoter: 'dj-kay', ref: 'abc123def0' }))
+      .toEqual({ utm_source: 'whatsapp', utm_medium: 'fan_share', promoter: 'dj-kay', ref: 'abc123def0' });
+    expect(shareAttribution({ role: 'fan', channel: 'x', ref: 'NOT-VALID' })).toEqual({ utm_source: 'x', utm_medium: 'fan_share' });
+    expect(shareAttribution({ role: 'promoter', channel: 'x', promoter: 'p', ref: 'abc123def0' }).ref).toBeUndefined();
+  });
   it('tags a fan share with no promoter', () => {
     expect(shareAttribution({ role: 'fan', channel: 'sms' })).toEqual({ utm_source: 'sms', utm_medium: 'fan_share' });
   });

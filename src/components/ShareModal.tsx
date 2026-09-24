@@ -34,13 +34,15 @@ interface ShareModalProps {
   // Promoter code: the sharer's own (promoter) or the one a fan arrived with.
   promoterId?: string;
   campaign?: string;
+  // Fan's own referral code (lib/referrals.ts), so friends are counted.
+  referralCode?: string;
 }
 
-export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign }: ShareModalProps) {
+export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign, referralCode }: ShareModalProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  const linkFor = (channel: ShareChannel) => buildShareUrl(url, { role, channel, promoter: promoterId, campaign });
+  const linkFor = (channel: ShareChannel) => buildShareUrl(url, { role, channel, promoter: promoterId, campaign, ref: referralCode });
   const shareUrl = linkFor('copy');
   const shareText = text ?? `Check out ${title}`;
 

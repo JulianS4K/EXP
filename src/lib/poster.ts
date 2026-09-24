@@ -41,6 +41,8 @@ interface StoryShareInput {
   role?: ShareRole;
   promoter?: string;
   campaign?: string;
+  /** Fan's own referral code (lib/referrals.ts). */
+  ref?: string;
   /** Instagram (default) or Facebook Stories; only matters in the native app. */
   target?: 'instagram_story' | 'facebook_story';
 }
@@ -253,7 +255,7 @@ export async function shareEventToStory(input: StoryShareInput, toast?: ToastFn)
   const { title } = input;
   const target = input.target ?? 'instagram_story';
   const url = input.role
-    ? buildShareUrl(input.url, { role: input.role, channel: target, promoter: input.promoter, campaign: input.campaign })
+    ? buildShareUrl(input.url, { role: input.role, channel: target, promoter: input.promoter, campaign: input.campaign, ref: input.ref })
     : input.url;
 
   // Always copy the URL — that's the link-sticker hand-off regardless of path.

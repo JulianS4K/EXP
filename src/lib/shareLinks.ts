@@ -8,7 +8,7 @@
 // Instagram / Facebook Stories hand-off later (lib/nativeShare.ts).
 
 import { withAttribution, type Attribution } from './attribution';
-import { sanitizePromoter, sanitizeTag } from '../../supabase/functions/_shared/attribution.ts';
+import { sanitizePromoter, sanitizeRef, sanitizeTag } from '../../supabase/functions/_shared/attribution.ts';
 
 export type ShareRole = 'fan' | 'promoter';
 
@@ -36,6 +36,8 @@ export interface ShareOptions {
   promoter?: string;
   /** Promoter campaign name (defaults to the promoter code). */
   campaign?: string;
+  /** Fan: their own referral code (lib/referrals.ts), so friends are counted. */
+  ref?: string;
 }
 
 export function shareAttribution(opts: ShareOptions): Attribution {
@@ -44,6 +46,8 @@ export function shareAttribution(opts: ShareOptions): Attribution {
   if (opts.role === 'fan') {
     out.utm_medium = 'fan_share';
     if (promoter) out.promoter = promoter;
+    const ref = sanitizeRef(opts.ref);
+    if (ref) out.ref = ref;
     return out;
   }
   out.utm_medium = PROMOTER_MEDIUM[opts.channel] ?? 'referral';

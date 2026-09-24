@@ -122,6 +122,14 @@ list)
   - Each promoter gets a private portal (`/p/:token`) with their own sales and kit.
   - Links can be paused or rotated.
 
+**7f. Link in bio and fan referrals** ✅
+- **Promoter link in bio** (`/l/:orgSlug/:code`): one bio link that lists the organizer's upcoming
+  events, credited to the promoter.
+- **Fan referrals** (mig `20260924234500`, not applied): a code per ticket holder per event.
+  - Friends who buy through it are counted, whether the tickets are paid or free.
+  - The ticket page shows the count.
+  - Rewards are not built; that's an operator decision (`docs/social.md`).
+
 **8. Ticket marketplace APIs**
 - **Reading (inventory, pricing and event data):** fine. Reuse Terminal-2's read-only clients
   (`*_client.py`, GET-only by construction).

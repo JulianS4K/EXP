@@ -23,6 +23,7 @@ import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
 import { takePrefill, type CheckoutPrefill } from '../lib/checkoutLink';
+import { attachReferral } from '../lib/referrals';
 import ShareModal from '../components/ShareModal';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
@@ -286,6 +287,9 @@ export default function EventDetails() {
         // same tickets instead of minting twice (button is disabled meanwhile).
         orderRef,
       });
+      // Credit the friend whose link brought this buyer (paid orders are
+      // credited at fulfillment from the checkout attribution).
+      if (attribution.ref) void attachReferral(orderRef, attribution.ref);
       // Stamp attendee names onto the new tickets (best-effort — a name hiccup
       // must not fail a claim that already minted).
       // Pair names with tickets in MINT order. A fresh mint returns ids in
