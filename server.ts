@@ -1,7 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import Stripe from "stripe";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 
@@ -17,66 +16,11 @@ const __dirname = path.dirname(__filename);
 //   * Adds /healthz so a load balancer can probe liveness.
 //   * Catches uncaught route errors centrally instead of leaking stacks.
 //   * Handles SIGTERM/SIGINT cleanly so in-flight requests don't get cut off.
-// Stripe payment flow is intentionally untouched — slated for the
-// later phase that introduces the webhook + server-side fulfillment.
+// Payments are not served from here: checkout is the `exos-checkout` edge
+// function and fulfillment is `stripe-webhook`. The old /api/* Stripe routes
+// were removed (audit 2026-09-24): unused, and /api/verify-session returned
+// any session's metadata to anyone holding its id.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// In-memory token-bucket rate limiter.
-//
-// Implemented inline rather than pulling in `express-rate-limit` to keep the
-// dependency surface small. Limit is per-key and per-process — fine for a
-// single replica; behind a multi-replica deployment swap this for a Redis-
-// backed limiter (Cloud Memorystore / Upstash) so quotas are shared.
-//
-// Defaults: 30 requests per minute per key on /api/*. The Stripe checkout
-// endpoint specifically gets a tighter cap to deter Stripe-session spam.
-// ---------------------------------------------------------------------------
-interface Bucket {
-  tokens: number;
-  updatedAt: number;
-}
-const rateBuckets = new Map<string, Bucket>();
-
-// Light-weight cleanup so the map can't grow unbounded under churn (every
-// new client IP would otherwise stay in memory forever).
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, v] of rateBuckets) {
-    // 5 minutes idle and above the refill ceiling — safe to drop.
-    if (now - v.updatedAt > 5 * 60_000) rateBuckets.delete(k);
-  }
-}, 60_000).unref();
-
-function rateLimit(opts: { capacity: number; refillPerMinute: number; keyPrefix: string }) {
-  const refillRate = opts.refillPerMinute / 60_000; // tokens per ms
-  return (req: Request, res: Response, next: NextFunction) => {
-    // Trust X-Forwarded-For only when express trust proxy is configured;
-    // otherwise fall back to socket IP. Combining method+route into the key
-    // keeps GETs and POSTs from sharing a bucket.
-    const ip = (req.ip || req.socket.remoteAddress || 'unknown').toString();
-    const key = `${opts.keyPrefix}:${ip}`;
-
-    const now = Date.now();
-    let bucket = rateBuckets.get(key);
-    if (!bucket) {
-      bucket = { tokens: opts.capacity, updatedAt: now };
-      rateBuckets.set(key, bucket);
-    } else {
-      const elapsed = now - bucket.updatedAt;
-      bucket.tokens = Math.min(opts.capacity, bucket.tokens + elapsed * refillRate);
-      bucket.updatedAt = now;
-    }
-
-    if (bucket.tokens < 1) {
-      const retryAfterMs = Math.ceil((1 - bucket.tokens) / refillRate);
-      res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000));
-      return res.status(429).json({ error: 'Too many requests' });
-    }
-    bucket.tokens -= 1;
-    return next();
-  };
-}
 
 // Parse the CORS allowlist from CORS_ORIGINS (comma-separated). Empty list
 // → same-origin only (no Access-Control-Allow-Origin emitted, which makes
@@ -113,21 +57,6 @@ async function startServer() {
     }
     return next();
   });
-
-  // Lazy Stripe client: only instantiated on the first request that needs it,
-  // and only if the secret is configured. Lets the app boot without it.
-  let stripe: Stripe | null = null;
-  const getStripe = () => {
-    if (!stripe) {
-      const key = process.env.STRIPE_SECRET_KEY;
-      if (!key) {
-        console.warn("STRIPE_SECRET_KEY not set. Payments will fail.");
-        return null;
-      }
-      stripe = new Stripe(key);
-    }
-    return stripe;
-  };
 
   // -- Security headers ----------------------------------------------------
   // Minimal set of headers that any web app should send. We don't ship a
@@ -288,152 +217,6 @@ async function startServer() {
         '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>\n',
       );
       next?.(); // eslint-disable-line @typescript-eslint/no-unused-expressions
-    }
-  });
-
-  // -- Rate limiting --------------------------------------------------------
-  // Apply a generous per-IP cap to all /api/* endpoints, plus a tighter cap
-  // on the Stripe checkout creation endpoint (which has real cost on Stripe's
-  // side and shouldn't be spammable).
-  const apiLimiter = rateLimit({
-    capacity: 60,
-    refillPerMinute: 60,
-    keyPrefix: 'api',
-  });
-  const checkoutLimiter = rateLimit({
-    capacity: 10,
-    refillPerMinute: 10,
-    keyPrefix: 'checkout',
-  });
-  app.use('/api', apiLimiter);
-  app.use('/api/create-checkout-session', checkoutLimiter);
-
-  // -- API: Create Stripe Checkout Session --------------------------------
-  // Canonical buyer checkout is the `exos-checkout` Supabase edge function
-  // (the live SPA calls it via supabase.functions.invoke). This Express route
-  // exists only for the future standalone-server deployment; it mirrors the
-  // edge function's security posture: the buyer is authenticated from their
-  // Supabase JWT, and price + currency are read server-side from the DB —
-  // never trusted from the request body.
-  app.post("/api/create-checkout-session", async (req, res, next) => {
-    try {
-      const { eventId, tierId, quantity, promoCode, promoterId } = req.body;
-      const stripeClient = getStripe();
-      if (!stripeClient) {
-        return res.status(503).json({ error: "Stripe not configured" });
-      }
-      if (!eventId || !tierId) {
-        return res.status(400).json({ error: "missing eventId / tierId" });
-      }
-
-      const sbUrl = process.env.VITE_SUPABASE_URL;
-      const sbKey = process.env.VITE_SUPABASE_ANON_KEY;
-      if (!sbUrl || !sbKey) {
-        return res.status(503).json({ error: "Supabase not configured" });
-      }
-
-      // Authenticate the buyer from their forwarded Supabase session. Never
-      // trust a client-supplied userId — derive it from the verified token.
-      const { createClient } = await import('@supabase/supabase-js');
-      const authHeader = req.get('authorization') || '';
-      const sb = createClient(sbUrl, sbKey, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: { user } } = await sb.auth.getUser();
-      if (!user) return res.status(401).json({ error: "unauthorized" });
-
-      const qty = Number.isInteger(quantity) && quantity > 0 && quantity <= 10 ? quantity : 1;
-
-      // Authoritative price/capacity from the server-side tier projection
-      // (anon-readable; price/sold/capacity are the source of truth).
-      const { data: tier, error: tierErr } = await sb
-        .from('exos_public_tiers')
-        .select('id, name, price, capacity, sold, event_id')
-        .eq('id', tierId)
-        .eq('event_id', eventId)
-        .maybeSingle();
-      if (tierErr || !tier) return res.status(404).json({ error: "tier not found" });
-      if (tier.capacity > 0 && tier.sold + qty > tier.capacity) {
-        return res.status(409).json({ error: "not enough tickets in this tier" });
-      }
-
-      const { data: ev } = await sb
-        .from('exos_public_events')
-        .select('name, currency')
-        .eq('id', eventId)
-        .maybeSingle();
-      const currency = (ev?.currency && /^[A-Za-z]{3}$/.test(ev.currency))
-        ? ev.currency.toLowerCase()
-        : 'usd';
-      const unitAmount = Math.round(Number(tier.price) * 100);
-
-      const session = await stripeClient.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency,
-              product_data: {
-                name: `${ev?.name ?? 'Event'} — ${tier.name}`,
-                metadata: { eventId, tierId },
-              },
-              unit_amount: unitAmount,
-            },
-            quantity: qty,
-          },
-        ],
-        mode: "payment",
-        success_url: `${process.env.VITE_APP_URL || "http://localhost:3000"}/my-tickets?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.VITE_APP_URL || "http://localhost:3000"}/event/${eventId}`,
-        metadata: {
-          eventId,
-          tierId,
-          // Authenticated buyer, not a client-supplied id.
-          userId: user.id,
-          quantity: qty.toString(),
-          // Promo code passes through metadata so MyTickets fulfillment
-          // can increment events/{id}/promoUses/{code} once the buyer
-          // actually pays. Stripe rejects null metadata values, so we
-          // collapse missing codes to an empty string.
-          promoCode: typeof promoCode === 'string' ? promoCode : '',
-          // Promoter / affiliate attribution. Empty string when no
-          // promoter was supplied. We additionally restrict the
-          // character set with a regex to refuse anything that could
-          // surface in dashboards / CSV exports as raw HTML or
-          // JSON-breaking glyphs. Stripe metadata accepts ~500 chars
-          // per value; we go stricter.
-          promoterId:
-            typeof promoterId === 'string' &&
-            /^[A-Za-z0-9_-]{1,64}$/.test(promoterId)
-              ? promoterId
-              : '',
-        },
-      });
-
-      return res.json({ id: session.id });
-    } catch (err) {
-      return next(err);
-    }
-  });
-
-  app.get("/api/verify-session", async (req, res, next) => {
-    try {
-      const { session_id } = req.query;
-      const stripeClient = getStripe();
-      if (!stripeClient || !session_id) {
-        return res.status(400).json({ error: "Invalid request" });
-      }
-
-      const session = await stripeClient.checkout.sessions.retrieve(
-        session_id as string
-      );
-      if (session.payment_status === "paid") {
-        return res.json({ status: "paid", metadata: session.metadata });
-      } else {
-        return res.json({ status: session.payment_status });
-      }
-    } catch (err) {
-      return next(err);
     }
   });
 

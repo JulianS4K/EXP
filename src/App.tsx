@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import { lazy, Suspense, ReactNode } from 'react';
+import { lazy, Suspense, ReactNode, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { OrganizationProvider } from './context/OrganizationContext';
 import { ToastProvider } from './context/ToastContext';
@@ -9,6 +9,7 @@ import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
 import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
+import { isPixelRoute, leavePixelScope } from './lib/pixels';
 
 // Home is the landing page — keep it eagerly loaded so the first paint is
 // fast. Every other route is split out so we don't ship CreateEvent / the
@@ -66,6 +67,11 @@ function RouteFallback() {
  */
 function ChromeLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  // Organizer pixels only ever see public listing pages, never tickets,
+  // accounts, dashboards or the door scanner.
+  useEffect(() => {
+    if (!isPixelRoute(location.pathname)) leavePixelScope();
+  }, [location.pathname]);
   const isBare =
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||

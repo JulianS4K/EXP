@@ -331,7 +331,7 @@ export default function OrgStorefront() {
         }
         // Marketing: load the org's pixels (consent-gated). The loaders emit
         // their own PageView, so we don't fire one here.
-        initOrgPixels(org.marketing?.pixels);
+        initOrgPixels(org.id, org.marketing?.pixels);
       } catch (err) {
         console.error('Org slug lookup failed:', err);
         if (!cancelled) setState({ status: 'not-found' });

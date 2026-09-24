@@ -38,6 +38,7 @@ the details with counsel.)
 | `STRIPE_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the platform endpoint (step 3). Test and live have **different** secrets |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the connected-accounts endpoint (step 3). Without it organizers never become `chargesEnabled` |
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
+| `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
 | `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 500 |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | all | Supabase sets these automatically |
 
@@ -50,8 +51,8 @@ it, which is part of why payments are dormant. Checkout itself redirects to the 
 
 | Function | Entry | Extra files in the bundle | `verify_jwt` | Why |
 |---|---|---|---|---|
-| `exos-checkout` | `index.ts` | `../_shared/pricing.ts` | **true** | Called by signed-in buyers |
-| `exos-connect-onboard` | `index.ts` | — | **true** | Called by the org owner |
+| `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts` | **true** | Called by signed-in buyers |
+| `exos-connect-onboard` | `index.ts` | `../_shared/redirects.ts` | **true** | Called by the org owner |
 | `stripe-webhook` | `index.ts` | — | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
 | `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
 

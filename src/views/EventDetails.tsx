@@ -120,7 +120,7 @@ export default function EventDetails() {
           getPublicOrg(data.orgId)
             .then((o) => {
               setOrg(o ?? null);
-              initOrgPixels(o?.marketing?.pixels);
+              initOrgPixels(data.orgId, o?.marketing?.pixels);
               trackPixelEvent('ViewContent', { content_name: data.title, content_ids: [data.id] });
             })
             .catch(() => {/* non-fatal */});

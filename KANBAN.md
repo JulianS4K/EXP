@@ -96,8 +96,11 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - M — reconcile sweep: `status='failed' LIMIT 100` with no order/marker can starve; webhook and reconcile use
   different refund idempotency keys.
 - M — `exos-webhook-drain` has no row claim (duplicate deliveries on overlap) and doesn't sign the timestamp.
-- L — open redirects via client `success_url`/`cancel_url`/`return_url`; add-on oversell (read-then-charge);
-  SSRF blocklist gaps (198.18/15, 224/4, 240/4, NAT64, 6to4); no rate limit on `exos-api`; dispute marks
+- ✅ L — open redirects via client `success_url`/`cancel_url`/`return_url`: both functions now require the URL's
+  origin to be in `EXOS_REDIRECT_ORIGINS` (`_shared/redirects.ts`).
+- ✅ L — add-on oversell (read-then-charge): fulfillment claims add-ons atomically and rolls the whole order back
+  if one is gone (mig `20260924215000`, not applied yet).
+- L — SSRF blocklist gaps (198.18/15, 224/4, 240/4, NAT64, 6to4); no rate limit on `exos-api`; dispute marks
   session `refunded`.
 - INFO — `exos-distribute` exists to POST listings to Automatiq; keep undeployed until the operator signs off
   (read-only-upstream rule).
@@ -117,7 +120,9 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - M — `authenticated` reads every column of published events and all orgs (`owner_uid`, `comp_budget`, …).
 - M — check-in: event scope only when `p_event_id` is passed; HMAC skipped for non-camera; client-chosen
   `verification` is logged as-is; cancelled events not rejected.
-- M — vouchers are consumed before capacity checks and burned when fulfillment fails; not re-validated.
+- ✅ M — vouchers were consumed before capacity checks and burned when fulfillment failed; a failed house cap also
+  leaked the tier's `sold`. Fulfillment is now all-or-nothing (mig `20260924215000`, not applied yet). Still open:
+  a voucher isn't re-validated (expiry) at fulfillment.
 - L — account enumeration via issue-to-email / comp batch; `comp_budget` bypassable; stale invites can
   re-enable/demote members. (✅ `exos_assert_purchase_limit` no longer callable by users.)
 
@@ -125,12 +130,14 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.
 - ✅ M — replayed offline check-ins dropped server refusals silently; now audited + surfaced.
 - ✅ H (partial) — scanner registry (every ticket's barcode secret) now wiped on sign-out. Still open: it
-  lives in plaintext localStorage for 7 days; pixels still load on `/checkin`.
+  lives in plaintext localStorage for 7 days. (✅ Pixels no longer load on `/checkin`.)
 - ✅ L — removed the `GEMINI_API_KEY` Vite `define` (a future reference would inline the key) and `@google/genai`.
 - H (correctness) — production CSP/XFO from Terminal-2 (`frame-ancestors 'none'`, `script-src 'self'`) kills the
   embed, the org pixels, and Google Fonts. Needs per-path headers in Terminal-2 `server.py`.
-- M — one org's pixels receive other orgs' events (never unloaded; fire to every loaded pixel).
-- M — `server.ts` `/api/*` is unused but `/api/verify-session` is unauthenticated; delete it.
+- ✅ M — one org's pixels received other orgs' events. Now one org per page: switching org, or leaving to an
+  untracked page (tickets, wallet, account, dashboards, `/checkin`), reloads to drop loaded pixels, and Meta's
+  SPA auto-PageView is off (`src/lib/pixels.ts`, `isPixelRoute`).
+- ✅ M — `server.ts` `/api/*` removed (unused; `/api/verify-session` was unauthenticated); `stripe` dependency dropped.
 - L — dead Firebase rules/env vars/Stripe.js; unsigned legacy barcode fallback can never scan; SVG logo
   upload rejected by the bucket; embed snippet puts the raw title in an HTML comment.
 
