@@ -54,6 +54,13 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - Mail: `exos_queue_mail` RPC enqueues transactional mail → `exos-mail-drain` edge function delivers via Resend (dormant — set `RESEND_API_KEY` + `EXOS_MAIL_FROM`)
 - See `src/lib/` for auth, barcode, tickets, datetime, mail utilities
 
+## Docs
+
+- [`docs/onboarding.md`](docs/onboarding.md): start here as a developer
+- [`docs/payments-go-live.md`](docs/payments-go-live.md): switching Stripe on (operator runbook)
+- [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
+- [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
+
 ## Repository layout
 
 | Path | What |

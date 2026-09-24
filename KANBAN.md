@@ -12,6 +12,40 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Roadmap (operator, 2026-09-24)
+
+P0 (paid-ticketing blockers) is done in code; see the audit list below. The operator still has to
+apply the migrations and go through `docs/payments-go-live.md`. P1 is in the audit list. Beyond
+that:
+
+**7. Social commerce, maps and SEO**
+- **Checkout inside Instagram / Facebook in-app browsers.** Hosted event and checkout pages that
+  work inside the Meta in-app webview. Plan for:
+  - Stripe Checkout redirects inside the webview, with Apple/Google Pay fallback behaviour.
+  - Sign-in without popups.
+  - `og:` tags for rich link previews.
+  - Pixel attribution. Meta's own checkout surfaces are a later, separate integration with its
+    own review.
+  Blocked on the P1 security-header fix (the embed and pixels are currently blocked).
+- **Google Maps** on event and venue pages: a Maps JS / Embed API key restricted by referrer, and
+  a static-map fallback.
+- **SEO:**
+  - Server-rendered or prerendered event pages. The SPA serves one shell today, and Terminal-2
+    already has an event-page SSR pattern (`tests/test_event_page_ssr_meta.py` there).
+  - `schema.org/Event` JSON-LD, a sitemap, canonical URLs on `/e/:slug` and `/o/:slug`.
+
+**8. Ticket marketplace APIs**
+- **Reading (inventory, pricing and event data):** fine. Reuse Terminal-2's read-only clients
+  (`*_client.py`, GET-only by construction).
+- **Writing (listing Exos inventory on marketplaces, syncing sales back):** forbidden without
+  explicit operator authorization. This is the project's read-only-upstream rule, enforced in
+  Terminal-2 CI by `scripts/check_readonly.py`.
+  - `exos-distribute` (Automatiq/Lysted) is written but must stay undeployed until the operator
+    signs off on each partner's write scope.
+  - Plan each partner as its own reviewed integration: auth, idempotency, inventory
+    reconciliation, and how a marketplace sale reserves an Exos seat. That last one would go
+    through `exos_seats_available`, like any other sale.
+
 ## Audit 2026-09-24 — open findings
 
 Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,
@@ -20,14 +54,16 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 **Payments (edge functions)**
 - ✅ H — auto-refunds on destination charges didn't set `reverse_transfer` / `refund_application_fee`, so the
   platform paid every refund and the organizer kept the money (`stripe-webhook`, `exos-reconcile-checkouts`).
-- H — partial-then-full refunds can mark a session `refunded` without voiding tickets: the `charge.refunded`
-  fallback records a NULL refund id with the *cumulative* amount (double-counts). Handle `refund.*` events or
-  list refunds by PI and record each by id.
+- ✅ H (P0) — partial-then-full refunds could leave valid tickets: refunds are now recorded by Stripe id
+  (`refunds.list`), NULL ids are refused, and the void is idempotent (mig `20260924205115`).
 - ✅ M — Stripe session lives 24h but the seat hold lasts 30 min; now `expires_at` = 30 min.
 - ✅ M — hidden (non-public) tiers were purchasable by UUID without a voucher.
-- M — `price_schedule` isn't applied at checkout; buyers pay base `tier.price` (display-only feature today).
-- M — `.rpc()`/`.update()` errors are never checked in `stripe-webhook` / reconcile, so failed ledger writes
-  return 200 and Stripe never retries.
+- ✅ M (P0) — checkout charges the scheduled price (`supabase/functions/_shared/pricing.ts`, parity-tested
+  against `src/lib/pricing.ts`).
+- ✅ M (partly) — `stripe-webhook` ledger writes now return 500 on failure so Stripe retries; the reconcile
+  sweep still ignores `{error}`.
+- ✅ H — `account.updated` for organizers comes from a *connected-accounts* endpoint with its own secret; the
+  webhook now accepts `STRIPE_CONNECT_WEBHOOK_SECRET` too (otherwise nobody could ever sell).
 - M — reconcile sweep: `status='failed' LIMIT 100` with no order/marker can starve; webhook and reconcile use
   different refund idempotency keys.
 - M — `exos-webhook-drain` has no row claim (duplicate deliveries on overlap) and doesn't sign the timestamp.
@@ -43,15 +79,18 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ H — transfer race: two concurrent transfers of one ticket both claimable; the sender can claw a sold ticket
   back. Claim now locks the ticket and requires `pending_transfer_id` + current owner to match.
 - ✅ M — `authenticated` could UPDATE any column of its own waitlist row (queue position, status, voucher).
-- H — one single-use voucher (incl. waitlist auto-offers, which bypass capacity) mints up to 10 tickets.
-- H — `exos_create_hold` has no per-buyer cap; a script can hold all inventory indefinitely.
-- H — free-claim, issue-to-email and comp-batch mints ignore shared quotas and live holds.
+- ✅ H (P0) — one voucher use = one ticket; waitlist offers carry the group size, go out FIFO, and reserve
+  their seats (`block_quota`) (mig `20260924205508`).
+- ✅ H (P0) — one live cart hold per buyer per event, purchase limits at hold time, confirmed email, 30-min TTL
+  (mig `20260924205916`). Residual: many confirmed accounts can each hold one cart.
+- ✅ H (P0) — free-claim, issue-to-email, comp batch and box-office mint go through `exos_seats_available`
+  (quotas + holds + offers) (mig `20260924210103`).
 - M — `authenticated` reads every column of published events and all orgs (`owner_uid`, `comp_budget`, …).
 - M — check-in: event scope only when `p_event_id` is passed; HMAC skipped for non-camera; client-chosen
   `verification` is logged as-is; cancelled events not rejected.
 - M — vouchers are consumed before capacity checks and burned when fulfillment fails; not re-validated.
-- L — account enumeration via issue-to-email / comp batch; `exos_assert_purchase_limit` callable with any
-  buyer; `comp_budget` bypassable; stale invites can re-enable/demote members.
+- L — account enumeration via issue-to-email / comp batch; `comp_budget` bypassable; stale invites can
+  re-enable/demote members. (✅ `exos_assert_purchase_limit` no longer callable by users.)
 
 **Frontend**
 - ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.

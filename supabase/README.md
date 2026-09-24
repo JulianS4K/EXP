@@ -13,7 +13,7 @@ copy so Exos can be read, tested and reasoned about on its own.
 |---|---|---|
 | `*exos*` migrations | `Terminal-2/supabase/migrations/` | `supabase/migrations/`. When you add one there, copy it here in the same change |
 | `exos-*` edge functions + `stripe-webhook` (Exos fulfillment/refunds, no `exos-` prefix) | `Terminal-2/supabase/functions/` | `supabase/functions/`. Keep in step |
-| `_shared/cron-auth.ts` | `Terminal-2/supabase/functions/_shared/` | vendored |
+| `_shared/cron-auth.ts`, `_shared/pricing.ts` | `Terminal-2/supabase/functions/_shared/` | copies (`pricing.ts` must match `src/lib/pricing.ts`; `pricingParity.test.ts` checks it) |
 | SQL harnesses | `Terminal-2/tests/exos/` (its CI gates the shared DB) | `tests/exos/` (this repo's CI runs them too) |
 | Built SPA bundle | `Terminal-2/static/bridge/` (served by `vibepass-storefront-test`) | build it here (`dist/`), copy it over |
 
