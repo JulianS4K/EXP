@@ -26,6 +26,8 @@ export interface MetaInput {
   canonicalUrl?: string;
   // Schema.org Event JSON-LD. Pass null to skip (default).
   event?: SchemaEvent;
+  // Keep this page out of search results (per-person pages).
+  noindex?: boolean;
 }
 
 export interface SchemaEvent {
@@ -62,6 +64,8 @@ export function applyMeta(input: MetaInput): void {
 
   // <meta name="description">
   setOrCreateMeta('name', 'description', input.description ?? '');
+  // Robots: set on every call so a noindex page doesn't leak to the next one.
+  setOrCreateMeta('name', 'robots', input.noindex ? 'noindex, nofollow' : 'index, follow');
 
   // Open Graph.
   setOrCreateMeta('property', 'og:title', input.title);

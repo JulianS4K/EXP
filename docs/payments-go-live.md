@@ -51,10 +51,12 @@ it, which is part of why payments are dormant. Checkout itself redirects to the 
 
 | Function | Entry | Extra files in the bundle | `verify_jwt` | Why |
 |---|---|---|---|---|
-| `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts` | **true** | Called by signed-in buyers |
+| `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts`, `../_shared/attribution.ts` | **true** | Called by signed-in buyers |
 | `exos-connect-onboard` | `index.ts` | `../_shared/redirects.ts` | **true** | Called by the org owner |
 | `stripe-webhook` | `index.ts` | — | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
 | `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
+
+**Apply migrations `20260924215000` and `20260924223000` first** (all-or-nothing fulfillment, promoter attribution). `exos-checkout` writes the columns the second one adds.
 
 With the CLI (from `Terminal-2/`): `supabase functions deploy <name> --project-ref hzrizjeaxlqcxfrtczpq`,
 adding `--no-verify-jwt` for the last two. Once `exos-reconcile-checkouts` exists, the

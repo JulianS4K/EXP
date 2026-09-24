@@ -60,6 +60,14 @@ tiers and discount codes, into a series of dates.
 
 **Promote** (`/dashboard/event/:eventId/promote`, `/orgs/:orgId/promote`):
 
+- **Promoters.** Name a campaign and that becomes the promoter's code.
+  - Send each promoter their **kit link** (`/promoter/:eventId/:code`, no login needed). It gives
+    them a buy-now link with the cart pre-filled, a story poster, and tracked links for Instagram,
+    TikTok, WhatsApp and text.
+  - Every ticket sold through their links, free or paid, shows under their code in the Sales
+    report.
+  - Fans who share after buying pass the promoter's credit along.
+
 - Share links and the venue embed (`/embed/event/:eventId`).
 - Tracking pixels, which only load after the visitor consents.
   - They only see your public pages: the event page, your storefront and your profile.

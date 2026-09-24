@@ -34,7 +34,7 @@
 | Phase | Theme | Status |
 |---|---|---|
 | 0 | Payments go-live + P1 audit fixes | 🟡 in progress: P0 live; P1 items below |
-| 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 started: in-app browser handling ✅, Maps + directions ✅; next: prerendered SEO pages, promoter links, CRM, wallet passes |
+| 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 in-app browser ✅, Maps ✅, checkout links ✅, promoter kit ✅, fan/promoter sharing + app Stories bridge ✅; next: prerendered SEO pages, CRM, wallet passes |
 | 2 | Face-value resale exchange + pricing intelligence (read-only from Terminal-2) | ⬜ |
 | 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | ⬜ |
 | 4 | Channel hub (Otter): one inventory across own channels, then authorized marketplaces (item 8) | ⬜ |
@@ -75,6 +75,30 @@ that:
   - Server-rendered or prerendered event pages. The SPA serves one shell today, and Terminal-2
     already has an event-page SSR pattern (`tests/test_event_page_ssr_meta.py` there).
   - `schema.org/Event` JSON-LD, a sitemap, canonical URLs on `/e/:slug` and `/o/:slug`.
+
+**7d. Checkout links, promoter kit, app-ready sharing** ✅ (`docs/native-sharing.md`)
+- **`/checkout?products=<tierId>:<qty>,<addonId>:<qty>&coupon=…`** follows Meta's Shops checkout-URL
+  format.
+  - It resolves the event and pre-fills tier, quantity, add-ons and voucher on the event page.
+  - The event page and `exos-checkout` re-check everything.
+- **Paid checkout now keeps `?promoter=` and UTM, `fbclid` and `cart_origin`.**
+  - The shared sanitizer is `_shared/attribution.ts`.
+  - It's stored on the session by mig `20260924223000` (**not applied**), and fulfillment stamps
+    `promoter_id` on tickets.
+  - Before this, a promoter's paid sales never reached the Sales report.
+- **Promoter kit.** Available on the Promote page, plus a no-login `/promoter/:eventId/:code` page
+  the organizer sends each promoter. It has:
+  - a buy-now link builder;
+  - a story poster;
+  - tracked links per channel.
+- **Fan shares** (ticket and event pages) are tagged `utm_medium=fan_share` and pass along the
+  promoter the fan came from. WhatsApp was added to the share sheet.
+- **`window.ExosNative` bridge (v1)** for the future app's Instagram / Facebook Stories hand-off.
+  The web keeps its share-sheet fallback.
+- **Open:**
+  - a Meta App ID (operator);
+  - a sticker layer;
+  - the Shop catalog (policy check, plus operator sign-off for any push).
 
 **8. Ticket marketplace APIs**
 - **Reading (inventory, pricing and event data):** fine. Reuse Terminal-2's read-only clients

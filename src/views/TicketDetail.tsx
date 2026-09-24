@@ -192,6 +192,8 @@ export default function TicketDetail() {
           ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
           : undefined,
         venue: event.location,
+        role: 'fan',
+        promoter: currentTicket?.promoterId || undefined,
       },
       toast,
     );
@@ -534,6 +536,8 @@ export default function TicketDetail() {
           title={event.title}
           url={publicUrl(`event/${event.id}`)}
           text={`I'm going to ${event.title}!`}
+          role="fan"
+          promoterId={currentTicket?.promoterId || undefined}
         />
       )}
     </div>

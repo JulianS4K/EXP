@@ -4,7 +4,7 @@
 // check we report the code + grant up to EventDetails, which then enables the
 // buy button (even when sold out) and forwards the code to checkout.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Ticket, Check } from 'lucide-react';
 import { checkVoucher } from '../lib/vouchers';
 import { useToast } from '../context/ToastContext';
@@ -22,16 +22,18 @@ interface Props {
   eventId: string;
   email?: string | null;
   onApplied: (applied: AppliedVoucher | null) => void;
+  /** A code from a checkout link; checked once on mount. */
+  initialCode?: string;
 }
 
-export default function VoucherField({ eventId, email, onApplied }: Props) {
+export default function VoucherField({ eventId, email, onApplied, initialCode }: Props) {
   const { toast } = useToast();
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode ?? '');
   const [busy, setBusy] = useState(false);
   const [appliedCode, setAppliedCode] = useState<string | null>(null);
 
-  const apply = async () => {
-    const c = code.trim();
+  const apply = async (override?: string) => {
+    const c = (override ?? code).trim();
     if (!c) return;
     setBusy(true);
     try {
@@ -51,6 +53,15 @@ export default function VoucherField({ eventId, email, onApplied }: Props) {
       setBusy(false);
     }
   };
+
+  const autoApplied = useRef(false);
+  useEffect(() => {
+    if (initialCode && !autoApplied.current) {
+      autoApplied.current = true;
+      void apply(initialCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode]);
 
   if (appliedCode) {
     return (
@@ -76,7 +87,7 @@ export default function VoucherField({ eventId, email, onApplied }: Props) {
       <button
         type="button"
         disabled={busy || !code.trim()}
-        onClick={apply}
+        onClick={() => apply()}
         className="px-4 py-2 border-2 border-white/20 hover:border-brand-primary text-white/70 hover:text-brand-primary text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40"
       >
         {busy ? '…' : 'Apply'}

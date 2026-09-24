@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
@@ -21,6 +21,8 @@ import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
+import { captureAttribution, type Attribution } from '../lib/attribution';
+import { takePrefill, type CheckoutPrefill } from '../lib/checkoutLink';
 import ShareModal from '../components/ShareModal';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
@@ -50,6 +52,20 @@ export default function EventDetails() {
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
+  // Where this buyer came from (promoter link, ad, Instagram Shop), kept for
+  // the visit so it survives sign-in; and a cart pre-filled by a checkout link.
+  const [attribution, setAttribution] = useState<Attribution>({});
+  const [prefill, setPrefill] = useState<CheckoutPrefill | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    setAttribution(captureAttribution(id, window.location.search));
+    setPrefill(takePrefill(id));
+  }, [id]);
+  const location = useLocation();
+  useEffect(() => {
+    const notes = (location.state as { checkoutNotes?: string[] } | null)?.checkoutNotes;
+    if (notes && notes.length > 0) toast({ kind: 'info', message: notes.join(' ') });
+  }, [location.state]);
   const [userTicketCount, setUserTicketCount] = useState(0);
   // Per-tier sold/capacity, sourced from the events/{id}/tierSales sub-
   // collection. Buyers can no longer mutate the embedded ticketTiers array
@@ -188,6 +204,18 @@ export default function EventDetails() {
   const priceToDisplay = calculateFinalPrice();
 
   const maxPerOrder = event?.purchaseLimits?.maxPerOrder || 8;
+
+  // Apply a checkout link's tier + quantity once the event's tiers are known.
+  // (A hidden tier only shows once its voucher applies; the voucher field
+  // re-selects it then.)
+  useEffect(() => {
+    if (!prefill || !event?.ticketTiers?.length) return;
+    if (event.ticketTiers.some((t) => t.id === prefill.tierId)) setSelectedTierId(prefill.tierId);
+    setQuantity(Math.max(1, Math.min(maxPerOrder, prefill.quantity)));
+  }, [prefill, event?.id]);
+  useEffect(() => {
+    if (voucher?.restrictTierId && prefill?.tierId === voucher.restrictTierId) setSelectedTierId(voucher.restrictTierId);
+  }, [voucher?.restrictTierId, prefill?.tierId]);
   const maxPerAccount = event?.purchaseLimits?.maxPerAccount || 8;
   // Paid checkout is gated on the Stripe publishable key — the backend
   // (exos-checkout + exos_fulfill_checkout) is built but stays dormant until
@@ -231,6 +259,7 @@ export default function EventDetails() {
           cancelUrl: publicUrl(`event/${event.id}`),
           addons: addonSel.items,
           voucherCode: voucher?.code,
+          attribution,
         });
         window.location.href = url; // leave the SPA for Stripe-hosted checkout
       } catch (err: any) {
@@ -245,15 +274,14 @@ export default function EventDetails() {
     // (?promoter / ?utm_source) so it lands in the event's Sales report.
     setPurchasing(true);
     try {
-      const params = new URLSearchParams(window.location.search);
       // Shared idempotency/order ref so any free $0 extras attach to this claim.
       const orderRef = crypto.randomUUID();
       const ids = await claimFreeTickets({
         eventId: event.id,
         tierId: tier.id,
         quantity,
-        promoterId: params.get('promoter'),
-        channel: params.get('utm_source'),
+        promoterId: attribution.promoter ?? null,
+        channel: attribution.utm_source ?? null,
         // Idempotency key for this claim attempt — a network retry returns the
         // same tickets instead of minting twice (button is disabled meanwhile).
         orderRef,
@@ -395,6 +423,8 @@ export default function EventDetails() {
           ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
           : undefined,
         venue: event.location,
+        role: 'fan',
+        promoter: attribution.promoter,
       },
       toast,
     );
@@ -797,6 +827,7 @@ export default function EventDetails() {
                   eventId={event.id}
                   email={user?.email ?? null}
                   onApplied={setVoucher}
+                  initialCode={prefill?.coupon}
                 />
 
                 {(!soldOut || voucher?.canBypass) && (
@@ -804,6 +835,7 @@ export default function EventDetails() {
                     eventId={event.id}
                     currency={event.currency || 'USD'}
                     onChange={setAddonSel}
+                    initialQty={prefill?.addons}
                   />
                 )}
 
@@ -893,7 +925,7 @@ export default function EventDetails() {
           onClose={() => setShowShare(false)}
           title={event.title}
           url={window.location.href.split('?')[0]}
-          promoterId={new URLSearchParams(window.location.search).get('promoter') ?? undefined}
+          promoterId={attribution.promoter}
         />
       )}
     </div>

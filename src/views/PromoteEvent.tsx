@@ -28,6 +28,7 @@ import { useToast } from '../context/ToastContext';
 import { publicUrl } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
+import PromoterKitPanel from '../components/PromoterKitPanel';
 import SocialLinks from '../components/SocialLinks';
 
 // Channel presets for the campaign-link builder. utm_medium follows the GA4
@@ -44,7 +45,8 @@ const CHANNELS: { key: string; label: string; medium: string }[] = [
 ];
 
 const slugify = (s: string) =>
-  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  // Capped at 64 to match the promoter-code rule (_shared/attribution.ts).
+  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
 
 export default function PromoteEvent() {
   const { eventId } = useParams();
@@ -258,6 +260,29 @@ window.addEventListener('message', function(e) {
           )}
         </section>
 
+        {/* Promoter kit — buy-now link, story poster, tracked links for one promoter code */}
+        <section className="bg-[#111] p-6 border border-white/10 mb-6">
+          <h2 className="disp text-lg uppercase tracking-wide text-white mb-1 flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-brand-primary" /> Promoter kit
+          </h2>
+          {campaignSlug ? (
+            <>
+              <p className="text-sm text-white/60 mb-3">
+                Give each promoter their own code (the campaign name above). Send them their kit link: it needs no
+                account, and every sale through it, free or paid, is credited to <strong className="text-white">{campaignSlug}</strong>.
+              </p>
+              <div className="flex items-center gap-2 bg-black/40 border border-brand-primary/40 px-3 py-2 mb-6">
+                <span className="type text-[10px] uppercase tracking-widest text-brand-primary w-28 shrink-0">Kit link</span>
+                <span className="flex-1 text-[11px] font-mono text-white/70 truncate">{publicUrl(`promoter/${eventId}/${campaignSlug}`)}</span>
+                <button onClick={() => copy(publicUrl(`promoter/${eventId}/${campaignSlug}`), 'Promoter kit link copied.')} aria-label="Copy promoter kit link" className="p-2 text-white/40 hover:text-brand-primary transition-colors shrink-0"><Copy className="w-4 h-4" /></button>
+              </div>
+              <PromoterKitPanel event={event} promoter={campaignSlug} />
+            </>
+          ) : (
+            <p className="text-[11px] text-white/40 italic">Enter a campaign name above to make a promoter kit for that code.</p>
+          )}
+        </section>
+
         {/* QR code */}
         <section className="bg-[#111] p-6 border border-white/10 mb-6">
           <h2 className="disp text-lg uppercase tracking-wide text-white mb-4 flex items-center gap-2">
@@ -336,6 +361,8 @@ window.addEventListener('message', function(e) {
         onClose={() => setShareOpen(false)}
         title={event.title}
         url={url}
+        role="promoter"
+        promoterId={campaignSlug || undefined}
       />
     </div>
   );

@@ -25,6 +25,8 @@
 // separately; this module is the fan-side share path.
 
 import type { ToastFn } from './utils';
+import { buildShareUrl, type ShareRole } from './shareLinks';
+import { blobToDataUrl, getNativeBridge, validateNativePayload } from './nativeShare';
 
 interface StoryShareInput {
   title: string;
@@ -34,6 +36,13 @@ interface StoryShareInput {
   dateLabel?: string;
   /** Venue / location line. Optional. */
   venue?: string;
+  /** Who is sharing, for the link's attribution (lib/shareLinks.ts). A
+   *  promoter's own code, or the code a fan arrived with. */
+  role?: ShareRole;
+  promoter?: string;
+  campaign?: string;
+  /** Instagram (default) or Facebook Stories; only matters in the native app. */
+  target?: 'instagram_story' | 'facebook_story';
 }
 
 const W = 1080;
@@ -216,7 +225,8 @@ export async function composeStoryPoster(input: StoryShareInput): Promise<Blob |
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillText('SECURE TICKETING · LINK IN STICKER', 100, H - 96);
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    const shortUrl = input.url.replace(/^https?:\/\//, '');
+    // Printed on the poster, so no tracking query string.
+    const shortUrl = input.url.split('?')[0].replace(/^https?:\/\//, '');
     ctx.fillText(shortUrl.slice(0, 52), 100, H - 48);
 
     return await new Promise<Blob | null>((resolve) =>
@@ -240,7 +250,11 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export async function shareEventToStory(input: StoryShareInput, toast?: ToastFn): Promise<void> {
-  const { title, url } = input;
+  const { title } = input;
+  const target = input.target ?? 'instagram_story';
+  const url = input.role
+    ? buildShareUrl(input.url, { role: input.role, channel: target, promoter: input.promoter, campaign: input.campaign })
+    : input.url;
 
   // Always copy the URL — that's the link-sticker hand-off regardless of path.
   try {
@@ -251,6 +265,34 @@ export async function shareEventToStory(input: StoryShareInput, toast?: ToastFn)
 
   // 1) Compose the poster; fall back to the raw event image bytes.
   let blob = await composeStoryPoster(input);
+
+  // 0) Inside the Exos app: hand the poster straight to the Stories composer
+  //    (lib/nativeShare.ts, docs/native-sharing.md). Falls through to the web
+  //    path if the app can't (Instagram not installed, old bridge, error).
+  const bridge = getNativeBridge();
+  if (bridge && blob) {
+    try {
+      if (await bridge.canShare(target)) {
+        const payload = { target, backgroundImage: await blobToDataUrl(blob), contentUrl: url };
+        if (validateNativePayload(payload).length === 0) {
+          const result = await bridge.share(payload);
+          if (result === 'cancelled') return;
+          if (result === 'shared') {
+            toast?.({
+              kind: 'success',
+              title: 'Opened in Stories',
+              message: 'Add a link sticker and paste: the link is on your clipboard.',
+              duration: 8000,
+            });
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Native story share failed; using the web share sheet:', err);
+    }
+  }
+
   let ext = 'png';
   if (!blob && input.imageUrl) {
     try {

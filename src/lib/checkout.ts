@@ -7,6 +7,7 @@
 // these and redirects to the returned Stripe-hosted URL.
 
 import { supabase } from './supabase';
+import type { Attribution } from './attribution';
 
 /** Create a Checkout Session for an event/tier; returns the Stripe-hosted URL. */
 export async function startCheckout(input: {
@@ -19,6 +20,8 @@ export async function startCheckout(input: {
   addons?: { addon_id: string; quantity: number }[];
   /** Optional access voucher (may bypass a sold-out tier / pin a price). */
   voucherCode?: string;
+  /** Promoter + campaign tags the buyer arrived with (see lib/attribution.ts). */
+  attribution?: Attribution;
 }): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -29,6 +32,7 @@ export async function startCheckout(input: {
       cancel_url: input.cancelUrl,
       addons: input.addons && input.addons.length > 0 ? input.addons : undefined,
       voucher_code: input.voucherCode || undefined,
+      attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
     },
   });
   if (error) throw error;

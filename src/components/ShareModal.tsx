@@ -9,16 +9,16 @@
 // URL. The picker below adds the platform-specific share-intent URLs
 // for one-click flow.
 //
-// Promoter / affiliate attribution: when the share is initiated by
-// a buyer or by an organizer with a promoterId, we append
-// `?promoter=<id>` to the shared URL so back-attribution works
-// through the existing `promoterId` field in CreateEvent + Stripe
-// metadata pipeline.
+// Attribution (lib/shareLinks.ts): every link is tagged with the channel
+// it was shared to. A fan's share passes along the promoter they arrived
+// with; a promoter's share carries their own code, so their sales land in
+// the event's per-promoter Sales report (free and paid).
 
 import { ReactNode, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Copy, Send, Twitter, Facebook, Link as LinkIcon, X } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { buildShareUrl, type ShareChannel, type ShareRole } from '../lib/shareLinks';
 
 interface ShareModalProps {
   open: boolean;
@@ -29,19 +29,19 @@ interface ShareModalProps {
   // Optional: pre-composed text for buyer-side "I'm going" framing.
   // If omitted, a generic "Check out {title}" is used.
   text?: string;
-  // Optional promoter id; when present, appended as ?promoter=<id>
-  // to the shared URL for attribution.
+  // Fan ("I'm going", the default) or promoter / organizer.
+  role?: ShareRole;
+  // Promoter code: the sharer's own (promoter) or the one a fan arrived with.
   promoterId?: string;
+  campaign?: string;
 }
 
-export default function ShareModal({ open, onClose, title, url, text, promoterId }: ShareModalProps) {
+export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign }: ShareModalProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  // Build the actual link with promoter attribution if present.
-  const shareUrl = promoterId
-    ? appendQuery(url, 'promoter', promoterId)
-    : url;
+  const linkFor = (channel: ShareChannel) => buildShareUrl(url, { role, channel, promoter: promoterId, campaign });
+  const shareUrl = linkFor('copy');
   const shareText = text ?? `Check out ${title}`;
 
   async function handleNativeShare() {
@@ -53,7 +53,7 @@ export default function ShareModal({ open, onClose, title, url, text, promoterId
       // a no-op silent close.
       if (typeof navigator !== 'undefined' && 'share' in navigator) {
         // @ts-ignore — TS lib lags Web Share API in some toolchains
-        await navigator.share({ title, text: shareText, url: shareUrl });
+        await navigator.share({ title, text: shareText, url: linkFor('native') });
         onClose();
         return;
       }
@@ -82,9 +82,10 @@ export default function ShareModal({ open, onClose, title, url, text, promoterId
 
   const twitterHref =
     'https://twitter.com/intent/tweet?text=' +
-    encodeURIComponent(`${shareText} ${shareUrl}`);
+    encodeURIComponent(`${shareText} ${linkFor('x')}`);
   const facebookHref =
-    'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(shareUrl);
+    'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(linkFor('facebook'));
+  const whatsappHref = 'https://wa.me/?text=' + encodeURIComponent(`${shareText} ${linkFor('whatsapp')}`);
 
   return (
     <AnimatePresence>
@@ -141,6 +142,12 @@ export default function ShareModal({ open, onClose, title, url, text, promoterId
                 external
               />
               <ShareButton
+                icon={<Send size={16} />}
+                label="WhatsApp"
+                href={whatsappHref}
+                external
+              />
+              <ShareButton
                 icon={<Copy size={16} />}
                 label="Copy link"
                 onClick={handleCopy}
@@ -190,17 +197,4 @@ function ShareButton({ icon, label, href, onClick, external, primary }: ShareBut
       <span className="truncate">{label}</span>
     </button>
   );
-}
-
-function appendQuery(url: string, key: string, value: string): string {
-  try {
-    const u = new URL(url);
-    u.searchParams.set(key, value);
-    return u.toString();
-  } catch {
-    // url isn't absolute — fall back to a simple concat. Should
-    // never happen for our /event/:id URLs but defensive.
-    const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
-  }
 }
