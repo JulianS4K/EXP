@@ -61,7 +61,7 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ M (P0) — checkout charges the scheduled price (`supabase/functions/_shared/pricing.ts`, parity-tested
   against `src/lib/pricing.ts`).
 - ✅ M (partly) — `stripe-webhook` ledger writes now return 500 on failure so Stripe retries; the reconcile
-  sweep still ignores `{error}`.
+  sweep now records its refunds by id and surfaces errors too.
 - ✅ H — `account.updated` for organizers comes from a *connected-accounts* endpoint with its own secret; the
   webhook now accepts `STRIPE_CONNECT_WEBHOOK_SECRET` too (otherwise nobody could ever sell).
 - M — reconcile sweep: `status='failed' LIMIT 100` with no order/marker can starve; webhook and reconcile use
