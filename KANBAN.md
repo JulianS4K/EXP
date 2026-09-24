@@ -1,20 +1,21 @@
 # Kanban Board / Product Roadmap
 
-## ⚠ Prod state vs this repo (checked read-only 2026-09-24)
+## Prod state vs this repo (updated 2026-09-24, after the operator-approved apply)
 
-- **Prod DB is behind the source.** Not applied to prod: `20260702121000_exos_transfer_secret_leak_fix`
-  (the leak is **live**: after a transfer the previous holder can still read the rotated barcode secret),
-  and all of the 2026-09-11 Stage 2/3 set: `…060000_ticket_attendee_name`, `…070000_event_reminders_hardening`,
-  `…130000_event_analytics`, `…131000_rsvp_release`, `…132000_comp_batch`, `…133000_event_series`,
-  `…134000_roster_attendee_name`.
-- **Deploy landmine:** the bundle served at `/bridge/` (Terminal-2 `static/bridge/`) was last rebuilt 2026-07-27.
-  This repo's source reads `exos_tickets.attendee_name` and calls Stage 3 RPCs, so **rebuilding and copying
-  `dist/` now breaks ticket reads in prod.** Apply the missing migrations first (operator-gated), then rebuild.
+- **DB caught up.** Applied to prod 2026-09-24: the 2026-09-11 Stage 2/3 set and
+  `20260924200848_exos_audit_hardening_quota_transfer_waitlist` (which also carries the transfer secret leak fix).
+  `20260702121000` and `20260911130000` were not applied on their own; later migrations supersede them (see their headers).
+- **The `/bridge/` bundle (Terminal-2 `static/bridge/`, built 07-27) still works**, and it's now safe to rebuild it from
+  this repo and copy `dist/` over.
+- **Payments are dormant by choice.** `stripe-webhook`, `exos-checkout`, `exos-reconcile-checkouts` have never been deployed.
+  Before Stripe go-live: set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `CRON_SECRET`, deploy the three functions,
+  register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
+  it's deployed.
 
 ## Audit 2026-09-24 — open findings
 
 Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,
-Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else is open. DB fixes still need applying to prod.
+Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else is open. The ✅ DB fixes are live in prod; the ✅ edge-function fixes ship when payments go live.
 
 **Payments (edge functions)**
 - ✅ H — auto-refunds on destination charges didn't set `reverse_transfer` / `refund_application_fee`, so the
