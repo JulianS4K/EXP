@@ -34,7 +34,7 @@
 | Phase | Theme | Status |
 |---|---|---|
 | 0 | Payments go-live + P1 audit fixes | 🟡 in progress: P0 live; P1 items below |
-| 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 started (SEO/share metadata, Maps, in-app browser handling) |
+| 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 started: in-app browser handling ✅, Maps + directions ✅; next: prerendered SEO pages, promoter links, CRM, wallet passes |
 | 2 | Face-value resale exchange + pricing intelligence (read-only from Terminal-2) | ⬜ |
 | 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | ⬜ |
 | 4 | Channel hub (Otter): one inventory across own channels, then authorized marketplaces (item 8) | ⬜ |
@@ -55,9 +55,22 @@ that:
   - `og:` tags for rich link previews.
   - Pixel attribution. Meta's own checkout surfaces are a later, separate integration with its
     own review.
-  Blocked on the P1 security-header fix (the embed and pixels are currently blocked).
-- **Google Maps** on event and venue pages: a Maps JS / Embed API key restricted by referrer, and
-  a static-map fallback.
+  **Built:**
+  - `src/lib/inAppBrowser.ts` detects Instagram, Facebook, Messenger, TikTok and others.
+  - Inside them, the sign-in modal hides Google and Microsoft (Google refuses OAuth in webviews)
+    and keeps Apple and email.
+  - Event and storefront pages show a banner: "buy here, or open in your browser for Apple Pay"
+    (an Android intent link; on iOS, copy the link).
+  - Checkout was already a same-tab redirect.
+
+  **Still to do:** test on real devices (per iOS and Instagram release), and use `og:` data for
+  richer previews.
+- **Google Maps** ✅:
+  - Event pages show a "Directions" link (keyless Maps URLs).
+  - An embedded map appears when the build has `VITE_GOOGLE_MAPS_EMBED_KEY`. Restrict that key
+    to the Embed API and our referrers.
+  - Built in `src/lib/maps.ts` and `src/components/VenueMap.tsx`.
+  - The storefront venue map is a follow-up.
 - **SEO:**
   - Server-rendered or prerendered event pages. The SPA serves one shell today, and Terminal-2
     already has an event-page SSR pattern (`tests/test_event_page_ssr_meta.py` there).
@@ -132,8 +145,9 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ H (partial) — scanner registry (every ticket's barcode secret) now wiped on sign-out. Still open: it
   lives in plaintext localStorage for 7 days. (✅ Pixels no longer load on `/checkin`.)
 - ✅ L — removed the `GEMINI_API_KEY` Vite `define` (a future reference would inline the key) and `@google/genai`.
-- H (correctness) — production CSP/XFO from Terminal-2 (`frame-ancestors 'none'`, `script-src 'self'`) kills the
-  embed, the org pixels, and Google Fonts. Needs per-path headers in Terminal-2 `server.py`.
+- ✅ H (correctness) — production CSP/XFO from Terminal-2 killed the embed, the org pixels and Google Fonts. Fixed
+  with a `/bridge/*` policy in Terminal-2 `server.py` (https://github.com/JulianS4K/Terminal-2/pull/1003); live
+  once that merges and deploys.
 - ✅ M — one org's pixels received other orgs' events. Now one org per page: switching org, or leaving to an
   untracked page (tickets, wallet, account, dashboards, `/checkin`), reloads to drop loaded pixels, and Meta's
   SPA auto-PageView is off (`src/lib/pixels.ts`, `isPixelRoute`).

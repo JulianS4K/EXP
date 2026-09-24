@@ -28,6 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatInTz } from '../lib/datetime';
 import { applyMeta } from '../lib/meta';
 import { initOrgPixels } from '../lib/pixels';
+import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import SocialLinks from '../components/SocialLinks';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
@@ -366,6 +367,7 @@ export default function OrgStorefront() {
 
   return (
     <ThemeProvider org={state.org!}>
+      <InAppBrowserBanner />
       <StorefrontInner org={state.org!} />
     </ThemeProvider>
   );

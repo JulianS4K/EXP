@@ -19,6 +19,8 @@ import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
+import InAppBrowserBanner from '../components/InAppBrowserBanner';
+import VenueMap from '../components/VenueMap';
 import ShareModal from '../components/ShareModal';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
@@ -442,6 +444,7 @@ export default function EventDetails() {
 
   return (
     <div className="wall grain min-h-screen text-white relative">
+      <InAppBrowserBanner />
       {/* Local reproduction of the mockup's bespoke `.grain` film-grain
           overlay — not in index.css, so it's copied verbatim from the
           EventDetails/Checkout mockup <style> blocks. `.wall`, `.disp`,
@@ -576,6 +579,7 @@ export default function EventDetails() {
                    <p className="disp text-xl tracking-tight">{event.location}</p>
                 </div>
               </div>
+              <VenueMap location={event.location} address={event.address} />
               {/* Performers block — only renders when the organizer
                   has set at least one. First name is treated as the
                   headliner (slightly larger). The block sits above

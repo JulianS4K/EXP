@@ -62,8 +62,14 @@ tiers and discount codes, into a series of dates.
 
 - Share links and the venue embed (`/embed/event/:eventId`).
 - Tracking pixels, which only load after the visitor consents.
-- *The embed and the pixels are currently blocked by the production security headers. This is a
-  known P1 in `KANBAN.md`.*
+  - They only see your public pages: the event page, your storefront and your profile.
+  - They never see buyers' tickets, accounts or the door scanner, and never another
+    organizer's pages.
+- *The embed and the pixels need the Terminal-2 security-header fix to be deployed (see
+  `KANBAN.md`).*
+- **Instagram and Facebook.** Buyers who tap your bio link can buy inside the app.
+  - Google sign-in doesn't work in those in-app browsers, so buyers use email or Apple.
+  - A banner offers to open the page in their browser if they want Apple Pay.
 
 ## 4. While it's on sale (`/dashboard/event/:eventId`)
 
@@ -109,7 +115,6 @@ tiers and discount codes, into a series of dates.
 ## Not built yet (tracked in `KANBAN.md`)
 
 - A screen for managing quotas.
-- Selling inside Instagram and Facebook in-app browsers.
-- Google Maps on event pages.
+- A map on the storefront page. Event pages already have directions, and a map when the key is set.
 - SEO landing pages.
 - Marketplace distribution (see the roadmap and the read-only rule).
