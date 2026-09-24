@@ -60,7 +60,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 |---|---|
 | `src/`, `public/`, `index.html`, `server.ts` | The SPA + Express dev/serve layer |
 | `supabase/migrations/` | Copy of every `*exos*` migration. The DB is still shared, so Terminal-2 is authoritative (see `supabase/README.md`) |
-| `supabase/functions/exos-*` | Copy of the Exos edge functions (+ vendored `_shared/cron-auth.ts`); Terminal-2 deploys them |
+| `supabase/functions/` | Copy of the Exos edge functions (`exos-*` + `stripe-webhook`) (+ vendored `_shared/cron-auth.ts`); Terminal-2 deploys them |
 | `tests/exos/` | SQL lifecycle / RLS / money-path harnesses (run against a scratch Postgres) |
 | `docs/` | Charter, RLS review, FE test plan, event preflight |
 | `design/exos-screens/` | Static screen mockups |

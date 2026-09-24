@@ -12,7 +12,7 @@ copy so Exos can be read, tested and reasoned about on its own.
 | Thing | Authoritative home (edit + apply/deploy from) | Copy here |
 |---|---|---|
 | `*exos*` migrations | `Terminal-2/supabase/migrations/` | `supabase/migrations/`. When you add one there, copy it here in the same change |
-| `exos-*` edge functions | `Terminal-2/supabase/functions/` | `supabase/functions/`. Keep in step |
+| `exos-*` edge functions + `stripe-webhook` (Exos fulfillment/refunds, no `exos-` prefix) | `Terminal-2/supabase/functions/` | `supabase/functions/`. Keep in step |
 | `_shared/cron-auth.ts` | `Terminal-2/supabase/functions/_shared/` | vendored |
 | SQL harnesses | `Terminal-2/tests/exos/` (its CI gates the shared DB) | `tests/exos/` (this repo's CI runs them too) |
 | Built SPA bundle | `Terminal-2/static/bridge/` (served by `vibepass-storefront-test`) | build it here (`dist/`), copy it over |
@@ -25,11 +25,21 @@ authoritative and the Terminal-2 copies get deleted.
 
 ## Caveats
 
-- These are only the migrations with `exos` in the filename. Some Terminal-2
-  security sweeps (e.g. `*_sec_p*`, `*_rls_initplan_optimization`,
-  `*_flip_safe_definer_views_security_invoker`) also touch `exos_*` objects, so
+- These are only the migrations with `exos` in the filename. 18 Terminal-2
+  migrations without `exos` in the name also alter `exos_*` objects, so
   replaying this directory from zero **does not** reproduce the production
-  schema exactly. Take a baseline `pg_dump --schema-only` of the `exos_*`
+  schema exactly. The ones that matter most:
+  - `20260622200000_rls_initplan_optimization.sql` rewrites the exos RLS
+    policies (`auth.uid()` → `(select auth.uid())`); **the final policy text is
+    there, not in the exos migrations.**
+  - `20260622190000_fk_indexes_unindexed.sql` adds exos FK indexes.
+  - `20260526020000_fix_checkins_scanned_by_nullable.sql` changes `exos_checkins`.
+  - security sweeps: `20260525170000_*`, `20260525180000_*`, `20260601120100_sec_p1_*`,
+    `20260601120200_sec_p2_*`, `20260621180156_harden_pgcrypto_*`,
+    `20260622180000_axs_security_lockdown.sql`, `20260623190100_flip_safe_definer_*`,
+    `20260702140000_a1_security_close_*`.
+  Find the full list with
+  `grep -l exos_ Terminal-2/supabase/migrations/*.sql | grep -v exos`. Take a baseline `pg_dump --schema-only` of the `exos_*`
   objects when splitting off a dedicated project.
 - `exos_*` tables live in `public`, not in their own schema. Their RLS uses the
   shared Supabase Auth.
