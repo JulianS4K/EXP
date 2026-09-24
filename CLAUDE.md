@@ -17,12 +17,13 @@ npm run dev      # tsx server.ts (hits the Supabase URL in .env.local)
 bash tests/exos/run.sh <db>   # SQL harnesses against a scratch Postgres
 ```
 
-Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs the same three.
+Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs the same three plus the SQL harnesses.
 
 ## Rules carried over from Terminal-2
 
 - **The database is shared with Terminal-2's broker data.** Read `supabase/README.md`
-  before writing a migration. Prod `apply_migration`, DML/DDL, cron changes,
+  before writing a migration or touching an edge function: while the DB is shared,
+  migrations and `exos-*` functions are authored in Terminal-2 and copied here. Prod `apply_migration`, DML/DDL, cron changes,
   and edge-function deploys need explicit operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
   Never add order/hold/price/inventory writes to a third party.

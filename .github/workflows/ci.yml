@@ -33,3 +33,40 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
         run: npm run build
+
+  exos-sql:
+    name: Exos SQL (migrations + lifecycle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Applies the exos migrations to a throwaway Postgres and drives the real
+    # RPC bodies: platform suite + ticket lifecycle (mint → roster → HMAC scan
+    # → transfer/claim/reissue → void).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5433"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Exos platform suite (waitlist/addons/vouchers/tax/invoicing)
+        run: bash tests/exos/run.sh exos_test
+
+      - name: Exos ticket-lifecycle suite (mint/scan/transfer/void/reissue)
+        run: bash tests/exos/run_lifecycle.sh exos_lifecycle_test

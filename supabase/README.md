@@ -5,12 +5,23 @@ Terminal-2's broker data. The code moved out of Terminal-2; the database has not
 
 ## Where each thing lives until the database split
 
-| Thing | Where you edit it | Where it's applied/deployed from |
+While the DB is shared, **Terminal-2 stays authoritative** for everything that
+gets applied or deployed to that project. This directory is a history-carrying
+copy so Exos can be read, tested and reasoned about on its own.
+
+| Thing | Authoritative home (edit + apply/deploy from) | Copy here |
 |---|---|---|
-| New `exos_*` migrations | **here** (`supabase/migrations/`) | applied to the shared project under operator direction; also mirrored into `Terminal-2/supabase/migrations/` so its migration history stays complete |
-| Existing `*exos*` migrations | read-only history, don't edit | already applied |
-| `exos-*` edge functions | **here** | deployed to the shared project |
-| `_shared/cron-auth.ts` | vendored copy of `Terminal-2/supabase/functions/_shared/cron-auth.ts`; keep them in step | — |
+| `*exos*` migrations | `Terminal-2/supabase/migrations/` | `supabase/migrations/`. When you add one there, copy it here in the same change |
+| `exos-*` edge functions | `Terminal-2/supabase/functions/` | `supabase/functions/`. Keep in step |
+| `_shared/cron-auth.ts` | `Terminal-2/supabase/functions/_shared/` | vendored |
+| SQL harnesses | `Terminal-2/tests/exos/` (its CI gates the shared DB) | `tests/exos/` (this repo's CI runs them too) |
+| Built SPA bundle | `Terminal-2/static/bridge/` (served by `vibepass-storefront-test`) | build it here (`dist/`), copy it over |
+
+The app source (`src/`, `server.ts`, etc.) lives **only** here now. It was
+removed from Terminal-2.
+
+When the DB split happens (plan step 4 below), flip this table: this repo becomes
+authoritative and the Terminal-2 copies get deleted.
 
 ## Caveats
 
