@@ -65,6 +65,16 @@ that:
 
   **Still to do:** test on real devices (per iOS and Instagram release), and use `og:` data for
   richer previews.
+- **Interactive maps, phase 1** ✅ (`docs/maps.md`):
+  - `exos-geocode` is the server-side Geocoding proxy (organizers only, key stays server-side);
+    `exos-geocode-refresh` is its daily cron.
+  - Mig `20260924230000` stores pins; buyers see coordinates for 30 days at most, Place IDs are
+    kept.
+  - `@vis.gl/react-google-maps`: the event page gets an AdvancedMarker, and a new `/map` page
+    shows all events.
+  - The Terminal-2 CSP allows Maps hosts on map pages only.
+  - **Not applied or deployed**; needs keys (see the doc).
+  - Phase 2 (native SDKs) and Phase 3 (Places UI Kit intake) are scoped in the doc.
 - **Google Maps** ✅:
   - Event pages show a "Directions" link (keyless Maps URLs).
   - An embedded map appears when the build has `VITE_GOOGLE_MAPS_EMBED_KEY`. Restrict that key

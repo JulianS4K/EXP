@@ -61,6 +61,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
 - [`docs/strategy.md`](docs/strategy.md): where Exos is going and the phased build plan
 - [`docs/gtm-nyc.md`](docs/gtm-nyc.md): go-to-market, NYC first
+- [`docs/maps.md`](docs/maps.md): venue geocoding proxy, 30-day pin cache, interactive maps
 - [`docs/native-sharing.md`](docs/native-sharing.md): fan + promoter sharing, and the Stories bridge for the future app
 - [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
 

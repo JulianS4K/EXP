@@ -1,3 +1,4 @@
+import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
@@ -515,6 +516,8 @@ export default function EditEvent() {
       setOriginalCodes(ed.discountCodes || []);
       setOriginalTiers((ed.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalTierIds((ed.ticketTiers || []).map((t) => t.id));
+      // Re-pin the venue if its address changed (server skips unchanged, fresh pins).
+      void geocodeEvent(eventId);
       toast({ kind: 'success', message: 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {

@@ -609,7 +609,7 @@ export default function EventDetails() {
                    <p className="disp text-xl tracking-tight">{event.location}</p>
                 </div>
               </div>
-              <VenueMap location={event.location} address={event.address} />
+              <VenueMap eventId={event.id} location={event.location} address={event.address} />
               {/* Performers block — only renders when the organizer
                   has set at least one. First name is treated as the
                   headliner (slightly larger). The block sits above

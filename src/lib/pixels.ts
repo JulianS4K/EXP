@@ -85,8 +85,10 @@ function enterScope(orgId: string | null): boolean {
 // Public listing pages an org's pixels may see. Everything else (tickets,
 // wallet, transfers, account, dashboards, door check-in) is untracked.
 const PIXEL_ROUTE_PREFIXES = ['/event/', '/e/', '/o/', '/organizer/', '/embed/event/'];
+// Exact public pages that aren't one org's (no org pixels fire there anyway).
+const PIXEL_ROUTES_EXACT = new Set(['/', '/map']);
 export function isPixelRoute(pathname: string): boolean {
-  return pathname === '/' || PIXEL_ROUTE_PREFIXES.some((p) => pathname.startsWith(p));
+  return PIXEL_ROUTES_EXACT.has(pathname) || PIXEL_ROUTE_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 // Call on pages that must never send data to a pixel (door check-in, account

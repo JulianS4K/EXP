@@ -1,3 +1,4 @@
+import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createEvent, getEventForEdit } from '../lib/events';
 import { uploadEventImage, deleteStorageObject } from '../lib/storage';
@@ -807,7 +808,7 @@ export default function CreateEvent() {
         : undefined;
 
       try {
-        await createEvent({
+        const created = await createEvent({
           orgId: activeOrg.id,
           name: formData.title.trim(),
           description: formData.description.trim(),
@@ -858,6 +859,8 @@ export default function CreateEvent() {
               };
             }),
         });
+        // Pin the venue for the map (server-side geocode; best-effort).
+        void geocodeEvent(created.eventId);
       } catch (commitErr) {
         // exos_events.slug is UNIQUE — a collision surfaces as a unique violation.
         if (slug && /duplicate|unique|exists/i.test(String(commitErr))) {
