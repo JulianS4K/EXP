@@ -39,12 +39,16 @@ paid events can't be sold.**
 - Date, doors, start and end times, and the venue.
 - Performers and artist links.
 - **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
+- **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
+  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee; the
+  platform fee comes out of your payout.
 - **Scheduled prices** (early-bird → regular → last-minute). Buyers are charged the price that's
   live when they check out, which is the one the storefront shows.
 - **Vouchers:**
   - **One use = one ticket**, so a 3-use code covers one order of 3 or three orders of 1.
   - A voucher can pin a price, restrict itself to one tier, be reserved for one email, expire,
-    and **sell past sold-out**.
+    and **sell past sold-out**. Vouchers replace the old storefront discount-code box, which was
+    removed because checkout never applied it.
   - **Hidden tiers** can only be bought with a voucher restricted to that tier.
 - **Add-ons**, **tax rules**, and **purchase limits** (per order / per account). Limits apply when
   seats are reserved, not just at payment.

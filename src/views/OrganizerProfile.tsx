@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { motion } from 'motion/react';
 import { MapPin, Calendar, CheckCircle2, UserPlus } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { fromPrice } from '../lib/pricing';
 import { formatInTz } from '../lib/datetime';
 
 export default function OrganizerProfile() {
@@ -171,7 +172,7 @@ export default function OrganizerProfile() {
                               </div>
                               <div className="flex justify-between items-center">
                                  <span className="stamp neon text-base">
-                                    {event.ticketTiers?.length ? formatCurrency(Math.min(...event.ticketTiers.map(t => t.price))) : formatCurrency(event.price)}+
+                                    {formatCurrency(fromPrice(event.ticketTiers, event.price), event.currency)}+
                                  </span>
                                  <span className="type text-[9px] text-white/40 uppercase tracking-widest group-hover:text-brand-primary transition-colors">view details →</span>
                               </div>

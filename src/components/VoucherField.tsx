@@ -9,10 +9,19 @@ import { Ticket, Check } from 'lucide-react';
 import { checkVoucher } from '../lib/vouchers';
 import { useToast } from '../context/ToastContext';
 
+export interface AppliedVoucher {
+  code: string;
+  canBypass: boolean;
+  /** Server-validated per-ticket price this voucher pins (null = normal price). */
+  overridePrice: number | null;
+  /** The only tier this voucher works for (null = any); it also unlocks that tier if hidden. */
+  restrictTierId: string | null;
+}
+
 interface Props {
   eventId: string;
   email?: string | null;
-  onApplied: (applied: { code: string; canBypass: boolean } | null) => void;
+  onApplied: (applied: AppliedVoucher | null) => void;
 }
 
 export default function VoucherField({ eventId, email, onApplied }: Props) {
@@ -34,7 +43,7 @@ export default function VoucherField({ eventId, email, onApplied }: Props) {
         return;
       }
       setAppliedCode(c);
-      onApplied({ code: c, canBypass: res.canBypass });
+      onApplied({ code: c, canBypass: res.canBypass, overridePrice: res.overridePrice, restrictTierId: res.restrictTierId });
       toast({ kind: 'success', message: res.canBypass ? 'Voucher applied — you can buy this event.' : 'Voucher applied.' });
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not check voucher.' });

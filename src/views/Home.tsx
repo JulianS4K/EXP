@@ -6,18 +6,14 @@ import { Calendar, MapPin, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatInTz } from '../lib/datetime';
 import { formatCurrency } from '../lib/utils';
-import { effectiveTierPrice } from '../lib/pricing';
+import { fromPrice } from '../lib/pricing';
 import { listSavedEventIds } from '../lib/saves';
 import { useAuth } from '../context/AuthContext';
 import SaveEventButton from '../components/SaveEventButton';
 
-/** Lowest effective (schedule-aware) price across an event's tiers. */
+/** Lowest current all-in price across an event's tiers (what a buyer pays). */
 function eventFromPrice(event: Event): number {
-  const tiers = event.ticketTiers;
-  if (tiers && tiers.length > 0) {
-    return Math.min(...tiers.map((t) => effectiveTierPrice(t.price, t.priceSchedule)));
-  }
-  return event.price;
+  return fromPrice(event.ticketTiers, event.price);
 }
 
 // ---------------------------------------------------------------------------

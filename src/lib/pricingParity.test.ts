@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { effectiveTierPrice as clientPrice } from './pricing';
-import { effectiveTierPrice as serverPrice } from '../../supabase/functions/_shared/pricing.ts';
+import { allInPrice, effectiveTierPrice as clientPrice } from './pricing';
+import { allInCents, effectiveTierPrice as serverPrice } from '../../supabase/functions/_shared/pricing.ts';
 
 // The storefront shows clientPrice; exos-checkout charges serverPrice. They must
 // agree for every schedule, or buyers are charged a price they weren't shown.
@@ -50,3 +50,28 @@ describe('checkout price parity (client vs exos-checkout)', () => {
     expect(clientPrice(30, schedule, NOW)).toBe(42);
   });
 });
+
+describe('all-in price parity (what the buyer sees = what checkout charges)', () => {
+  it('agrees to the cent over 5,000 generated prices and tax rates', () => {
+    const r = rng(424242);
+    for (let i = 0; i < 5000; i++) {
+      const price = Math.round(r() * 50000) / 100;
+      const rate = r() < 0.3 ? 0 : Math.round(r() * 2500) / 100; // 0–25%, 2 dp
+      const shown = Math.round(allInPrice(price, rate) * 100);
+      const charged = allInCents(Math.round(price * 100), rate);
+      expect(shown, JSON.stringify({ price, rate })).toBe(charged);
+    }
+  });
+
+  it('adds nothing when the price already includes tax (rate 0)', () => {
+    expect(allInPrice(25, 0)).toBe(25);
+    expect(allInCents(2500, 0)).toBe(2500);
+  });
+
+  it('rounds tax per ticket, so quantity x all-in unit = the charge', () => {
+    // $10.05 at 8.875% → 0.8919… tax → $10.94 per ticket; 3 tickets = $32.82.
+    expect(allInPrice(10.05, 8.875)).toBe(10.94);
+    expect(allInCents(1005, 8.875) * 3).toBe(3282);
+  });
+});
+

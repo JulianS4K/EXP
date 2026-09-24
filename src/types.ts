@@ -275,6 +275,9 @@ export interface Event {
     // effective price is the latest already-active step (lib/pricing.ts).
     // Models early-bird → regular → last-minute. Empty/undefined = flat price.
     priceSchedule?: { startsAt: string; price: number }[];
+    // Exclusive tax rate the buyer pays on top of `price` (0 when the price
+    // already includes tax). From exos_public_tiers; drives all-in display.
+    exclusiveTaxPercent?: number;
   }[];
   // Promo code metadata. The redemption *count* lives in the
   // events/{id}/promoUses/{code} sub-collection so it can be

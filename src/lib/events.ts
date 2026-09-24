@@ -33,6 +33,7 @@ function mapTier(t: any): Tier {
     salesStart: t.sales_start ? toTs(t.sales_start) : null,
     salesEnd: t.sales_end ? toTs(t.sales_end) : null,
     priceSchedule: Array.isArray(t.price_schedule) ? t.price_schedule : undefined,
+    exclusiveTaxPercent: Number(t.exclusive_tax_percent) || 0,
   };
 }
 
@@ -98,6 +99,24 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
 
 // --- Public reads (anon + signed-in buyers) — column-narrowed views --------
 
+// Listing cards show an all-in "from $X" price, which needs each event's public
+// tiers; one extra query for the whole page rather than one per event.
+async function withPublicTiers(rows: any[]): Promise<Event[]> {
+  if (rows.length === 0) return [];
+  const { data: tiers } = await supabase
+    .from('exos_public_tiers')
+    .select('*')
+    .in('event_id', rows.map((r) => r.id))
+    .order('sort_order', { ascending: true });
+  const byEvent = new Map<string, any[]>();
+  for (const t of tiers ?? []) {
+    const list = byEvent.get(t.event_id) ?? [];
+    list.push(t);
+    byEvent.set(t.event_id, list);
+  }
+  return rows.map((r) => mapEvent(r, byEvent.get(r.id) ?? []));
+}
+
 export async function listPublicEvents(limit = 50): Promise<Event[]> {
   const { data, error } = await supabase
     .from('exos_public_events')
@@ -105,7 +124,7 @@ export async function listPublicEvents(limit = 50): Promise<Event[]> {
     .order('starts_at', { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  return withPublicTiers(data ?? []);
 }
 
 // Published events for a specific org (public org storefront).
@@ -116,7 +135,7 @@ export async function listPublicEventsForOrg(orgId: string): Promise<Event[]> {
     .eq('org_id', orgId)
     .order('starts_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  return withPublicTiers(data ?? []);
 }
 
 export async function getPublicEvent(id: string): Promise<Event | null> {

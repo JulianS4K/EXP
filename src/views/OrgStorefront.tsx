@@ -29,7 +29,8 @@ import { formatInTz } from '../lib/datetime';
 import { applyMeta } from '../lib/meta';
 import { initOrgPixels } from '../lib/pixels';
 import SocialLinks from '../components/SocialLinks';
-import { publicUrl } from '../lib/utils';
+import { formatCurrency, publicUrl } from '../lib/utils';
+import { fromPrice } from '../lib/pricing';
 
 interface ResolvedOrg {
   org: Organization;
@@ -277,7 +278,7 @@ function StorefrontInner({ org }: ResolvedOrg) {
                       {ev.location}
                     </span>
                     <span className="stamp neon text-base shrink-0" style={{ color: accent }}>
-                      ${ev.price}+
+                      {formatCurrency(fromPrice(ev.ticketTiers, ev.price), ev.currency)}+
                     </span>
                   </div>
                 </Link>

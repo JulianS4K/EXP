@@ -9,10 +9,20 @@ While the database is shared with Terminal-2, the functions are deployed from
 `Terminal-2/supabase/functions/` to project `hzrizjeaxlqcxfrtczpq`. This repo keeps copies (see
 `supabase/README.md`).
 
+## Pricing model: all-in (operator decision 2026-09-24)
+
+Every price a buyer sees is the full amount they pay. Buyers are charged **no service fee**: the
+platform fee is a Stripe application fee taken from the organizer's share. Exclusive tax is added
+**per ticket, inside the displayed price**. `allInCents` in `supabase/functions/_shared/pricing.ts`
+and `allInPrice` in `src/lib/pricing.ts` must stay identical, and `pricingParity.test.ts` enforces
+that. If a buyer-paid fee is ever added, it has to go into that same all-in figure, never onto a
+separate checkout line. (The FTC's rule on live-event ticket fees is the external reason; confirm
+the details with counsel.)
+
 ## 0. Before you start
 
 - [ ] Every P0 migration is applied (`supabase/migrations/20260924205115`, `…205508`, `…205916`,
-      `…210103`). Check with `SELECT name FROM supabase_migrations.schema_migrations WHERE name LIKE '%exos_p0%';`
+      `…210103`), plus all-in pricing (`…211840`). Check with `SELECT name FROM supabase_migrations.schema_migrations WHERE name LIKE '%exos_p0%';`
 - [ ] Stripe account with **Connect** enabled. Organizers onboard as Express accounts, and charges
       are **destination charges** (`transfer_data.destination`) with an `application_fee_amount`.
 - [ ] Decide the platform fee. `EXOS_PLATFORM_FEE_BPS` defaults to `500` (5%). The operator
@@ -93,6 +103,7 @@ for each case.
 | 7 | Start checkout and leave it for 30 minutes | Session `expired`, hold released. Stripe sessions expire at 30 minutes |
 | 8 | Hidden tier: buy by UUID with no voucher | 409 from exos-checkout, no Stripe session |
 | 9 | Tier with a `price_schedule` step already started | The Stripe line item shows the scheduled price, which is also what the storefront shows |
+| 11 | **All-in:** a tier priced $10.05 with an 8.875% exclusive tax rule; buy 3 | The storefront shows **$10.94** per ticket ("all-in · incl. tax"), and Stripe charges **$32.82**. That's one line at $10.94 × 3, whose description notes the tax included. There's no separate Tax line and no fee line |
 | 10 | Replay an event from the Stripe dashboard | Nothing changes (every handler is idempotent) |
 
 Useful queries:

@@ -23,10 +23,10 @@ import ShareModal from '../components/ShareModal';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
-import { effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
-import VoucherField from '../components/VoucherField';
+import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
 
 export default function EventDetails() {
@@ -40,17 +40,14 @@ export default function EventDetails() {
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
-  const [discountCode, setDiscountCode] = useState('');
-  const [appliedDiscount, setAppliedDiscount] = useState<{ type: 'percentage' | 'fixed', value: number } | null>(null);
   // The literal code that's currently applied — needed so we can pass it
   // through to the Stripe metadata and the post-purchase usage increment.
-  const [appliedDiscountCode, setAppliedDiscountCode] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   // Optional per-ticket attendee names, index-aligned with quantity. Stamped
   // onto the minted tickets after a free claim (best-effort, owner RPC).
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
-  const [voucher, setVoucher] = useState<{ code: string; canBypass: boolean } | null>(null);
+  const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
   const [userTicketCount, setUserTicketCount] = useState(0);
   // Per-tier sold/capacity, sourced from the events/{id}/tierSales sub-
   // collection. Buyers can no longer mutate the embedded ticketTiers array
@@ -143,41 +140,13 @@ export default function EventDetails() {
   // sold/capacity off the mapped tiers; real-time counters return in phase-2
   // with the exos_tickets fulfillment path.)
 
-  const applyDiscount = async () => {
-    if (!event || !discountCode) return;
-    const upper = discountCode.trim().toUpperCase();
-    const codeObj = event.discountCodes?.find((c) => c.code === upper);
-    if (!codeObj) {
-      toast({ kind: 'error', message: 'Invalid discount code.' });
-      setAppliedDiscount(null);
-      setAppliedDiscountCode(null);
-      return;
-    }
-
-    // Usage-limit / expiry enforcement lands in phase-2 (a validate-code RPC):
-    // discount codes are org-secret, so buyer-side validation can't read the
-    // counter directly. Phase-1 applies the code locally — checkout is gated.
-    setAppliedDiscount({ type: codeObj.type, value: codeObj.value });
-    setAppliedDiscountCode(upper);
-    toast({
-      kind: 'success',
-      title: 'Discount applied',
-      message: `${codeObj.value}${codeObj.type === 'percentage' ? '%' : '$'} off your purchase.`,
-    });
-  };
-
-  // Tiers visible to the current viewer. A tier is visible if it's
-  // public OR if the currently-applied promo code unlocks it (the code
-  // carries an `unlocksTierIds` array). This is the buyer-side mirror
-  // of the per-tier visibility model on the event doc — without it,
-  // setting a tier to 'hidden' would have no effect because all tiers
-  // would still be in the rendered list.
+  // Tiers visible to the current viewer: public ones, plus a hidden tier when
+  // the applied voucher is restricted to it — the same rule exos-checkout
+  // enforces server-side, so nothing is shown that can't be bought.
   const visibleTiers = (event?.ticketTiers || []).filter((t) => {
     const visibility = (t as { visibility?: string }).visibility ?? 'public';
     if (visibility === 'public') return true;
-    if (!appliedDiscountCode) return false;
-    const code = event?.discountCodes?.find((c) => c.code === appliedDiscountCode);
-    return code?.unlocksTierIds?.includes(t.id) === true;
+    return !!voucher?.restrictTierId && voucher.restrictTierId === t.id;
   });
 
   const selectedTier = visibleTiers.find((t) => t.id === selectedTierId);
@@ -201,23 +170,17 @@ export default function EventDetails() {
     return null;
   };
   
+  // All-in: exactly what exos-checkout will charge per ticket — the scheduled
+  // price (or a server-validated voucher's pinned price) plus exclusive tax.
   const calculateFinalPrice = () => {
     if (!event) return 0;
-    // Scheduled pricing: the selected tier's price is its current effective
-    // price (latest active step), not the flat base — so early-bird / timed
-    // price steps are reflected in the checkout total.
-    let basePrice = selectedTier
-      ? effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule)
-      : event.price;
-
-    if (appliedDiscount) {
-      if (appliedDiscount.type === 'percentage') {
-        basePrice = basePrice * (1 - appliedDiscount.value / 100);
-      } else {
-        basePrice = Math.max(0, basePrice - appliedDiscount.value);
-      }
-    }
-    return basePrice;
+    if (!selectedTier) return event.price;
+    const voucherApplies =
+      voucher?.overridePrice != null && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
+    const base = voucherApplies
+      ? (voucher!.overridePrice as number)
+      : effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    return allInPrice(base, selectedTier.exclusiveTaxPercent);
   };
 
   const priceToDisplay = calculateFinalPrice();
@@ -687,15 +650,19 @@ export default function EventDetails() {
                 <div className="mb-8">
                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">price</p>
                     <p className="disp text-6xl neon tracking-tight">{formatCurrency(priceToDisplay * quantity, event.currency)}</p>
+                    <p className="type mt-1 text-[10px] uppercase tracking-widest text-white/40">
+                      {selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
+                    </p>
                     {selectedTier && (() => {
                       // Scheduled-pricing urgency nudge: surface the next upward
                       // step so buyers see "price rises to $X on <date>".
                       const cur = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
                       const next = nextPriceStep(selectedTier.priceSchedule);
                       if (!next || next.price <= cur) return null;
+                      const nextAllIn = allInPrice(next.price, selectedTier.exclusiveTaxPercent);
                       return (
                         <p className="type mt-2 text-[10px] uppercase tracking-widest text-brand-accent">
-                          ⏱ price rises to {formatCurrency(next.price, event.currency)} on{' '}
+                          ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
                           {formatInTz(new Date(next.startsAt), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
                       );
@@ -766,12 +733,13 @@ export default function EventDetails() {
                          <div className="flex justify-between items-center w-full mb-1 gap-3">
                             <p className="disp text-xl tracking-tight text-white">{tier.name}</p>
                             {(() => {
-                              const eff = effectiveTierPrice(tier.price, tier.priceSchedule);
-                              const markedDown = eff < tier.price;
+                              const eff = buyerTierPrice(tier);
+                              const opening = allInPrice(tier.price, tier.exclusiveTaxPercent);
+                              const markedDown = eff < opening;
                               return (
                                 <span className="inline-flex items-center gap-2 shrink-0">
                                   {markedDown && (
-                                    <span className="type text-white/30 line-through text-xs">{formatCurrency(tier.price, event.currency)}</span>
+                                    <span className="type text-white/30 line-through text-xs">{formatCurrency(opening, event.currency)}</span>
                                   )}
                                   <span className="stamp neon text-base">{formatCurrency(eff, event.currency)}</span>
                                 </span>
@@ -799,24 +767,6 @@ export default function EventDetails() {
                 )}
 
                 <div className="space-y-6 mb-6">
-                  <div className="bg-black p-4 border border-white/5">
-                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">discount_code</p>
-                     <div className="flex gap-2">
-                        <input
-                          className="type flex-grow bg-white/5 border border-white/10 px-4 py-3 text-[11px] uppercase tracking-widest text-white focus:outline-none focus:border-brand-primary"
-                          placeholder="enter_token"
-                          value={discountCode}
-                          onChange={(e) => setDiscountCode(e.target.value)}
-                        />
-                        <button
-                          onClick={applyDiscount}
-                          className="disp px-5 bg-white text-black text-lg tracking-wide hover:bg-brand-primary transition-colors shrink-0"
-                        >
-                          APPLY
-                        </button>
-                     </div>
-                  </div>
-
                   <div className="divide-y divide-white/5 border-t border-white/5">
                     <div className="flex justify-between type text-[10px] py-3.5 uppercase tracking-widest">
                       <span className="text-white/30">status</span>

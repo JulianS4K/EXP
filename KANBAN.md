@@ -12,6 +12,22 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## All-in pricing (operator decision 2026-09-24)
+
+✅ **Every buyer-facing price is all-in.**
+- Checkout folds exclusive tax into each line (no separate Tax line). Buyers pay no service fee.
+- The storefront (event page, tier list, add-ons, home / org / profile "from" prices, price-rise
+  nudges) shows the same figure, via `allInPrice` (client) and `allInCents` (server), which are
+  parity-tested.
+- The public views expose `exclusive_tax_percent` (mig `20260924211840`, **not applied yet**).
+- The storefront discount-code box was removed: it lowered the displayed price but checkout never
+  applied it, so the charge could be higher than shown. Server-validated vouchers remain.
+- Listing cards now load tiers, so "from $X" is no longer $0.
+- **Follow-ups:**
+  - Server-side discount codes, if still wanted.
+  - A "buyers will see $X" preview in the organizer tier editor.
+  - Counsel review of fee and tax display per market.
+
 ## Roadmap (operator, 2026-09-24)
 
 P0 (paid-ticketing blockers) is done in code; see the audit list below. The operator still has to

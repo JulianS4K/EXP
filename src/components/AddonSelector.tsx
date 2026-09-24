@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { listPublicAddons, type PublicAddon } from '../lib/addons';
 import { formatCurrency } from '../lib/utils';
+import { allInPrice } from '../lib/pricing';
 import { useT } from '../context/LanguageContext';
 
 export interface AddonSelection {
@@ -45,7 +46,8 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange }: P
     const items = Object.entries(updated).map(([addon_id, quantity]) => ({ addon_id, quantity }));
     const totalCents = items.reduce((sum, it) => {
       const found = addons.find((x) => x.id === it.addon_id);
-      return sum + Math.round((found?.price ?? 0) * 100) * it.quantity;
+      // All-in (incl. exclusive tax), matching what exos-checkout charges.
+      return sum + Math.round(allInPrice(found?.price ?? 0, found?.exclusiveTaxPercent) * 100) * it.quantity;
     }, 0);
     onChange({ items, totalCents });
   };
@@ -65,7 +67,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange }: P
               <p className="font-black uppercase italic tracking-tighter text-sm truncate">{a.name}</p>
               {a.description && <p className="text-white/40 text-xs font-bold truncate">{a.description}</p>}
               <p className="text-brand-primary text-xs font-black mt-0.5">
-                {a.price > 0 ? formatCurrency(a.price, currency) : t('event.free')}
+                {a.price > 0 ? formatCurrency(allInPrice(a.price, a.exclusiveTaxPercent), currency) : t('event.free')}
                 {soldOut && <span className="text-brand-accent ml-2">{t('event.soldOut')}</span>}
               </p>
             </div>
