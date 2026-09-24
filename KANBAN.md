@@ -14,7 +14,7 @@
 ## Audit 2026-09-24 — open findings
 
 Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,
-Terminal-2 `claude/exos-audit-hardening`). Everything else is open. DB fixes still need applying to prod.
+Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else is open. DB fixes still need applying to prod.
 
 **Payments (edge functions)**
 - ✅ H — auto-refunds on destination charges didn't set `reverse_transfer` / `refund_application_fee`, so the
