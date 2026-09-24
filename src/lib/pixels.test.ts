@@ -21,7 +21,7 @@ describe('pixelScopeAction', () => {
 });
 
 describe('isPixelRoute', () => {
-  it.each(['/', '/event/abc', '/e/slug', '/o/brand', '/organizer/x', '/embed/event/1'])('tracks %s', (p) => {
+  it.each(['/', '/event/abc', '/e/slug', '/o/brand', '/organizer/x', '/embed/event/1', '/l/brand/dj-kay'])('tracks %s', (p) => {
     expect(isPixelRoute(p)).toBe(true);
   });
   it.each(['/checkin/1', '/ticket/1', '/wallet/pass/1', '/my-tickets', '/dashboard', '/orgs/1/settings', '/transfer/1', '/claim/1', '/profile'])(

@@ -72,3 +72,20 @@ export async function getPromoterKit(token: string): Promise<PromoterKitData | n
   if (error || !data) return null;
   return data as PromoterKitData;
 }
+
+export interface PublicPromoterCard {
+  promoter: { name: string; code: string };
+  org: { id: string; name: string; slug: string };
+}
+
+// The link-in-bio page's header: the promoter's display name, active only.
+export async function getPublicPromoter(orgSlug: string, code: string): Promise<PublicPromoterCard | null> {
+  const { data, error } = await supabase.rpc('exos_public_promoter', { p_org_slug: orgSlug, p_code: code });
+  if (error || !data) return null;
+  return data as PublicPromoterCard;
+}
+
+// One public link a promoter can put in their Instagram / TikTok bio.
+export function linkInBioPath(orgSlug: string, code: string): string {
+  return `l/${encodeURIComponent(orgSlug)}/${encodeURIComponent(code)}`;
+}

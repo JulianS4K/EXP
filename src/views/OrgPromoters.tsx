@@ -9,9 +9,10 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Copy, Pause, Play, RefreshCw, Trophy, UserPlus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { getOrganization } from '../lib/orgs';
 import { publicUrl, formatCurrency } from '../lib/utils';
 import {
-  codeFromName, listPromoters, orgPromoterStats, setPromoterStatus, upsertPromoter,
+  codeFromName, linkInBioPath, listPromoters, orgPromoterStats, setPromoterStatus, upsertPromoter,
   type Promoter, type PromoterStat,
 } from '../lib/promoters';
 
@@ -27,6 +28,10 @@ export default function OrgPromoters() {
   const [codeTouched, setCodeTouched] = useState(false);
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
+  const [orgSlug, setOrgSlug] = useState<string | null>(null);
+  useEffect(() => {
+    if (orgId) getOrganization(orgId).then((o) => setOrgSlug(o?.slug ?? null)).catch(() => {});
+  }, [orgId]);
 
   const load = async () => {
     if (!orgId) return;
@@ -127,6 +132,11 @@ export default function OrgPromoters() {
                 <button onClick={() => copy(kitUrl(p), `Kit link for ${p.name} copied.`)} disabled={p.status === 'paused'} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-brand-primary disabled:opacity-40" aria-label={`Copy kit link for ${p.name}`}>
                   <Copy className="w-3 h-3" /> Kit link
                 </button>
+                {orgSlug && (
+                  <button onClick={() => copy(publicUrl(linkInBioPath(orgSlug, p.code)), `Link in bio for ${p.name} copied.`)} disabled={p.status === 'paused'} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-white/60 hover:text-white disabled:opacity-40" aria-label={`Copy link in bio for ${p.name}`}>
+                    <Copy className="w-3 h-3" /> Bio link
+                  </button>
+                )}
                 <button onClick={() => toggle(p)} className="p-2 text-white/40 hover:text-white" aria-label={p.status === 'active' ? `Pause ${p.name}` : `Reactivate ${p.name}`}>
                   {p.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </button>
