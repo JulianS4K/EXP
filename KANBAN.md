@@ -1,5 +1,71 @@
 # Kanban Board / Product Roadmap
 
+## ⚠ Prod state vs this repo (checked read-only 2026-09-24)
+
+- **Prod DB is behind the source.** Not applied to prod: `20260702121000_exos_transfer_secret_leak_fix`
+  (the leak is **live**: after a transfer the previous holder can still read the rotated barcode secret),
+  and all of the 2026-09-11 Stage 2/3 set: `…060000_ticket_attendee_name`, `…070000_event_reminders_hardening`,
+  `…130000_event_analytics`, `…131000_rsvp_release`, `…132000_comp_batch`, `…133000_event_series`,
+  `…134000_roster_attendee_name`.
+- **Deploy landmine:** the bundle served at `/bridge/` (Terminal-2 `static/bridge/`) was last rebuilt 2026-07-27.
+  This repo's source reads `exos_tickets.attendee_name` and calls Stage 3 RPCs, so **rebuilding and copying
+  `dist/` now breaks ticket reads in prod.** Apply the missing migrations first (operator-gated), then rebuild.
+
+## Audit 2026-09-24 — open findings
+
+Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,
+Terminal-2 `claude/exos-audit-hardening`). Everything else is open. DB fixes still need applying to prod.
+
+**Payments (edge functions)**
+- ✅ H — auto-refunds on destination charges didn't set `reverse_transfer` / `refund_application_fee`, so the
+  platform paid every refund and the organizer kept the money (`stripe-webhook`, `exos-reconcile-checkouts`).
+- H — partial-then-full refunds can mark a session `refunded` without voiding tickets: the `charge.refunded`
+  fallback records a NULL refund id with the *cumulative* amount (double-counts). Handle `refund.*` events or
+  list refunds by PI and record each by id.
+- ✅ M — Stripe session lives 24h but the seat hold lasts 30 min; now `expires_at` = 30 min.
+- ✅ M — hidden (non-public) tiers were purchasable by UUID without a voucher.
+- M — `price_schedule` isn't applied at checkout; buyers pay base `tier.price` (display-only feature today).
+- M — `.rpc()`/`.update()` errors are never checked in `stripe-webhook` / reconcile, so failed ledger writes
+  return 200 and Stripe never retries.
+- M — reconcile sweep: `status='failed' LIMIT 100` with no order/marker can starve; webhook and reconcile use
+  different refund idempotency keys.
+- M — `exos-webhook-drain` has no row claim (duplicate deliveries on overlap) and doesn't sign the timestamp.
+- L — open redirects via client `success_url`/`cancel_url`/`return_url`; add-on oversell (read-then-charge);
+  SSRF blocklist gaps (198.18/15, 224/4, 240/4, NAT64, 6to4); no rate limit on `exos-api`; dispute marks
+  session `refunded`.
+- INFO — `exos-distribute` exists to POST listings to Automatiq; keep undeployed until the operator signs off
+  (read-only-upstream rule).
+
+**Database**
+- ✅ H — any signed-up user could map their own quota onto another org's tier and zero its availability
+  (`exos_quota_tiers_wr` never checked the tier's org).
+- ✅ H — transfer race: two concurrent transfers of one ticket both claimable; the sender can claw a sold ticket
+  back. Claim now locks the ticket and requires `pending_transfer_id` + current owner to match.
+- ✅ M — `authenticated` could UPDATE any column of its own waitlist row (queue position, status, voucher).
+- H — one single-use voucher (incl. waitlist auto-offers, which bypass capacity) mints up to 10 tickets.
+- H — `exos_create_hold` has no per-buyer cap; a script can hold all inventory indefinitely.
+- H — free-claim, issue-to-email and comp-batch mints ignore shared quotas and live holds.
+- M — `authenticated` reads every column of published events and all orgs (`owner_uid`, `comp_budget`, …).
+- M — check-in: event scope only when `p_event_id` is passed; HMAC skipped for non-camera; client-chosen
+  `verification` is logged as-is; cancelled events not rejected.
+- M — vouchers are consumed before capacity checks and burned when fulfillment fails; not re-validated.
+- L — account enumeration via issue-to-email / comp batch; `exos_assert_purchase_limit` callable with any
+  buyer; `comp_budget` bypassable; stale invites can re-enable/demote members.
+
+**Frontend**
+- ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.
+- ✅ M — replayed offline check-ins dropped server refusals silently; now audited + surfaced.
+- ✅ H (partial) — scanner registry (every ticket's barcode secret) now wiped on sign-out. Still open: it
+  lives in plaintext localStorage for 7 days; pixels still load on `/checkin`.
+- ✅ L — removed the `GEMINI_API_KEY` Vite `define` (a future reference would inline the key) and `@google/genai`.
+- H (correctness) — production CSP/XFO from Terminal-2 (`frame-ancestors 'none'`, `script-src 'self'`) kills the
+  embed, the org pixels, and Google Fonts. Needs per-path headers in Terminal-2 `server.py`.
+- M — one org's pixels receive other orgs' events (never unloaded; fire to every loaded pixel).
+- M — `server.ts` `/api/*` is unused but `/api/verify-session` is unauthenticated; delete it.
+- L — dead Firebase rules/env vars/Stripe.js; unsigned legacy barcode fallback can never scan; SVG logo
+  upload rejected by the bucket; embed snippet puts the raw title in an HTML comment.
+
+
 Current baseline: `af37caf` + tsconfig fix + 4 rebuild commits
 (mail templateName rename, voided ticket status, pending-transfer
 lock, ScanReport field rename).

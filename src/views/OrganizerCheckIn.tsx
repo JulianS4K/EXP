@@ -191,6 +191,7 @@ export default function OrganizerCheckIn() {
     if (pendingUpdates.length === 0 || syncing) return;
     setSyncing(true);
     const successfulSyncs: string[] = [];
+    const conflicts: { id: string; reason: string }[] = [];
     try {
       // Per-item try/catch so one failing replay doesn't abort the rest of the
       // queue. With a single outer catch the first failure silently skipped
@@ -202,7 +203,10 @@ export default function OrganizerCheckIn() {
           // a second flip of an already-used ticket returns {ok:false,
           // reason:'used'} (no throw), so we still drop it from the queue.
           // Only a real network/auth error throws and keeps it queued.
-          await checkInTicket(tId, 'manual', 'manual', undefined, eventId);
+          // A refusal here means someone was admitted offline on a ticket the
+          // server says was already used / voided / in transfer — surface it.
+          const result = await checkInTicket(tId, 'manual', 'manual', undefined, eventId);
+          if (!result.ok) conflicts.push({ id: tId, reason: result.reason ?? 'unknown' });
           successfulSyncs.push(tId);
         } catch (err) {
           console.error(`Error syncing pending update ${tId}:`, err);
@@ -213,6 +217,18 @@ export default function OrganizerCheckIn() {
       setPendingUpdates(remainingUpdates);
       localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(remainingUpdates));
       setSyncing(false);
+      for (const c of conflicts) {
+        const reason = c.reason === 'used' || c.reason === 'voided' || c.reason === 'in-transfer' || c.reason === 'wrong-event'
+          ? c.reason
+          : 'not-found';
+        void writeScanReject(reason, 'manual', { ticketIdAttempted: c.id, reasonDetail: `offline-replay:${c.reason}` });
+      }
+      if (conflicts.length > 0) {
+        toast({
+          kind: 'error',
+          message: `${conflicts.length} ticket(s) admitted while offline were refused on sync (${[...new Set(conflicts.map((c) => c.reason))].join(', ')}). Check the scan report.`,
+        });
+      }
     }
   };
 
@@ -634,6 +650,44 @@ export default function OrganizerCheckIn() {
               scanning ? 'camera' : 'manual',
               { ticketIdAttempted: docId, reasonDetail: result.reason },
             );
+            return;
+          }
+          // Any other server refusal (used / voided / in-transfer / wrong-event /
+          // not-found) means the offline registry is stale — never admit on it.
+          if (!result.ok) {
+            const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
+            if (result.reason === 'used' || result.reason === 'voided') {
+              const synced = {
+                ...offlineRegistry,
+                [docId]: { ...offlineTicket, used: result.reason === 'used' || offlineTicket.used, voided: result.reason === 'voided' || offlineTicket.voided },
+              };
+              setOfflineRegistry(synced);
+              if (eventId) saveRegistry(eventId, synced);
+            }
+            setBuyerName(offlineTicket.name);
+            setRecentScans((prev) =>
+              [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' }, ...prev].slice(0, 5),
+            );
+            if (result.reason === 'used') {
+              setStatus('already-used');
+              void writeScanReject('used', src, { ticketIdAttempted: docId });
+              return;
+            }
+            setStatus('invalid-barcode');
+            setInvalidReason(
+              result.reason === 'voided'
+                ? 'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.'
+                : result.reason === 'in-transfer'
+                ? 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.'
+                : result.reason === 'wrong-event'
+                ? 'This ticket is for a different event.'
+                : 'The server did not accept this ticket. Re-sync the offline registry and retry.',
+            );
+            const rejectReason =
+              result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event'
+                ? result.reason
+                : 'not-found';
+            void writeScanReject(rejectReason, src, { ticketIdAttempted: docId, reasonDetail: result.reason });
             return;
           }
         } catch (err) {

@@ -88,6 +88,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await supabase.auth.signOut();
+    // The door scanner caches every ticket's barcode secret + attendee names
+    // for offline use; never leave that on a shared device after sign-out.
+    // pending_updates_* (ticket ids only) stays so unsynced check-ins replay.
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('registry_')) keys.push(k);
+      }
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch {
+      /* storage unavailable */
+    }
   };
 
   return (
