@@ -110,6 +110,18 @@ that:
   - a sticker layer;
   - the Shop catalog (policy check, plus operator sign-off for any push).
 
+**7e. Social: link previews and promoter records** ✅ (`docs/social.md` has the built / missing
+list)
+- **Link previews.** Terminal-2 `core/exos_seo.py` gives crawlers (WhatsApp, iMessage, Instagram
+  and Facebook DMs, X) each event's and organizer's own preview.
+  - It covers checkout and promoter links too.
+  - The "from" price is all-in.
+  - It goes live once the rebuilt bundle, with its SSR markers, is deployed.
+- **Promoter records** (mig `20260924233000`, not applied).
+  - The organizer's promoter manager has a leaderboard (`/orgs/:orgId/promoters`).
+  - Each promoter gets a private portal (`/p/:token`) with their own sales and kit.
+  - Links can be paused or rotated.
+
 **8. Ticket marketplace APIs**
 - **Reading (inventory, pricing and event data):** fine. Reuse Terminal-2's read-only clients
   (`*_client.py`, GET-only by construction).

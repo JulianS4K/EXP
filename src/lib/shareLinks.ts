@@ -54,6 +54,12 @@ export function shareAttribution(opts: ShareOptions): Attribution {
   return out;
 }
 
+// A promoter code from a display name. Same rule as _shared/attribution.ts
+// sanitizePromoter: 1-64 of [A-Za-z0-9_-].
+export function codeFromName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
+}
+
 export function buildShareUrl(eventUrl: string, opts: ShareOptions): string {
   return withAttribution(eventUrl, shareAttribution(opts));
 }

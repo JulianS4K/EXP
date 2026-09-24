@@ -60,7 +60,12 @@ tiers and discount codes, into a series of dates.
 
 **Promote** (`/dashboard/event/:eventId/promote`, `/orgs/:orgId/promote`):
 
-- **Promoters.** Name a campaign and that becomes the promoter's code.
+- **Promoters** (`/orgs/:orgId/promoters`).
+  - Add each promoter once and send them their private portal link. It shows their tickets and
+    sales and has their kit.
+  - Pause a promoter, or make a new link if one leaks.
+  - The leaderboard ranks everyone.
+- **Per-event campaigns.** Name a campaign and that becomes a promoter code.
   - Send each promoter their **kit link** (`/promoter/:eventId/:code`, no login needed). It gives
     them a buy-now link with the cart pre-filled, a story poster, and tracked links for Instagram,
     TikTok, WhatsApp and text.

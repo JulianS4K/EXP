@@ -19,6 +19,8 @@ const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
+const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
+const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
 const TicketDetail = lazy(() => import('./views/TicketDetail'));
 const WalletPass = lazy(() => import('./views/WalletPass'));
@@ -117,6 +119,8 @@ export default function App() {
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/map" element={<EventsMap />} />
+                    <Route path="/p/:token" element={<PromoterPortal />} />
+                    <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />

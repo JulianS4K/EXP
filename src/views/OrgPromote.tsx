@@ -158,6 +158,14 @@ export default function OrgPromote() {
         </section>
 
         {/* Socials + pixels */}
+        <section className="bg-[#111] p-6 border border-white/10 mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="disp text-lg uppercase tracking-wide text-white mb-1">Promoters</h2>
+            <p className="text-sm text-white/60">Give your street team codes and private kit links, and see who's selling.</p>
+          </div>
+          <Link to={`/orgs/${orgId}/promoters`} className="inline-flex items-center gap-2 bg-brand-primary text-black px-4 py-2 text-sm font-black uppercase">Manage promoters</Link>
+        </section>
+
         <section className="bg-gradient-to-r from-brand-primary/10 to-brand-secondary/10 border border-white/10 p-6 mb-6">
           <h2 className="disp text-lg uppercase tracking-wide text-white mb-2 flex items-center gap-2">
             <Sparkles className="w-4 h-4" /> Socials &amp; pixels

@@ -54,3 +54,17 @@ describe('validateNativePayload', () => {
     expect(validateNativePayload({ target: 'instagram_feed', contentUrl: EVENT })).toContain('instagram_feed needs backgroundImage');
   });
 });
+
+import { codeFromName } from './shareLinks';
+import { sanitizePromoter } from '../../supabase/functions/_shared/attribution.ts';
+
+describe('codeFromName', () => {
+  it('makes a valid promoter code', () => {
+    expect(codeFromName('DJ Kay!')).toBe('dj-kay');
+    expect(codeFromName('  Mo  B  ')).toBe('mo-b');
+    const long = codeFromName('a'.repeat(40) + ' ' + 'b'.repeat(40));
+    expect(long.length).toBeLessThanOrEqual(64);
+    expect(sanitizePromoter(long)).toBe(long);
+    expect(codeFromName('!!!')).toBe('');
+  });
+});
