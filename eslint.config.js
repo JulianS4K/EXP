@@ -5,6 +5,6 @@
 // Supabase RLS migrations were translated from (see migration headers).
 export default [
   {
-    ignores: ['dist/**/*', 'node_modules/**/*'],
+    ignores: ['dist/**/*', 'node_modules/**/*', 'supabase/**/*'],
   },
 ];

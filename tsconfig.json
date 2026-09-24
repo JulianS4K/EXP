@@ -37,6 +37,7 @@
     "scripts/**",
     "sim.ts",
     "eventday.ts",
-    "automatiq-race.ts"
+    "automatiq-race.ts",
+    "supabase/**"
   ]
 }
