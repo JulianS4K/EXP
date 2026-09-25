@@ -18,6 +18,8 @@ import { shareEventToStory } from '../lib/poster';
 import { formatInTz } from '../lib/datetime';
 import { useToast } from '../context/ToastContext';
 import ShareModal from './ShareModal';
+import { useShareTags } from '../hooks/useShareTags';
+import { mentionsFor } from '../lib/socialTags';
 
 const LINK_CHANNELS: { channel: ShareChannel; label: string }[] = [
   { channel: 'instagram_bio', label: 'Instagram bio' },
@@ -31,6 +33,8 @@ const LINK_CHANNELS: { channel: ShareChannel; label: string }[] = [
 export default function PromoterKitPanel({ event, promoter }: { event: Event; promoter: string }) {
   const { toast } = useToast();
   const tiers = event.ticketTiers ?? [];
+  // A promoter's share tags the organizer.
+  const shareTags = useShareTags({ orgId: event.orgId, includePromoter: false, enabled: !!event.orgId });
   const [tierId, setTierId] = useState(tiers[0]?.id ?? '');
   const [quantity, setQuantity] = useState(1);
   const [coupon, setCoupon] = useState('');
@@ -69,6 +73,7 @@ export default function PromoterKitPanel({ event, promoter }: { event: Event; pr
       venue: event.location,
       role: 'promoter',
       promoter,
+      mentions: mentionsFor('instagram_story', shareTags),
     },
     toast,
   );
@@ -152,6 +157,7 @@ export default function PromoterKitPanel({ event, promoter }: { event: Event; pr
         url={eventUrl}
         role="promoter"
         promoterId={promoter}
+        tags={shareTags}
       />
     </div>
   );

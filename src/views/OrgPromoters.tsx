@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { getOrganization } from '../lib/orgs';
 import { typedCode } from '../lib/shareLinks';
+import { cleanHandle, type SocialHandles } from '../lib/socialTags';
 import { publicUrl, formatCurrency } from '../lib/utils';
 import {
   codeFromName, linkInBioPath, listPromoters, orgPromoterStats, setPromoterStatus, upsertPromoter,
@@ -28,6 +29,8 @@ export default function OrgPromoters() {
   const [code, setCode] = useState('');
   const [codeTouched, setCodeTouched] = useState(false);
   const [email, setEmail] = useState('');
+  const [instagram, setInstagram] = useState('');
+  const [tiktok, setTiktok] = useState('');
   const [busy, setBusy] = useState(false);
   const [orgSlug, setOrgSlug] = useState<string | null>(null);
   useEffect(() => {
@@ -61,8 +64,18 @@ export default function OrgPromoters() {
     if (!name.trim() || !c) { toast({ kind: 'error', message: 'Give the promoter a name.' }); return; }
     setBusy(true);
     try {
-      await upsertPromoter(orgId, { code: c, name: name.trim(), email: email.trim() || undefined });
-      setName(''); setCode(''); setCodeTouched(false); setEmail('');
+      const socials: SocialHandles = {};
+      const ig = cleanHandle(instagram, 'instagram');
+      const tt = cleanHandle(tiktok, 'tiktok');
+      if (instagram.trim() && !ig) { toast({ kind: 'error', message: 'That Instagram handle doesn\'t look right.' }); return; }
+      if (tiktok.trim() && !tt) { toast({ kind: 'error', message: 'That TikTok handle doesn\'t look right.' }); return; }
+      if (ig) socials.instagram = ig;
+      if (tt) socials.tiktok = tt;
+      await upsertPromoter(orgId, {
+        code: c, name: name.trim(), email: email.trim() || undefined,
+        ...(ig || tt ? { socials } : {}),
+      });
+      setName(''); setCode(''); setCodeTouched(false); setEmail(''); setInstagram(''); setTiktok('');
       toast({ kind: 'success', message: `Added ${name.trim()}. Copy their kit link to send it.` });
       await load();
     } catch (err: any) {
@@ -104,11 +117,14 @@ export default function OrgPromoters() {
         <input className={field} placeholder="code" aria-label="Promoter code" value={code}
           onChange={(e) => { setCodeTouched(true); setCode(typedCode(e.target.value)); }} />
         <input className={field} placeholder="Email (optional)" aria-label="Promoter email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className={`${field} sm:col-span-2`} placeholder="Instagram @handle (optional)" aria-label="Promoter Instagram" value={instagram} onChange={(e) => setInstagram(e.target.value)} />
+        <input className={`${field} sm:col-span-2`} placeholder="TikTok @handle (optional)" aria-label="Promoter TikTok" value={tiktok} onChange={(e) => setTiktok(e.target.value)} />
         <button disabled={busy} className="sm:col-span-4 inline-flex items-center justify-center gap-2 bg-brand-primary text-black px-4 py-2 text-sm font-black uppercase disabled:opacity-50">
           <UserPlus className="w-4 h-4" /> Add promoter
         </button>
         <p className="sm:col-span-4 text-[11px] text-white/40">
           Using a code that's already on shared links (a campaign name from an event's Promote page)? Enter it as the code and those sales count too.
+          With a handle, fans' shares tag the promoter; they can turn that off from their kit page.
         </p>
       </form>
 
@@ -125,7 +141,11 @@ export default function OrgPromoters() {
               <div key={p.id} className={`flex flex-wrap items-center gap-3 bg-[#111] border border-white/10 px-4 py-3 ${p.status === 'paused' ? 'opacity-60' : ''}`}>
                 <span className="disp text-xl w-8 text-white/40">{i + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="font-black text-white truncate">{p.name} <span className="type text-[10px] text-white/40 ml-2">{p.code}</span></p>
+                  <p className="font-black text-white truncate">
+                    {p.name} <span className="type text-[10px] text-white/40 ml-2">{p.code}</span>
+                    {p.socials.instagram && <span className="type text-[10px] text-white/40 ml-2">@{p.socials.instagram}</span>}
+                    {!p.allowTagging && <span className="type text-[10px] text-white/30 ml-2">tagging off</span>}
+                  </p>
                   <p className="type text-[10px] uppercase tracking-widest text-white/50">
                     {s?.tickets ?? 0} tickets · {formatCurrency(s?.gross ?? 0)} incl. add-ons &amp; tax{p.status === 'paused' ? ' · paused' : ''}
                   </p>

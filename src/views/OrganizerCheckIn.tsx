@@ -91,6 +91,9 @@ export default function OrganizerCheckIn() {
   const [event, setEvent] = useState<Event | null>(null);
   const [searchId, setSearchId] = useState('');
   const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode'>('idle');
+  // A scan during the pre-doors test window: verified, but the ticket stays
+  // unused (the server answers reason 'test-scan'), so don't mark it locally.
+  const [testScan, setTestScan] = useState(false);
   // Reason text shown in the 'invalid-barcode' state — populated by the
   // HMAC verifier so the operator knows whether the issue was a stale
   // barcode (screenshot from earlier) or a forged one.
@@ -690,6 +693,14 @@ export default function OrganizerCheckIn() {
             void writeScanReject(rejectReason, src, { ticketIdAttempted: docId, reasonDetail: result.reason });
             return;
           }
+          if (result.reason === 'test-scan') {
+            setTestScan(true);
+            setBuyerName(offlineTicket.name);
+            setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
+            setStatus('success');
+            setSearchId('');
+            return;
+          }
         } catch (err) {
           console.error('Server check-in failed; admitting on offline registry and queuing replay.', err);
           const newPending = [...pendingUpdates, docId];
@@ -709,6 +720,7 @@ export default function OrganizerCheckIn() {
 
       setBuyerName(offlineTicket.name);
       setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
+      setTestScan(false);
       setStatus('success');
       setRecentScans(prev => [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'SUCCESS' }, ...prev].slice(0, 5));
       setSearchId('');
@@ -845,8 +857,9 @@ export default function OrganizerCheckIn() {
     const result = await checkInTicket(scanTicket.id, src, verification, barcodePayload, eventId);
 
     if (result.ok) {
+      setTestScan(result.reason === 'test-scan');
       setStatus('success');
-      pushScan('SUCCESS');
+      if (result.reason !== 'test-scan') pushScan('SUCCESS');
       setSearchId('');
       return;
     }
@@ -1082,8 +1095,10 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-green-200">
                  <CheckCircle2 className="w-10 h-10" />
               </div>
-              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">Entry Allowed</h2>
-              <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">Identity Verified</p>
+              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">{testScan ? 'Test scan OK' : 'Entry Allowed'}</h2>
+              <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
+                {testScan ? 'Valid ticket · not checked in (test window)' : 'Identity Verified'}
+              </p>
               
               <div className="w-full space-y-4">
                  <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-green-50">

@@ -498,6 +498,19 @@ window.addEventListener('message', function(e) {
                   </label>
                 ))}
               </div>
+              <label className="flex items-start gap-2 mb-5 text-xs text-slate-500">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={marketing.allowTagging !== false}
+                  onChange={(e) => setMarketing((m) => ({ ...m, allowTagging: e.target.checked }))}
+                  disabled={!canEdit}
+                />
+                <span>
+                  Tag us when fans and promoters share. Their posts on X, WhatsApp and the share sheet
+                  mention your handles, and story posters print them.
+                </span>
+              </label>
               <div className="grid grid-cols-3 gap-3">
                 {(([['Meta Pixel','meta','000000000000000'],['GA4','ga4','G-XXXXXXXXXX'],['TikTok Pixel','tiktok','CXXXXXXXXXXXXXXXXXXX']]) as readonly (readonly [string, 'meta'|'ga4'|'tiktok', string])[]).map(([label, key, hint]) => (
                   <label key={key} className="block">

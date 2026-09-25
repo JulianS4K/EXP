@@ -171,21 +171,33 @@ Review of both PRs, then every pending migration replayed on a local copy of pro
   - ✅ free claims now need a confirmed email (bots could drain free tiers);
   - ✅ a hidden tier can't be held without its voucher, and clients can no longer read hidden-tier
     stock.
+- ✅ **Round 2** (mig `20260925010000`, `test_trial_run_fixes_2.sql` plus a real-schema run with a
+  failing negative control):
+  - referral credit attaches to free claims only;
+  - a claimed transfer carries the recipient's email;
+  - pre-doors test-window scans verify the ticket but don't use it up (the scanner shows "Test scan OK");
+  - cancelling a transfer withdraws its unsent mail;
+  - mail says Exos, not "the Bridge app";
+  - a buyer whose paid order fails in a sold-out race is mailed.
+- ✅ **Operator decisions 2026-09-25**, built:
+  - **Shares auto-tag the organizer and promoter where allowed**:
+    - @handles in the text on X, WhatsApp, SMS and the share sheet, with none on Facebook (its
+      sharer drops text);
+    - printed on story posters, since Instagram Stories can't be pre-filled;
+    - organizers switch it off in Settings; promoters set their handles and switch on their kit
+      page (`lib/socialTags.ts`, `hooks/useShareTags.ts`).
+    - Fan shares still credit the promoter.
+  - **Profiles are private by default**: readable by the owner, org staff for their ticket
+    holders, teammates, or anyone once `is_public` is set.
+- **Applied to prod 2026-09-25**: `20260924215000`, `223000`, `230000`, `233000`, `234500`,
+  `20260925000000`, `20260925001000`, `20260925003000`, `20260925010000`. Each was verified
+  against the tested mirror by function checksum.
 - **Open from the trial:**
   - Hidden-tier presales can't be set up from the organizer UI: the voucher editor can't pick a
     tier or a code, and the "unlocks hidden tiers" toggle is dropped.
-  - `exos_attach_referral` credits any recent order.
-  - A transfer keeps the old `buyer_email`.
-  - Test-window scans aren't flagged.
-  - Transfer mail isn't withdrawn when the transfer is cancelled, the copy still says "Bridge
-    app", and the losing buyer in a sold-out race gets no mail.
-  - Decisions for the operator:
-    - Should fan shares also credit the promoter?
+  - Undecided:
     - Add-ons aren't reserved by the hold.
     - Scanners can read buyer emails.
-    - Signed-in users can read all profiles.
-- **To apply (operator):** `20260924215000`, `223000`, `230000`, `233000`, `234500`,
-  `20260925000000`, `20260925001000`, `20260925003000`, in that order.
 
 ## Audit 2026-09-24 — open findings
 

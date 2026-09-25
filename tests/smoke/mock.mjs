@@ -29,17 +29,21 @@ export const tables = {
     { id: ADDON, event_id: EV, name: 'Poster', description: '', price: 5, capacity: 10, sold: 0,
       max_per_order: 4, image_url: null, sort_order: 0, exclusive_tax_percent: 0 },
   ],
-  exos_public_orgs: [{ id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights', theme: {}, description: 'Parties.', followers_count: 0, marketing: {} }],
+  exos_public_orgs: [{ id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights', theme: {}, description: 'Parties.', followers_count: 0,
+    marketing: { socials: { instagram: 'https://instagram.com/bknights', x: '@bknights' } } }],
   exos_public_event_geo: [],
 };
 
 export const rpcs = {
   exos_public_promoter: (b) => b.p_code === 'dj-kay' && b.p_org_slug === 'bk-nights'
-    ? { promoter: { name: 'DJ Kay', code: 'dj-kay' }, org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' } } : null,
+    ? { promoter: { name: 'DJ Kay', code: 'dj-kay', socials: { instagram: 'dj.kay' } }, org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' } } : null,
   exos_promoter_kit: (b) => b.p_token === TOKEN ? {
-    promoter: { name: 'DJ Kay', code: 'dj-kay' }, org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' },
+    promoter: { name: 'DJ Kay', code: 'dj-kay', socials: { instagram: 'dj.kay' }, allow_tagging: true },
+    org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' },
     events: [{ event_id: EV, name: 'Fall Party', starts_at: future, tickets: 7, gross: 140, currency: 'USD' }],
   } : null,
+  exos_promoter_set_socials: (b) => b.p_token === TOKEN
+    ? { socials: b.p_socials, allow_tagging: b.p_allow_tagging } : null,
   exos_check_voucher: (b) => [b.p_code === 'PRESALE'
     ? { is_valid: true, voucher_id: 'v1', restrict_tier_id: HIDDEN, can_bypass: false, override_price: null, reason: null }
     : { is_valid: false, voucher_id: null, restrict_tier_id: null, can_bypass: false, override_price: null, reason: 'invalid' }],

@@ -93,6 +93,28 @@ await run('promoter portal shows sales, bio link and kit', async (page) => {
   assert(body.includes('/checkout?event=') && body.includes('promoter=dj-kay'), 'buy-now link built');
 });
 
+await run('fan share tags the organizer and the promoter', async (page) => {
+  await page.goto(BASE + '/event/' + EV + '?promoter=dj-kay');
+  await expectText(page, 'Fall Party');
+  await page.getByRole('button', { name: /share link/i }).click();
+  await expectText(page, 'Tags @bknights @dj.kay');
+  const x = await page.getByRole('link', { name: /X \/ Twitter/ }).getAttribute('href');
+  const text = decodeURIComponent(x);
+  assert(text.includes('with @bknights') && !text.includes('@dj.kay'), 'X text uses X handles only: ' + text);
+  const fb = await page.getByRole('link', { name: /Facebook/ }).getAttribute('href');
+  assert(!decodeURIComponent(fb).includes('@'), 'Facebook gets no mentions');
+});
+
+await run('promoter sets their handles and tagging switch', async (page, log) => {
+  await page.goto(BASE + '/p/' + TOKEN);
+  await expectText(page, 'Get tagged');
+  await page.getByLabel('X handle').fill('x.com/djkay');
+  await page.getByLabel('Tag me in shares').uncheck();
+  await page.getByRole('button', { name: /^Save$/ }).click();
+  await expectText(page, "Shares won't tag you");
+  assert(log.some((l) => l.includes('exos_promoter_set_socials')), 'saved through the kit token');
+});
+
 await run('events map falls back to a list without a key', async (page) => {
   await page.goto(BASE + '/map');
   await expectText(page, 'Fall Party');

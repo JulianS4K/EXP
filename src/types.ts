@@ -97,6 +97,8 @@ export interface Organization {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
     pixels?: { meta?: string; ga4?: string; tiktok?: string };
     shareImageUrl?: string;
+    /** Shares by fans and promoters @-tag the org (lib/socialTags.ts). Default on. */
+    allowTagging?: boolean;
   };
 }
 

@@ -27,6 +27,7 @@
 import type { ToastFn } from './utils';
 import { buildShareUrl, type ShareRole } from './shareLinks';
 import { blobToDataUrl, getNativeBridge, validateNativePayload } from './nativeShare';
+import { withMentions } from './socialTags';
 
 interface StoryShareInput {
   title: string;
@@ -45,6 +46,9 @@ interface StoryShareInput {
   ref?: string;
   /** Instagram (default) or Facebook Stories; only matters in the native app. */
   target?: 'instagram_story' | 'facebook_story';
+  /** @handles to print on the poster (lib/socialTags.ts): Stories can't be
+   *  pre-filled from the web, so the sharer adds them as mention stickers. */
+  mentions?: string[];
 }
 
 const W = 1080;
@@ -207,6 +211,11 @@ export async function composeStoryPoster(input: StoryShareInput): Promise<Blob |
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.fillText(input.venue.toUpperCase().slice(0, 44), 100, metaY + 58);
     }
+    if (input.mentions?.length) {
+      ctx.fillStyle = NEON;
+      ctx.font = '400 38px "Special Elite", monospace';
+      ctx.fillText(('with ' + input.mentions.join('  ')).slice(0, 48), 100, metaY + (input.venue ? 124 : 58));
+    }
 
     // ---- Marker scrawl accent ----
     ctx.save();
@@ -319,14 +328,15 @@ export async function shareEventToStory(input: StoryShareInput, toast?: ToastFn)
       const file = new File([blob], `${fileSlug(title)}-story.${ext}`, {
         type: blob.type || 'image/png',
       });
-      const data = { files: [file], title, text: `${title} — get tickets`, url };
+      const data = { files: [file], title, text: withMentions(`${title} — get tickets`, input.mentions ?? []), url };
       if (nav.canShare(data)) {
         await nav.share(data);
         toast?.({
           kind: 'success',
           title: 'Poster ready to post',
           message:
-            'In Instagram: pick the poster, add a link sticker, and paste — the URL is on your clipboard.',
+            'In Instagram: pick the poster, add a link sticker, and paste — the URL is on your clipboard.' +
+            (input.mentions?.length ? ` Tag ${input.mentions.join(' ')} with a mention sticker.` : ''),
           duration: 8000,
         });
         return;

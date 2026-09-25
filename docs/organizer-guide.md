@@ -115,7 +115,8 @@ tiers and discount codes, into a series of dates.
   - Anything the server rejects on sync is flagged to staff.
   - **Sign out of shared devices after the event.** Signing out clears the cached roster.
 - Doors can't be scanned before the event's doors time. An owner or manager can open a 3-hour
-  test window for rehearsals.
+  test window for rehearsals. Test scans check the ticket ("Test scan OK") but don't use it up, so
+  the holder still gets in at doors.
 
 ## 6. After a sale
 

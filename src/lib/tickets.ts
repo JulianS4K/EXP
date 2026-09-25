@@ -404,7 +404,8 @@ export interface CheckInResult {
 }
 
 /** Atomic check-in (status flip + audit). Returns {ok,reason}; reason is one
- *  of 'checked-in' | 'used' | 'voided' | 'in-transfer' | 'not-found'. */
+ *  of 'checked-in' | 'used' | 'voided' | 'in-transfer' | 'not-found', or
+ *  'test-scan' (ok, pre-doors test window: verified but NOT checked in). */
 export async function checkInTicket(
   ticketId: string,
   source: 'camera' | 'manual',

@@ -15,6 +15,8 @@ import { useToast } from '../context/ToastContext';
 import ShareModal from '../components/ShareModal';
 import { myReferralCode, myReferralStats, type ReferralStats } from '../lib/referrals';
 import { buildShareUrl } from '../lib/shareLinks';
+import { useShareTags } from '../hooks/useShareTags';
+import { mentionsFor, withMentions } from '../lib/socialTags';
 import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import { useT } from '../context/LanguageContext';
@@ -45,6 +47,12 @@ export default function TicketDetail() {
   // "Bring your friends": this holder's referral code for the event and how
   // many friends bought through it (mig 20260924234500). Missing = no card.
   const [referral, setReferral] = useState<ReferralStats | null>(null);
+  // The organizer and the promoter this fan's ticket came through.
+  const shareTags = useShareTags({
+    orgId: event?.orgId,
+    promoterCode: tickets[currentIndex]?.promoterId,
+    enabled: !!event?.orgId,
+  });
   const eventIdForReferral = event?.id;
   useEffect(() => {
     if (!eventIdForReferral || !user) return undefined;
@@ -213,6 +221,7 @@ export default function TicketDetail() {
         role: 'fan',
         promoter: currentTicket?.promoterId || undefined,
         ref: referral?.code,
+        mentions: mentionsFor('instagram_story', shareTags),
       },
       toast,
     );
@@ -222,7 +231,7 @@ export default function TicketDetail() {
     const link = buildShareUrl(publicUrl(`event/${event.id}`), {
       role: 'fan', channel: 'sms', promoter: currentTicket?.promoterId || undefined, ref: referral?.code,
     });
-    const text = `I just secured tickets for ${event.title}! Join me: ${link}`;
+    const text = `${withMentions(`I just secured tickets for ${event.title}!`, mentionsFor('sms', shareTags))} Join me: ${link}`;
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
@@ -573,6 +582,7 @@ export default function TicketDetail() {
           role="fan"
           promoterId={currentTicket?.promoterId || undefined}
           referralCode={referral?.code}
+          tags={shareTags}
         />
       )}
     </div>

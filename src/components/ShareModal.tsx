@@ -13,12 +13,17 @@
 // it was shared to. A fan's share passes along the promoter they arrived
 // with; a promoter's share carries their own code, so their sales land in
 // the event's per-promoter Sales report (free and paid).
+//
+// Tagging (lib/socialTags.ts): `tags` are the organizer / promoter accounts
+// that allow it; their @handles go into the text wherever the platform takes
+// pre-filled text (X, WhatsApp, the share sheet), not Facebook's sharer.
 
 import { ReactNode, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Copy, Send, Twitter, Facebook, Link as LinkIcon, X } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { buildShareUrl, type ShareChannel, type ShareRole } from '../lib/shareLinks';
+import { mentionsFor, withMentions, type TagSource } from '../lib/socialTags';
 
 interface ShareModalProps {
   open: boolean;
@@ -36,15 +41,19 @@ interface ShareModalProps {
   campaign?: string;
   // Fan's own referral code (lib/referrals.ts), so friends are counted.
   referralCode?: string;
+  // Accounts to @-tag (hooks/useShareTags.ts).
+  tags?: TagSource[];
 }
 
-export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign, referralCode }: ShareModalProps) {
+export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign, referralCode, tags = [] }: ShareModalProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
   const linkFor = (channel: ShareChannel) => buildShareUrl(url, { role, channel, promoter: promoterId, campaign, ref: referralCode });
   const shareUrl = linkFor('copy');
   const shareText = text ?? `Check out ${title}`;
+  const textFor = (channel: ShareChannel) => withMentions(shareText, mentionsFor(channel, tags));
+  const shownTags = mentionsFor('native', tags);
 
   async function handleNativeShare() {
     if (busy) return;
@@ -55,7 +64,7 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
       // a no-op silent close.
       if (typeof navigator !== 'undefined' && 'share' in navigator) {
         // @ts-ignore — TS lib lags Web Share API in some toolchains
-        await navigator.share({ title, text: shareText, url: linkFor('native') });
+        await navigator.share({ title, text: textFor('native'), url: linkFor('native') });
         onClose();
         return;
       }
@@ -84,10 +93,10 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
 
   const twitterHref =
     'https://twitter.com/intent/tweet?text=' +
-    encodeURIComponent(`${shareText} ${linkFor('x')}`);
+    encodeURIComponent(`${textFor('x')} ${linkFor('x')}`);
   const facebookHref =
     'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(linkFor('facebook'));
-  const whatsappHref = 'https://wa.me/?text=' + encodeURIComponent(`${shareText} ${linkFor('whatsapp')}`);
+  const whatsappHref = 'https://wa.me/?text=' + encodeURIComponent(`${textFor('whatsapp')} ${linkFor('whatsapp')}`);
 
   return (
     <AnimatePresence>
@@ -119,7 +128,10 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
               </button>
             </div>
 
-            <p className="text-white/60 text-sm mb-6 truncate">{title}</p>
+            <p className={`text-white/60 text-sm truncate ${shownTags.length ? 'mb-1' : 'mb-6'}`}>{title}</p>
+            {shownTags.length > 0 && (
+              <p className="text-white/40 text-xs mb-6 truncate">Tags {shownTags.join(' ')}</p>
+            )}
 
             <div className="grid grid-cols-2 gap-2 mb-2">
               {/* Native share button — only useful on devices that support it. */}

@@ -13,6 +13,7 @@ import { getPublicEvent } from '../lib/events';
 import { applyMeta } from '../lib/meta';
 import { formatCurrency } from '../lib/utils';
 import PromoterKitPanel from '../components/PromoterKitPanel';
+import PromoterSocialsForm from '../components/PromoterSocialsForm';
 
 export default function PromoterPortal() {
   const { token } = useParams();
@@ -64,6 +65,13 @@ export default function PromoterPortal() {
           {publicUrl(linkInBioPath(kit.org.slug, kit.promoter.code))}
         </button>
       </div>
+      {token && (
+        <PromoterSocialsForm
+          token={token}
+          socials={kit.promoter.socials ?? {}}
+          allowTagging={kit.promoter.allow_tagging !== false}
+        />
+      )}
       <div className="space-y-3">
         {kit.events.length === 0 && <p className="text-[11px] text-white/40 italic">No events on sale right now.</p>}
         {kit.events.map((e) => (

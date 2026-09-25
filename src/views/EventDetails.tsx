@@ -26,6 +26,8 @@ import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkout
 import { getVoucherTier } from '../lib/vouchers';
 import { attachReferral } from '../lib/referrals';
 import ShareModal from '../components/ShareModal';
+import { useShareTags } from '../hooks/useShareTags';
+import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
@@ -61,6 +63,8 @@ export default function EventDetails() {
   // the visit so it survives sign-in; and a cart pre-filled by a checkout link.
   const [attribution, setAttribution] = useState<Attribution>({});
   const [prefill, setPrefill] = useState<CheckoutPrefill | null>(null);
+  // Accounts a share tags: the organizer and the promoter who brought this fan.
+  const shareTags = useShareTags({ org, promoterCode: attribution.promoter, enabled: !!org });
   useEffect(() => {
     if (!id) return;
     setAttribution(captureAttribution(id, window.location.search));
@@ -462,13 +466,14 @@ export default function EventDetails() {
         venue: event.location,
         role: 'fan',
         promoter: attribution.promoter,
+        mentions: mentionsFor('instagram_story', shareTags),
       },
       toast,
     );
   };
 
   const handleSMSShare = () => {
-    const text = `Join me at ${event?.title}! Access intel here: ${window.location.href}`;
+    const text = `${withMentions(`Join me at ${event?.title}!`, mentionsFor('sms', shareTags))} Access intel here: ${window.location.href}`;
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
@@ -963,6 +968,7 @@ export default function EventDetails() {
           title={event.title}
           url={window.location.href.split('?')[0]}
           promoterId={attribution.promoter}
+          tags={shareTags}
         />
       )}
     </div>
