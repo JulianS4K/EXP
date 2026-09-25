@@ -684,6 +684,8 @@ export default function OrganizerCheckIn() {
                 ? 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.'
                 : result.reason === 'wrong-event'
                 ? 'This ticket is for a different event.'
+                : result.reason === 'event-cancelled'
+                ? 'This event was cancelled. Nobody can be checked in.'
                 : 'The server did not accept this ticket. Re-sync the offline registry and retry.',
             );
             const rejectReason =
@@ -913,6 +915,21 @@ export default function OrganizerCheckIn() {
       setStatus('already-used');
       pushScan('DENIED');
       void writeScanReject('used', src, { ticketIdAttempted: scanTicket.id });
+      return;
+    }
+
+    if (result.reason === 'event-cancelled' || result.reason === 'wrong-event') {
+      setStatus('invalid-barcode');
+      setInvalidReason(
+        result.reason === 'event-cancelled'
+          ? 'This event was cancelled. Nobody can be checked in.'
+          : 'This ticket is for a different event.',
+      );
+      pushScan('DENIED');
+      void writeScanReject(result.reason === 'wrong-event' ? 'wrong-event' : 'not-found', src, {
+        ticketIdAttempted: scanTicket.id,
+        reasonDetail: result.reason,
+      });
       return;
     }
 

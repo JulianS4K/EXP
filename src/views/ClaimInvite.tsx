@@ -21,7 +21,7 @@ import { Check, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
-import { claimOrgInvite, getOrgInvite, getOrganization } from '../lib/orgs';
+import { claimOrgInvite, getOrgInvite, getPublicOrg } from '../lib/orgs';
 import { Organization, OrgRole } from '../types';
 import { Timestamp } from '../lib/timestamp';
 
@@ -81,7 +81,9 @@ export default function ClaimInvite() {
           });
           return;
         }
-        const org = await getOrganization(inv.orgId).catch(() => null);
+        // The invitee isn't a member yet, so read the public org row
+        // (exos_orgs itself is members-only, mig 20260925021000).
+        const org = await getPublicOrg(inv.orgId).catch(() => null);
         setState({ kind: 'ready', invite: inv as InviteDoc, org });
       } catch (err) {
         // Most likely cause: rule rejection because the signed-in

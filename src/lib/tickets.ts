@@ -424,8 +424,11 @@ export interface CheckInResult {
 }
 
 /** Atomic check-in (status flip + audit). Returns {ok,reason}; reason is one
- *  of 'checked-in' | 'used' | 'voided' | 'in-transfer' | 'not-found', or
- *  'test-scan' (ok, pre-doors test window: verified but NOT checked in). */
+ *  of 'checked-in' | 'used' | 'voided' | 'in-transfer' | 'not-found' |
+ *  'wrong-event' | 'event-cancelled' | 'doors-not-open' | 'barcode-rejected' |
+ *  'barcode-expired', or 'test-scan' (ok, pre-doors test window: verified but
+ *  NOT checked in). The server logs 'verified' only when it checked the HMAC
+ *  itself; the `verification` argument is advisory (mig 20260925021000). */
 export async function checkInTicket(
   ticketId: string,
   source: 'camera' | 'manual',
@@ -439,7 +442,8 @@ export async function checkInTicket(
     p_verification: verification,
     // Server re-verifies the HMAC for signed payloads (D4-OPS-6); NULL = manual.
     p_barcode_payload: barcodePayload ?? null,
-    // Event scoping (D4-OPS-18): server rejects a cross-event scan. NULL = skip.
+    // Event scoping (D4-OPS-18): server rejects a cross-event scan, and a
+    // missing event id (mig 20260925021000).
     p_event_id: eventId ?? null,
   });
   if (error) throw error;
