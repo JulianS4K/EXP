@@ -253,14 +253,19 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
   (mig `20260924205916`). Residual: many confirmed accounts can each hold one cart.
 - ✅ H (P0) — free-claim, issue-to-email, comp batch and box-office mint go through `exos_seats_available`
   (quotas + holds + offers) (mig `20260924210103`).
-- M — `authenticated` reads every column of published events and all orgs (`owner_uid`, `comp_budget`, …).
-- M — check-in: event scope only when `p_event_id` is passed; HMAC skipped for non-camera; client-chosen
-  `verification` is logged as-is; cancelled events not rejected.
+- ✅ M — signed-in users read `exos_orgs` only as members/admins and published events only through the public
+  views (which now run as their owner); the invite page uses the public org (mig `20260925021000`, not applied).
+- ✅ M — check-in: `p_event_id` required, cancelled events refused (`event-cancelled`), anything barcode-shaped must
+  pass HMAC whatever the source, `verification` derived server-side (mig `20260925021000`).
 - ✅ M — vouchers were consumed before capacity checks and burned when fulfillment failed; a failed house cap also
-  leaked the tier's `sold`. Fulfillment is now all-or-nothing (mig `20260924215000`, not applied yet). Still open:
-  a voucher isn't re-validated (expiry) at fulfillment.
-- L — account enumeration via issue-to-email / comp batch; `comp_budget` bypassable; stale invites can
-  re-enable/demote members. (✅ `exos_assert_purchase_limit` no longer callable by users.)
+  leaked the tier's `sold`. Fulfillment is now all-or-nothing (mig `20260924215000`). ✅ Fulfillment re-checks
+  the voucher (exists, not expired, email + tier) before consuming it (mig `20260925021000`). Decision open: expiry
+  is strict, so a voucher that expires mid-payment fails and refunds that order.
+- ✅ L — issue-to-email and the comp batch answer the same whether or not the recipient has an account; free
+  box-office mints and issue-to-email count against `comp_budget`; claiming an invite never overrides a membership
+  edited after it was sent or demotes an owner, and every invite expires (14 days default, 30 max)
+  (mig `20260925021000`). (✅ `exos_assert_purchase_limit` no longer callable by users.) Left: staff can still infer
+  an account from a comp's `owner_id`; a $0.01 mint isn't counted as a comp.
 
 **Frontend**
 - ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.
