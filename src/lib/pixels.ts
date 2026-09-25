@@ -19,6 +19,11 @@
 // (door check-in), reloads the page to drop them. Queued pre-consent events
 // are discarded when the org changes, so they can't reach the next org.
 //
+// GA4 caveat: enhanced measurement's "page changes based on browser history
+// events" (on by default) reports SPA route changes itself, including the
+// moment before the reload above. Organizers should turn that setting off in
+// their GA4 property (docs/organizer-guide.md); it can't be disabled from here.
+//
 // CSP: these inject <script src> from the three vendor origins and run the
 // inline bootstraps. If a strict Content-Security-Policy is added later, it
 // must allowlist those origins (and 'unsafe-inline' or a nonce for the
@@ -46,6 +51,12 @@ declare global {
 const loaded = new Set<string>();
 let pending: PixelConfig | null = null;
 let scopeOrg: string | null = null;   // org whose pixels are pending or loaded
+// Set once a reload has been decided: from then on nothing fires, so events
+// meant for the next org can't reach the pixels that are about to be dropped
+// (window.location.reload() doesn't stop the current script).
+let reloading = false;
+// Short grace before that reload so a just-fired Purchase beacon can flush.
+const RELOAD_DELAY_MS = 800;
 let subscribed = false;
 let ready = false;
 
@@ -70,7 +81,14 @@ export function pixelScopeAction(
 function enterScope(orgId: string | null): boolean {
   const action = pixelScopeAction(scopeOrg, orgId, loaded.size > 0);
   if (action === 'reload') {
-    window.location.reload();
+    if (!reloading) {
+      reloading = true;
+      scopeOrg = null;
+      pending = null;
+      ready = false;
+      deferred.length = 0;
+      setTimeout(() => window.location.reload(), RELOAD_DELAY_MS);
+    }
     return false;
   }
   if (action === 'switch') {
@@ -94,14 +112,24 @@ export function isPixelRoute(pathname: string): boolean {
 // Call on pages that must never send data to a pixel (door check-in, account
 // pages). Reloads only if some org's pixels are already live.
 export function leavePixelScope(): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || reloading) return;
   enterScope(null);
+}
+
+// The router path of the current page (the /bridge basename stripped).
+function currentRoutePath(): string {
+  const base = ((import.meta as any).env?.BASE_URL ?? '/').replace(/\/$/, '');
+  const path = window.location.pathname;
+  return base && path.startsWith(base) ? path.slice(base.length) || '/' : path;
 }
 
 // Register an org's pixels. Loads immediately if consent is granted, else
 // queues until the visitor opts in.
 export function initOrgPixels(orgId: string, pixels?: PixelConfig): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined' || reloading) return;
+  // A late org lookup can resolve after the buyer has moved on to an
+  // untracked page (My Tickets, the door scanner): never load pixels there.
+  if (!isPixelRoute(currentRoutePath())) return;
   if (!enterScope(orgId)) return;
   if (!pixels || (!pixels.meta && !pixels.ga4 && !pixels.tiktok)) return;
   pending = pixels;
@@ -142,7 +170,7 @@ function fire(name: string, params?: Record<string, unknown>): void {
 // or before the providers finish loading are queued and replayed on flush.
 // Do NOT pass 'PageView' here — the loaders emit that themselves.
 export function trackPixelEvent(name: string, params?: Record<string, unknown>): void {
-  if (typeof window === 'undefined' || scopeOrg === null) return;
+  if (typeof window === 'undefined' || scopeOrg === null || reloading) return;
   if (getConsent() !== 'granted' || !ready) {
     if (deferred.length < MAX_DEFERRED) deferred.push({ name, params });
     return;

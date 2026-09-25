@@ -64,6 +64,13 @@ export function codeFromName(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
 }
 
+// While typing a code: only drop characters that can never be in one, so
+// hyphens and underscores can be typed (codeFromName would trim a trailing
+// "-" on every keystroke). Trim with codeFromName on submit.
+export function typedCode(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 64);
+}
+
 export function buildShareUrl(eventUrl: string, opts: ShareOptions): string {
   return withAttribution(eventUrl, shareAttribution(opts));
 }

@@ -46,7 +46,7 @@ export default function PromoterBio() {
       if (!alive) return;
       setEvents(evs);
       // The org's own pixels, consent-gated (lib/pixels.ts).
-      getPublicOrg(c.org.id).then((o) => initOrgPixels(c.org.id, o?.marketing?.pixels)).catch(() => {});
+      getPublicOrg(c.org.id).then((o) => { if (alive) initOrgPixels(c.org.id, o?.marketing?.pixels); }).catch(() => {});
     })()
       .catch((e) => console.error('Link-in-bio load failed:', e))
       .finally(() => { if (alive) setLoading(false); });

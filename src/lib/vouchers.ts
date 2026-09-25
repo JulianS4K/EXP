@@ -6,6 +6,8 @@
 // grant, never the code list.
 
 import { supabase } from './supabase';
+import { mapTier } from './events';
+import type { Event } from '../types';
 
 export interface VoucherCheck {
   valid: boolean;
@@ -45,6 +47,21 @@ export async function checkVoucher(eventId: string, code: string, email?: string
     overridePrice: r?.override_price != null ? Number(r.override_price) : null,
     reason: r?.reason ?? null,
   };
+}
+
+/** The hidden tier a valid voucher unlocks (exos_voucher_tier, mig
+ *  20260925000000). The public tier list never includes hidden tiers, so the
+ *  event page adds this one once the code checks out. Null when the code is
+ *  invalid or isn't restricted to a tier. */
+export async function getVoucherTier(
+  eventId: string, code: string, email?: string | null,
+): Promise<NonNullable<Event['ticketTiers']>[number] | null> {
+  const { data, error } = await supabase.rpc('exos_voucher_tier', {
+    p_event_id: eventId, p_code: code.trim(), p_email: email ?? null,
+  });
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? mapTier(row) : null;
 }
 
 /** Organizer: mint a voucher; returns the generated code. */

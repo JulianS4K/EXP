@@ -61,8 +61,15 @@ describe('validateNativePayload', () => {
   });
 });
 
-import { codeFromName } from './shareLinks';
+import { codeFromName, typedCode } from './shareLinks';
 import { sanitizePromoter } from '../../supabase/functions/_shared/attribution.ts';
+
+describe('typedCode', () => {
+  it('keeps hyphens and underscores while typing', () => {
+    expect(typedCode('Summer-')).toBe('summer-');
+    expect(typedCode('dj_kay!')).toBe('dj_kay');
+  });
+});
 
 describe('codeFromName', () => {
   it('makes a valid promoter code', () => {

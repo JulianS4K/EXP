@@ -34,6 +34,35 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
         run: npm run build
 
+  smoke:
+    name: Browser smoke (mocked Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke tests (tests/smoke)
+        run: npm run smoke
+
+      - name: Failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: tests/smoke/fail-*.png
+          if-no-files-found: ignore
+
   exos-sql:
     name: Exos SQL (migrations + lifecycle)
     runs-on: ubuntu-latest

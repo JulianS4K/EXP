@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "start": "node server.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "bash tests/smoke/run.sh"
   },
   "dependencies": {
     "@stripe/stripe-js": "^9.3.1",
@@ -37,6 +38,7 @@
     "@types/express": "^4.17.25",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "playwright": "^1.56.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.22.4",
     "typescript": "~5.8.2",

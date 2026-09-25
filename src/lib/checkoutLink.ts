@@ -140,16 +140,21 @@ export interface CheckoutPrefill {
 
 const PREFILL_KEY = (eventId: string) => `exos_prefill:${eventId}`;
 
+export function clearPrefill(eventId: string): void {
+  try { sessionStorage.removeItem(PREFILL_KEY(eventId)); } catch { /* non-fatal */ }
+}
+
 export function savePrefill(eventId: string, prefill: CheckoutPrefill): void {
   try { sessionStorage.setItem(PREFILL_KEY(eventId), JSON.stringify(prefill)); } catch { /* non-fatal */ }
 }
 
-// Read and clear (a prefill applies once).
-export function takePrefill(eventId: string): CheckoutPrefill | null {
+// Read without clearing, so the cart survives a re-render, React StrictMode's
+// double effect, and the sign-in round trip. Cleared by clearPrefill once
+// the buyer has actually checked out.
+export function readPrefill(eventId: string): CheckoutPrefill | null {
   try {
     const raw = sessionStorage.getItem(PREFILL_KEY(eventId));
     if (!raw) return null;
-    sessionStorage.removeItem(PREFILL_KEY(eventId));
     const p = JSON.parse(raw) as CheckoutPrefill;
     if (typeof p?.tierId !== 'string' || !Number.isInteger(p.quantity)) return null;
     return { tierId: p.tierId, quantity: p.quantity, addons: p.addons && typeof p.addons === 'object' ? p.addons : {}, coupon: p.coupon };

@@ -10,6 +10,7 @@ import { ArrowLeft, Copy, Pause, Play, RefreshCw, Trophy, UserPlus } from 'lucid
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { getOrganization } from '../lib/orgs';
+import { typedCode } from '../lib/shareLinks';
 import { publicUrl, formatCurrency } from '../lib/utils';
 import {
   codeFromName, linkInBioPath, listPromoters, orgPromoterStats, setPromoterStatus, upsertPromoter,
@@ -56,7 +57,7 @@ export default function OrgPromoters() {
   const add = async (e: FormEvent) => {
     e.preventDefault();
     if (!orgId) return;
-    const c = code || codeFromName(name);
+    const c = (code ? code.replace(/^[-_]+|[-_]+$/g, '') : '') || codeFromName(name);
     if (!name.trim() || !c) { toast({ kind: 'error', message: 'Give the promoter a name.' }); return; }
     setBusy(true);
     try {
@@ -101,7 +102,7 @@ export default function OrgPromoters() {
         <input className={`${field} sm:col-span-2`} placeholder="Name (e.g. DJ Kay)" aria-label="Promoter name" value={name}
           onChange={(e) => { setName(e.target.value); if (!codeTouched) setCode(codeFromName(e.target.value)); }} />
         <input className={field} placeholder="code" aria-label="Promoter code" value={code}
-          onChange={(e) => { setCodeTouched(true); setCode(codeFromName(e.target.value)); }} />
+          onChange={(e) => { setCodeTouched(true); setCode(typedCode(e.target.value)); }} />
         <input className={field} placeholder="Email (optional)" aria-label="Promoter email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <button disabled={busy} className="sm:col-span-4 inline-flex items-center justify-center gap-2 bg-brand-primary text-black px-4 py-2 text-sm font-black uppercase disabled:opacity-50">
           <UserPlus className="w-4 h-4" /> Add promoter
@@ -126,7 +127,7 @@ export default function OrgPromoters() {
                 <div className="min-w-0 flex-1">
                   <p className="font-black text-white truncate">{p.name} <span className="type text-[10px] text-white/40 ml-2">{p.code}</span></p>
                   <p className="type text-[10px] uppercase tracking-widest text-white/50">
-                    {s?.tickets ?? 0} tickets · {formatCurrency(s?.gross ?? 0)}{p.status === 'paused' ? ' · paused' : ''}
+                    {s?.tickets ?? 0} tickets · {formatCurrency(s?.gross ?? 0)} incl. add-ons &amp; tax{p.status === 'paused' ? ' · paused' : ''}
                   </p>
                 </div>
                 <button onClick={() => copy(kitUrl(p), `Kit link for ${p.name} copied.`)} disabled={p.status === 'paused'} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-brand-primary disabled:opacity-40" aria-label={`Copy kit link for ${p.name}`}>

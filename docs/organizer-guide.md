@@ -78,6 +78,9 @@ tiers and discount codes, into a series of dates.
   - They only see your public pages: the event page, your storefront and your profile.
   - They never see buyers' tickets, accounts or the door scanner, and never another
     organizer's pages.
+  - **Google Analytics 4:** in your GA4 property, open Admin → Data streams → Enhanced
+    measurement and turn off "Page changes based on browser history events". Otherwise GA4
+    logs page views for the pages it isn't meant to see before Exos drops it.
 - *The embed and the pixels need the Terminal-2 security-header fix to be deployed (see
   `KANBAN.md`).*
 - **Instagram and Facebook.** Buyers who tap your bio link can buy inside the app.

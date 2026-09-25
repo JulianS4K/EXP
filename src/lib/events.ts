@@ -20,7 +20,7 @@ const toTs = (iso?: string | null): Timestamp => Timestamp.fromDate(iso ? new Da
 type Tier = NonNullable<Event['ticketTiers']>[number];
 type Discount = NonNullable<Event['discountCodes']>[number];
 
-function mapTier(t: any): Tier {
+export function mapTier(t: any): Tier {
   return {
     id: t.id,
     name: t.name,

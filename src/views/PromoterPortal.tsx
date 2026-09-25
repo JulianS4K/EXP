@@ -71,7 +71,7 @@ export default function PromoterPortal() {
             <button onClick={() => open(e.event_id)} className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left">
               <span className="font-black text-white truncate">{e.name}</span>
               <span className="type text-[10px] uppercase tracking-widest text-white/60 shrink-0">
-                {e.tickets} sold · {formatCurrency(Number(e.gross) || 0, e.currency || 'USD')}
+                {e.tickets} sold · {formatCurrency(Number(e.gross) || 0, e.currency || 'USD')} incl. add-ons &amp; tax
               </span>
             </button>
             {openEvent?.id === e.event_id && (

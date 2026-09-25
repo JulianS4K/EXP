@@ -22,7 +22,8 @@ import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
-import { takePrefill, type CheckoutPrefill } from '../lib/checkoutLink';
+import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
+import { getVoucherTier } from '../lib/vouchers';
 import { attachReferral } from '../lib/referrals';
 import ShareModal from '../components/ShareModal';
 import EventCountdown from '../components/EventCountdown';
@@ -53,6 +54,9 @@ export default function EventDetails() {
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
+  // A hidden tier the applied voucher unlocks. The public tier list never
+  // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
+  const [unlockedTier, setUnlockedTier] = useState<NonNullable<Event['ticketTiers']>[number] | null>(null);
   // Where this buyer came from (promoter link, ad, Instagram Shop), kept for
   // the visit so it survives sign-in; and a cart pre-filled by a checkout link.
   const [attribution, setAttribution] = useState<Attribution>({});
@@ -60,7 +64,7 @@ export default function EventDetails() {
   useEffect(() => {
     if (!id) return;
     setAttribution(captureAttribution(id, window.location.search));
-    setPrefill(takePrefill(id));
+    setPrefill(readPrefill(id));
   }, [id]);
   const location = useLocation();
   useEffect(() => {
@@ -89,8 +93,12 @@ export default function EventDetails() {
       if (!data && user) data = await getEventForEdit(id);
       if (data) {
         setEvent(data);
+        // Default to the first tier, but keep a choice the buyer (or a
+        // checkout link, or a voucher) already made: this effect re-runs when
+        // the session resolves or the buyer signs in.
         if (data.ticketTiers && data.ticketTiers.length > 0) {
-          setSelectedTierId(data.ticketTiers[0].id);
+          const first = data.ticketTiers[0].id;
+          setSelectedTierId((cur) => cur ?? first);
         }
         // SEO: per-event meta tags (Open Graph, Twitter Card,
         // Schema.org Event). Crawlers that execute JS pick this up;
@@ -138,6 +146,7 @@ export default function EventDetails() {
         if (data.orgId) {
           getPublicOrg(data.orgId)
             .then((o) => {
+              if (!alive) return;   // navigated away: don't load pixels on the next page
               setOrg(o ?? null);
               initOrgPixels(data.orgId, o?.marketing?.pixels);
               trackPixelEvent('ViewContent', { content_name: data.title, content_ids: [data.id] });
@@ -149,10 +158,12 @@ export default function EventDetails() {
     }
     // A thrown fetch (network/Supabase error) must still clear the spinner so
     // the "Event not found" state renders instead of an infinite loader.
+    let alive = true;
     fetchEvent().catch((err) => {
       console.warn('Event load failed:', err);
       setLoading(false);
     });
+    return () => { alive = false; };
   }, [id, user]);
 
   // (Live per-tier sold/capacity subscription removed — phase-1 reads
@@ -162,7 +173,11 @@ export default function EventDetails() {
   // Tiers visible to the current viewer: public ones, plus a hidden tier when
   // the applied voucher is restricted to it — the same rule exos-checkout
   // enforces server-side, so nothing is shown that can't be bought.
-  const visibleTiers = (event?.ticketTiers || []).filter((t) => {
+  const allTiers = [
+    ...(event?.ticketTiers || []),
+    ...(unlockedTier && !(event?.ticketTiers || []).some((t) => t.id === unlockedTier.id) ? [unlockedTier] : []),
+  ];
+  const visibleTiers = allTiers.filter((t) => {
     const visibility = (t as { visibility?: string }).visibility ?? 'public';
     if (visibility === 'public') return true;
     return !!voucher?.restrictTierId && voucher.restrictTierId === t.id;
@@ -214,9 +229,23 @@ export default function EventDetails() {
     if (event.ticketTiers.some((t) => t.id === prefill.tierId)) setSelectedTierId(prefill.tierId);
     setQuantity(Math.max(1, Math.min(maxPerOrder, prefill.quantity)));
   }, [prefill, event?.id]);
+  // A voucher restricted to a tier the page doesn't list (hidden tier): fetch
+  // it, show it and select it. Dropped again if the voucher is removed.
   useEffect(() => {
-    if (voucher?.restrictTierId && prefill?.tierId === voucher.restrictTierId) setSelectedTierId(voucher.restrictTierId);
-  }, [voucher?.restrictTierId, prefill?.tierId]);
+    const tierId = voucher?.restrictTierId;
+    if (!event || !voucher || !tierId) { setUnlockedTier(null); return undefined; }
+    if ((event.ticketTiers || []).some((t) => t.id === tierId)) {
+      setSelectedTierId(tierId);
+      return undefined;
+    }
+    let alive = true;
+    getVoucherTier(event.id, voucher.code, user?.email ?? null).then((t) => {
+      if (!alive || !t) return;
+      setUnlockedTier(t);
+      setSelectedTierId(t.id);
+    });
+    return () => { alive = false; };
+  }, [event?.id, voucher?.code, voucher?.restrictTierId]);
   const maxPerAccount = event?.purchaseLimits?.maxPerAccount || 8;
   // Paid checkout is gated on the Stripe publishable key — the backend
   // (exos-checkout + exos_fulfill_checkout) is built but stays dormant until
@@ -230,9 +259,11 @@ export default function EventDetails() {
       return;
     }
     if (!event) return;
-    const tier = event.ticketTiers?.find((t) => t.id === selectedTierId) || event.ticketTiers?.[0];
+    // Never fall back to another tier: buying tier 0 when the buyer picked a
+    // (voucher-unlocked) tier that isn't loaded would charge the wrong price.
+    const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
     if (!tier?.id) {
-      toast({ kind: 'error', message: 'No ticket tier available for this event yet.' });
+      toast({ kind: 'error', message: selectedTierId ? 'That ticket type is no longer available. Pick another.' : 'No ticket tier available for this event yet.' });
       return;
     }
     const unitPrice = tier.price ?? event.price ?? 0;
@@ -262,6 +293,7 @@ export default function EventDetails() {
           voucherCode: voucher?.code,
           attribution,
         });
+        clearPrefill(event.id);
         window.location.href = url; // leave the SPA for Stripe-hosted checkout
       } catch (err: any) {
         console.error('Checkout failed:', err);
@@ -336,8 +368,9 @@ export default function EventDetails() {
         currency: event.currency || 'USD',
         num_items: ids.length,
       });
-      toast({ kind: 'success', title: "You're in!", message: `${ids.length} ticket(s) reserved — find them in My Tickets.` });
-      navigate('/my-tickets');
+      clearPrefill(event.id);
+      // My Tickets shows the confirmation (see its ?claimed handler).
+      navigate(`/my-tickets?claimed=${ids.length}`);
     } catch (err: any) {
       console.error('Free claim failed:', err);
       toast({ kind: 'error', message: err?.message || 'Could not reserve tickets. Please try again.' });
@@ -396,7 +429,7 @@ export default function EventDetails() {
     // transfer) is exercisable without Stripe checkout (which stays phase-2).
     setPurchasing(true);
     try {
-      const tier = event.ticketTiers?.find((t) => t.id === selectedTierId) || event.ticketTiers?.[0];
+      const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
       const ids = await mintTickets({
         eventId: event.id,
         tierId: tier?.id ?? null,
