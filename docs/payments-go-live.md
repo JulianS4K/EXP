@@ -53,10 +53,12 @@ it, which is part of why payments are dormant. Checkout itself redirects to the 
 |---|---|---|---|---|
 | `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts`, `../_shared/attribution.ts` | **true** | Called by signed-in buyers |
 | `exos-connect-onboard` | `index.ts` | `../_shared/redirects.ts` | **true** | Called by the org owner |
-| `stripe-webhook` | `index.ts` | — | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
-| `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
+| `stripe-webhook` | `index.ts` | `../_shared/auto-refund.ts` | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
+| `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts`, `../_shared/auto-refund.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
 
 **Apply migrations `20260924215000` and `20260924223000` first** (all-or-nothing fulfillment, promoter attribution). `exos-checkout` writes the columns the second one adds.
+Also apply **`20260925020000`** (dispute recording, reconcile bookkeeping) before deploying `stripe-webhook`
+and `exos-reconcile-checkouts`: without it the dispute handler returns 500 and the sweep does nothing.
 
 With the CLI (from `Terminal-2/`): `supabase functions deploy <name> --project-ref hzrizjeaxlqcxfrtczpq`,
 adding `--no-verify-jwt` for the last two. Once `exos-reconcile-checkouts` exists, the
@@ -81,7 +83,7 @@ version the handler is written against).
 1. **Platform endpoint.** Listen to events on *your account*:
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed`, `checkout.session.expired`,
-   `charge.refunded`, `charge.dispute.created`.
+   `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`.
    Destination charges raise these on the platform. Signing secret → `STRIPE_WEBHOOK_SECRET`.
 2. **Connected-accounts endpoint.** Listen to events on *connected accounts*: `account.updated`.
    This is how an organizer's onboarding status (`chargesEnabled`, `payoutsEnabled`) reaches Exos.
@@ -101,7 +103,7 @@ for each case.
 | 2 | Buy 2 tickets | Session `fulfilled`, 2 active tickets with `order_ref = session_id`, an `exos_order_payments` row, one ticket email queued, and the fee shown on the Stripe payment |
 | 3 | Refund $10 of it in the Stripe dashboard | Session `partially_refunded`, tickets **still active**, one refund row with Stripe's `re_…` id |
 | 4 | Refund the rest | Session `refunded`, **both tickets voided**, tier `sold` back down by 2 |
-| 5 | Buy 1 ticket, then open a dispute (test card `4000 0000 0000 0259`) | Tickets voided |
+| 5 | Buy 1 ticket, then open a dispute (test card `4000 0000 0000 0259`) | Session keeps its status and gets `dispute_status`; tickets stay valid. Lose it (submit losing evidence in test mode) → tickets voided |
 | 6 | On a tier with nothing sold, start checkout for 2, then set the tier's `capacity` to 1 in SQL and pay. (`capacity = 0` means *unlimited*, so don't use 0) | Session `failed`, automatic refund with `reverse_transfer` (the connected account's balance goes down, not the platform's) |
 | 7 | Start checkout and leave it for 30 minutes | Session `expired`, hold released. Stripe sessions expire at 30 minutes |
 | 8 | Hidden tier: buy by UUID with no voucher | 409 from exos-checkout, no Stripe session |
@@ -139,7 +141,5 @@ sessions have settled, because refunds and disputes still need it.
 
 ## Known gaps (see `KANBAN.md`)
 
-- `exos-webhook-drain` has no row claim and doesn't sign the timestamp.
 - Redirect URLs (`success_url`, `cancel_url`, `return_url`) aren't allow-listed.
 - Add-ons can oversell under concurrency, because they're read, then charged, with no hold.
-- A dispute marks the session `refunded` and nothing restores the tickets if you win it.

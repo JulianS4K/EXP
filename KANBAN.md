@@ -226,15 +226,18 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
   sweep now records its refunds by id and surfaces errors too.
 - ✅ H — `account.updated` for organizers comes from a *connected-accounts* endpoint with its own secret; the
   webhook now accepts `STRIPE_CONNECT_WEBHOOK_SECRET` too (otherwise nobody could ever sell).
-- M — reconcile sweep: `status='failed' LIMIT 100` with no order/marker can starve; webhook and reconcile use
-  different refund idempotency keys.
-- M — `exos-webhook-drain` has no row claim (duplicate deliveries on overlap) and doesn't sign the timestamp.
+- ✅ M — reconcile sweep: sessions are stamped (`exos_reconcile_mark`, backoff to 24h) and read oldest/due
+  first; webhook and sweep share one refund key + params (`_shared/auto-refund.ts`), and the sweep checks
+  Stripe's existing refunds first (mig `20260925020000`, not applied yet).
+- ✅ M — `exos-webhook-drain` claims rows (`exos_webhook_claim_batch`, SKIP LOCKED + lease + claim token) and
+  signs `<timestamp>.<body>`. Prod has no webhooks yet, so the signature change breaks no receiver.
 - ✅ L — open redirects via client `success_url`/`cancel_url`/`return_url`: both functions now require the URL's
   origin to be in `EXOS_REDIRECT_ORIGINS` (`_shared/redirects.ts`).
 - ✅ L — add-on oversell (read-then-charge): fulfillment claims add-ons atomically and rolls the whole order back
   if one is gone (mig `20260924215000`, not applied yet).
-- L — SSRF blocklist gaps (198.18/15, 224/4, 240/4, NAT64, 6to4); no rate limit on `exos-api`; dispute marks
-  session `refunded`.
+- ✅ L — SSRF blocklist (`_shared/ssrf.ts`, full IPv6 parsing, all reserved ranges); `exos-api` limits 120
+  req/min per key (429); a dispute is recorded (`dispute_*`), and only a lost one voids tickets. Left: invalid
+  keys aren't rate-limited; DNS rebinding in the SSRF check.
 - INFO — `exos-distribute` exists to POST listings to Automatiq; keep undeployed until the operator signs off
   (read-only-upstream rule).
 
