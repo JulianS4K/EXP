@@ -79,9 +79,8 @@ export default function OrganizerEventReport() {
   // Gate: only owner / manager / finance (or admin) see financials. NOTE:
   // canEditEvents() returns true for the 'content' role too, which wrongly
   // exposed the report to content staff — gate explicitly on the finance-capable
-  // roles. (Column-scoping buyer_email/price_paid out of scanner/content at the
-  // RLS layer is a tracked follow-up on the barcode-secret least-privilege
-  // pattern from mig 20260702123000.) Falls back to legacy organizerId.
+  // roles. (Buyer emails are column-scoped to these roles server-side, mig
+  // 20260925013000.) Falls back to legacy organizerId.
   const allowedByRole =
     isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance';
   const allowedByLegacy = event?.organizerId === user.uid;

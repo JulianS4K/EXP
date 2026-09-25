@@ -90,12 +90,31 @@ export function mapTransfer(row: any): Transfer {
 // (owner wallet, scanner) fetch it separately from the gated
 // exos_ticket_barcode_secrets view via fetchBarcodeSecrets().
 const TICKET_COLS =
-  'id, event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, ' +
+  'id, event_id, org_id, tier_id, tier_name, buyer_id, owner_id, ' +
   'status, price_paid, order_ref, channel_source, promoter_id, ' +
   'pending_transfer_id, transfer_id, voided_at, voided_by, voided_reason, released_at, ' +
   'check_in_at, last_reissue_at, created_at, updated_at, attendee_name';
 
 const TICKET_WITH_EVENT = `${TICKET_COLS}, event:exos_events(*)`;
+
+// --- Buyer-email lookup (gated view — owner/buyer + owner/manager/finance) ---
+
+/** Buyer emails aren't readable on exos_tickets (door staff mustn't see them,
+ *  mig 20260925013000); staff lists that need them add them from the view.
+ *  Unauthorized ids are simply absent, so their tickets show no email. */
+async function withBuyerEmails(rows: any[]): Promise<any[]> {
+  const ids = Array.from(new Set(rows.map((r) => r.id).filter(Boolean)));
+  if (ids.length === 0) return rows;
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase
+      .from('exos_ticket_buyer_emails')
+      .select('ticket_id, buyer_email')
+      .in('ticket_id', ids.slice(i, i + 200));
+    for (const r of data ?? []) if (r.buyer_email) out.set(r.ticket_id, r.buyer_email);
+  }
+  return rows.map((r) => ({ ...r, buyer_email: out.get(r.id) }));
+}
 
 // --- Barcode-secret lookup (gated view — owner/buyer + owner/manager/scanner) --
 
@@ -279,7 +298,8 @@ export async function listEventTicketsForRegistry(eventId: string): Promise<Regi
   }));
 }
 
-/** All tickets for an event (event report). Staff RLS. */
+/** All tickets for an event (event report). Staff RLS; buyer emails only for
+ *  owner / manager / finance (the attendee CSV). */
 export async function listEventTickets(eventId: string): Promise<Ticket[]> {
   const { data, error } = await supabase
     .from('exos_tickets')
@@ -287,7 +307,7 @@ export async function listEventTickets(eventId: string): Promise<Ticket[]> {
     .eq('event_id', eventId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []).map(mapTicket);
+  return (await withBuyerEmails(data ?? [])).map(mapTicket);
 }
 
 /** Tickets across every org the current user staffs (organizer dashboard

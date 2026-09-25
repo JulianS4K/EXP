@@ -198,9 +198,12 @@ Review of both PRs, then every pending migration replayed on a local copy of pro
 - **Applied to prod 2026-09-25**: `20260924215000`, `223000`, `230000`, `233000`, `234500`,
   `20260925000000`, `20260925001000`, `20260925003000`, `20260925010000`, `20260925012000`.
   Each was verified against the tested mirror by function checksum.
-- **Open from the trial**, undecided:
-    - Add-ons aren't reserved by the hold.
-    - Scanners can read buyer emails.
+- **Operator decisions 2026-09-25, round 2**:
+  - Holds don't reserve add-ons (unchanged).
+  - **Door staff don't see buyer emails**: mig `20260925013000` (authored; the SPA already reads
+    emails through `exos_ticket_buyer_emails`). ⚠ Apply it only after a bundle built from this
+    branch is deployed to `/bridge`. The live 07-27 bundle selects `buyer_email` directly and would
+    break.
 
 ## Audit 2026-09-24 — open findings
 
