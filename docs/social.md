@@ -33,4 +33,4 @@ built, and what's missing and why. Related docs: `docs/native-sharing.md` (app S
 | **SMS invites and reminders** | No SMS provider | A provider account (for example Twilio) and the 10DLC registration US carriers require |
 | **Fan referral rewards** ("bring 3 friends, get in free") | Referrals are counted per fan per event; turning a count into a reward is a product call | A decision on the reward (comp ticket, discount voucher, perk) and its cap per event |
 | **Link previews live in production** | Code is done | Terminal-2 #1003 merged and deployed; the SPA rebuilt from EXP and copied to `static/bridge/` (today's bundle is from 07-27 and has no SSR markers); `RENDER_EXTERNAL_URL` or `EXOS_PUBLIC_BASE_URL` set |
-| **Promoter records, link in bio and fan referrals live** | Code is done | Migrations `215000`, `223000`, `230000`, `233000` and `234500` applied, in that order |
+| **Promoter records, link in bio and fan referrals live** | Code is done | Migrations `20260924215000`, `223000`, `230000`, `233000`, `234500`, then `20260925000000` and `20260925001000`, applied in that order (each is safe to re-run) |

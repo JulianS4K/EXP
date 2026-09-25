@@ -142,6 +142,28 @@ list)
     reconciliation, and how a marketplace sale reserves an Exos seat. That last one would go
     through `exos_seats_available`, like any other sale.
 
+## Stabilization 2026-09-25
+
+Review of both PRs, then every pending migration replayed on a local copy of prod's real schema
+(all 85 functions and every table, policy and grant checksum-matched to prod). ✅ = fixed on
+`claude/exos-p0` / Terminal-2 `claude/d4-exos-p0`.
+
+- ✅ **Prod bug: creating an event series fails** whenever an org has discount codes. It's a
+  syntax error in the code copy, and the offline harness never saw it because its stub has no
+  `exos_discount_codes`. Fixed by mig `20260925001000`, tested in `test_event_series_codes.sql`.
+- ✅ Hidden tiers unlocked by a voucher were unbuyable (the page fell back to tier 0). Mig
+  `20260925000000` (`exos_voucher_tier`) plus `EventDetails` now shows the unlocked tier.
+- ✅ Pending migrations re-run safely (replay tested in `run_p0.sh`).
+- ✅ Pixels: no cross-org leak on reload, no late pixel on untracked pages. Checkout prefill
+  survives sign-in. Toasts after checkout and free claims.
+- ✅ `stripe-webhook` ignores connected-account events except that org's `account.updated`.
+  `exos-geocode` isn't an open proxy. A geo error keeps the pin.
+- ✅ Promoter kit tokens are hidden from the content role and from the analytics roles
+  (`coworker_readonly`, `analyst_ro`), and `referral_code` is readable by ticket owners.
+- ✅ Browser smoke tests (`npm run smoke`, 9 flows, mocked Supabase) run in CI.
+- **To apply (operator):** `20260924215000`, `223000`, `230000`, `233000`, `234500`,
+  `20260925000000`, `20260925001000`, in that order.
+
 ## Audit 2026-09-24 — open findings
 
 Three parallel reviews (DB / edge functions / frontend). ✅ = fixed in the audit PRs (EXP `claude/exos-audit-fixes`,

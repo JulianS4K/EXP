@@ -23,7 +23,9 @@ buyer opens /event/:id or /map ◄── exos_public_event_geo (published, fresh
 - **Only organizers trigger lookups,** because each one is billed.
   - Saving an event calls it with `{ event_id }` (`src/lib/geo.ts`, from Create and Edit).
   - It's skipped when the address is unchanged and the pin is under 25 days old.
-  - Staff can also preview an address with `{ address }`; nothing is stored.
+  - It only accepts `{ event_id }`, never a free-form address, so it can't be used as an open
+    geocoding proxy.
+  - A transient lookup error keeps the existing pin; a new address that fails to geocode clears it.
   - Buyers only read the stored result.
 - **The proxy is a Supabase edge function, not a Node/Express route on Cloud Run.** Exos has no
   Node server in production: `server.ts` is dev-only, and the SPA is served by Terminal-2. Edge
