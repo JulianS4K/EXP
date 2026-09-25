@@ -1217,7 +1217,7 @@ export default function EditEvent() {
         {eventId && <AddonsEditor eventId={eventId} />}
 
         {/* Vouchers — self-contained CRUD (not part of the form submit). */}
-        {eventId && <VouchersEditor eventId={eventId} />}
+        {eventId && <VouchersEditor eventId={eventId} tiers={(eventData.ticketTiers || []).map((t) => ({ id: t.id, name: t.name, visibility: t.visibility }))} />}
 
         {/* Tax / VAT rules — self-contained CRUD (not part of the form submit). */}
         {eventId && <TaxRulesEditor eventId={eventId} />}

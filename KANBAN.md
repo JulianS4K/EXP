@@ -189,13 +189,16 @@ Review of both PRs, then every pending migration replayed on a local copy of pro
     - Fan shares still credit the promoter.
   - **Profiles are private by default**: readable by the owner, org staff for their ticket
     holders, teammates, or anyone once `is_public` is set.
+- ✅ **Presales from the organizer UI** (mig `20260925012000`, `test_presale_vouchers.sql`):
+  - the voucher editor picks the code (e.g. PRESALE), the ticket type, the number of uses and
+    whether holders can buy when sold out;
+  - codes match in any case;
+  - the discount-code "unlocks hidden tiers" toggle, which checkout never honored, now points
+    organizers to vouchers.
 - **Applied to prod 2026-09-25**: `20260924215000`, `223000`, `230000`, `233000`, `234500`,
-  `20260925000000`, `20260925001000`, `20260925003000`, `20260925010000`. Each was verified
-  against the tested mirror by function checksum.
-- **Open from the trial:**
-  - Hidden-tier presales can't be set up from the organizer UI: the voucher editor can't pick a
-    tier or a code, and the "unlocks hidden tiers" toggle is dropped.
-  - Undecided:
+  `20260925000000`, `20260925001000`, `20260925003000`, `20260925010000`, `20260925012000`.
+  Each was verified against the tested mirror by function checksum.
+- **Open from the trial**, undecided:
     - Add-ons aren't reserved by the hold.
     - Scanners can read buyer emails.
 

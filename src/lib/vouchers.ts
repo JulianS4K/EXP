@@ -74,6 +74,8 @@ export async function issueVoucher(input: {
   maxUses?: number;
   validHours?: number | null;
   comment?: string | null;
+  /** A code the organizer picks (e.g. PRESALE); random when empty. */
+  code?: string | null;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('exos_issue_voucher', {
     p_event_id: input.eventId,
@@ -84,6 +86,8 @@ export async function issueVoucher(input: {
     p_max_uses: input.maxUses ?? 1,
     p_valid_hours: input.validHours ?? null,
     p_comment: input.comment ?? null,
+    // Only sent when set (mig 20260925012000 added it).
+    ...(input.code?.trim() ? { p_code: input.code.trim() } : {}),
   });
   if (error) throw error;
   return data as string;

@@ -520,23 +520,6 @@ export default function CreateEvent() {
     );
   };
 
-  // Flip a tier id in/out of a code's unlocksTierIds. Kept separate from
-  // updatePromoCode because the value type is array-shaped, not string.
-  const togglePromoUnlock = (codeId: string, tierId: string) => {
-    setPromoCodes((prev) =>
-      prev.map((p) => {
-        if (p.id !== codeId) return p;
-        const has = p.unlocksTierIds.includes(tierId);
-        return {
-          ...p,
-          unlocksTierIds: has
-            ? p.unlocksTierIds.filter((t) => t !== tierId)
-            : [...p.unlocksTierIds, tierId],
-        };
-      }),
-    );
-  };
-
   const handleGenreToggle = (genre: string) => {
     const current = formData.genres;
     if (current.includes(genre)) {
@@ -1612,42 +1595,13 @@ export default function CreateEvent() {
                     </button>
                   </div>
 
-                  {/* Hidden-tier unlocks. Only renders when the
-                      organizer has at least one hidden tier — otherwise
-                      the section is silent (no clutter for the common
-                      case). Each checkbox is a tier the code reveals
-                      when applied at checkout. */}
+                  {/* Hidden tiers are sold through vouchers (Edit event → Vouchers),
+                      which checkout enforces; discount codes only discount. */}
                   {ticketTiers.some((t) => t.visibility === 'hidden') && (
-                    <div className="md:col-span-12 mt-2 pt-3 border-t border-white/10">
-                      <p className="type text-[9px] text-white/40 uppercase tracking-widest mb-2">
-                        Unlocks hidden tiers
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {ticketTiers
-                          .filter((t) => t.visibility === 'hidden')
-                          .map((t) => {
-                            const checked = p.unlocksTierIds.includes(t.id);
-                            return (
-                              <label
-                                key={t.id}
-                                className={`flex items-center gap-2 px-3 py-1 rounded-full border cursor-pointer text-[10px] font-bold uppercase tracking-widest ${
-                                  checked
-                                    ? 'bg-brand-primary text-black border-brand-primary'
-                                    : 'bg-black text-white/60 border-white/20 hover:border-white/40'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="sr-only"
-                                  checked={checked}
-                                  onChange={() => togglePromoUnlock(p.id, t.id)}
-                                />
-                                {t.name || `(unnamed tier)`}
-                              </label>
-                            );
-                          })}
-                      </div>
-                    </div>
+                    <p className="md:col-span-12 mt-2 pt-3 border-t border-white/10 type text-[10px] text-white/40">
+                      To sell a hidden ticket type (a presale), save the event, then add a voucher for it under
+                      Edit event → Vouchers.
+                    </p>
                   )}
                 </div>
               ))}
