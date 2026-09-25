@@ -84,7 +84,10 @@ that:
 - **SEO:**
   - Server-rendered or prerendered event pages. The SPA serves one shell today, and Terminal-2
     already has an event-page SSR pattern (`tests/test_event_page_ssr_meta.py` there).
-  - `schema.org/Event` JSON-LD, a sitemap, canonical URLs on `/e/:slug` and `/o/:slug`.
+  - ✅ `schema.org/Event` JSON-LD and canonical URLs (Terminal-2 `core/exos_seo.py`, server-side meta on
+    `/bridge/event/:id` and `/bridge/o/:slug`).
+  - ✅ `/bridge/sitemap.xml` (public, not-ended events + orgs with a slug) and a `Sitemap:` line in
+    robots.txt (Terminal-2 `build_sitemap`, 2026-09-25; not deployed until that branch merges).
 
 **7d. Checkout links, promoter kit, app-ready sharing** ✅ (`docs/native-sharing.md`)
 - **`/checkout?products=<tierId>:<qty>,<addonId>:<qty>&coupon=…`** follows Meta's Shops checkout-URL
@@ -269,8 +272,9 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
   untracked page (tickets, wallet, account, dashboards, `/checkin`), reloads to drop loaded pixels, and Meta's
   SPA auto-PageView is off (`src/lib/pixels.ts`, `isPixelRoute`).
 - ✅ M — `server.ts` `/api/*` removed (unused; `/api/verify-session` was unauthenticated); `stripe` dependency dropped.
-- L — dead Firebase rules/env vars/Stripe.js; unsigned legacy barcode fallback can never scan; SVG logo
-  upload rejected by the bucket; embed snippet puts the raw title in an HTML comment.
+- ✅ L — dead Firebase rules and env vars deleted; SVG no longer offered for logos (the bucket rejects it);
+  the embed snippet strips `--` and `<>` from the title. Stripe.js stays (EventDetails uses it).
+- L — the unsigned legacy barcode fallback in check-in can never scan (left for the check-in hardening pass).
 
 
 Current baseline: `af37caf` + tsconfig fix + 4 rebuild commits
