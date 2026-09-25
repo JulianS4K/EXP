@@ -63,8 +63,11 @@ await run('voucher reveals the hidden tier', async (page, log) => {
   const voucher = page.getByPlaceholder(/voucher|code/i).first();
   await voucher.fill('PRESALE');
   await voucher.press('Enter');
-  await expectText(page, 'Presale');
+  // The tier fetch starts after the voucher check resolves, and "Presale" can
+  // appear from the check's own message first, so wait for the fetch itself.
+  for (let i = 0; i < 50 && !log.some((l) => l.includes('exos_voucher_tier')); i++) await page.waitForTimeout(100);
   assert(log.some((l) => l.includes('exos_voucher_tier')), 'called exos_voucher_tier');
+  await expectText(page, 'Presale');
 });
 
 await run('promoter link in bio lists events with the code', async (page) => {
