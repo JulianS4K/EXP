@@ -10,7 +10,7 @@
 // owner / manager / finance / admin.
 
 import { ReactNode, useCallback, useEffect, useState } from 'react';
-import { BarChart3, Download, Globe, RefreshCw, ShieldAlert, Tag, UserX, Users } from 'lucide-react';
+import { BarChart3, DollarSign, Download, Globe, RefreshCw, ShieldAlert, Tag, UserX, Users } from 'lucide-react';
 import {
   analyticsSummaryCsv,
   attendeesCsv,
@@ -122,7 +122,15 @@ export default function EventAnalyticsPanel({ eventId, eventTitle, currency, tic
       </div>
 
       {/* Funnel */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <Stat
+          label="Net revenue"
+          value={formatCurrency(a.netRevenue, currency)}
+          sub={`tickets ${formatCurrency(a.revenue, currency)} + add-ons ${formatCurrency(a.addonRevenue, currency)}${
+            a.partialRefunds > 0 ? ` − refunds ${formatCurrency(a.partialRefunds, currency)}` : ''
+          }`}
+          icon={<DollarSign size={16} />}
+        />
         <Stat label="Checked in" value={pct(a.checkinRate)} sub={`${a.used} of ${a.sold} tickets`} icon={<Users size={16} />} />
         <Stat
           label="No-show"

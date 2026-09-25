@@ -34,6 +34,12 @@ export interface EventAnalytics {
   voided: number;
   released: number;
   revenue: number;
+  /** Add-ons still active (posters, parking). Not in `revenue`, which is tickets only. */
+  addonRevenue: number;
+  /** Partial refunds on orders that still stand (full refunds void the tickets). */
+  partialRefunds: number;
+  /** revenue + addonRevenue - partialRefunds: what the event actually kept. */
+  netRevenue: number;
   checkinRate: number | null;
   noShowRate: number | null;
   firstSaleAt: Date | null;
@@ -83,6 +89,10 @@ export function mapAnalytics(j: any): EventAnalytics {
     voided: num(j?.voided),
     released: num(j?.released),
     revenue: num(j?.revenue),
+    addonRevenue: num(j?.addon_revenue),
+    partialRefunds: num(j?.partial_refunds),
+    // Older servers (before mig 20260925003000) send no net_revenue.
+    netRevenue: j?.net_revenue != null ? num(j.net_revenue) : num(j?.revenue),
     checkinRate: rate(j?.checkin_rate),
     noShowRate: rate(j?.no_show_rate),
     firstSaleAt: date(j?.first_sale_at),
@@ -130,6 +140,9 @@ export function analyticsSummaryCsv(a: EventAnalytics, eventTitle: string): stri
     ['voided', a.voided, '', '', ''],
     ['released', a.released, '', '', ''],
     ['revenue', a.revenue, '', '', ''],
+    ['addon_revenue', a.addonRevenue, '', '', ''],
+    ['partial_refunds', a.partialRefunds, '', '', ''],
+    ['net_revenue', a.netRevenue, '', '', ''],
     ['checkin_rate', pct(a.checkinRate), '', '', ''],
     ['no_show_rate', pct(a.noShowRate), '', '', ''],
     ['rejected_scans', a.rejects.total, '', '', ''],

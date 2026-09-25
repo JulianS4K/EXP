@@ -161,8 +161,31 @@ Review of both PRs, then every pending migration replayed on a local copy of pro
 - ✅ Promoter kit tokens are hidden from the content role and from the analytics roles
   (`coworker_readonly`, `analyst_ro`), and `referral_code` is readable by ticket owners.
 - ✅ Browser smoke tests (`npm run smoke`, 9 flows, mocked Supabase) run in CI.
+- **End-to-end trial run** on a local copy of prod: a fake event ("Exos Trial Run — Warehouse
+  Party (TEST)") created, promoted, sold (with sold-out races), transferred and scanned at the door.
+  Stripe was simulated. The core flow and access control passed. Fixed by mig `20260925003000`
+  (`test_trial_run_fixes.sql`):
+  - ✅ add-ons were folded into every ticket's `price_paid`, inflating promoter gross and analytics;
+  - ✅ a full refund of a scanned order voided nothing. Analytics now show add-on revenue, partial
+    refunds and **net revenue**: the trial's $54.44 had been reported as $82.44;
+  - ✅ free claims now need a confirmed email (bots could drain free tiers);
+  - ✅ a hidden tier can't be held without its voucher, and clients can no longer read hidden-tier
+    stock.
+- **Open from the trial:**
+  - Hidden-tier presales can't be set up from the organizer UI: the voucher editor can't pick a
+    tier or a code, and the "unlocks hidden tiers" toggle is dropped.
+  - `exos_attach_referral` credits any recent order.
+  - A transfer keeps the old `buyer_email`.
+  - Test-window scans aren't flagged.
+  - Transfer mail isn't withdrawn when the transfer is cancelled, the copy still says "Bridge
+    app", and the losing buyer in a sold-out race gets no mail.
+  - Decisions for the operator:
+    - Should fan shares also credit the promoter?
+    - Add-ons aren't reserved by the hold.
+    - Scanners can read buyer emails.
+    - Signed-in users can read all profiles.
 - **To apply (operator):** `20260924215000`, `223000`, `230000`, `233000`, `234500`,
-  `20260925000000`, `20260925001000`, in that order.
+  `20260925000000`, `20260925001000`, `20260925003000`, in that order.
 
 ## Audit 2026-09-24 — open findings
 

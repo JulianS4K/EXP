@@ -234,7 +234,7 @@ export default function OrganizerEventReport() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
           <Stat
-            label="Revenue"
+            label="Ticket sales"
             value={formatCurrency(totalRevenue, currency)}
             icon={<DollarSign size={16} />}
           />
