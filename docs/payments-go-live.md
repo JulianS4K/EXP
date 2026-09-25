@@ -21,6 +21,7 @@ the details with counsel.)
 
 ## 0. Before you start
 
+- [ ] Migrations `20260924215000`, `…223000`, `20260925020000` and `…021000` are applied (done 2026-09-24/25).
 - [ ] Every P0 migration is applied (`supabase/migrations/20260924205115`, `…205508`, `…205916`,
       `…210103`), plus all-in pricing (`…211840`). Check with `SELECT name FROM supabase_migrations.schema_migrations WHERE name LIKE '%exos_p0%';`
 - [ ] Stripe account with **Connect** enabled. Organizers onboard as Express accounts, and charges
@@ -61,8 +62,9 @@ Also apply **`20260925020000`** (dispute recording, reconcile bookkeeping) befor
 and `exos-reconcile-checkouts`: without it the dispute handler returns 500 and the sweep does nothing.
 
 With the CLI (from `Terminal-2/`): `supabase functions deploy <name> --project-ref hzrizjeaxlqcxfrtczpq`,
-adding `--no-verify-jwt` for the last two. Once `exos-reconcile-checkouts` exists, the
-`exos-reconcile-checkouts-15min` cron (already scheduled) starts calling it.
+adding `--no-verify-jwt` for the last two. Then schedule the reconcile sweep by applying
+`20260702144637_exos_reconcile_checkouts_cron.sql` (a cron change: operator-gated). As of 2026-09-25
+that cron is **not** scheduled in prod; the file was held back because the function wasn't deployed.
 
 **Never deploy `exos-distribute`.** It exists to POST listings to Automatiq, and the project's
 read-only-upstream rule forbids that without explicit operator authorization.
