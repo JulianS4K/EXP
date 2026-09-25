@@ -23,9 +23,8 @@ import type { ArtistLink } from '../types';
 // users a fast-failure experience — the Storage rules enforce the same cap.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-// Limits matched against Firestore rule constraints. Keep in sync with
-// `isValidEvent` in firestore.rules so the UI fails fast instead of getting
-// a generic permission-denied at submit.
+// Form limits, checked client-side so the organizer gets a specific error.
+// Keep in sync with EditEvent.tsx.
 const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 2000;
 const SUBGENRES_MAX_COUNT = 12;
@@ -530,7 +529,7 @@ export default function CreateEvent() {
   };
 
   /**
-   * Run all client-side validation that mirrors firestore.rules constraints.
+   * Run all client-side validation on the form.
    * Returns null on success, or a user-facing error message on failure.
    *
    * The server still enforces these via rules, but a permission-denied is a

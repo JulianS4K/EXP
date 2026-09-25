@@ -389,7 +389,7 @@ window.addEventListener('message', function(e) {
                       ref={fileInputRef}
                       id="org-logo-upload"
                       type="file"
-                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      accept="image/png,image/jpeg,image/webp"
                       onChange={handleLogoUpload}
                       disabled={!canEdit || uploadingLogo}
                       className="hidden"

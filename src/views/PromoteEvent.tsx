@@ -137,7 +137,9 @@ export default function PromoteEvent() {
     `Don't miss ${title}. Limited tickets, secure yours here: ${url}`,
   ];
 
-  const embedSnippet = `<!-- Exos embed — ${title} -->
+  // The title goes inside an HTML comment: strip anything that could close it.
+  const commentTitle = title.replace(/-{2,}/g, '—').replace(/[<>]/g, '');
+  const embedSnippet = `<!-- Exos embed — ${commentTitle} -->
 <iframe id="vibepass-embed" src="${publicUrl(`embed/event/${eventId}`)}" style="width:100%;border:0;min-height:200px" loading="lazy" title="Tickets"></iframe>
 <script>
 window.addEventListener('message', function(e) {

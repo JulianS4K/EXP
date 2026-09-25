@@ -59,7 +59,7 @@ function localInputToTimestamp(
   return utc ? Timestamp.fromDate(utc) : null;
 }
 
-// Limits matched against firestore.rules `isValidEvent`. Keep in sync.
+// Form limits. Keep in sync with CreateEvent.tsx.
 const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 2000;
 const LOCATION_MAX = 200;
@@ -182,8 +182,8 @@ export default function EditEvent() {
   };
 
   /**
-   * Mirror of the server-side validation in firestore.rules. Surfaces
-   * specific errors instead of a generic permission-denied at submit time.
+   * Client-side form validation. Surfaces specific errors instead of a
+   * generic failure at submit time.
    */
   const validate = (): string | null => {
     const t = (eventData.title || '').trim();

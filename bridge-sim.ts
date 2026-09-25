@@ -22,7 +22,7 @@ function assert(id: number, name: string, ok: boolean, reason: string) {
   }
 }
 
-// ---- Domain mocks (mirror lib/orgs.ts + firestore.rules semantics)
+// ---- Domain mocks (mirror lib/orgs.ts + the RLS role semantics)
 
 type OrgRole = 'owner' | 'manager' | 'finance' | 'scanner' | 'content';
 
@@ -61,7 +61,7 @@ const slugs = new Map<string, { orgId?: string; eventId?: string }>();
 
 const k = (orgId: string, uid: string) => `${orgId}_${uid}`;
 
-// ---- Rule helpers (mirror firestore.rules)
+// ---- Rule helpers (mirror the RLS role checks)
 
 function isAdmin(uid: string) {
   return uid === 'admin-uid';
