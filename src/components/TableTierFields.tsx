@@ -24,7 +24,7 @@ export default function TableTierFields({
 }) {
   const set = (patch: Partial<TableTierDraft>) => onChange({ ...value, ...patch });
   return (
-    <div className="col-span-2 border border-white/10 p-4 space-y-4">
+    <div className="md:col-span-2 border border-white/10 p-4 space-y-4">
       <label className="flex items-center gap-3 cursor-pointer">
         <input
           type="checkbox"

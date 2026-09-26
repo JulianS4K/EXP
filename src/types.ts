@@ -175,6 +175,8 @@ export interface ArtistLink {
 
 export interface Event {
   id: string;
+  // Vanity slug (exos_events.slug) — the short /e/<slug> share link.
+  slug?: string;
   title: string;
   description: string;
   date: Timestamp;

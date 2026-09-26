@@ -4,6 +4,14 @@ import { Mail, Phone, X, ShieldCheck, Ticket, ArrowLeft, Loader2 } from 'lucide-
 import { supabase } from '../lib/supabase';
 import { currentInAppBrowser, IN_APP_LABEL } from '../lib/inAppBrowser';
 
+// Send the buyer back to the page they signed in from (keeps the /bridge
+// base path and the event they were buying). The hash is dropped: Supabase
+// appends its own tokens there.
+function authReturnUrl(): string {
+  const { origin, pathname, search } = window.location;
+  return `${origin}${pathname}${search}`;
+}
+
 export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [method, setMethod] = useState<'options' | 'email-login' | 'email-signup' | 'phone'>('options');
   const [email, setEmail] = useState('');
@@ -36,7 +44,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: window.location.origin },
+        options: { redirectTo: authReturnUrl() },
       });
       if (error) throw error;
       // OAuth is a redirect flow — the browser navigates to the provider and
@@ -58,7 +66,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { display_name: name }, emailRedirectTo: window.location.origin },
+          options: { data: { display_name: name }, emailRedirectTo: authReturnUrl() },
         });
         if (error) throw error;
         // Supabase sends a confirmation email; the session isn't active until

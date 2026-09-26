@@ -5,6 +5,7 @@ import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { publicUrl } from '../lib/utils';
+import { eventSharePath } from '../lib/events';
 import { ArrowLeft, Share2, ShieldCheck, RefreshCw, Ticket as TicketIcon, Calendar, Download, PlusCircle, Instagram, Send, ChevronLeft, ChevronRight, Smartphone, Lock } from 'lucide-react';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 import { signBarcode, currentBucket } from '../lib/barcode';
@@ -213,7 +214,7 @@ export default function TicketDetail() {
     await shareEventToStory(
       {
         title: event.title,
-        url: publicUrl(`event/${event.id}`),
+        url: publicUrl(eventSharePath(event)),
         imageUrl: event.image,
         dateLabel: event.date
           ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -441,8 +442,8 @@ export default function TicketDetail() {
                        <p className="disp neon text-2xl tracking-wide">{currentTicket.tierName || 'GENERAL'}</p>
                     </div>
                     <div className="p-6 bg-black text-right">
-                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">entry_hash</p>
-                       <p className="disp text-white text-2xl tracking-wide">SEC_A{currentIndex + 1}</p>
+                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">{t('ticket.passNo')}</p>
+                       <p className="disp text-white text-2xl tracking-wide">{currentIndex + 1} / {tickets.length}</p>
                     </div>
                  </div>
 
@@ -452,11 +453,11 @@ export default function TicketDetail() {
                     <div className="grid grid-cols-2 gap-3">
                        <button onClick={handleSMSShare} className="type flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 py-3.5 text-[11px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
                           <Send className="w-3.5 h-3.5 text-brand-primary" />
-                          sms_forward
+                          {t('ticket.textIt')}
                        </button>
                        <button onClick={handleInstagramStory} className="type flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 py-3.5 text-[11px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
                           <Instagram className="w-3.5 h-3.5 text-brand-primary" />
-                          story_prep
+                          {t('ticket.igStory')}
                        </button>
                     </div>
                     <div className="flex gap-4">
@@ -534,7 +535,7 @@ export default function TicketDetail() {
 
           {/* Visual Cues for Sliding */}
           {tickets.length > 1 && (
-            <div className="absolute -inset-x-6 top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
+            <div className="absolute inset-x-0 sm:-inset-x-6 top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
                 <div className="w-12 h-12 bg-white/5 rounded-full border border-white/10 blur-sm"></div>
                 <div className="w-12 h-12 bg-white/5 rounded-full border border-white/10 blur-sm"></div>
             </div>

@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react';
 import { Copy, Instagram, Link as LinkIcon, Share2, ShoppingCart } from 'lucide-react';
 import type { Event } from '../types';
 import { publicUrl } from '../lib/utils';
+import { eventSharePath } from '../lib/events';
 import { buildCheckoutLink } from '../lib/checkoutLink';
 import { buildShareUrl, shareAttribution, type ShareChannel } from '../lib/shareLinks';
 import { shareEventToStory } from '../lib/poster';
@@ -41,7 +42,7 @@ export default function PromoterKitPanel({ event, promoter }: { event: Event; pr
   const [channel, setChannel] = useState<ShareChannel>('instagram_bio');
   const [shareOpen, setShareOpen] = useState(false);
 
-  const eventUrl = publicUrl(`event/${event.id}`);
+  const eventUrl = publicUrl(eventSharePath(event));
   const checkoutLink = useMemo(
     () => tierId
       ? buildCheckoutLink(publicUrl('checkout'), {

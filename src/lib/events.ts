@@ -54,6 +54,7 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
   const minPrice = mappedTiers && mappedTiers.length ? Math.min(...mappedTiers.map((t) => t.price)) : 0;
   return {
     id: row.id,
+    slug: row.slug ?? undefined,
     title: row.name,
     description: row.description ?? '',
     date: toTs(row.starts_at ?? null),
@@ -171,7 +172,32 @@ export async function listOrgEvents(orgId: string): Promise<Event[]> {
     .eq('org_id', orgId)
     .order('starts_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+  // Tiers drive the dashboard's per-event revenue and capacity. A failed
+  // tier read degrades to tier-less events rather than hiding the list.
+  const { data: tiers } = await supabase
+    .from('exos_ticket_tiers')
+    .select('*')
+    .in('event_id', rows.map((r: any) => r.id))
+    .order('sort_order', { ascending: true });
+  const byEvent = new Map<string, any[]>();
+  for (const t of tiers ?? []) {
+    const list = byEvent.get(t.event_id) ?? [];
+    list.push(t);
+    byEvent.set(t.event_id, list);
+  }
+  return rows.map((r: any) => mapEvent(r, byEvent.get(r.id) ?? []));
+}
+
+/** Public path for sharing: the short /e/<slug> when the event has one. */
+export function eventSharePath(ev: { id: string; slug?: string | null }): string {
+  return ev.slug ? `e/${encodeURIComponent(ev.slug)}` : `event/${ev.id}`;
+}
+
+/** Face value sold: each tier's price times its sold count (tables count once). */
+export function eventGrossSales(ev: Pick<Event, 'ticketTiers'>): number {
+  return (ev.ticketTiers ?? []).reduce((sum, t) => sum + (Number(t.price) || 0) * (Number(t.sold) || 0), 0);
 }
 
 export async function getEventForEdit(eventId: string): Promise<Event | null> {

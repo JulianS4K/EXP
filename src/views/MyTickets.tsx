@@ -278,12 +278,6 @@ export default function MyTickets() {
                     </div>
                   </div>
 
-                  <div className="px-6 pb-5 flex items-center justify-between type text-[9px] text-white/15 uppercase tracking-widest">
-                    <span>cluster id: {eventId.slice(0, 12)}</span>
-                    <div className="flex gap-1">
-                      {[1,2,3,4,5].map(i => <span key={i} className="w-1 h-1 bg-white/10 rounded-full"></span>)}
-                    </div>
-                  </div>
                 </motion.div>
               );
             })}

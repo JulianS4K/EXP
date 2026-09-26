@@ -17,6 +17,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { verifyBarcode, extractTicketIdFromAny } from '../lib/barcode';
+import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
 import { joinCheckinChannel } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
@@ -114,6 +115,15 @@ export default function OrganizerCheckIn() {
   const [doorsBlocked, setDoorsBlocked] = useState(false);
   const [enablingTest, setEnablingTest] = useState(false);
   const [foundTicket, setFoundTicket] = useState<Ticket | null>(null);
+  // True when the last lookup was typed or picked from the name search
+  // rather than a scanned signed QR — nothing was cryptographically verified.
+  const [manualEntry, setManualEntry] = useState(false);
+  const verdictRef = useRef<HTMLDivElement>(null);
+  // On a phone the verdict renders below the scanner; bring it into view.
+  useEffect(() => {
+    if (status === 'idle' || status === 'searching') return;
+    verdictRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [status, foundTicket?.id]);
   const [buyerName, setBuyerName] = useState<string>('');
   const [scanning, setScanning] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -478,6 +488,14 @@ export default function OrganizerCheckIn() {
     return () => { cancelled = true; };
   }, [eventId]);
 
+  // Pull the roster once on open (silently) so name search works without a
+  // manual download; the cached copy from localStorage covers offline opens.
+  useEffect(() => {
+    if (!eventId || !user || !navigator.onLine) return;
+    void downloadRegistry({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, user?.uid]);
+
   // On reconnect, re-pull the registry: Realtime doesn't replay check-ins other
   // lanes made while we were offline, so catch up silently once links return.
   useEffect(() => {
@@ -537,6 +555,7 @@ export default function OrganizerCheckIn() {
     if (!probeValue || !eventId) return;
 
     setStatus('searching');
+    setManualEntry(!probeValue.includes(':'));
     setFoundTicket(null);
     setInvalidReason('');
     setDoorsBlocked(false);
@@ -1007,6 +1026,7 @@ export default function OrganizerCheckIn() {
   const rejectCount = recentScans.filter((s) => s.status !== 'SUCCESS').length;
 
   return (
+    <div className="bg-[#f2f4f7] min-h-screen">
     <div className="max-w-7xl mx-auto px-4 py-10">
       <style>{`
         @keyframes checkinScanline { 0% { top: 8%; } 100% { top: 92%; } }
@@ -1037,7 +1057,7 @@ export default function OrganizerCheckIn() {
              className="flex items-center space-x-2 px-3 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
            >
               <Download className={`w-3 h-3 ${downloading ? 'animate-bounce' : ''}`} aria-hidden="true" />
-              <span>{downloading ? 'Syncing...' : 'Sync'}</span>
+              <span>{downloading ? 'Downloading…' : 'Download for offline'}</span>
            </button>
            <button
              type="button"
@@ -1054,7 +1074,7 @@ export default function OrganizerCheckIn() {
       {pendingUpdates.length > 0 && (
          <div className="mb-6 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
            <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest">
-             {pendingUpdates.length} unsynced validations
+             {pendingUpdates.length} check-in{pendingUpdates.length === 1 ? '' : 's'} waiting to upload
            </div>
            {!isOffline && (
              <button
@@ -1063,7 +1083,7 @@ export default function OrganizerCheckIn() {
                className="flex items-center text-[10px] font-black text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded transition-all uppercase tracking-widest disabled:opacity-50"
              >
                <RefreshCw className={`w-3 h-3 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-               Force Sync
+               Upload now
              </button>
            )}
          </div>
@@ -1148,11 +1168,29 @@ export default function OrganizerCheckIn() {
                 <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-300"><span className="bg-white px-4">Manual Entry — no camera?</span></div>
              </div>
 
-             <form onSubmit={(e) => handleCheckIn(e)} className="relative">
+             <form
+               onSubmit={(e) => {
+                 // A name / id-tail search with exactly one match admits that
+                 // ticket; several matches wait for staff to pick from the list.
+                 if (!isFullTicketId(searchId)) {
+                   e.preventDefault();
+                   const m = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
+                   if (m.length === 1 && !m[0][1].used && !m[0][1].voided) {
+                     setSearchId('');
+                     void handleCheckIn(undefined, m[0][0]);
+                   }
+                   return;
+                 }
+                 void handleCheckIn(e);
+               }}
+               className="relative"
+             >
                 <input
                   type="text"
-                  placeholder="Enter pass ID or last 6 digits…"
-                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 font-mono focus:outline-none focus:border-tm-blue transition-all"
+                  placeholder="Name, last 6 of pass ID, or full ID"
+                  aria-label="Search by name or pass ID"
+                  autoComplete="off"
+                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus:border-tm-blue transition-all"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                 />
@@ -1164,9 +1202,45 @@ export default function OrganizerCheckIn() {
                   Check
                 </button>
              </form>
+             {(() => {
+               const matches = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
+               if (searchId.trim().length < 2 || isFullTicketId(searchId)) return null;
+               if (Object.keys(offlineRegistry).length === 0) {
+                 return <p className="text-xs text-slate-500 px-2">Tap “Download for offline” to search by name.</p>;
+               }
+               if (matches.length === 0) {
+                 return <p className="text-xs text-slate-500 px-2">No one on the list matches “{searchId.trim()}”.</p>;
+               }
+               return (
+                 <ul className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden" aria-label="Matching tickets">
+                   {matches.map(([id, entry]) => (
+                     <li key={id} className="flex items-center gap-3 px-4 py-3">
+                       <div className="min-w-0 flex-1">
+                         <p className="font-bold text-slate-900 text-sm truncate">{entry.name || 'Unnamed'}</p>
+                         <p className="text-[11px] text-slate-500 truncate">{entry.tier} · …{id.slice(-6)}</p>
+                       </div>
+                       {entry.voided ? (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
+                       ) : entry.used ? (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">In</span>
+                       ) : (
+                         <button
+                           type="button"
+                           onClick={() => { setSearchId(''); void handleCheckIn(undefined, id); }}
+                           className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
+                         >
+                           Admit
+                         </button>
+                       )}
+                     </li>
+                   ))}
+                 </ul>
+               );
+             })()}
           </div>
         )}
 
+        <div ref={verdictRef} className="scroll-mt-24" />
         <AnimatePresence mode="wait">
           {status === 'searching' && (
             <motion.div 
@@ -1190,7 +1264,7 @@ export default function OrganizerCheckIn() {
               </div>
               <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">{testScan ? 'Test scan OK' : 'Entry Allowed'}</h2>
               <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
-                {testScan ? 'Valid ticket · not checked in (test window)' : 'Identity Verified'}
+                {testScan ? 'Valid ticket · not checked in (test window)' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
               </p>
               
               <div className="w-full space-y-4">
@@ -1353,6 +1427,7 @@ export default function OrganizerCheckIn() {
           {eventId && <ScanRejectAudit eventId={eventId} eventTitle={event.title} />}
         </div>
       </div>
+    </div>
     </div>
   );
 }

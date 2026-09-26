@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 import { lazy, Suspense, ReactNode, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { OrganizationProvider } from './context/OrganizationContext';
@@ -75,11 +75,17 @@ function RouteFallback() {
  */
 function ChromeLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navType = useNavigationType();
   // Organizer pixels only ever see public listing pages, never tickets,
   // accounts, dashboards or the door scanner.
   useEffect(() => {
     if (!isPixelRoute(location.pathname)) leavePixelScope();
   }, [location.pathname]);
+  // A new page starts at the top (back/forward keeps the browser's own
+  // restoration; tab switches via ?tab= don't change the pathname).
+  useEffect(() => {
+    if (navType !== 'POP') window.scrollTo(0, 0);
+  }, [location.pathname, navType]);
   const isBare =
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||

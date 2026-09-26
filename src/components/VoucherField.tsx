@@ -39,7 +39,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     try {
       const res = await checkVoucher(eventId, c, email);
       if (!res.valid) {
-        toast({ kind: 'error', message: `Voucher ${res.reason ?? 'invalid'}.` });
+        toast({ kind: 'error', message: voucherErrorMessage(res.reason) });
         setAppliedCode(null);
         onApplied(null);
         return;
@@ -81,6 +81,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') apply(); }}
           placeholder="Voucher code"
+          aria-label="Voucher code"
           className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none pl-9 pr-3 py-2 text-sm font-bold uppercase"
         />
       </div>
@@ -94,4 +95,14 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
       </button>
     </div>
   );
+}
+
+/** Buyer-facing copy for exos_check_voucher's reason codes. */
+export function voucherErrorMessage(reason: string | null): string {
+  switch (reason) {
+    case 'expired': return 'That code has expired.';
+    case 'already used': return 'That code has already been used.';
+    case 'reserved for another buyer': return 'That code is reserved for a different email. Sign in with the email it was sent to.';
+    default: return "That code isn't valid for this event. Check the spelling and try again.";
+  }
 }

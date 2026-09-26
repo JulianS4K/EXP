@@ -14,13 +14,13 @@
 // link 404s today — see lib/utils.ts publicUrl().
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   ArrowLeft, Megaphone, Copy, Download, Code2, Share2, ExternalLink,
   Twitter, Facebook, QrCode, Sparkles, Settings, Tag,
 } from 'lucide-react';
-import { getEventForEdit } from '../lib/events';
+import { eventSharePath, getEventForEdit } from '../lib/events';
 import { Event, Organization } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -51,6 +51,9 @@ const slugify = (s: string) =>
 
 export default function PromoteEvent() {
   const { eventId } = useParams();
+  // ?new=1 — just published from Create Event: open on a "you're live" note.
+  const [searchParams] = useSearchParams();
+  const justPublished = searchParams.get('new') === '1';
   const { user } = useAuth();
   const { orgs } = useOrganization();
   const { toast } = useToast();
@@ -84,7 +87,7 @@ export default function PromoteEvent() {
     [orgs, event?.orgId],
   );
 
-  const url = eventId ? publicUrl(`event/${eventId}`) : '';
+  const url = event ? publicUrl(eventSharePath(event)) : '';
   const published = (event?.status ?? 'published') === 'published';
 
   // Campaign-link builder. The campaign slug is set as BOTH utm_campaign (for
@@ -94,7 +97,7 @@ export default function PromoteEvent() {
   const campaignSlug = slugify(campaignName);
   const buildCampaignUrl = (ch: { key: string; medium: string }): string => {
     if (!eventId) return '';
-    const u = new URL(publicUrl(`event/${eventId}`));
+    const u = new URL(publicUrl(event ? eventSharePath(event) : `event/${eventId}`));
     if (campaignSlug) {
       u.searchParams.set('utm_campaign', campaignSlug);
       u.searchParams.set('promoter', campaignSlug);
@@ -167,6 +170,14 @@ export default function PromoteEvent() {
           <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
         </Link>
 
+        {justPublished && published && (
+          <div className="mb-8 p-5 border border-brand-primary/40 bg-brand-primary/10">
+            <p className="disp text-3xl tracking-wide text-brand-primary leading-none mb-2">You're live ✦</p>
+            <p className="type text-white/70 text-sm">
+              {event.title} is on sale. Copy the link below and post it, or share the QR code at the venue.
+            </p>
+          </div>
+        )}
         <p className="type text-[10px] text-white/40 uppercase tracking-widest mb-2">Promote</p>
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <Megaphone className="w-6 h-6 text-brand-primary" />

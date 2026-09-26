@@ -155,6 +155,19 @@ list)
     reconciliation, and how a marketplace sale reserves an Exos seat. That last one would go
     through `exos_seats_available`, like any other sale.
 
+## Ease of use 2026-09-26
+
+Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are on
+`claude/exos-p0`, in three stages (quick wins, buyer/door/organizer flow, create form and report).
+
+- [ ] **Percent / fixed discount codes don't work.** `exos_discount_codes` is written by the old
+  form but nothing redeems it: `exos-checkout` only consumes vouchers. The Create/Edit editors
+  are hidden (`SHOW_DISCOUNT_CODES`). Fix: add `percent_off` / `amount_off` to vouchers (migration
+  + `exos_check_voucher` + `exos-checkout`), then drop discount codes.
+- [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
+  (sign-in now returns to the page the buyer started on, not the site root).
+- [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
+
 ## Stabilization 2026-09-25
 
 Review of both PRs, then every pending migration replayed on a local copy of prod's real schema
