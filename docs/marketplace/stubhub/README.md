@@ -149,6 +149,26 @@ Topics (payload: `{ topic, action, barcodes[], _links, _embedded: { event, sale,
 | ReTransferTicket | Buyer didn't receive the ticket, so re-transfer from the 3rd-party provider |
 | Ping | Test delivery |
 
+## Client
+
+`src/lib/marketplace/stubhub/` is a dependency-free, `fetch`-based client:
+
+- `endpoints.ts`: all 81 endpoints above with their R/W tag. A test checks
+  it against `text/*.txt`, so a doc refresh that adds an endpoint fails CI
+  until the endpoint is tagged.
+- `client.ts`: `StubHubClient` with a method for every **R** and **R\***
+  endpoint Exos needs, plus `paginate()`, 429/5xx retry, and
+  `clientCredentialsToken()` (cached OAuth2 client-credentials). It has **no
+  write methods**, and its transport throws `UpstreamWriteForbiddenError` for
+  any `write` entry before calling `fetch`.
+- `webhook.ts`: `verifyWebhookAuthorization` (constant-time, fails closed),
+  `parseWebhookPayload`, `normalizeTopic`.
+
+The reference gives neither the API host nor the OAuth token URL. Both are
+constructor arguments; take them from the StubHub account onboarding
+(suggested env: `STUBHUB_API_BASE_URL`, `STUBHUB_TOKEN_URL`,
+`STUBHUB_CLIENT_ID`, `STUBHUB_CLIENT_SECRET`).
+
 ## Mapping to Exos
 
 - **Event xref:** `GET /catalog/events/external_mappings/{platform}/{id}` and
