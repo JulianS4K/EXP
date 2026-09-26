@@ -1,0 +1,52 @@
+# Render blueprint for the Exos web app's own host.
+#
+# The app is served under /bridge/ (vite base). Visitors keep using the
+# existing Render link: Terminal-2's vibepass-storefront-test reverse-proxies
+# /bridge/* to this service once its EXOS_ORIGIN env var points here, so the
+# URL, the origin and the shared Supabase login stay the same. Until then
+# Terminal-2 keeps serving its static/bridge copy.
+#
+# Creating the service and setting secrets are Render writes: an operator
+# applies this blueprint (Dashboard → New → Blueprint → this repo).
+
+services:
+  - type: web
+    name: exos-web
+    runtime: node
+    plan: starter            # always warm; the door scanner can't wait on a cold start
+    region: oregon           # same region as vibepass-storefront-test (short proxy hop)
+    branch: main
+    autoDeploy: true         # every merge to main redeploys; no more copying dist/ into Terminal-2
+    # --include=dev: vite + tsx are devDependencies and NODE_ENV=production
+    # would otherwise make npm skip them.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Client IP for logs/limits: Render's edge + Terminal-2's proxy.
+      - key: TRUST_PROXY_HOPS
+        value: "2"
+      # Public origin people use (the Render link), WITHOUT /bridge. Used for
+      # link-preview canonical URLs, the sitemap and robots.txt.
+      - key: EXOS_PUBLIC_BASE_URL
+        sync: false
+      # Build-time (baked into the bundle) and read by the server for the
+      # public-view previews/sitemap. Anon key only.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: VITE_GOOGLE_MAPS_MAP_ID
+        sync: false
+      - key: VITE_GOOGLE_MAPS_EMBED_KEY
+        sync: false
+      - key: VITE_AUTOMATIQ_ENABLED
+        value: "false"

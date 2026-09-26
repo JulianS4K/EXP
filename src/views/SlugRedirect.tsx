@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { getPublicEventBySlug } from '../lib/events';
 
 /**
@@ -13,6 +13,8 @@ import { getPublicEventBySlug } from '../lib/events';
  */
 export default function SlugRedirect() {
   const { slug } = useParams<{ slug: string }>();
+  // Keep ?promoter= / utm_* / ref= so attribution survives the short link.
+  const { search } = useLocation();
   const [eventId, setEventId] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'missing' | 'found'>('loading');
 
@@ -52,7 +54,7 @@ export default function SlugRedirect() {
   }
   if (state === 'found' && eventId) {
     // `replace: true` so the slug URL doesn't pollute the back-button history.
-    return <Navigate to={`/event/${eventId}`} replace />;
+    return <Navigate to={`/event/${eventId}${search}`} replace />;
   }
   return (
     <div className="max-w-xl mx-auto px-4 py-24 text-center">

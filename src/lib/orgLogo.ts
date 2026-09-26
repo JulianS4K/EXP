@@ -8,11 +8,11 @@
 import { uploadOrgLogo as uploadToBucket } from './storage';
 
 const MAX_BYTES = 2 * 1024 * 1024;
-const ACCEPTED_TYPES = /^image\/(png|jpe?g|webp|svg\+xml)$/;
+const ACCEPTED_TYPES = /^image\/(png|jpe?g|webp)$/;
 
 export async function uploadOrgLogo(orgId: string, file: File): Promise<string> {
   if (!ACCEPTED_TYPES.test(file.type)) {
-    throw new Error('Logo must be a PNG, JPG, WebP, or SVG.');
+    throw new Error('Logo must be a PNG, JPG, or WebP.');
   }
   if (file.size > MAX_BYTES) {
     throw new Error(`Logo must be under ${MAX_BYTES / 1024 / 1024} MB.`);

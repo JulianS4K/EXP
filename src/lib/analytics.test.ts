@@ -33,6 +33,12 @@ const doc = {
 };
 
 describe('mapAnalytics', () => {
+  it('reads net revenue, add-ons and partial refunds', () => {
+    const a = mapAnalytics({ ...doc, addon_revenue: '10.00', partial_refunds: '5', net_revenue: '25.00' });
+    expect(a.addonRevenue).toBe(10);
+    expect(a.partialRefunds).toBe(5);
+    expect(a.netRevenue).toBe(25);
+  });
   it('coerces numerics + dates and keeps null rates as null', () => {
     const a = mapAnalytics(doc);
     expect(a.sold).toBe(4);
@@ -40,6 +46,8 @@ describe('mapAnalytics', () => {
     expect(a.checkinRate).toBe(0.75);
     expect(a.noShowRate).toBe(0.25);
     expect(a.released).toBe(0); // absent until the release migration lands
+    expect(a.netRevenue).toBe(20); // no net_revenue yet → falls back to ticket revenue
+    expect(a.addonRevenue).toBe(0);
     expect(a.scans.lastAt?.toISOString()).toBe('2026-09-11T11:00:00.000Z');
     expect(a.scans.firstAt).toBeNull();
     expect(a.byTier[0]).toEqual({ key: 't1', label: 'GA', sold: 4, used: 3, revenue: 20 });

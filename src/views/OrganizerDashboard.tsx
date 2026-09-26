@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Event } from '../types';
-import { listOrgEvents } from '../lib/events';
+import { eventGrossSales, listOrgEvents } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
@@ -15,7 +15,7 @@ type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
 export default function OrganizerDashboard() {
   const { user, isAdmin } = useAuth();
-  const { orgs } = useOrganization();
+  const { orgs, activeOrg } = useOrganization();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   // Search + filter state. Both apply client-side over the loaded
@@ -61,7 +61,8 @@ export default function OrganizerDashboard() {
     fetchEvents();
   }, [user, orgs]);
 
-  const totalEarnings = events.reduce((acc, event) => acc + (event.price * event.ticketsSold), 0);
+  const totalEarnings = events.reduce((acc, event) => acc + eventGrossSales(event), 0);
+  const liveCount = events.filter((e) => (e.status ?? 'published') === 'published').length;
   const totalTicketsSold = events.reduce((acc, event) => acc + event.ticketsSold, 0);
 
   // Apply search + status filter. Memoized so the rendered list
@@ -111,9 +112,9 @@ export default function OrganizerDashboard() {
               <h1 className="text-3xl font-bold tracking-tight text-slate-900">
                 {isAdmin ? 'All Events (admin)' : 'My Events'}
               </h1>
-              {events.length > 0 && (
+              {liveCount > 0 && (
                 <span className="marker text-brand-secondary text-lg rotate-[-3deg] leading-none whitespace-nowrap">
-                  {events.length} live ✦
+                  {liveCount} live ✦
                 </span>
               )}
             </div>
@@ -123,7 +124,17 @@ export default function OrganizerDashboard() {
                 : 'Manage and track your events and ticket sales.'}
             </p>
           </div>
-          <div className="flex space-x-3">
+          <div className="flex flex-wrap gap-3">
+            {activeOrg && (
+              <>
+                <Link to={`/orgs/${activeOrg.id}/settings`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                  <Settings className="w-4 h-4" /><span>Org settings</span>
+                </Link>
+                <Link to={`/orgs/${activeOrg.id}/members`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                  <Users className="w-4 h-4" /><span>Team</span>
+                </Link>
+              </>
+            )}
             {orgs.length > 0 && (
               <Link
                 to={orgs.length === 1 ? `/orgs/${orgs[0].org.id}/promote` : '/orgs'}
@@ -145,7 +156,7 @@ export default function OrganizerDashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: 'TOTAL EARNINGS', value: formatCurrency(totalEarnings), icon: BarChart3, color: 'text-slate-900' },
+            { label: 'GROSS SALES', value: formatCurrency(totalEarnings), icon: BarChart3, color: 'text-slate-900' },
             { label: 'TICKETS SOLD', value: totalTicketsSold, icon: Users, color: 'text-slate-900' },
             { label: 'ACTIVE EVENTS', value: events.length, icon: Music, color: 'text-slate-900' },
             // Removed RELIABILITY SCORE — it was a hardcoded 98/100 from
@@ -252,7 +263,38 @@ export default function OrganizerDashboard() {
               <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No events found</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Phones: one card per event, actions as labelled buttons. */}
+            <ul className="md:hidden divide-y divide-slate-100">
+              {filteredEvents.length === 0 && (
+                <li className="px-6 py-12 text-center text-sm text-slate-400">No events match your search or filter.</li>
+              )}
+              {filteredEvents.map((event) => (
+                <li key={event.id} className="p-4">
+                  <Link to={`/dashboard/event/${event.id}`} className="flex items-start gap-3">
+                    <div className="w-12 h-14 bg-slate-100 rounded overflow-hidden shrink-0">
+                      {event.image ? <img src={event.image} alt="" className="w-full h-full object-cover" /> : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-slate-900 text-sm truncate">{event.title}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric' })} · {event.location}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <EventStatusPill status={event.status} />
+                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event))}</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
+                  </Link>
+                  <div className="grid grid-cols-4 gap-2 mt-3">
+                    <Link to={`/checkin/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Door</Link>
+                    <Link to={`/dashboard/event/${event.id}/promote`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Share</Link>
+                    <Link to={`/edit-event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Edit</Link>
+                    <Link to={`/event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">View</Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="overflow-x-auto hidden md:block">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
@@ -292,16 +334,16 @@ export default function OrganizerDashboard() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="px-2 py-1 bg-green-50 text-green-600 rounded text-[10px] font-bold uppercase tracking-widest border border-green-100">Active</span>
+                        <EventStatusPill status={event.status} />
                       </td>
                       <td className="px-6 py-4">
                         <div className="w-full max-w-[100px] bg-slate-100 h-1 rounded-full overflow-hidden">
-                           <div className="bg-[#026cdf] h-full" style={{ width: `${Math.min(100, (event.ticketsSold / 100) * 100)}%` }}></div>
+                           <div className="bg-[#026cdf] h-full" style={{ width: `${event.totalTickets > 0 ? Math.min(100, (event.ticketsSold / event.totalTickets) * 100) : 0}%` }}></div>
                         </div>
-                        <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold} SOLD</p>
+                        <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold}{event.totalTickets > 0 ? ` / ${event.totalTickets}` : ''} SOLD</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(event.ticketsSold * event.price)}</p>
+                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event))}</p>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end space-x-2">
@@ -319,10 +361,21 @@ export default function OrganizerDashboard() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
 
       </div>
     </div>
   );
+}
+
+function EventStatusPill({ status }: { status?: Event['status'] }) {
+  const s = status ?? 'published';
+  const style =
+    s === 'published' ? 'bg-green-50 text-green-600 border-green-100'
+    : s === 'draft' ? 'bg-slate-100 text-slate-500 border-slate-200'
+    : 'bg-red-50 text-red-600 border-red-100';
+  const label = s === 'published' ? 'Live' : s === 'draft' ? 'Draft' : 'Cancelled';
+  return <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border ${style}`}>{label}</span>;
 }

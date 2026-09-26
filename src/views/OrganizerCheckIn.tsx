@@ -1,3 +1,4 @@
+import { AccessNeedBadges } from '../components/Accessibility';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEventForEdit, getPublicEvent } from '../lib/events';
@@ -17,9 +18,21 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { verifyBarcode, extractTicketIdFromAny } from '../lib/barcode';
+import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
 import { joinCheckinChannel } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
+import GuestListDoor from '../components/GuestListDoor';
+import {
+  getDoorExtras,
+  loadCachedDoorExtras,
+  loadPendingArrivals,
+  pruneStaleDoorExtras,
+  saveCachedDoorExtras,
+  type DoorExtras,
+} from '../lib/guestListsApi';
+import { overlayPending } from '../lib/guestLists';
+import { indexTablesByTicket, tableSummary } from '../lib/tables';
 
 // Anything older than this is dropped from localStorage when the page mounts.
 // Set to a generous 7 days so a multi-day festival is still cached on day 3.
@@ -91,6 +104,9 @@ export default function OrganizerCheckIn() {
   const [event, setEvent] = useState<Event | null>(null);
   const [searchId, setSearchId] = useState('');
   const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode'>('idle');
+  // A scan during the pre-doors test window: verified, but the ticket stays
+  // unused (the server answers reason 'test-scan'), so don't mark it locally.
+  const [testScan, setTestScan] = useState(false);
   // Reason text shown in the 'invalid-barcode' state — populated by the
   // HMAC verifier so the operator knows whether the issue was a stale
   // barcode (screenshot from earlier) or a forged one.
@@ -100,6 +116,15 @@ export default function OrganizerCheckIn() {
   const [doorsBlocked, setDoorsBlocked] = useState(false);
   const [enablingTest, setEnablingTest] = useState(false);
   const [foundTicket, setFoundTicket] = useState<Ticket | null>(null);
+  // True when the last lookup was typed or picked from the name search
+  // rather than a scanned signed QR — nothing was cryptographically verified.
+  const [manualEntry, setManualEntry] = useState(false);
+  const verdictRef = useRef<HTMLDivElement>(null);
+  // On a phone the verdict renders below the scanner; bring it into view.
+  useEffect(() => {
+    if (status === 'idle' || status === 'searching') return;
+    verdictRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [status, foundTicket?.id]);
   const [buyerName, setBuyerName] = useState<string>('');
   const [scanning, setScanning] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -120,6 +145,36 @@ export default function OrganizerCheckIn() {
   // fires and starts the camera with no owner to shut it down.
   const startScannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasOfflineRef = useRef(isOffline);
+  // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
+  const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
+  // Offline door download: table labels by ticket + every guest-list entry.
+  const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
+  const [extrasSyncing, setExtrasSyncing] = useState(false);
+  const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+
+  const updateDoorExtras = (next: DoorExtras) => {
+    setDoorExtras(next);
+    if (eventId) saveCachedDoorExtras(eventId, next);
+  };
+
+  // Best-effort: a failure here never blocks ticket check-in.
+  const downloadDoorExtras = async (opts: { silent?: boolean } = {}) => {
+    if (!eventId || !user) return;
+    setExtrasSyncing(true);
+    try {
+      const fresh = await getDoorExtras(eventId);
+      // Arrivals still waiting to sync stay applied on top of the fresh copy.
+      updateDoorExtras({ ...fresh, guests: overlayPending(fresh.guests, loadPendingArrivals(eventId)) });
+      if (!opts.silent && mode === 'guests') {
+        toast({ kind: 'success', message: `Synced ${fresh.guests.length} guest-list name(s) for offline check-in.` });
+      }
+    } catch (err) {
+      console.warn('door extras (tables / guest lists) unavailable:', err);
+      if (!opts.silent && mode === 'guests') toast({ kind: 'error', message: 'Failed to sync guest lists.' });
+    } finally {
+      setExtrasSyncing(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchEvent() {
@@ -145,6 +200,7 @@ export default function OrganizerCheckIn() {
     // attendees in for accumulates ~one entry per attendee in localStorage
     // forever and eventually trips the ~5MB browser quota.
     pruneStaleCheckInCaches();
+    pruneStaleDoorExtras();
 
     // Load registry and pending updates for THIS event, if cached.
     if (eventId) {
@@ -164,6 +220,7 @@ export default function OrganizerCheckIn() {
           localStorage.removeItem(`registry_${eventId}`);
         }
       }
+      setDoorExtras(loadCachedDoorExtras(eventId));
       const pending = localStorage.getItem(`pending_updates_${eventId}`);
       if (pending) {
         try {
@@ -191,6 +248,7 @@ export default function OrganizerCheckIn() {
     if (pendingUpdates.length === 0 || syncing) return;
     setSyncing(true);
     const successfulSyncs: string[] = [];
+    const conflicts: { id: string; reason: string }[] = [];
     try {
       // Per-item try/catch so one failing replay doesn't abort the rest of the
       // queue. With a single outer catch the first failure silently skipped
@@ -202,7 +260,10 @@ export default function OrganizerCheckIn() {
           // a second flip of an already-used ticket returns {ok:false,
           // reason:'used'} (no throw), so we still drop it from the queue.
           // Only a real network/auth error throws and keeps it queued.
-          await checkInTicket(tId, 'manual', 'manual', undefined, eventId);
+          // A refusal here means someone was admitted offline on a ticket the
+          // server says was already used / voided / in transfer — surface it.
+          const result = await checkInTicket(tId, 'manual', 'manual', undefined, eventId);
+          if (!result.ok) conflicts.push({ id: tId, reason: result.reason ?? 'unknown' });
           successfulSyncs.push(tId);
         } catch (err) {
           console.error(`Error syncing pending update ${tId}:`, err);
@@ -213,6 +274,18 @@ export default function OrganizerCheckIn() {
       setPendingUpdates(remainingUpdates);
       localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(remainingUpdates));
       setSyncing(false);
+      for (const c of conflicts) {
+        const reason = c.reason === 'used' || c.reason === 'voided' || c.reason === 'in-transfer' || c.reason === 'wrong-event'
+          ? c.reason
+          : 'not-found';
+        void writeScanReject(reason, 'manual', { ticketIdAttempted: c.id, reasonDetail: `offline-replay:${c.reason}` });
+      }
+      if (conflicts.length > 0) {
+        toast({
+          kind: 'error',
+          message: `${conflicts.length} ticket(s) admitted while offline were refused on sync (${[...new Set(conflicts.map((c) => c.reason))].join(', ')}). Check the scan report.`,
+        });
+      }
     }
   };
 
@@ -368,6 +441,7 @@ export default function OrganizerCheckIn() {
 
       setOfflineRegistry(registry);
       saveRegistry(eventId, registry);
+      void downloadDoorExtras({ silent: true });
       if (!silent) {
         toast({
           kind: 'success',
@@ -414,6 +488,14 @@ export default function OrganizerCheckIn() {
       .catch(() => {/* non-fatal */});
     return () => { cancelled = true; };
   }, [eventId]);
+
+  // Pull the roster once on open (silently) so name search works without a
+  // manual download; the cached copy from localStorage covers offline opens.
+  useEffect(() => {
+    if (!eventId || !user || !navigator.onLine) return;
+    void downloadRegistry({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, user?.uid]);
 
   // On reconnect, re-pull the registry: Realtime doesn't replay check-ins other
   // lanes made while we were offline, so catch up silently once links return.
@@ -474,6 +556,7 @@ export default function OrganizerCheckIn() {
     if (!probeValue || !eventId) return;
 
     setStatus('searching');
+    setManualEntry(!probeValue.includes(':'));
     setFoundTicket(null);
     setInvalidReason('');
     setDoorsBlocked(false);
@@ -636,6 +719,54 @@ export default function OrganizerCheckIn() {
             );
             return;
           }
+          // Any other server refusal (used / voided / in-transfer / wrong-event /
+          // not-found) means the offline registry is stale — never admit on it.
+          if (!result.ok) {
+            const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
+            if (result.reason === 'used' || result.reason === 'voided') {
+              const synced = {
+                ...offlineRegistry,
+                [docId]: { ...offlineTicket, used: result.reason === 'used' || offlineTicket.used, voided: result.reason === 'voided' || offlineTicket.voided },
+              };
+              setOfflineRegistry(synced);
+              if (eventId) saveRegistry(eventId, synced);
+            }
+            setBuyerName(offlineTicket.name);
+            setRecentScans((prev) =>
+              [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' }, ...prev].slice(0, 5),
+            );
+            if (result.reason === 'used') {
+              setStatus('already-used');
+              void writeScanReject('used', src, { ticketIdAttempted: docId });
+              return;
+            }
+            setStatus('invalid-barcode');
+            setInvalidReason(
+              result.reason === 'voided'
+                ? 'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.'
+                : result.reason === 'in-transfer'
+                ? 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.'
+                : result.reason === 'wrong-event'
+                ? 'This ticket is for a different event.'
+                : result.reason === 'event-cancelled'
+                ? 'This event was cancelled. Nobody can be checked in.'
+                : 'The server did not accept this ticket. Re-sync the offline registry and retry.',
+            );
+            const rejectReason =
+              result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event'
+                ? result.reason
+                : 'not-found';
+            void writeScanReject(rejectReason, src, { ticketIdAttempted: docId, reasonDetail: result.reason });
+            return;
+          }
+          if (result.reason === 'test-scan') {
+            setTestScan(true);
+            setBuyerName(offlineTicket.name);
+            setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
+            setStatus('success');
+            setSearchId('');
+            return;
+          }
         } catch (err) {
           console.error('Server check-in failed; admitting on offline registry and queuing replay.', err);
           const newPending = [...pendingUpdates, docId];
@@ -655,6 +786,7 @@ export default function OrganizerCheckIn() {
 
       setBuyerName(offlineTicket.name);
       setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
+      setTestScan(false);
       setStatus('success');
       setRecentScans(prev => [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'SUCCESS' }, ...prev].slice(0, 5));
       setSearchId('');
@@ -791,8 +923,9 @@ export default function OrganizerCheckIn() {
     const result = await checkInTicket(scanTicket.id, src, verification, barcodePayload, eventId);
 
     if (result.ok) {
+      setTestScan(result.reason === 'test-scan');
       setStatus('success');
-      pushScan('SUCCESS');
+      if (result.reason !== 'test-scan') pushScan('SUCCESS');
       setSearchId('');
       return;
     }
@@ -849,6 +982,21 @@ export default function OrganizerCheckIn() {
       return;
     }
 
+    if (result.reason === 'event-cancelled' || result.reason === 'wrong-event') {
+      setStatus('invalid-barcode');
+      setInvalidReason(
+        result.reason === 'event-cancelled'
+          ? 'This event was cancelled. Nobody can be checked in.'
+          : 'This ticket is for a different event.',
+      );
+      pushScan('DENIED');
+      void writeScanReject(result.reason === 'wrong-event' ? 'wrong-event' : 'not-found', src, {
+        ticketIdAttempted: scanTicket.id,
+        reasonDetail: result.reason,
+      });
+      return;
+    }
+
     // not-found or any unexpected reason.
     setStatus('not-found');
     void writeScanReject('not-found', src, { ticketIdAttempted: scanTicket.id });
@@ -879,6 +1027,7 @@ export default function OrganizerCheckIn() {
   const rejectCount = recentScans.filter((s) => s.status !== 'SUCCESS').length;
 
   return (
+    <div className="bg-[#f2f4f7] min-h-screen">
     <div className="max-w-7xl mx-auto px-4 py-10">
       <style>{`
         @keyframes checkinScanline { 0% { top: 8%; } 100% { top: 92%; } }
@@ -909,7 +1058,7 @@ export default function OrganizerCheckIn() {
              className="flex items-center space-x-2 px-3 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
            >
               <Download className={`w-3 h-3 ${downloading ? 'animate-bounce' : ''}`} aria-hidden="true" />
-              <span>{downloading ? 'Syncing...' : 'Sync'}</span>
+              <span>{downloading ? 'Downloading…' : 'Download for offline'}</span>
            </button>
            <button
              type="button"
@@ -926,7 +1075,7 @@ export default function OrganizerCheckIn() {
       {pendingUpdates.length > 0 && (
          <div className="mb-6 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
            <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest">
-             {pendingUpdates.length} unsynced validations
+             {pendingUpdates.length} check-in{pendingUpdates.length === 1 ? '' : 's'} waiting to upload
            </div>
            {!isOffline && (
              <button
@@ -935,7 +1084,7 @@ export default function OrganizerCheckIn() {
                className="flex items-center text-[10px] font-black text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded transition-all uppercase tracking-widest disabled:opacity-50"
              >
                <RefreshCw className={`w-3 h-3 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-               Force Sync
+               Upload now
              </button>
            )}
          </div>
@@ -944,6 +1093,38 @@ export default function OrganizerCheckIn() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* SCANNER STAGE */}
         <div className="lg:col-span-2 space-y-6">
+      <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
+        {(['tickets', 'guests'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            onClick={() => {
+              if (m === 'guests' && scanning) {
+                void stopScanner();
+                setScanning(false);
+              }
+              setMode(m);
+            }}
+            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+          >
+            {m === 'tickets' ? 'Tickets' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+          </button>
+        ))}
+      </div>
+      {mode === 'guests' && eventId ? (
+      <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <GuestListDoor
+          eventId={eventId}
+          isOffline={isOffline}
+          extras={doorExtras}
+          onExtrasChange={updateDoorExtras}
+          onSync={() => void downloadDoorExtras()}
+          syncing={extrasSyncing}
+        />
+      </div>
+      ) : (
       <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {scanning ? (
            <div className="relative mb-2">
@@ -988,11 +1169,29 @@ export default function OrganizerCheckIn() {
                 <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-300"><span className="bg-white px-4">Manual Entry — no camera?</span></div>
              </div>
 
-             <form onSubmit={(e) => handleCheckIn(e)} className="relative">
+             <form
+               onSubmit={(e) => {
+                 // A name / id-tail search with exactly one match admits that
+                 // ticket; several matches wait for staff to pick from the list.
+                 if (!isFullTicketId(searchId)) {
+                   e.preventDefault();
+                   const m = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
+                   if (m.length === 1 && !m[0][1].used && !m[0][1].voided) {
+                     setSearchId('');
+                     void handleCheckIn(undefined, m[0][0]);
+                   }
+                   return;
+                 }
+                 void handleCheckIn(e);
+               }}
+               className="relative"
+             >
                 <input
                   type="text"
-                  placeholder="Enter pass ID or last 6 digits…"
-                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 font-mono focus:outline-none focus:border-tm-blue transition-all"
+                  placeholder="Name, last 6 of pass ID, or full ID"
+                  aria-label="Search by name or pass ID"
+                  autoComplete="off"
+                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus:border-tm-blue transition-all"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                 />
@@ -1004,9 +1203,48 @@ export default function OrganizerCheckIn() {
                   Check
                 </button>
              </form>
+             {(() => {
+               const matches = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
+               if (searchId.trim().length < 2 || isFullTicketId(searchId)) return null;
+               if (Object.keys(offlineRegistry).length === 0) {
+                 return <p className="text-xs text-slate-500 px-2">Tap “Download for offline” to search by name.</p>;
+               }
+               if (matches.length === 0) {
+                 return <p className="text-xs text-slate-500 px-2">No one on the list matches “{searchId.trim()}”.</p>;
+               }
+               return (
+                 <ul className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden" aria-label="Matching tickets">
+                   {matches.map(([id, entry]) => (
+                     <li key={id} className="flex items-center gap-3 px-4 py-3">
+                       <div className="min-w-0 flex-1">
+                         <p className="font-bold text-slate-900 text-sm truncate">{entry.name || 'Unnamed'}</p>
+                         <p className="text-[11px] text-slate-500 truncate">{entry.tier} · …{id.slice(-6)}</p>
+                         {(doorExtras?.ticketAccess?.[id]?.length ?? 0) > 0 && (
+                           <div className="mt-1"><AccessNeedBadges needs={doorExtras!.ticketAccess![id]} /></div>
+                         )}
+                       </div>
+                       {entry.voided ? (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
+                       ) : entry.used ? (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">In</span>
+                       ) : (
+                         <button
+                           type="button"
+                           onClick={() => { setSearchId(''); void handleCheckIn(undefined, id); }}
+                           className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
+                         >
+                           Admit
+                         </button>
+                       )}
+                     </li>
+                   ))}
+                 </ul>
+               );
+             })()}
           </div>
         )}
 
+        <div ref={verdictRef} className="scroll-mt-24" />
         <AnimatePresence mode="wait">
           {status === 'searching' && (
             <motion.div 
@@ -1028,9 +1266,18 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-green-200">
                  <CheckCircle2 className="w-10 h-10" />
               </div>
-              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">Entry Allowed</h2>
-              <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">Identity Verified</p>
-              
+              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">{testScan ? 'Test scan OK' : 'Entry Allowed'}</h2>
+              <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
+                {testScan ? 'Valid ticket · not checked in (test window)' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
+              </p>
+
+              {(doorExtras?.ticketAccess?.[foundTicket.id]?.length ?? 0) > 0 && (
+                <div role="note" className="w-full mb-4 p-4 rounded-2xl bg-sky-50 border border-sky-200 text-left">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-sky-800 mb-2">Access needs</p>
+                  <AccessNeedBadges needs={doorExtras!.ticketAccess![foundTicket.id]} />
+                </div>
+              )}
+
               <div className="w-full space-y-4">
                  <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-green-50">
                     <div className="flex items-center space-x-3 text-left">
@@ -1045,6 +1292,18 @@ export default function OrganizerCheckIn() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
+                 {tableByTicket[foundTicket.id] && (() => {
+                   const tb = tableByTicket[foundTicket.id];
+                   return (
+                     <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
+                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Table</p>
+                       <p className="font-bold text-slate-900">{tb.label || 'Not assigned yet'}</p>
+                       <p className="text-xs text-slate-500 mt-1">
+                         {tableSummary({ partySize: tb.partySize, minSpendCents: tb.minSpendCents, sectionLabel: tb.sectionLabel }, event?.currency || 'USD')}
+                       </p>
+                     </div>
+                   );
+                 })()}
               </div>
             </motion.div>
           )}
@@ -1126,6 +1385,7 @@ export default function OrganizerCheckIn() {
           )}
         </AnimatePresence>
       </div>
+      )}
         </div>
 
         {/* SIDEBAR: stats + scan log */}
@@ -1178,6 +1438,7 @@ export default function OrganizerCheckIn() {
           {eventId && <ScanRejectAudit eventId={eventId} eventTitle={event.title} />}
         </div>
       </div>
+    </div>
     </div>
   );
 }

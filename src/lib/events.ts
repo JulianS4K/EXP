@@ -9,6 +9,7 @@
 // transitionally, same as lib/orgs.ts.
 
 import { Timestamp } from './timestamp';
+import { parseAccessibility, type EventAccessibility } from './accessibility';
 import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
@@ -20,7 +21,7 @@ const toTs = (iso?: string | null): Timestamp => Timestamp.fromDate(iso ? new Da
 type Tier = NonNullable<Event['ticketTiers']>[number];
 type Discount = NonNullable<Event['discountCodes']>[number];
 
-function mapTier(t: any): Tier {
+export function mapTier(t: any): Tier {
   return {
     id: t.id,
     name: t.name,
@@ -33,6 +34,9 @@ function mapTier(t: any): Tier {
     salesStart: t.sales_start ? toTs(t.sales_start) : null,
     salesEnd: t.sales_end ? toTs(t.sales_end) : null,
     priceSchedule: Array.isArray(t.price_schedule) ? t.price_schedule : undefined,
+    exclusiveTaxPercent: Number(t.exclusive_tax_percent) || 0,
+    accessible: t.accessible === true,
+    accessibleNote: t.accessible_note || undefined,
   };
 }
 
@@ -53,6 +57,7 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
   const minPrice = mappedTiers && mappedTiers.length ? Math.min(...mappedTiers.map((t) => t.price)) : 0;
   return {
     id: row.id,
+    slug: row.slug ?? undefined,
     title: row.name,
     description: row.description ?? '',
     date: toTs(row.starts_at ?? null),
@@ -93,10 +98,30 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     releaseCutoffHours: row.release_cutoff_hours ?? undefined,
     seriesId: row.series_id ?? undefined,
     seriesIndex: row.series_index ?? undefined,
+    // undefined when the column isn't there yet (mig 20260926090000 not applied).
+    accessibility: 'accessibility' in row ? parseAccessibility(row.accessibility) : undefined,
   };
 }
 
 // --- Public reads (anon + signed-in buyers) — column-narrowed views --------
+
+// Listing cards show an all-in "from $X" price, which needs each event's public
+// tiers; one extra query for the whole page rather than one per event.
+async function withPublicTiers(rows: any[]): Promise<Event[]> {
+  if (rows.length === 0) return [];
+  const { data: tiers } = await supabase
+    .from('exos_public_tiers')
+    .select('*')
+    .in('event_id', rows.map((r) => r.id))
+    .order('sort_order', { ascending: true });
+  const byEvent = new Map<string, any[]>();
+  for (const t of tiers ?? []) {
+    const list = byEvent.get(t.event_id) ?? [];
+    list.push(t);
+    byEvent.set(t.event_id, list);
+  }
+  return rows.map((r) => mapEvent(r, byEvent.get(r.id) ?? []));
+}
 
 export async function listPublicEvents(limit = 50): Promise<Event[]> {
   const { data, error } = await supabase
@@ -105,7 +130,7 @@ export async function listPublicEvents(limit = 50): Promise<Event[]> {
     .order('starts_at', { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  return withPublicTiers(data ?? []);
 }
 
 // Published events for a specific org (public org storefront).
@@ -116,7 +141,7 @@ export async function listPublicEventsForOrg(orgId: string): Promise<Event[]> {
     .eq('org_id', orgId)
     .order('starts_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  return withPublicTiers(data ?? []);
 }
 
 export async function getPublicEvent(id: string): Promise<Event | null> {
@@ -152,7 +177,32 @@ export async function listOrgEvents(orgId: string): Promise<Event[]> {
     .eq('org_id', orgId)
     .order('starts_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => mapEvent(r));
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+  // Tiers drive the dashboard's per-event revenue and capacity. A failed
+  // tier read degrades to tier-less events rather than hiding the list.
+  const { data: tiers } = await supabase
+    .from('exos_ticket_tiers')
+    .select('*')
+    .in('event_id', rows.map((r: any) => r.id))
+    .order('sort_order', { ascending: true });
+  const byEvent = new Map<string, any[]>();
+  for (const t of tiers ?? []) {
+    const list = byEvent.get(t.event_id) ?? [];
+    list.push(t);
+    byEvent.set(t.event_id, list);
+  }
+  return rows.map((r: any) => mapEvent(r, byEvent.get(r.id) ?? []));
+}
+
+/** Public path for sharing: the short /e/<slug> when the event has one. */
+export function eventSharePath(ev: { id: string; slug?: string | null }): string {
+  return ev.slug ? `e/${encodeURIComponent(ev.slug)}` : `event/${ev.id}`;
+}
+
+/** Face value sold: each tier's price times its sold count (tables count once). */
+export function eventGrossSales(ev: Pick<Event, 'ticketTiers'>): number {
+  return (ev.ticketTiers ?? []).reduce((sum, t) => sum + (Number(t.price) || 0) * (Number(t.sold) || 0), 0);
 }
 
 export async function getEventForEdit(eventId: string): Promise<Event | null> {
@@ -179,6 +229,8 @@ export interface TierInput {
   salesEnd?: string | null;
   sortOrder?: number;
   priceSchedule?: { startsAt: string; price: number }[];
+  accessible?: boolean;
+  accessibleNote?: string | null;
 }
 
 export interface DiscountInput {
@@ -222,6 +274,7 @@ export interface EventInput {
   distributionNetworks?: string[];
   allowHolderRelease?: boolean;
   releaseCutoffHours?: number;
+  accessibility?: EventAccessibility;
   tiers?: TierInput[];
 }
 
@@ -235,6 +288,7 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
   ['imageUrl', 'image_url'], ['totalTickets', 'total_tickets'], ['branding', 'branding'], ['exclusivity', 'exclusivity'],
   ['purchaseLimits', 'purchase_limits'], ['distributionNetworks', 'distribution_networks'],
   ['allowHolderRelease', 'allow_holder_release'], ['releaseCutoffHours', 'release_cutoff_hours'],
+  ['accessibility', 'accessibility'],
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {
@@ -250,6 +304,9 @@ function tierInsertRow(eventId: string, t: TierInput, idx: number) {
     sales_end: t.salesEnd ?? null,
     sort_order: t.sortOrder ?? idx,
     price_schedule: t.priceSchedule ?? [],
+    // Only sent when set, so creating a plain tier never needs the new columns.
+    ...(t.accessible ? { accessible: true } : {}),
+    ...(t.accessibleNote ? { accessible_note: t.accessibleNote } : {}),
   };
 }
 
@@ -375,6 +432,8 @@ export async function updateTier(tierId: string, patch: Partial<TierInput>): Pro
   if (patch.salesEnd !== undefined) row.sales_end = patch.salesEnd;
   if (patch.sortOrder !== undefined) row.sort_order = patch.sortOrder;
   if (patch.priceSchedule !== undefined) row.price_schedule = patch.priceSchedule;
+  if (patch.accessible !== undefined) row.accessible = patch.accessible;
+  if (patch.accessibleNote !== undefined) row.accessible_note = patch.accessibleNote || null;
   if (Object.keys(row).length === 0) return;
   const { error } = await supabase.from('exos_ticket_tiers').update(row).eq('id', tierId);
   if (error) throw error;

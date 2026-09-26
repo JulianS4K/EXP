@@ -49,21 +49,22 @@ export default function MyTickets() {
   };
 
   useEffect(() => {
+    // Confirmation after a purchase, shown here rather than on the event page:
+    // leaving an org's page can reload the app to drop its pixels
+    // (lib/pixels.ts), which would swallow a toast raised before navigating.
+    //   ?checkout=success — back from Stripe; stripe-webhook mints the tickets
+    //   ?claimed=N        — a free claim that already minted N tickets
     const params = new URLSearchParams(location.search);
-    const sessionId = params.get('session_id');
-    if (sessionId && user) {
-      // Real Stripe fulfillment (server-side mint via webhook into
-      // exos_tickets) is phase-2. Checkout is gated in EventDetails, so no
-      // live Stripe session reaches this redirect yet — but if one ever does
-      // (stale link, manual nav) we surface a clear message and strip the
-      // param rather than silently doing nothing.
-      toast({
-        kind: 'info',
-        message: 'Ticket purchase fulfillment is being wired up (phase-2).',
-      });
-      navigate('/my-tickets', { replace: true });
+    const claimed = Number(params.get('claimed'));
+    if (params.get('checkout') === 'success') {
+      toast({ kind: 'success', title: 'Payment received', message: 'Your tickets will appear here in a moment.' });
+    } else if (Number.isInteger(claimed) && claimed > 0) {
+      toast({ kind: 'success', title: "You're in!", message: `${claimed} ticket${claimed === 1 ? '' : 's'} reserved.` });
+    } else {
+      return;
     }
-  }, [location, user, navigate, toast]);
+    navigate('/my-tickets', { replace: true });
+  }, [location.search, navigate, toast]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -277,12 +278,6 @@ export default function MyTickets() {
                     </div>
                   </div>
 
-                  <div className="px-6 pb-5 flex items-center justify-between type text-[9px] text-white/15 uppercase tracking-widest">
-                    <span>cluster id: {eventId.slice(0, 12)}</span>
-                    <div className="flex gap-1">
-                      {[1,2,3,4,5].map(i => <span key={i} className="w-1 h-1 bg-white/10 rounded-full"></span>)}
-                    </div>
-                  </div>
                 </motion.div>
               );
             })}

@@ -1,3 +1,4 @@
+import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTicket, listMyTicketsForEvent, setTicketAttendee } from '../lib/tickets';
@@ -5,6 +6,7 @@ import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { publicUrl } from '../lib/utils';
+import { eventSharePath } from '../lib/events';
 import { ArrowLeft, Share2, ShieldCheck, RefreshCw, Ticket as TicketIcon, Calendar, Download, PlusCircle, Instagram, Send, ChevronLeft, ChevronRight, Smartphone, Lock } from 'lucide-react';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 import { signBarcode, currentBucket } from '../lib/barcode';
@@ -13,8 +15,13 @@ import AddToCalendar from '../components/AddToCalendar';
 import { shareEventToStory } from '../lib/poster';
 import { useToast } from '../context/ToastContext';
 import ShareModal from '../components/ShareModal';
+import { myReferralCode, myReferralStats, type ReferralStats } from '../lib/referrals';
+import { buildShareUrl } from '../lib/shareLinks';
+import { useShareTags } from '../hooks/useShareTags';
+import { mentionsFor, withMentions } from '../lib/socialTags';
 import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
+import ReferralProgress from '../components/ReferralProgress';
 import { useT } from '../context/LanguageContext';
 
 export default function TicketDetail() {
@@ -39,6 +46,28 @@ export default function TicketDetail() {
   useEffect(() => {
     setNameDraft(null);
   }, [currentTicketId]);
+
+  // "Bring your friends": this holder's referral code for the event and how
+  // many friends bought through it (mig 20260924234500). Missing = no card.
+  const [referral, setReferral] = useState<ReferralStats | null>(null);
+  // The organizer and the promoter this fan's ticket came through.
+  const shareTags = useShareTags({
+    orgId: event?.orgId,
+    promoterCode: tickets[currentIndex]?.promoterId,
+    enabled: !!event?.orgId,
+  });
+  const eventIdForReferral = event?.id;
+  useEffect(() => {
+    if (!eventIdForReferral || !user) return undefined;
+    let alive = true;
+    (async () => {
+      const code = await myReferralCode(eventIdForReferral);
+      if (!code) return;
+      const stats = await myReferralStats(eventIdForReferral);
+      if (alive) setReferral(stats ?? { code, friends: 0, tickets: 0 });
+    })().catch(() => { /* feature is optional */ });
+    return () => { alive = false; };
+  }, [eventIdForReferral, user]);
 
   useEffect(() => {
     async function fetchData() {
@@ -186,19 +215,26 @@ export default function TicketDetail() {
     await shareEventToStory(
       {
         title: event.title,
-        url: publicUrl(`event/${event.id}`),
+        url: publicUrl(eventSharePath(event)),
         imageUrl: event.image,
         dateLabel: event.date
           ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
           : undefined,
         venue: event.location,
+        role: 'fan',
+        promoter: currentTicket?.promoterId || undefined,
+        ref: referral?.code,
+        mentions: mentionsFor('instagram_story', shareTags),
       },
       toast,
     );
   };
 
   const handleSMSShare = () => {
-    const text = `I just secured tickets for ${event.title}! Join me: ${publicUrl(`event/${event.id}`)}`;
+    const link = buildShareUrl(publicUrl(`event/${event.id}`), {
+      role: 'fan', channel: 'sms', promoter: currentTicket?.promoterId || undefined, ref: referral?.code,
+    });
+    const text = `${withMentions(`I just secured tickets for ${event.title}!`, mentionsFor('sms', shareTags))} Join me: ${link}`;
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
@@ -407,20 +443,26 @@ export default function TicketDetail() {
                        <p className="disp neon text-2xl tracking-wide">{currentTicket.tierName || 'GENERAL'}</p>
                     </div>
                     <div className="p-6 bg-black text-right">
-                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">entry_hash</p>
-                       <p className="disp text-white text-2xl tracking-wide">SEC_A{currentIndex + 1}</p>
+                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">{t('ticket.passNo')}</p>
+                       <p className="disp text-white text-2xl tracking-wide">{currentIndex + 1} / {tickets.length}</p>
                     </div>
                  </div>
+
+                 {currentTicket.status === 'active' && !(currentTicket as any).pendingTransferId && (
+                   <TicketAccessNeeds ticketId={currentTicket.id} />
+                 )}
+
+                 <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />
 
                  <div className="space-y-3 mb-10">
                     <div className="grid grid-cols-2 gap-3">
                        <button onClick={handleSMSShare} className="type flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 py-3.5 text-[11px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
                           <Send className="w-3.5 h-3.5 text-brand-primary" />
-                          sms_forward
+                          {t('ticket.textIt')}
                        </button>
                        <button onClick={handleInstagramStory} className="type flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/60 py-3.5 text-[11px] uppercase tracking-widest hover:bg-white hover:text-black transition-colors">
                           <Instagram className="w-3.5 h-3.5 text-brand-primary" />
-                          story_prep
+                          {t('ticket.igStory')}
                        </button>
                     </div>
                     <div className="flex gap-4">
@@ -498,7 +540,7 @@ export default function TicketDetail() {
 
           {/* Visual Cues for Sliding */}
           {tickets.length > 1 && (
-            <div className="absolute -inset-x-6 top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
+            <div className="absolute inset-x-0 sm:-inset-x-6 top-1/2 -translate-y-1/2 flex justify-between pointer-events-none">
                 <div className="w-12 h-12 bg-white/5 rounded-full border border-white/10 blur-sm"></div>
                 <div className="w-12 h-12 bg-white/5 rounded-full border border-white/10 blur-sm"></div>
             </div>
@@ -534,6 +576,10 @@ export default function TicketDetail() {
           title={event.title}
           url={publicUrl(`event/${event.id}`)}
           text={`I'm going to ${event.title}!`}
+          role="fan"
+          promoterId={currentTicket?.promoterId || undefined}
+          referralCode={referral?.code}
+          tags={shareTags}
         />
       )}
     </div>

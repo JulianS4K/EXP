@@ -14,20 +14,22 @@
 // link 404s today — see lib/utils.ts publicUrl().
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   ArrowLeft, Megaphone, Copy, Download, Code2, Share2, ExternalLink,
   Twitter, Facebook, QrCode, Sparkles, Settings, Tag,
 } from 'lucide-react';
-import { getEventForEdit } from '../lib/events';
+import { eventSharePath, getEventForEdit } from '../lib/events';
 import { Event, Organization } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { publicUrl } from '../lib/utils';
+import { buildEmbedSnippet } from '../lib/embed';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
+import PromoterKitPanel from '../components/PromoterKitPanel';
 import SocialLinks from '../components/SocialLinks';
 
 // Channel presets for the campaign-link builder. utm_medium follows the GA4
@@ -44,10 +46,14 @@ const CHANNELS: { key: string; label: string; medium: string }[] = [
 ];
 
 const slugify = (s: string) =>
-  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  // Capped at 64 to match the promoter-code rule (_shared/attribution.ts).
+  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
 
 export default function PromoteEvent() {
   const { eventId } = useParams();
+  // ?new=1 — just published from Create Event: open on a "you're live" note.
+  const [searchParams] = useSearchParams();
+  const justPublished = searchParams.get('new') === '1';
   const { user } = useAuth();
   const { orgs } = useOrganization();
   const { toast } = useToast();
@@ -81,7 +87,7 @@ export default function PromoteEvent() {
     [orgs, event?.orgId],
   );
 
-  const url = eventId ? publicUrl(`event/${eventId}`) : '';
+  const url = event ? publicUrl(eventSharePath(event)) : '';
   const published = (event?.status ?? 'published') === 'published';
 
   // Campaign-link builder. The campaign slug is set as BOTH utm_campaign (for
@@ -91,7 +97,7 @@ export default function PromoteEvent() {
   const campaignSlug = slugify(campaignName);
   const buildCampaignUrl = (ch: { key: string; medium: string }): string => {
     if (!eventId) return '';
-    const u = new URL(publicUrl(`event/${eventId}`));
+    const u = new URL(publicUrl(event ? eventSharePath(event) : `event/${eventId}`));
     if (campaignSlug) {
       u.searchParams.set('utm_campaign', campaignSlug);
       u.searchParams.set('promoter', campaignSlug);
@@ -135,17 +141,9 @@ export default function PromoteEvent() {
     `Don't miss ${title}. Limited tickets, secure yours here: ${url}`,
   ];
 
-  const embedSnippet = `<!-- Exos embed — ${title} -->
-<iframe id="vibepass-embed" src="${publicUrl(`embed/event/${eventId}`)}" style="width:100%;border:0;min-height:200px" loading="lazy" title="Tickets"></iframe>
-<script>
-window.addEventListener('message', function(e) {
-  if (e.origin !== '${typeof window !== 'undefined' ? window.location.origin : ''}') return;
-  if (e.data && e.data.type === 'vibepass:resize') {
-    var f = document.getElementById('vibepass-embed');
-    if (f) f.style.height = e.data.height + 'px';
-  }
-});
-</script>`;
+  // Loader snippet (public/embed.js): the fan picks tickets and pays inside
+  // the iframe without leaving the venue's site (lib/embed.ts).
+  const embedSnippet = buildEmbedSnippet({ loaderUrl: publicUrl('embed.js'), eventId: eventId ?? '', title });
 
   const twitterHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(`${title} ${url}`)}`;
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
@@ -172,6 +170,14 @@ window.addEventListener('message', function(e) {
           <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
         </Link>
 
+        {justPublished && published && (
+          <div className="mb-8 p-5 border border-brand-primary/40 bg-brand-primary/10">
+            <p className="disp text-3xl tracking-wide text-brand-primary leading-none mb-2">You're live ✦</p>
+            <p className="type text-white/70 text-sm">
+              {event.title} is on sale. Copy the link below and post it, or share the QR code at the venue.
+            </p>
+          </div>
+        )}
         <p className="type text-[10px] text-white/40 uppercase tracking-widest mb-2">Promote</p>
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <Megaphone className="w-6 h-6 text-brand-primary" />
@@ -258,6 +264,29 @@ window.addEventListener('message', function(e) {
           )}
         </section>
 
+        {/* Promoter kit — buy-now link, story poster, tracked links for one promoter code */}
+        <section className="bg-[#111] p-6 border border-white/10 mb-6">
+          <h2 className="disp text-lg uppercase tracking-wide text-white mb-1 flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-brand-primary" /> Promoter kit
+          </h2>
+          {campaignSlug ? (
+            <>
+              <p className="text-sm text-white/60 mb-3">
+                Give each promoter their own code (the campaign name above). Send them their kit link: it needs no
+                account, and every sale through it, free or paid, is credited to <strong className="text-white">{campaignSlug}</strong>.
+              </p>
+              <div className="flex items-center gap-2 bg-black/40 border border-brand-primary/40 px-3 py-2 mb-6">
+                <span className="type text-[10px] uppercase tracking-widest text-brand-primary w-28 shrink-0">Kit link</span>
+                <span className="flex-1 text-[11px] font-mono text-white/70 truncate">{publicUrl(`promoter/${eventId}/${campaignSlug}`)}</span>
+                <button onClick={() => copy(publicUrl(`promoter/${eventId}/${campaignSlug}`), 'Promoter kit link copied.')} aria-label="Copy promoter kit link" className="p-2 text-white/40 hover:text-brand-primary transition-colors shrink-0"><Copy className="w-4 h-4" /></button>
+              </div>
+              <PromoterKitPanel event={event} promoter={campaignSlug} />
+            </>
+          ) : (
+            <p className="text-[11px] text-white/40 italic">Enter a campaign name above to make a promoter kit for that code.</p>
+          )}
+        </section>
+
         {/* QR code */}
         <section className="bg-[#111] p-6 border border-white/10 mb-6">
           <h2 className="disp text-lg uppercase tracking-wide text-white mb-4 flex items-center gap-2">
@@ -284,7 +313,7 @@ window.addEventListener('message', function(e) {
             <Code2 className="w-4 h-4 text-brand-primary" /> Embed on your site
           </h2>
           <p className="text-sm text-white/60 mb-3">
-            Paste this into your own website (WordPress, Wix, Squarespace, or hand-written HTML). It self-resizes.
+            Paste this into your own website (WordPress, Wix, Squarespace, or hand-written HTML). Fans pick tickets and pay right there, without leaving your site. It self-resizes.
           </p>
           <pre className="bg-black border border-white/10 text-brand-primary text-[11px] p-4 overflow-x-auto font-mono whitespace-pre-wrap break-all">{embedSnippet}</pre>
           <button onClick={() => copy(embedSnippet, 'Embed snippet copied.')} className="mt-3 flex items-center gap-2 px-4 py-2.5 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest hover:bg-brand-primary/90 transition-colors">
@@ -336,6 +365,8 @@ window.addEventListener('message', function(e) {
         onClose={() => setShareOpen(false)}
         title={event.title}
         url={url}
+        role="promoter"
+        promoterId={campaignSlug || undefined}
       />
     </div>
   );

@@ -157,8 +157,9 @@ export default function DeveloperSettings({ orgId, canEdit }: { orgId: string; c
           <span className="text-[11px] font-black uppercase tracking-widest">Webhooks</span>
         </div>
         <p className="text-white/40 text-xs">
-          We POST signed events to your URL (header <code className="text-brand-primary">X-Exos-Signature: sha256=…</code>,
-          HMAC of the body with your secret).
+          We POST signed events to your URL. <code className="text-brand-primary">X-Exos-Signature: sha256=…</code> is
+          the HMAC-SHA256, with your secret, of <code className="text-brand-primary">{'<X-Exos-Timestamp>.<raw body>'}</code>.
+          Reject timestamps more than 5 minutes old, and skip a repeated <code className="text-brand-primary">X-Exos-Delivery</code> id.
         </p>
 
         {hooks.map((h) => (

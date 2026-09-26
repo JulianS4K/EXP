@@ -6,6 +6,8 @@
 // grant, never the code list.
 
 import { supabase } from './supabase';
+import { mapTier } from './events';
+import type { Event } from '../types';
 
 export interface VoucherCheck {
   valid: boolean;
@@ -47,6 +49,21 @@ export async function checkVoucher(eventId: string, code: string, email?: string
   };
 }
 
+/** The hidden tier a valid voucher unlocks (exos_voucher_tier, mig
+ *  20260925000000). The public tier list never includes hidden tiers, so the
+ *  event page adds this one once the code checks out. Null when the code is
+ *  invalid or isn't restricted to a tier. */
+export async function getVoucherTier(
+  eventId: string, code: string, email?: string | null,
+): Promise<NonNullable<Event['ticketTiers']>[number] | null> {
+  const { data, error } = await supabase.rpc('exos_voucher_tier', {
+    p_event_id: eventId, p_code: code.trim(), p_email: email ?? null,
+  });
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? mapTier(row) : null;
+}
+
 /** Organizer: mint a voucher; returns the generated code. */
 export async function issueVoucher(input: {
   eventId: string;
@@ -57,6 +74,8 @@ export async function issueVoucher(input: {
   maxUses?: number;
   validHours?: number | null;
   comment?: string | null;
+  /** A code the organizer picks (e.g. PRESALE); random when empty. */
+  code?: string | null;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('exos_issue_voucher', {
     p_event_id: input.eventId,
@@ -67,6 +86,8 @@ export async function issueVoucher(input: {
     p_max_uses: input.maxUses ?? 1,
     p_valid_hours: input.validHours ?? null,
     p_comment: input.comment ?? null,
+    // Only sent when set (mig 20260925012000 added it).
+    ...(input.code?.trim() ? { p_code: input.code.trim() } : {}),
   });
   if (error) throw error;
   return data as string;

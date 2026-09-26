@@ -54,13 +54,25 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - Mail: `exos_queue_mail` RPC enqueues transactional mail → `exos-mail-drain` edge function delivers via Resend (dormant — set `RESEND_API_KEY` + `EXOS_MAIL_FROM`)
 - See `src/lib/` for auth, barcode, tickets, datetime, mail utilities
 
+## Docs
+
+- [`docs/onboarding.md`](docs/onboarding.md): start here as a developer
+- [`docs/payments-go-live.md`](docs/payments-go-live.md): switching Stripe on (operator runbook)
+- [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
+- [`docs/strategy.md`](docs/strategy.md): where Exos is going and the phased build plan
+- [`docs/gtm-nyc.md`](docs/gtm-nyc.md): go-to-market, NYC first
+- [`docs/social.md`](docs/social.md): social integrations for promoters + buyers, built vs. missing
+- [`docs/maps.md`](docs/maps.md): venue geocoding proxy, 30-day pin cache, interactive maps
+- [`docs/native-sharing.md`](docs/native-sharing.md): fan + promoter sharing, and the Stories bridge for the future app
+- [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
+
 ## Repository layout
 
 | Path | What |
 |---|---|
 | `src/`, `public/`, `index.html`, `server.ts` | The SPA + Express dev/serve layer |
 | `supabase/migrations/` | Copy of every `*exos*` migration. The DB is still shared, so Terminal-2 is authoritative (see `supabase/README.md`) |
-| `supabase/functions/exos-*` | Copy of the Exos edge functions (+ vendored `_shared/cron-auth.ts`); Terminal-2 deploys them |
+| `supabase/functions/` | Copy of the Exos edge functions (`exos-*` + `stripe-webhook`) (+ vendored `_shared/cron-auth.ts`); Terminal-2 deploys them |
 | `tests/exos/` | SQL lifecycle / RLS / money-path harnesses (run against a scratch Postgres) |
 | `docs/` | Charter, RLS review, FE test plan, event preflight |
 | `design/exos-screens/` | Static screen mockups |

@@ -66,3 +66,36 @@ export function nextPriceStep(schedule?: unknown, now: Date = new Date()): Price
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// All-in pricing (operator decision 2026-09-24): every price a buyer sees is
+// the full amount they pay. Buyers pay no service fee, so "all-in" = price +
+// its EXCLUSIVE tax, computed per unit in cents exactly like exos-checkout's
+// allInCents (supabase/functions/_shared/pricing.ts) — pricingParity.test.ts
+// keeps them identical.
+// ---------------------------------------------------------------------------
+
+/** Price + exclusive tax per unit (exclusiveTaxPercent = 0 when tax is included). */
+export function allInPrice(price: number, exclusiveTaxPercent?: number | null): number {
+  const cents = Math.round(price * 100);
+  const rate = Number(exclusiveTaxPercent) || 0;
+  if (rate <= 0) return cents / 100;
+  return (cents + Math.round((cents * rate) / 100)) / 100;
+}
+
+interface PricedTier {
+  price: number;
+  priceSchedule?: unknown;
+  exclusiveTaxPercent?: number;
+}
+
+/** What a buyer pays per ticket for this tier right now (scheduled price, all-in). */
+export function buyerTierPrice(tier: PricedTier, now: Date = new Date()): number {
+  return allInPrice(effectiveTierPrice(tier.price, tier.priceSchedule, now), tier.exclusiveTaxPercent);
+}
+
+/** Lowest current all-in tier price for "from $X" labels; falls back to `fallback`. */
+export function fromPrice(tiers: PricedTier[] | undefined, fallback: number): number {
+  if (!tiers || tiers.length === 0) return fallback;
+  return Math.min(...tiers.map((t) => buyerTierPrice(t)));
+}

@@ -3,8 +3,9 @@
 // Owner / manager paste a list of emails, pick a tier and a quantity per
 // person, and `exos_issue_comp_batch` (mig 20260911132000) does the rest in
 // one call: account holders get the tickets + a "ticket ready" mail; everyone
-// else gets a claim-by-email transfer + an invite mail. The result table shows
-// each row's outcome so a sold-out or junk address is visible immediately.
+// else gets a claim-by-email transfer + an invite mail. Both report 'issued'
+// (the server doesn't say who has an account, mig 20260925021000). The result
+// table shows each row's outcome so a sold-out or junk address is visible.
 //
 // The per-org comp budget (OrgSettings) is enforced server-side: a batch that
 // would exceed it is refused whole, and the error text says how much is left.
@@ -71,7 +72,7 @@ export default function CompIssuancePanel({
       const created = result.reduce((n, r) => n + r.ticketIds.length, 0);
       toast({
         kind: created > 0 ? 'success' : 'info',
-        message: `${created} ticket${created === 1 ? '' : 's'} issued — ${s.issued} sent, ${s.invited} invited to claim, ${s['sold-out']} sold out, ${s.invalid} invalid.`,
+        message: `${created} ticket${created === 1 ? '' : 's'} issued — ${s.issued + s.invited} sent, ${s['sold-out']} sold out, ${s.invalid} invalid.`,
       });
       if (created > 0) {
         setText('');

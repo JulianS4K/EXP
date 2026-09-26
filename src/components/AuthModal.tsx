@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mail, Phone, X, ShieldCheck, Ticket, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { currentInAppBrowser, IN_APP_LABEL } from '../lib/inAppBrowser';
+
+// Send the buyer back to the page they signed in from (keeps the /bridge
+// base path and the event they were buying). The hash is dropped: Supabase
+// appends its own tokens there.
+function authReturnUrl(): string {
+  const { origin, pathname, search } = window.location;
+  return `${origin}${pathname}${search}`;
+}
 
 export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [method, setMethod] = useState<'options' | 'email-login' | 'email-signup' | 'phone'>('options');
@@ -11,6 +20,9 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
+  // Google blocks OAuth inside in-app webviews and Microsoft is unreliable
+  // there; email and Apple sign-in work, so those stay.
+  const [inApp] = useState(currentInAppBrowser);
 
   useEffect(() => {
     if (isOpen) {
@@ -32,7 +44,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: window.location.origin },
+        options: { redirectTo: authReturnUrl() },
       });
       if (error) throw error;
       // OAuth is a redirect flow — the browser navigates to the provider and
@@ -54,7 +66,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { display_name: name }, emailRedirectTo: window.location.origin },
+          options: { data: { display_name: name }, emailRedirectTo: authReturnUrl() },
         });
         if (error) throw error;
         // Supabase sends a confirmation email; the session isn't active until
@@ -123,6 +135,12 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
 
             {method === 'options' && (
               <div className="space-y-4">
+                {inApp && (
+                  <p className="type text-[10px] uppercase tracking-widest text-white/50 text-center">
+                    Google sign-in doesn't work inside {IN_APP_LABEL[inApp]}. Use email or Apple, or open this page in your browser.
+                  </p>
+                )}
+                {!inApp && (
                 <button
                   onClick={() => handleProviderSignIn('google')}
                   disabled={loading}
@@ -136,6 +154,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                   </svg>
                   <span>Continue with Google</span>
                 </button>
+                )}
 
                 <button
                   onClick={() => handleProviderSignIn('apple')}
@@ -148,6 +167,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                   <span>Continue with Apple</span>
                 </button>
 
+                {!inApp && (
                 <button
                   onClick={() => handleProviderSignIn('microsoft')}
                   disabled={loading}
@@ -158,6 +178,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                   </svg>
                   <span>Continue with Microsoft</span>
                 </button>
+                )}
 
                 <div className="relative py-4">
                   <div className="absolute inset-0 flex items-center">

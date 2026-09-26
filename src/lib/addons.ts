@@ -18,6 +18,8 @@ export interface PublicAddon {
   maxPerOrder: number | null;
   imageUrl: string | null;
   sortOrder: number;
+  /** Exclusive tax on top of `price` (0 when included) — for all-in display. */
+  exclusiveTaxPercent: number;
 }
 
 export interface AddonInput {
@@ -44,6 +46,7 @@ function mapPublic(r: any): PublicAddon {
     maxPerOrder: r.max_per_order ?? null,
     imageUrl: r.image_url ?? null,
     sortOrder: Number(r.sort_order) || 0,
+    exclusiveTaxPercent: Number(r.exclusive_tax_percent) || 0,
   };
 }
 

@@ -28,8 +28,10 @@ import { useAuth } from '../context/AuthContext';
 import { formatInTz } from '../lib/datetime';
 import { applyMeta } from '../lib/meta';
 import { initOrgPixels } from '../lib/pixels';
+import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import SocialLinks from '../components/SocialLinks';
-import { publicUrl } from '../lib/utils';
+import { formatCurrency, publicUrl } from '../lib/utils';
+import { fromPrice } from '../lib/pricing';
 
 interface ResolvedOrg {
   org: Organization;
@@ -277,7 +279,7 @@ function StorefrontInner({ org }: ResolvedOrg) {
                       {ev.location}
                     </span>
                     <span className="stamp neon text-base shrink-0" style={{ color: accent }}>
-                      ${ev.price}+
+                      {formatCurrency(fromPrice(ev.ticketTiers, ev.price), ev.currency)}+
                     </span>
                   </div>
                 </Link>
@@ -330,7 +332,7 @@ export default function OrgStorefront() {
         }
         // Marketing: load the org's pixels (consent-gated). The loaders emit
         // their own PageView, so we don't fire one here.
-        initOrgPixels(org.marketing?.pixels);
+        initOrgPixels(org.id, org.marketing?.pixels);
       } catch (err) {
         console.error('Org slug lookup failed:', err);
         if (!cancelled) setState({ status: 'not-found' });
@@ -365,6 +367,7 @@ export default function OrgStorefront() {
 
   return (
     <ThemeProvider org={state.org!}>
+      <InAppBrowserBanner />
       <StorefrontInner org={state.org!} />
     </ThemeProvider>
   );

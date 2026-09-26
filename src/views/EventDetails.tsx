@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Accessibility as AccessIcon } from 'lucide-react';
+import { EventAccessInfo } from '../components/Accessibility';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
-import { getPublicEvent, getEventForEdit } from '../lib/events';
+import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
 import { startCheckout } from '../lib/checkout';
 import SocialLinks from '../components/SocialLinks';
@@ -19,20 +21,34 @@ import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
+import InAppBrowserBanner from '../components/InAppBrowserBanner';
+import VenueMap from '../components/VenueMap';
+import { captureAttribution, type Attribution } from '../lib/attribution';
+import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
+import { getVoucherTier } from '../lib/vouchers';
+import { attachReferral } from '../lib/referrals';
 import ShareModal from '../components/ShareModal';
+import { useShareTags } from '../hooks/useShareTags';
+import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
-import { effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
-import VoucherField from '../components/VoucherField';
+import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
+
+const RESUME_KEY = 'exos.resumeBuy';
+const RESUME_TTL_MS = 10 * 60 * 1000;
 
 export default function EventDetails() {
   const { id } = useParams();
   const t = useT();
-  const { user, isAdmin, signIn } = useAuth();
+  const { user, isAdmin, signIn, isAuthModalOpen } = useAuth();
+  // Set when Buy opened the sign-in modal on this page (state still intact).
+  const pendingBuyRef = useRef(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const [event, setEvent] = useState<Event | null>(null);
@@ -40,17 +56,36 @@ export default function EventDetails() {
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
-  const [discountCode, setDiscountCode] = useState('');
-  const [appliedDiscount, setAppliedDiscount] = useState<{ type: 'percentage' | 'fixed', value: number } | null>(null);
+  // Phone buy bar: shown while the buy card is off screen.
+  const buyCardRef = useRef<HTMLDivElement>(null);
+  const [buyInView, setBuyInView] = useState(false);
   // The literal code that's currently applied — needed so we can pass it
   // through to the Stripe metadata and the post-purchase usage increment.
-  const [appliedDiscountCode, setAppliedDiscountCode] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   // Optional per-ticket attendee names, index-aligned with quantity. Stamped
   // onto the minted tickets after a free claim (best-effort, owner RPC).
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
-  const [voucher, setVoucher] = useState<{ code: string; canBypass: boolean } | null>(null);
+  const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
+  // A hidden tier the applied voucher unlocks. The public tier list never
+  // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
+  const [unlockedTier, setUnlockedTier] = useState<NonNullable<Event['ticketTiers']>[number] | null>(null);
+  // Where this buyer came from (promoter link, ad, Instagram Shop), kept for
+  // the visit so it survives sign-in; and a cart pre-filled by a checkout link.
+  const [attribution, setAttribution] = useState<Attribution>({});
+  const [prefill, setPrefill] = useState<CheckoutPrefill | null>(null);
+  // Accounts a share tags: the organizer and the promoter who brought this fan.
+  const shareTags = useShareTags({ org, promoterCode: attribution.promoter, enabled: !!org });
+  useEffect(() => {
+    if (!id) return;
+    setAttribution(captureAttribution(id, window.location.search));
+    setPrefill(readPrefill(id));
+  }, [id]);
+  const location = useLocation();
+  useEffect(() => {
+    const notes = (location.state as { checkoutNotes?: string[] } | null)?.checkoutNotes;
+    if (notes && notes.length > 0) toast({ kind: 'info', message: notes.join(' ') });
+  }, [location.state]);
   const [userTicketCount, setUserTicketCount] = useState(0);
   // Per-tier sold/capacity, sourced from the events/{id}/tierSales sub-
   // collection. Buyers can no longer mutate the embedded ticketTiers array
@@ -73,8 +108,14 @@ export default function EventDetails() {
       if (!data && user) data = await getEventForEdit(id);
       if (data) {
         setEvent(data);
+        // Default to the first tier, but keep a choice the buyer (or a
+        // checkout link, or a voucher) already made: this effect re-runs when
+        // the session resolves or the buyer signs in.
         if (data.ticketTiers && data.ticketTiers.length > 0) {
-          setSelectedTierId(data.ticketTiers[0].id);
+          // First tier that still has room; a sold-out tier only when all are.
+          const open = data.ticketTiers.find((t) => (t.capacity ?? 0) - (t.sold ?? 0) > 0);
+          const first = (open ?? data.ticketTiers[0]).id;
+          setSelectedTierId((cur) => cur ?? first);
         }
         // SEO: per-event meta tags (Open Graph, Twitter Card,
         // Schema.org Event). Crawlers that execute JS pick this up;
@@ -122,8 +163,9 @@ export default function EventDetails() {
         if (data.orgId) {
           getPublicOrg(data.orgId)
             .then((o) => {
+              if (!alive) return;   // navigated away: don't load pixels on the next page
               setOrg(o ?? null);
-              initOrgPixels(o?.marketing?.pixels);
+              initOrgPixels(data.orgId, o?.marketing?.pixels);
               trackPixelEvent('ViewContent', { content_name: data.title, content_ids: [data.id] });
             })
             .catch(() => {/* non-fatal */});
@@ -133,51 +175,29 @@ export default function EventDetails() {
     }
     // A thrown fetch (network/Supabase error) must still clear the spinner so
     // the "Event not found" state renders instead of an infinite loader.
+    let alive = true;
     fetchEvent().catch((err) => {
       console.warn('Event load failed:', err);
       setLoading(false);
     });
+    return () => { alive = false; };
   }, [id, user]);
 
   // (Live per-tier sold/capacity subscription removed — phase-1 reads
   // sold/capacity off the mapped tiers; real-time counters return in phase-2
   // with the exos_tickets fulfillment path.)
 
-  const applyDiscount = async () => {
-    if (!event || !discountCode) return;
-    const upper = discountCode.trim().toUpperCase();
-    const codeObj = event.discountCodes?.find((c) => c.code === upper);
-    if (!codeObj) {
-      toast({ kind: 'error', message: 'Invalid discount code.' });
-      setAppliedDiscount(null);
-      setAppliedDiscountCode(null);
-      return;
-    }
-
-    // Usage-limit / expiry enforcement lands in phase-2 (a validate-code RPC):
-    // discount codes are org-secret, so buyer-side validation can't read the
-    // counter directly. Phase-1 applies the code locally — checkout is gated.
-    setAppliedDiscount({ type: codeObj.type, value: codeObj.value });
-    setAppliedDiscountCode(upper);
-    toast({
-      kind: 'success',
-      title: 'Discount applied',
-      message: `${codeObj.value}${codeObj.type === 'percentage' ? '%' : '$'} off your purchase.`,
-    });
-  };
-
-  // Tiers visible to the current viewer. A tier is visible if it's
-  // public OR if the currently-applied promo code unlocks it (the code
-  // carries an `unlocksTierIds` array). This is the buyer-side mirror
-  // of the per-tier visibility model on the event doc — without it,
-  // setting a tier to 'hidden' would have no effect because all tiers
-  // would still be in the rendered list.
-  const visibleTiers = (event?.ticketTiers || []).filter((t) => {
+  // Tiers visible to the current viewer: public ones, plus a hidden tier when
+  // the applied voucher is restricted to it — the same rule exos-checkout
+  // enforces server-side, so nothing is shown that can't be bought.
+  const allTiers = [
+    ...(event?.ticketTiers || []),
+    ...(unlockedTier && !(event?.ticketTiers || []).some((t) => t.id === unlockedTier.id) ? [unlockedTier] : []),
+  ];
+  const visibleTiers = allTiers.filter((t) => {
     const visibility = (t as { visibility?: string }).visibility ?? 'public';
     if (visibility === 'public') return true;
-    if (!appliedDiscountCode) return false;
-    const code = event?.discountCodes?.find((c) => c.code === appliedDiscountCode);
-    return code?.unlocksTierIds?.includes(t.id) === true;
+    return !!voucher?.restrictTierId && voucher.restrictTierId === t.id;
   });
 
   const selectedTier = visibleTiers.find((t) => t.id === selectedTierId);
@@ -201,44 +221,82 @@ export default function EventDetails() {
     return null;
   };
   
+  // All-in: exactly what exos-checkout will charge per ticket — the scheduled
+  // price (or a server-validated voucher's pinned price) plus exclusive tax.
   const calculateFinalPrice = () => {
     if (!event) return 0;
-    // Scheduled pricing: the selected tier's price is its current effective
-    // price (latest active step), not the flat base — so early-bird / timed
-    // price steps are reflected in the checkout total.
-    let basePrice = selectedTier
-      ? effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule)
-      : event.price;
-
-    if (appliedDiscount) {
-      if (appliedDiscount.type === 'percentage') {
-        basePrice = basePrice * (1 - appliedDiscount.value / 100);
-      } else {
-        basePrice = Math.max(0, basePrice - appliedDiscount.value);
-      }
-    }
-    return basePrice;
+    if (!selectedTier) return event.price;
+    const voucherApplies =
+      voucher?.overridePrice != null && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
+    const base = voucherApplies
+      ? (voucher!.overridePrice as number)
+      : effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    return allInPrice(base, selectedTier.exclusiveTaxPercent);
   };
 
   const priceToDisplay = calculateFinalPrice();
 
   const maxPerOrder = event?.purchaseLimits?.maxPerOrder || 8;
+
+  // Apply a checkout link's tier + quantity once the event's tiers are known.
+  // (A hidden tier only shows once its voucher applies; the voucher field
+  // re-selects it then.)
+  useEffect(() => {
+    if (!prefill || !event?.ticketTiers?.length) return;
+    if (event.ticketTiers.some((t) => t.id === prefill.tierId)) setSelectedTierId(prefill.tierId);
+    setQuantity(Math.max(1, Math.min(maxPerOrder, prefill.quantity)));
+  }, [prefill, event?.id]);
+  // A voucher restricted to a tier the page doesn't list (hidden tier): fetch
+  // it, show it and select it. Dropped again if the voucher is removed.
+  useEffect(() => {
+    const tierId = voucher?.restrictTierId;
+    if (!event || !voucher || !tierId) { setUnlockedTier(null); return undefined; }
+    if ((event.ticketTiers || []).some((t) => t.id === tierId)) {
+      setSelectedTierId(tierId);
+      return undefined;
+    }
+    let alive = true;
+    getVoucherTier(event.id, voucher.code, user?.email ?? null).then((t) => {
+      if (!alive || !t) return;
+      setUnlockedTier(t);
+      setSelectedTierId(t.id);
+    });
+    return () => { alive = false; };
+  }, [event?.id, voucher?.code, voucher?.restrictTierId]);
   const maxPerAccount = event?.purchaseLimits?.maxPerAccount || 8;
   // Paid checkout is gated on the Stripe publishable key — the backend
   // (exos-checkout + exos_fulfill_checkout) is built but stays dormant until
   // payments are switched on. No key → paid tiers show "Coming soon".
   const stripeEnabled = !!(import.meta as { env?: { VITE_STRIPE_PUBLISHABLE_KEY?: string } }).env?.VITE_STRIPE_PUBLISHABLE_KEY;
+  // Same routing rule as handlePurchase: anything priced needs checkout.
+  const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
+  const paidNotOnSale = !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
   const handlePurchase = async () => {
+    if (!event) return;
+    // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
+    if (paidNotOnSale) {
+      toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
+      return;
+    }
     if (!user) {
+      // Pick up where they left off once signed in (survives the OAuth
+      // round trip, which reloads the page).
+      pendingBuyRef.current = true;
+      // A redirect sign-in (Google/Apple) reloads the page: keep the choice so
+      // it can be put back, never replayed without a tap.
+      try {
+        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
+      } catch { /* storage blocked */ }
       toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
       await signIn();
       return;
     }
-    if (!event) return;
-    const tier = event.ticketTiers?.find((t) => t.id === selectedTierId) || event.ticketTiers?.[0];
+    // Never fall back to another tier: buying tier 0 when the buyer picked a
+    // (voucher-unlocked) tier that isn't loaded would charge the wrong price.
+    const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
     if (!tier?.id) {
-      toast({ kind: 'error', message: 'No ticket tier available for this event yet.' });
+      toast({ kind: 'error', message: selectedTierId ? 'That ticket type is no longer available. Pick another.' : 'No ticket tier available for this event yet.' });
       return;
     }
     const unitPrice = tier.price ?? event.price ?? 0;
@@ -266,7 +324,9 @@ export default function EventDetails() {
           cancelUrl: publicUrl(`event/${event.id}`),
           addons: addonSel.items,
           voucherCode: voucher?.code,
+          attribution,
         });
+        clearPrefill(event.id);
         window.location.href = url; // leave the SPA for Stripe-hosted checkout
       } catch (err: any) {
         console.error('Checkout failed:', err);
@@ -280,19 +340,21 @@ export default function EventDetails() {
     // (?promoter / ?utm_source) so it lands in the event's Sales report.
     setPurchasing(true);
     try {
-      const params = new URLSearchParams(window.location.search);
       // Shared idempotency/order ref so any free $0 extras attach to this claim.
       const orderRef = crypto.randomUUID();
       const ids = await claimFreeTickets({
         eventId: event.id,
         tierId: tier.id,
         quantity,
-        promoterId: params.get('promoter'),
-        channel: params.get('utm_source'),
+        promoterId: attribution.promoter ?? null,
+        channel: attribution.utm_source ?? null,
         // Idempotency key for this claim attempt — a network retry returns the
         // same tickets instead of minting twice (button is disabled meanwhile).
         orderRef,
       });
+      // Credit the friend whose link brought this buyer (paid orders are
+      // credited at fulfillment from the checkout attribution).
+      if (attribution.ref) void attachReferral(orderRef, attribution.ref);
       // Stamp attendee names onto the new tickets (best-effort — a name hiccup
       // must not fail a claim that already minted).
       // Pair names with tickets in MINT order. A fresh mint returns ids in
@@ -339,8 +401,9 @@ export default function EventDetails() {
         currency: event.currency || 'USD',
         num_items: ids.length,
       });
-      toast({ kind: 'success', title: "You're in!", message: `${ids.length} ticket(s) reserved — find them in My Tickets.` });
-      navigate('/my-tickets');
+      clearPrefill(event.id);
+      // My Tickets shows the confirmation (see its ?claimed handler).
+      navigate(`/my-tickets?claimed=${ids.length}`);
     } catch (err: any) {
       console.error('Free claim failed:', err);
       toast({ kind: 'error', message: err?.message || 'Could not reserve tickets. Please try again.' });
@@ -348,6 +411,46 @@ export default function EventDetails() {
       setPurchasing(false);
     }
   };
+
+  // After sign-in. Same page (email sign-in, nothing reloaded): the buyer's
+  // choices are intact, so carry on with the purchase they tapped. After a
+  // redirect sign-in the page reloaded: put their ticket type and quantity
+  // back and ask for one more tap. Never buys on a later, unrelated visit.
+  useEffect(() => {
+    if (!user || !event) return;
+    let saved: { id?: string; at?: number; tierId?: string | null; qty?: number } | null = null;
+    try {
+      const raw = sessionStorage.getItem(RESUME_KEY);
+      if (raw) saved = JSON.parse(raw);
+      sessionStorage.removeItem(RESUME_KEY);
+    } catch { /* storage blocked or bad JSON */ }
+    if (pendingBuyRef.current) {
+      pendingBuyRef.current = false;
+      void handlePurchase();
+      return;
+    }
+    if (!saved || saved.id !== event.id || !saved.at || Date.now() - saved.at > RESUME_TTL_MS) return;
+    if (saved.tierId && (event.ticketTiers ?? []).some((t) => t.id === saved!.tierId)) setSelectedTierId(saved.tierId);
+    if (saved.qty && saved.qty > 0) setQuantity(Math.min(maxPerOrder, saved.qty));
+    toast({ kind: 'info', message: "You're signed in. Check your tickets and tap Buy to finish." });
+    buyCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, event?.id]);
+
+  // Closing the sign-in modal without signing in drops the pending purchase.
+  useEffect(() => {
+    if (isAuthModalOpen || user || !pendingBuyRef.current) return;
+    pendingBuyRef.current = false;
+    try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage blocked */ }
+  }, [isAuthModalOpen, user]);
+
+  useEffect(() => {
+    const el = buyCardRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver(([entry]) => setBuyInView(entry.isIntersecting), { threshold: 0.15 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [event?.id, loading]);
 
   const handleShare = async () => {
     const shareData = {
@@ -399,7 +502,7 @@ export default function EventDetails() {
     // transfer) is exercisable without Stripe checkout (which stays phase-2).
     setPurchasing(true);
     try {
-      const tier = event.ticketTiers?.find((t) => t.id === selectedTierId) || event.ticketTiers?.[0];
+      const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
       const ids = await mintTickets({
         eventId: event.id,
         tierId: tier?.id ?? null,
@@ -424,19 +527,22 @@ export default function EventDetails() {
     await shareEventToStory(
       {
         title: event.title,
-        url: publicUrl(`event/${event.id}`),
+        url: publicUrl(eventSharePath(event)),
         imageUrl: event.image,
         dateLabel: event.date
           ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
           : undefined,
         venue: event.location,
+        role: 'fan',
+        promoter: attribution.promoter,
+        mentions: mentionsFor('instagram_story', shareTags),
       },
       toast,
     );
   };
 
   const handleSMSShare = () => {
-    const text = `Join me at ${event?.title}! Access intel here: ${window.location.href}`;
+    const text = `${withMentions(`Join me at ${event?.title}!`, mentionsFor('sms', shareTags))} Access intel here: ${window.location.href}`;
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
@@ -479,6 +585,7 @@ export default function EventDetails() {
 
   return (
     <div className="wall grain min-h-screen text-white relative">
+      <InAppBrowserBanner />
       {/* Local reproduction of the mockup's bespoke `.grain` film-grain
           overlay — not in index.css, so it's copied verbatim from the
           EventDetails/Checkout mockup <style> blocks. `.wall`, `.disp`,
@@ -613,6 +720,9 @@ export default function EventDetails() {
                    <p className="disp text-xl tracking-tight">{event.location}</p>
                 </div>
               </div>
+              <VenueMap eventId={event.id} location={event.location} address={event.address} />
+              <EventAccessInfo accessibility={event.accessibility} />
+
               {/* Performers block — only renders when the organizer
                   has set at least one. First name is treated as the
                   headliner (slightly larger). The block sits above
@@ -682,25 +792,95 @@ export default function EventDetails() {
 
           {/* Right Column: Checkout Card */}
           <div className="lg:col-span-1">
-            <div className="sticky top-24 bg-[#111] border border-white/10 overflow-hidden">
+            <div id="buy" ref={buyCardRef} className="lg:sticky top-24 bg-[#111] border border-white/10 overflow-hidden scroll-mt-24">
               <div className="p-7">
                 <div className="mb-8">
                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">price</p>
                     <p className="disp text-6xl neon tracking-tight">{formatCurrency(priceToDisplay * quantity, event.currency)}</p>
+                    <p className="type mt-1 text-[10px] uppercase tracking-widest text-white/40">
+                      {selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
+                    </p>
                     {selectedTier && (() => {
                       // Scheduled-pricing urgency nudge: surface the next upward
                       // step so buyers see "price rises to $X on <date>".
                       const cur = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
                       const next = nextPriceStep(selectedTier.priceSchedule);
                       if (!next || next.price <= cur) return null;
+                      const nextAllIn = allInPrice(next.price, selectedTier.exclusiveTaxPercent);
                       return (
                         <p className="type mt-2 text-[10px] uppercase tracking-widest text-brand-accent">
-                          ⏱ price rises to {formatCurrency(next.price, event.currency)} on{' '}
+                          ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
                           {formatInTz(new Date(next.startsAt), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
                       );
                     })()}
                 </div>
+
+                {/* Tier Selection */}
+                {event.ticketTiers && event.ticketTiers.length > 0 && (
+                  <div className="mb-8 space-y-2">
+                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">{t('event.pickTicket')}</p>
+                     {visibleTiers.map((tier) => {
+                       const tierLive = liveTier(tier.id, tier.capacity);
+                       const tierLeft = Math.max(0, tierLive.capacity - tierLive.sold);
+                       return (
+                       <button
+                         key={tier.id}
+                         onClick={() => setSelectedTierId(tier.id)}
+                         aria-pressed={selectedTierId === tier.id}
+                         className={`w-full p-5 text-left border-2 transition-all relative overflow-hidden flex flex-col items-start ${
+                           selectedTierId === tier.id
+                             ? 'border-brand-primary bg-brand-primary/5'
+                             : 'border-white/10 hover:border-white/30 hover:bg-white/5'
+                         } ${tierLeft === 0 ? 'opacity-60' : ''}`}
+                       >
+                         {selectedTierId === tier.id && (
+                            <div className="absolute top-0 right-0 w-7 h-7 bg-brand-primary flex items-center justify-center">
+                               <CheckCircle2 className="w-4 h-4 text-black" />
+                            </div>
+                         )}
+
+                         <div className="flex justify-between items-center w-full mb-1 gap-3">
+                            <p className="disp text-xl tracking-tight text-white">{tier.name}</p>
+                            {(() => {
+                              const eff = buyerTierPrice(tier);
+                              const opening = allInPrice(tier.price, tier.exclusiveTaxPercent);
+                              const markedDown = eff < opening;
+                              return (
+                                <span className="inline-flex items-center gap-2 shrink-0">
+                                  {markedDown && (
+                                    <span className="type text-white/30 line-through text-xs">{formatCurrency(opening, event.currency)}</span>
+                                  )}
+                                  <span className="stamp neon text-base">{formatCurrency(eff, event.currency)}</span>
+                                </span>
+                              );
+                            })()}
+                         </div>
+
+                         <p className="type text-[10px] text-white/50 mb-3">{tier.description}</p>
+                         {tier.accessible && (
+                           <p className="type text-[11px] text-sky-200 mb-3 flex items-start gap-1.5">
+                             <AccessIcon className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
+                             <span><span className="font-bold">Accessible</span>{tier.accessibleNote ? ` · ${tier.accessibleNote}` : ''}</span>
+                           </p>
+                         )}
+                         <TableTierInfo eventId={event.id} tierId={tier.id} price={buyerTierPrice(tier)} currency={event.currency} />
+
+                         <div className="flex items-center gap-2">
+                           <span className={`w-1.5 h-1.5 ${tierLeft < 10 ? 'bg-brand-accent' : 'bg-brand-primary'}`}></span>
+                           <span className={`type text-[9px] uppercase tracking-widest leading-none ${tierLeft === 0 ? 'text-brand-accent' : 'text-white/40'}`}>
+                             {tierLeft === 0
+                               ? t('event.tierSoldOut')
+                               : !stripeEnabled && tier.price > 0
+                                 ? t('event.onSaleSoon')
+                                 : t('event.left', { n: tierLeft })}
+                           </span>
+                         </div>
+                       </button>
+                       );
+                     })}
+                  </div>
+                )}
 
                 <div className="mb-8">
                    <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">quantity</p>
@@ -735,6 +915,7 @@ export default function EventDetails() {
                          value={attendeeNames[i] ?? ''}
                          maxLength={80}
                          onChange={(e) => setAttendeeNames((prev) => { const next = [...prev]; next[i] = e.target.value; return next; })}
+                         aria-label={`Name on ticket ${i + 1}`}
                          placeholder={i === 0 ? t('event.ticketYou', { n: 1, name: user?.displayName || t('event.you') }) : t('event.ticketFriend', { n: i + 1 })}
                          className="type w-full bg-black border border-white/10 px-3 py-2.5 text-white text-sm placeholder-white/25 focus:border-brand-primary outline-none"
                        />
@@ -743,80 +924,7 @@ export default function EventDetails() {
                 </div>
                 )}
 
-                {/* Tier Selection */}
-                {event.ticketTiers && event.ticketTiers.length > 0 && (
-                  <div className="mb-8 space-y-2">
-                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">select ticket type</p>
-                     {visibleTiers.map((tier) => (
-                       <button
-                         key={tier.id}
-                         onClick={() => setSelectedTierId(tier.id)}
-                         className={`w-full p-5 text-left border-2 transition-all relative overflow-hidden flex flex-col items-start ${
-                           selectedTierId === tier.id
-                             ? 'border-brand-primary bg-brand-primary/5'
-                             : 'border-white/10 hover:border-white/30 hover:bg-white/5'
-                         }`}
-                       >
-                         {selectedTierId === tier.id && (
-                            <div className="absolute top-0 right-0 w-7 h-7 bg-brand-primary flex items-center justify-center">
-                               <CheckCircle2 className="w-4 h-4 text-black" />
-                            </div>
-                         )}
-
-                         <div className="flex justify-between items-center w-full mb-1 gap-3">
-                            <p className="disp text-xl tracking-tight text-white">{tier.name}</p>
-                            {(() => {
-                              const eff = effectiveTierPrice(tier.price, tier.priceSchedule);
-                              const markedDown = eff < tier.price;
-                              return (
-                                <span className="inline-flex items-center gap-2 shrink-0">
-                                  {markedDown && (
-                                    <span className="type text-white/30 line-through text-xs">{formatCurrency(tier.price, event.currency)}</span>
-                                  )}
-                                  <span className="stamp neon text-base">{formatCurrency(eff, event.currency)}</span>
-                                </span>
-                              );
-                            })()}
-                         </div>
-
-                         <p className="type text-[10px] text-white/50 mb-3">{tier.description}</p>
-
-                         {(() => {
-                           const live = liveTier(tier.id, tier.capacity);
-                           const remaining = Math.max(0, live.capacity - live.sold);
-                           return (
-                             <div className="flex items-center gap-2">
-                               <span className={`w-1.5 h-1.5 ${remaining < 10 ? 'bg-brand-accent' : 'bg-brand-primary'}`}></span>
-                               <span className="type text-[9px] text-white/30 uppercase tracking-widest leading-none">
-                                 {remaining} slots remaining
-                               </span>
-                             </div>
-                           );
-                         })()}
-                       </button>
-                     ))}
-                  </div>
-                )}
-
                 <div className="space-y-6 mb-6">
-                  <div className="bg-black p-4 border border-white/5">
-                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">discount_code</p>
-                     <div className="flex gap-2">
-                        <input
-                          className="type flex-grow bg-white/5 border border-white/10 px-4 py-3 text-[11px] uppercase tracking-widest text-white focus:outline-none focus:border-brand-primary"
-                          placeholder="enter_token"
-                          value={discountCode}
-                          onChange={(e) => setDiscountCode(e.target.value)}
-                        />
-                        <button
-                          onClick={applyDiscount}
-                          className="disp px-5 bg-white text-black text-lg tracking-wide hover:bg-brand-primary transition-colors shrink-0"
-                        >
-                          APPLY
-                        </button>
-                     </div>
-                  </div>
-
                   <div className="divide-y divide-white/5 border-t border-white/5">
                     <div className="flex justify-between type text-[10px] py-3.5 uppercase tracking-widest">
                       <span className="text-white/30">status</span>
@@ -843,6 +951,7 @@ export default function EventDetails() {
                   eventId={event.id}
                   email={user?.email ?? null}
                   onApplied={setVoucher}
+                  initialCode={prefill?.coupon}
                 />
 
                 {(!soldOut || voucher?.canBypass) && (
@@ -850,11 +959,12 @@ export default function EventDetails() {
                     eventId={event.id}
                     currency={event.currency || 'USD'}
                     onChange={setAddonSel}
+                    initialQty={prefill?.addons}
                   />
                 )}
 
                 <button
-                  disabled={(soldOut && !voucher?.canBypass) || purchasing}
+                  disabled={(soldOut && !voucher?.canBypass) || purchasing || paidNotOnSale}
                   onClick={handlePurchase}
                   className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide flex items-center justify-center gap-3 hover:scale-[1.01] transition-transform disabled:bg-white/10 disabled:text-white/20 disabled:scale-100"
                 >
@@ -863,10 +973,16 @@ export default function EventDetails() {
                   ) : (
                     <>
                       <Ticket className="w-5 h-5" />
-                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : t('event.buy')}</span>
+                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon') : t('event.buy')}</span>
                     </>
                   )}
                 </button>
+
+                {paidNotOnSale && !soldOut && (
+                  <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">
+                    {t('event.onSaleSoonHint')}
+                  </p>
+                )}
 
                 {soldOut && !voucher?.canBypass && (
                   <div className="mt-3">
@@ -925,6 +1041,29 @@ export default function EventDetails() {
         </div>
       </div>
 
+      {!buyInView && eventStatus !== 'cancelled' && (() => {
+        const open = visibleTiers.filter((tier) => {
+          const l = liveTier(tier.id, tier.capacity);
+          return l.capacity - l.sold > 0;
+        });
+        const from = open.length ? Math.min(...open.map((tier) => buyerTierPrice(tier))) : null;
+        return (
+          <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-black/95 border-t border-white/10 backdrop-blur px-4 py-3 flex items-center gap-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="min-w-0 flex-1">
+              <p className="type text-[10px] uppercase tracking-widest text-white/40">{from == null ? t('event.soldOut') : t('event.from')}</p>
+              {from != null && <p className="disp text-2xl neon leading-none">{from === 0 ? t('event.free') : formatCurrency(from, event.currency)}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={() => buyCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="disp bg-brand-primary text-black px-6 py-3 text-lg tracking-wide shrink-0"
+            >
+              {from == null ? t('event.joinWaitlist') : t('event.getTickets')}
+            </button>
+          </div>
+        );
+      })()}
+
       {/*
         Unified share modal — single entry point for the "Share Link"
         button on the event card. Falls back to platform pickers when
@@ -939,7 +1078,8 @@ export default function EventDetails() {
           onClose={() => setShowShare(false)}
           title={event.title}
           url={window.location.href.split('?')[0]}
-          promoterId={new URLSearchParams(window.location.search).get('promoter') ?? undefined}
+          promoterId={attribution.promoter}
+          tags={shareTags}
         />
       )}
     </div>

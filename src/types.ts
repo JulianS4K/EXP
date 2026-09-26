@@ -97,6 +97,8 @@ export interface Organization {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
     pixels?: { meta?: string; ga4?: string; tiktok?: string };
     shareImageUrl?: string;
+    /** Shares by fans and promoters @-tag the org (lib/socialTags.ts). Default on. */
+    allowTagging?: boolean;
   };
 }
 
@@ -173,6 +175,8 @@ export interface ArtistLink {
 
 export interface Event {
   id: string;
+  // Vanity slug (exos_events.slug) — the short /e/<slug> share link.
+  slug?: string;
   title: string;
   description: string;
   date: Timestamp;
@@ -275,6 +279,13 @@ export interface Event {
     // effective price is the latest already-active step (lib/pricing.ts).
     // Models early-bird → regular → last-minute. Empty/undefined = flat price.
     priceSchedule?: { startsAt: string; price: number }[];
+    // Exclusive tax rate the buyer pays on top of `price` (0 when the price
+    // already includes tax). From exos_public_tiers; drives all-in display.
+    exclusiveTaxPercent?: number;
+    // Accessible ticket type (mig 20260926090000) + its short note, e.g.
+    // "Wheelchair space + 1 companion seat".
+    accessible?: boolean;
+    accessibleNote?: string;
   }[];
   // Promo code metadata. The redemption *count* lives in the
   // events/{id}/promoUses/{code} sub-collection so it can be
@@ -310,6 +321,8 @@ export interface Event {
   // set. The template is index 0; undefined = standalone event.
   seriesId?: string;
   seriesIndex?: number;
+  // Venue access info shown on the event page (mig 20260926090000).
+  accessibility?: import('./lib/accessibility').EventAccessibility;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

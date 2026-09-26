@@ -27,7 +27,7 @@
 import { listInboundTransfers, listOutboundTransfers, listMyTickets } from './tickets';
 import { supabase } from './supabase';
 import { listSavedEvents } from './saves';
-import { nextPriceStep } from './pricing';
+import { allInPrice, nextPriceStep } from './pricing';
 import { formatInTz } from './datetime';
 import { formatCurrency } from './utils';
 import { Event, Ticket, Transfer } from '../types';
@@ -205,6 +205,7 @@ export interface TierRow {
   event_id: string;
   name: string | null;
   price_schedule: unknown;
+  exclusive_tax_percent?: number | null;
 }
 
 function eventMs(e: Event | undefined): number {
@@ -386,7 +387,8 @@ export function priceStepItems(
       if (!step) continue;
       const at = Date.parse(step.startsAt);
       if (at - now > PRICE_STEP_WINDOW_MS) continue;
-      if (!best || at < best.at) best = { at, tier: t.name ?? 'Tickets', price: step.price };
+      // All-in: the nudge quotes what the buyer will actually pay.
+      if (!best || at < best.at) best = { at, tier: t.name ?? 'Tickets', price: allInPrice(step.price, t.exclusive_tax_percent) };
     }
     if (!best) continue;
     const when = formatInTz(new Date(best.at), e.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -458,7 +460,7 @@ function fetchReschedules(): Promise<SourceResult<RescheduleRow>> {
 function fetchPublicTiers(eventIds: string[]): Promise<SourceResult<TierRow>> {
   if (eventIds.length === 0) return Promise.resolve({ rows: [] });
   return selectRows<TierRow>('tiers', () =>
-    supabase.from('exos_public_tiers').select('event_id, name, price_schedule').in('event_id', eventIds),
+    supabase.from('exos_public_tiers').select('event_id, name, price_schedule, exclusive_tax_percent').in('event_id', eventIds),
   );
 }
 

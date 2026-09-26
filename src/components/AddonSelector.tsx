@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { listPublicAddons, type PublicAddon } from '../lib/addons';
 import { formatCurrency } from '../lib/utils';
+import { allInPrice } from '../lib/pricing';
 import { useT } from '../context/LanguageContext';
 
 export interface AddonSelection {
@@ -19,9 +20,11 @@ interface Props {
   eventId: string;
   currency?: string;
   onChange: (sel: AddonSelection) => void;
+  /** Quantities from a checkout link, applied once the add-ons load. */
+  initialQty?: Record<string, number>;
 }
 
-export default function AddonSelector({ eventId, currency = 'USD', onChange }: Props) {
+export default function AddonSelector({ eventId, currency = 'USD', onChange, initialQty }: Props) {
   const t = useT();
   const [addons, setAddons] = useState<PublicAddon[]>([]);
   const [qty, setQty] = useState<Record<string, number>>({});
@@ -29,25 +32,49 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange }: P
   useEffect(() => {
     let alive = true;
     listPublicAddons(eventId)
-      .then((a) => { if (alive) setAddons(a); })
+      .then((a) => {
+        if (!alive) return;
+        setAddons(a);
+        if (initialQty) applyInitial(a, initialQty);
+      })
       .catch((e) => console.error('listPublicAddons failed:', e));
     return () => { alive = false; };
   }, [eventId]);
 
-  const setQuantity = (a: PublicAddon, next: number) => {
+  const clampFor = (a: PublicAddon, next: number) => {
     const remaining = a.capacity > 0 ? Math.max(0, a.capacity - a.sold) : Infinity;
     const ceiling = Math.min(a.maxPerOrder ?? Infinity, remaining);
-    const clamped = Math.max(0, Math.min(next, ceiling));
+    return Math.max(0, Math.min(next, ceiling));
+  };
+
+  const report = (updated: Record<string, number>, list: PublicAddon[]) => {
+    const items = Object.entries(updated).map(([addon_id, quantity]) => ({ addon_id, quantity }));
+    const totalCents = items.reduce((sum, it) => {
+      const found = list.find((x) => x.id === it.addon_id);
+      // All-in (incl. exclusive tax), matching what exos-checkout charges.
+      return sum + Math.round(allInPrice(found?.price ?? 0, found?.exclusiveTaxPercent) * 100) * it.quantity;
+    }, 0);
+    onChange({ items, totalCents });
+  };
+
+  // Ids that aren't this event's public add-ons are ignored.
+  const applyInitial = (list: PublicAddon[], wanted: Record<string, number>) => {
+    const updated: Record<string, number> = {};
+    for (const a of list) {
+      const n = clampFor(a, wanted[a.id] ?? 0);
+      if (n > 0) updated[a.id] = n;
+    }
+    if (Object.keys(updated).length === 0) return;
+    setQty(updated);
+    report(updated, list);
+  };
+
+  const setQuantity = (a: PublicAddon, next: number) => {
+    const clamped = clampFor(a, next);
     const updated: Record<string, number> = { ...qty, [a.id]: clamped };
     if (clamped === 0) delete updated[a.id];
     setQty(updated);
-
-    const items = Object.entries(updated).map(([addon_id, quantity]) => ({ addon_id, quantity }));
-    const totalCents = items.reduce((sum, it) => {
-      const found = addons.find((x) => x.id === it.addon_id);
-      return sum + Math.round((found?.price ?? 0) * 100) * it.quantity;
-    }, 0);
-    onChange({ items, totalCents });
+    report(updated, addons);
   };
 
   if (addons.length === 0) return null;
@@ -65,7 +92,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange }: P
               <p className="font-black uppercase italic tracking-tighter text-sm truncate">{a.name}</p>
               {a.description && <p className="text-white/40 text-xs font-bold truncate">{a.description}</p>}
               <p className="text-brand-primary text-xs font-black mt-0.5">
-                {a.price > 0 ? formatCurrency(a.price, currency) : t('event.free')}
+                {a.price > 0 ? formatCurrency(allInPrice(a.price, a.exclusiveTaxPercent), currency) : t('event.free')}
                 {soldOut && <span className="text-brand-accent ml-2">{t('event.soldOut')}</span>}
               </p>
             </div>

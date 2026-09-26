@@ -1,6 +1,7 @@
 import { useAuth } from '../context/AuthContext';
 import { Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import DeleteAccountPanel from '../components/DeleteAccountPanel';
 
 export default function Profile() {
   const { user } = useAuth();
@@ -85,8 +86,11 @@ export default function Profile() {
               <ul className="space-y-3">
                 <li><button className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">edit profile</button></li>
                 <li><button className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">payment methods</button></li>
-                <li><button className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">privacy</button></li>
+                <li><Link to="/privacy" className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">privacy</Link></li>
               </ul>
+              <div className="mt-6 pt-4 border-t border-white/10">
+                <DeleteAccountPanel />
+              </div>
             </div>
           </div>
 

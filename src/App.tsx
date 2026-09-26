@@ -1,5 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import { lazy, Suspense, ReactNode } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
+import { lazy, Suspense, ReactNode, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { OrganizationProvider } from './context/OrganizationContext';
 import { ToastProvider } from './context/ToastContext';
@@ -9,12 +9,20 @@ import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
 import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
+import { isPixelRoute, leavePixelScope } from './lib/pixels';
 
 // Home is the landing page — keep it eagerly loaded so the first paint is
 // fast. Every other route is split out so we don't ship CreateEvent / the
 // QR scanner / Stripe / etc. on the initial download.
 import Home from './views/Home';
 const EventDetails = lazy(() => import('./views/EventDetails'));
+const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
+const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
+const PromoterKit = lazy(() => import('./views/PromoterKit'));
+const EventsMap = lazy(() => import('./views/EventsMap'));
+const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
+const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
+const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
 const TicketDetail = lazy(() => import('./views/TicketDetail'));
 const WalletPass = lazy(() => import('./views/WalletPass'));
@@ -36,6 +44,7 @@ const OrgSettings = lazy(() => import('./views/OrgSettings'));
 const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
+const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
@@ -66,6 +75,19 @@ function RouteFallback() {
  */
 function ChromeLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navType = useNavigationType();
+  // Organizer pixels only ever see public listing pages, never tickets,
+  // accounts, dashboards or the door scanner.
+  useEffect(() => {
+    if (!isPixelRoute(location.pathname)) leavePixelScope();
+  }, [location.pathname]);
+  // A new page starts at the top (back/forward keeps the browser's own
+  // restoration; tab switches via ?tab= don't change the pathname).
+  // Keyed on the path only: a ?tab= replace on the same page must not jump.
+  useEffect(() => {
+    if (navType !== 'POP') window.scrollTo(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
   const isBare =
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||
@@ -106,6 +128,13 @@ export default function App() {
                     <Route path="/" element={<Home />} />
                     <Route path="/event/:id" element={<EventDetails />} />
                     <Route path="/e/:slug" element={<SlugRedirect />} />
+                    <Route path="/checkout" element={<CheckoutLink />} />
+                    <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/map" element={<EventsMap />} />
+                    <Route path="/p/:token" element={<PromoterPortal />} />
+                    <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
+                    <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
+                    <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />
                     <Route path="/my-tickets" element={<MyTickets />} />
@@ -137,6 +166,8 @@ export default function App() {
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />
+                    {/* Stripe Embedded Checkout return page, inside the same iframe. */}
+                    <Route path="/embed/return" element={<EmbedReturn />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />

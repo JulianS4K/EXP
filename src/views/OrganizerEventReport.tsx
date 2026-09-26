@@ -9,7 +9,7 @@
 // already organizer-or-admin-only).
 
 import { ReactNode, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, BarChart3, DollarSign, Tag, Users, Ban, Undo2 } from 'lucide-react';
 import { getEventForEdit } from '../lib/events';
@@ -28,11 +28,34 @@ import ReleasePolicyPanel from '../components/ReleasePolicyPanel';
 import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
+import RefundPanel from '../components/RefundPanel';
+import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
+import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
+import GuestListPanel from '../components/GuestListPanel';
+import PriceDisclosureExport from '../components/PriceDisclosureExport';
+import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
+type ReportTab = 'overview' | 'attendees' | 'door' | 'marketing' | 'settings';
+const REPORT_TABS: { key: ReportTab; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'attendees', label: 'Attendees & refunds' },
+  { key: 'door', label: 'Tables & guest lists' },
+  { key: 'marketing', label: 'Marketing' },
+  { key: 'settings', label: 'Settings' },
+];
+
 export default function OrganizerEventReport() {
   const { eventId } = useParams<{ eventId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const tab: ReportTab = REPORT_TABS.some((t) => t.key === tabParam) ? (tabParam as ReportTab) : 'overview';
+  const setTab = (next: ReportTab) => {
+    const sp = new URLSearchParams(searchParams);
+    if (next === 'overview') sp.delete('tab'); else sp.set('tab', next);
+    setSearchParams(sp, { replace: true });
+  };
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
   const { activeRole } = useOrganization();
@@ -79,9 +102,8 @@ export default function OrganizerEventReport() {
   // Gate: only owner / manager / finance (or admin) see financials. NOTE:
   // canEditEvents() returns true for the 'content' role too, which wrongly
   // exposed the report to content staff — gate explicitly on the finance-capable
-  // roles. (Column-scoping buyer_email/price_paid out of scanner/content at the
-  // RLS layer is a tracked follow-up on the barcode-secret least-privilege
-  // pattern from mig 20260702123000.) Falls back to legacy organizerId.
+  // roles. (Buyer emails are column-scoped to these roles server-side, mig
+  // 20260925013000.) Falls back to legacy organizerId.
   const allowedByRole =
     isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance';
   const allowedByLegacy = event?.organizerId === user.uid;
@@ -110,11 +132,10 @@ export default function OrganizerEventReport() {
   // refunds). Optimistic local update so the UI reflects the change
   // without re-fetching.
   //
-  // Note: this flow does NOT issue a Stripe refund. The actual money
-  // movement is a separate step the organizer arranges via their
-  // Stripe dashboard. The void is sticky regardless: the ticket is
-  // unscannable even if the refund hasn't cleared yet, which is the
-  // important property for the door.
+  // Note: this flow does NOT issue a Stripe refund. Money refunds go
+  // through RefundPanel (exos-refund) below. The void is sticky
+  // regardless: the ticket is unscannable even if a refund hasn't
+  // cleared yet, which is the important property for the door.
   const handleVoidTicket = async (ticket: Ticket) => {
     if (!user || !ticket || ticket.status !== 'active') return;
     const reason = window.prompt(
@@ -234,7 +255,7 @@ export default function OrganizerEventReport() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
           <Stat
-            label="Revenue"
+            label="Ticket sales"
             value={formatCurrency(totalRevenue, currency)}
             icon={<DollarSign size={16} />}
           />
@@ -250,6 +271,22 @@ export default function OrganizerEventReport() {
           />
         </div>
 
+        {/* Sections as tabs (?tab=…) so the report isn't one 8-screen scroll. */}
+        <div role="tablist" aria-label="Report sections" className="flex gap-1 overflow-x-auto -mx-4 px-4 mb-6 border-b border-slate-200">
+          {REPORT_TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 px-4 py-3 text-xs font-bold uppercase tracking-widest border-b-2 -mb-px transition-colors ${tab === t.key ? 'border-[#026cdf] text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-700'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'overview' && (<>
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
           <SalesChart organizerId={null} eventId={eventId!} fullHistory={true} />
@@ -261,57 +298,8 @@ export default function OrganizerEventReport() {
             attendees in. Pairs with the sales chart above (pre-event)
             for the full event lifecycle. */}
         <div className="mb-8">
-          <h2 className="text-sm font-bold text-slate-700 mb-3 mt-2">Door scans</h2>
           <ScanReport eventId={eventId!} totalSold={totalSold} />
         </div>
-
-        {/* Reschedule — postpone/move the event + notify holders (owner/manager). */}
-        <ReschedulePanel
-          event={event}
-          canManage={canAct}
-        />
-
-        {/* Scheduled pricing — time-based price steps per tier (owner/manager). */}
-        <TierPricingPanel
-          event={event}
-          canManage={canAct}
-        />
-
-        {/* Waitlist — demand captured after sell-out; release spots to notify. */}
-        <WaitlistPanel eventId={eventId!} />
-
-        {/* Attendee updates — broadcast a message to ticket holders (email +
-            in-app). Composer is owner/manager-only; the RPC re-checks server-side.
-            Finance-capable viewers below (scanner/content can't reach this page)
-            still see the sent history read-only. */}
-        <AnnouncementsPanel
-          eventId={eventId!}
-          canSend={canAct}
-        />
-
-        {/* Pre-event reminders — automatic T-24h / T-2h holder mail (cron) +
-            a manual "send now" for owner/manager (6h cooldown, server-enforced). */}
-        <RemindersPanel
-          eventId={eventId!}
-          canSend={canAct}
-          isPublished={event.status === 'published'}
-        />
-
-        {/* Guest list / bulk comps (owner/manager) — one call issues to a
-            pasted email list; budget enforced server-side. */}
-        <CompIssuancePanel
-          event={event}
-          canIssue={canAct}
-          onIssued={() => void reloadTickets()}
-        />
-
-        {/* Self-serve RSVP release policy (owner/manager) — holders of free
-            tickets can give the seat back; the waitlist auto-offers it. */}
-        <ReleasePolicyPanel
-          event={event}
-          canManage={canAct}
-          onSaved={(p) => setEvent((ev) => (ev ? { ...ev, ...p } : ev))}
-        />
 
         {/* Attendance funnel + attribution (server-side document) + CSV exports. */}
         <EventAnalyticsPanel
@@ -321,6 +309,11 @@ export default function OrganizerEventReport() {
           tickets={tickets}
           refreshKey={analyticsKey}
         />
+        </>)}
+
+        {tab === 'attendees' && (<>
+        {/* Access needs guests shared (mig 20260926090000). */}
+        <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
 
         {/* Attendees + per-ticket refund/void controls. Lists every
             ticket including voided ones (greyed out, with reason).
@@ -329,8 +322,7 @@ export default function OrganizerEventReport() {
         <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
           <h3 className="text-sm font-bold text-slate-700 mb-1">Attendees</h3>
           <p className="text-xs text-slate-400 mb-4">
-            "Refund / void" makes the ticket unscannable and shows "REFUNDED" on the buyer's wallet.
-            Issue the actual refund through your Stripe dashboard separately.
+            "Void" cancels a ticket so it no longer scans. To send money back, use Refunds below.
           </p>
           {tickets.length === 0 ? (
             <p className="text-xs text-slate-400">No tickets sold yet.</p>
@@ -382,7 +374,7 @@ export default function OrganizerEventReport() {
                                   onClick={() => handleReleaseTicket(t)}
                                   disabled={releasingId === t.id || voidingId === t.id}
                                   title="Give the seat back to the tier (free tickets only)"
-                                  className="inline-flex items-center gap-1 px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded text-[10px] font-bold uppercase tracking-widest border border-amber-200 disabled:opacity-40 transition-colors"
+                                  className="inline-flex items-center gap-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded text-[10px] font-bold uppercase tracking-widest border border-amber-200 disabled:opacity-40 transition-colors"
                                 >
                                   <Undo2 size={12} aria-hidden="true" />
                                   {releasingId === t.id ? 'Releasing…' : 'Release seat'}
@@ -391,10 +383,10 @@ export default function OrganizerEventReport() {
                               <button
                                 onClick={() => handleVoidTicket(t)}
                                 disabled={voidingId === t.id || releasingId === t.id}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[10px] font-bold uppercase tracking-widest border border-rose-200 disabled:opacity-40 transition-colors"
+                                className="inline-flex items-center gap-1 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[10px] font-bold uppercase tracking-widest border border-rose-200 disabled:opacity-40 transition-colors"
                               >
                                 <Ban size={12} aria-hidden="true" />
-                                {voidingId === t.id ? 'Voiding…' : 'Refund / Void'}
+                                {voidingId === t.id ? 'Voiding…' : 'Void'}
                               </button>
                             </span>
                           ) : (
@@ -409,6 +401,80 @@ export default function OrganizerEventReport() {
             </div>
           )}
         </div>
+
+        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
+        <RefundPanel
+          event={event}
+          canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+          canCancel={canAct}
+          onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+        />
+
+        {/* Guest list / bulk comps (owner/manager) — one call issues to a
+            pasted email list; budget enforced server-side. */}
+        <CompIssuancePanel
+          event={event}
+          canIssue={canAct}
+          onIssued={() => void reloadTickets()}
+        />
+        </>)}
+
+        {tab === 'door' && (<>
+        {/* Nightlife: table labels for sold tables, and guest lists. */}
+        <TableAssignmentsPanel event={event} canManage={canAct} />
+        <GuestListPanel event={event} canManage={canAct} />
+        </>)}
+
+        {tab === 'marketing' && (<>
+        {/* Attendee updates — broadcast a message to ticket holders (email +
+            in-app). Composer is owner/manager-only; the RPC re-checks server-side.
+            Finance-capable viewers below (scanner/content can't reach this page)
+            still see the sent history read-only. */}
+        <AnnouncementsPanel
+          eventId={eventId!}
+          canSend={canAct}
+        />
+
+        {/* Pre-event reminders — automatic T-24h / T-2h holder mail (cron) +
+            a manual "send now" for owner/manager (6h cooldown, server-enforced). */}
+        <RemindersPanel
+          eventId={eventId!}
+          canSend={canAct}
+          isPublished={event.status === 'published'}
+        />
+
+        {/* Fan referral rewards: rule (owner/manager) + top referrers. */}
+        <ReferralRewardsPanel event={event} canManage={canAct} />
+
+        {/* Waitlist — demand captured after sell-out; release spots to notify. */}
+        <WaitlistPanel eventId={eventId!} />
+        </>)}
+
+        {tab === 'settings' && (<>
+        {/* Scheduled pricing — time-based price steps per tier (owner/manager). */}
+        <TierPricingPanel
+          event={event}
+          canManage={canAct}
+        />
+
+        {/* Self-serve RSVP release policy (owner/manager) — holders of free
+            tickets can give the seat back; the waitlist auto-offers it. */}
+        <ReleasePolicyPanel
+          event={event}
+          canManage={canAct}
+          onSaved={(p) => setEvent((ev) => (ev ? { ...ev, ...p } : ev))}
+        />
+
+        {/* Reschedule — postpone/move the event + notify holders (owner/manager). */}
+        <ReschedulePanel
+          event={event}
+          canManage={canAct}
+        />
+
+        {/* Price shown vs charged per order (NY ACAL 25.07 / FTC fee rule record). */}
+        <PriceDisclosureExport eventId={eventId!} eventTitle={event.title} />
+        </>)}
+
       </div>
     </motion.div>
   );

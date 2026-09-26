@@ -124,7 +124,7 @@ export default function ClaimTicket() {
           <XCircle className="w-20 h-20 text-white/20 mx-auto mb-8" />
           <h1 className="disp text-5xl tracking-tight leading-none mb-4" style={{ transform: 'skewX(-4deg)' }}>{t('claim.expired')}</h1>
           <p className="type text-white/40 text-sm mb-10">
-            This transfer link is no longer active or the assets have already been claimed.
+            This transfer link has expired or the ticket was already claimed.
           </p>
           <button
             onClick={() => navigate('/')}
@@ -155,9 +155,6 @@ export default function ClaimTicket() {
             <ShieldCheck className="text-black w-8 h-8" aria-hidden="true" />
           </div>
           <h1 className="disp text-5xl tracking-tight leading-none mb-2" style={{ transform: 'skewX(-4deg)' }}>{t('claim.title')}</h1>
-          <p className="type text-[11px] text-white/40 uppercase tracking-[0.25em]">
-            secure exchange · verification
-          </p>
         </div>
 
         <motion.div
@@ -173,15 +170,12 @@ export default function ClaimTicket() {
             </div>
             <div>
               <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">
-                invitation for
+                ticket for
               </p>
               <h2 className="disp text-3xl tracking-tight leading-none mb-3">{displayTitle}</h2>
               <div className="flex items-center gap-3">
                 <span className="type text-[9px] text-white/60 bg-white/5 border border-white/10 px-3 py-1 uppercase tracking-widest">
                   {displayTier}
-                </span>
-                <span className="type text-[9px] text-brand-primary bg-brand-primary/10 border border-brand-primary/30 px-3 py-1 uppercase tracking-widest">
-                  verified
                 </span>
               </div>
             </div>
@@ -191,18 +185,13 @@ export default function ClaimTicket() {
             {!user ? (
               <div className="text-center">
                 <p className="type text-white/50 text-sm mb-8">
-                  Identification required to claim assets.
+                  {t('claim.signInPrompt')}
                 </p>
                 <button
-                  onClick={() =>
-                    toast({
-                      kind: 'info',
-                      message: t('claim.signInHint'),
-                    })
-                  }
+                  onClick={() => openAuthModal()}
                   className="disp w-full bg-white text-black py-4 text-lg tracking-wide hover:bg-brand-primary transition-all"
                 >
-                  AUTHORIZE VIA IDENTITY PROVIDER
+                  {t('claim.signInButton')}
                 </button>
               </div>
             ) : isWrongUser ? (
@@ -210,8 +199,7 @@ export default function ClaimTicket() {
                 <XCircle className="w-12 h-12 text-brand-accent mx-auto mb-4" aria-hidden="true" />
                 <p className="disp text-xl tracking-tight text-white mb-2">{t('claim.conflict')}</p>
                 <p className="type text-white/60 text-sm mb-6">
-                  This asset is registered for <strong className="text-white">{transfer.receiverEmail}</strong>, but you are
-                  identified as <strong className="text-white">{user.email}</strong>.
+                  {t('claim.wrongEmail', { email: maskEmail(transfer.receiverEmail), you: user.email ?? '' })}
                 </p>
                 <button
                   className="type text-brand-accent text-xs uppercase tracking-widest hover:underline"
@@ -220,7 +208,7 @@ export default function ClaimTicket() {
                     openAuthModal();
                   }}
                 >
-                  Switch Profile
+                  {t('claim.switchAccount')}
                 </button>
               </div>
             ) : (
@@ -231,12 +219,12 @@ export default function ClaimTicket() {
                       <p className="type text-[9px] text-white/30 uppercase tracking-widest mb-1">
                         from
                       </p>
-                      <p className="disp text-lg tracking-tight">{t('claim.sender')}</p>
+                      <p className="disp text-lg tracking-tight truncate">{transfer.senderEmail || t('claim.sender')}</p>
                     </div>
                     <ArrowRight className="text-brand-primary w-6 h-6 mx-4 shrink-0" aria-hidden="true" />
                     <div className="text-right min-w-0">
                       <p className="type text-[9px] text-white/30 uppercase tracking-widest mb-1">
-                        target account
+                        to
                       </p>
                       <p className="disp text-lg tracking-tight truncate">
                         {user.email}
@@ -263,10 +251,16 @@ export default function ClaimTicket() {
           </div>
         </motion.div>
 
-        <p className="text-center type text-[9px] text-white/25 uppercase tracking-[0.35em]">
-          exos secure exchange protocol v1.0.4
-        </p>
       </div>
     </div>
   );
+}
+
+// "jo@gmail.com" -> "j•••@gmail.com": enough for the buyer to recognise which
+// of their addresses the ticket went to, without handing it to whoever has
+// the link.
+function maskEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at <= 0) return email;
+  return `${email[0]}•••${email.slice(at)}`;
 }

@@ -14,6 +14,7 @@ carries copies.
 |---|---|---|
 | Exos edge functions: `exos-*` + `stripe-webhook` | **This repo**, `supabase/functions/` | Deploy to the shared project |
 | `_shared/cron-auth.ts` | **This repo** (the Exos copy) | Terminal-2 keeps its own for its broker functions |
+| `_shared/pricing.ts` | **This repo** | Must match `src/lib/pricing.ts`; `pricingParity.test.ts` checks it |
 | `*exos*` migrations | **This repo**, `supabase/migrations/` | Apply to the shared project; see the rules below |
 | SQL harnesses | **This repo**, `tests/exos/` | CI runs them (`exos-sql` job, incl. the barcode-secret RLS test) |
 | Built SPA bundle | `Terminal-2/static/bridge/` (served by `vibepass-storefront-test`) | build it here (`dist/`), copy it over |
