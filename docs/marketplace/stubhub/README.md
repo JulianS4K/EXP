@@ -255,8 +255,8 @@ Chosen 2026-09-26. For each StubHub sale:
 
 Not built yet (step 2): a service-side "mint + transfer to email" RPC. The
 current `exos_create_transfer` runs as the ticket's owner via the caller's
-JWT. The RPC is a migration (authored in Terminal-2 while the DB is shared);
-the edge function that calls it lives here with the other Exos functions.
+JWT. The RPC is an `*exos*` migration and the caller an Exos edge function;
+both are authored in this repo.
 
 Ticket type vs. delivery: Exos lists as **ticket transfer / mobile
 transfer** and delivers by e-ticket URL. StubHub may expect a transfer-type
