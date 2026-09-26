@@ -5,41 +5,50 @@ Terminal-2's broker data. The code moved out of Terminal-2; the database has not
 
 ## Where each thing lives until the database split
 
-While the DB is shared, **Terminal-2 stays authoritative** for everything that
-gets applied or deployed to that project. This directory is a history-carrying
-copy so Exos can be read, tested and reasoned about on its own.
+The DB is still shared with Terminal-2's broker data, but **all Exos
+server-side source now lives here**: edge functions since 2026-09-26, and
+migrations + SQL harnesses since 2026-09-26 as well. Terminal-2 no longer
+carries copies.
 
-| Thing | Authoritative home (edit + apply/deploy from) | Copy here |
+| Thing | Authoritative home (edit + apply/deploy from) | Notes |
 |---|---|---|
-| `*exos*` migrations | `Terminal-2/supabase/migrations/` | `supabase/migrations/`. When you add one there, copy it here in the same change |
-| `exos-*` edge functions + `stripe-webhook` (Exos fulfillment/refunds, no `exos-` prefix) | `Terminal-2/supabase/functions/` | `supabase/functions/`. Keep in step |
-| `_shared/cron-auth.ts` | `Terminal-2/supabase/functions/_shared/` | vendored |
-| SQL harnesses | `Terminal-2/tests/exos/` (its CI gates the shared DB) | `tests/exos/` (this repo's CI runs them too) |
+| Exos edge functions: `exos-*` + `stripe-webhook` | **This repo**, `supabase/functions/` | Deploy to the shared project |
+| `_shared/cron-auth.ts` | **This repo** (the Exos copy) | Terminal-2 keeps its own for its broker functions |
+| `*exos*` migrations | **This repo**, `supabase/migrations/` | Apply to the shared project; see the rules below |
+| SQL harnesses | **This repo**, `tests/exos/` | CI runs them (`exos-sql` job, incl. the barcode-secret RLS test) |
 | Built SPA bundle | `Terminal-2/static/bridge/` (served by `vibepass-storefront-test`) | build it here (`dist/`), copy it over |
 
-The app source (`src/`, `server.ts`, etc.) lives **only** here now. It was
-removed from Terminal-2.
+Applying a migration or deploying a function still goes to the **same shared
+project** and still needs explicit operator permission.
 
-When the DB split happens (plan step 4 below), flip this table: this repo becomes
-authoritative and the Terminal-2 copies get deleted.
+### Migration rules while the DB is shared
+
+1. **Filenames contain `exos`** (CI enforces it). Terminal-2's prod drift
+   check (`bin/sync-check.sh`) treats applied migrations with `exos` in the
+   name as owned here, so they don't show up as drift there.
+2. **Timestamps are shared with Terminal-2.** Both repos write the same
+   `supabase_migrations.schema_migrations` history, and its `version` is the
+   primary key. Before choosing a prefix, check Terminal-2's
+   `supabase/migrations/` (and prod's history) for the same 14 digits. A
+   collision can't corrupt anything, since the apply fails on the PK, but it
+   has to be renamed.
+3. **Cross-cutting sweeps stay in Terminal-2.** Eighteen Terminal-2
+   migrations (security / RLS / index sweeps across the whole schema, e.g.
+   `*_sec_p*`, `*_rls_initplan_optimization`, `*_fk_indexes_unindexed`) also
+   touch `exos_*` objects. They're already applied and stay there as
+   history, so replaying this directory alone doesn't reproduce prod
+   exactly (see Caveats).
+
+When the DB split happens (plan step 4 below), the remaining step is data:
+a new project, a data copy, and repointing the functions and the SPA.
 
 ## Caveats
 
-- These are only the migrations with `exos` in the filename. 18 Terminal-2
-  migrations without `exos` in the name also alter `exos_*` objects, so
+- These are only the migrations with `exos` in the filename. Some Terminal-2
+  security sweeps (e.g. `*_sec_p*`, `*_rls_initplan_optimization`,
+  `*_flip_safe_definer_views_security_invoker`) also touch `exos_*` objects, so
   replaying this directory from zero **does not** reproduce the production
-  schema exactly. The ones that matter most:
-  - `20260622200000_rls_initplan_optimization.sql` rewrites the exos RLS
-    policies (`auth.uid()` → `(select auth.uid())`); **the final policy text is
-    there, not in the exos migrations.**
-  - `20260622190000_fk_indexes_unindexed.sql` adds exos FK indexes.
-  - `20260526020000_fix_checkins_scanned_by_nullable.sql` changes `exos_checkins`.
-  - security sweeps: `20260525170000_*`, `20260525180000_*`, `20260601120100_sec_p1_*`,
-    `20260601120200_sec_p2_*`, `20260621180156_harden_pgcrypto_*`,
-    `20260622180000_axs_security_lockdown.sql`, `20260623190100_flip_safe_definer_*`,
-    `20260702140000_a1_security_close_*`.
-  Find the full list with
-  `grep -l exos_ Terminal-2/supabase/migrations/*.sql | grep -v exos`. Take a baseline `pg_dump --schema-only` of the `exos_*`
+  schema exactly. Take a baseline `pg_dump --schema-only` of the `exos_*`
   objects when splitting off a dedicated project.
 - `exos_*` tables live in `public`, not in their own schema. Their RLS uses the
   shared Supabase Auth.
