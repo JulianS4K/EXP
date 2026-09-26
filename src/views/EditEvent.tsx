@@ -23,6 +23,7 @@ import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
+import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import {
   COMMON_TIMEZONES,
@@ -1059,6 +1060,7 @@ export default function EditEvent() {
                 <span>Add Tier</span>
               </button>
            </div>
+           <PaymentsOffNotice prices={[eventData.price, ...(eventData.ticketTiers || []).map((t) => t.price)]} />
            
            <div className="space-y-6">
               {(eventData.ticketTiers || []).map((tier, index) => (

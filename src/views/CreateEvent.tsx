@@ -16,6 +16,7 @@ import {
 import { EVENT_CATEGORIES, genresFor } from '../lib/eventTaxonomy';
 import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
+import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import type { ArtistLink } from '../types';
 
 // Image is now uploaded to Firebase Storage and only the download URL ends
@@ -1365,6 +1366,7 @@ export default function CreateEvent() {
                 + Add Tier
               </button>
            </div>
+           <PaymentsOffNotice prices={[formData.price, ...ticketTiers.map((t) => t.price)]} />
            
            <div className="space-y-6">
               {ticketTiers.map((tier, index) => (
