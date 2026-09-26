@@ -12,7 +12,7 @@
 // both and returns `unknown` for anything new. Each delivery also carries a
 // unique delivery id (the spec gives no header name) usable for de-dup.
 
-import type { CatalogEvent, HalLinks, Sale, SellerListing, Venue, Webhook } from './types';
+import type { CatalogEvent, HalLinks, Sale, SellerListing, Venue, Webhook } from './types.ts';
 
 export const STUBHUB_WEBHOOK_TOPICS = [
   'Sales',

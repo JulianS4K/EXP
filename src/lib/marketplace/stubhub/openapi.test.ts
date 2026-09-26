@@ -4,9 +4,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { MOBILE_TRANSFER_PROVIDERS, attachETicketsRequest, eticketUrlsRequest, mobileTransferRequest } from './fulfilment';
-import { SPLIT_TYPES, buildRequestedEvent, buildRequestedEventListingRequest } from './listing';
-import { STUBHUB_WEBHOOK_TOPICS, normalizeTopic } from './webhook';
+import { MOBILE_TRANSFER_PROVIDERS, attachETicketsRequest, eticketUrlsRequest, mobileTransferRequest } from '.';
+import { SPLIT_TYPES, buildRequestedEvent, buildRequestedEventListingRequest } from '.';
+import { STUBHUB_WEBHOOK_TOPICS, normalizeTopic } from '.';
 
 type Schema = { properties?: Record<string, { description?: string }>; required?: string[] };
 type Spec = { components: { schemas: Record<string, Schema> }; 'x-webhooks'?: Record<string, { post: { summary: string } }> };

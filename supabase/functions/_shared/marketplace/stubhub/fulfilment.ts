@@ -16,7 +16,7 @@
 // Mobile transfer would need "Exos" on StubHub's provider list, which it
 // isn't.
 
-import type { BarcodeInformation, Sale, Seating, TicketHolder } from './types';
+import type { BarcodeInformation, Sale, Seating, TicketHolder } from './types.ts';
 
 /** `mobile_provider` values, verbatim from the Sales reference. */
 export const MOBILE_TRANSFER_PROVIDERS = [
@@ -87,19 +87,21 @@ export function toETicketUrlItem(url: string): ETicketUrlItem {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The buyer-facing claim link for one Exos transfer. `appOrigin` is the
- * public SPA origin (https only; claim links carry ticket ownership).
+ * The buyer-facing claim link for one Exos transfer. `appBase` is the public
+ * SPA base URL, path included: the app is served under /bridge/, so
+ * "https://vibepass-storefront-test.onrender.com/bridge" gives
+ * ".../bridge/claim/<id>". https only: claim links carry ticket ownership.
  */
-export function exosClaimUrl(appOrigin: string, transferId: string): string {
-  let origin: URL;
+export function exosClaimUrl(appBase: string, transferId: string): string {
+  let base: URL;
   try {
-    origin = new URL(appOrigin);
+    base = new URL(appBase);
   } catch {
-    throw new FulfilmentError(`app origin "${appOrigin}" is not a URL`);
+    throw new FulfilmentError(`app base URL "${appBase}" is not a URL`);
   }
-  if (origin.protocol !== 'https:') throw new FulfilmentError('claim links must use https');
+  if (base.protocol !== 'https:') throw new FulfilmentError('claim links must use https');
   if (!UUID_RE.test(transferId)) throw new FulfilmentError(`transfer id "${transferId}" is not a uuid`);
-  return `${origin.origin}/claim/${transferId.toLowerCase()}`;
+  return `${base.origin}${base.pathname.replace(/\/+$/, '')}/claim/${transferId.toLowerCase()}`;
 }
 
 /**

@@ -55,7 +55,7 @@ that uses a PUT/POST verb but changes nothing.
 ## Build order
 
 The write side is built but **not live** (see [Write foundation](#write-foundation)).
-Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/writer.ts`):
+Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`supabase/functions/_shared/marketplace/stubhub/writer.ts`):
 
 | # | Phase | Endpoints | Needs first |
 |---|---|---|---|
@@ -199,7 +199,7 @@ with a different `id`. Treat a changed id as a merge and update the xref.
 
 ## Client
 
-`src/lib/marketplace/stubhub/` is dependency-free and `fetch`-based.
+`supabase/functions/_shared/marketplace/stubhub/` is dependency-free and `fetch`-based, so the edge functions (Deno) and the app (through `src/lib/marketplace/stubhub/index.ts`) share one copy. Tests live in `src/lib/marketplace/stubhub/`.
 
 **Read side (usable now):**
 
@@ -247,16 +247,17 @@ Chosen 2026-09-26. For each StubHub sale:
 1. Read the buyer's email: `GET /sales/{id}/ticketholders` → `buyerEmail()`.
 2. Server-side, mint the sold tickets and create one Exos transfer per
    ticket to that email (the same transfer/claim flow buyers already use).
-3. `exosClaimUrl(appOrigin, transferId)` for each transfer, then
+3. `exosClaimUrl(appBase, transferId)` (base includes `/bridge`) for each transfer, then
    `writer.deliverETicketUrls(saleId, urls, sale.number_of_tickets)`, which
    confirms the sale and sends the URLs in one PATCH.
 4. The buyer opens the link and signs in with that email. Claiming rotates
    the barcode secret, so nothing sent before the claim scans at the door.
 
-Not built yet (step 2): a service-side "mint + transfer to email" RPC. The
-current `exos_create_transfer` runs as the ticket's owner via the caller's
-JWT. The RPC is an `*exos*` migration and the caller an Exos edge function;
-both are authored in this repo.
+Step 2 is `exos_fulfil_marketplace_order` (mig `20260926192000`), called by
+`exos-marketplace-sales`. It parks the tickets on the org owner with a
+pending transfer to the buyer's email. It also emails the buyer the claim
+links, so the tickets reach them as an Exos transfer as well as through
+StubHub. See [How StubHub ties into Exos](../README.md#how-stubhub-ties-into-exos).
 
 Ticket type vs. delivery: Exos lists as **ticket transfer / mobile
 transfer** and delivers by e-ticket URL. StubHub may expect a transfer-type
@@ -287,6 +288,51 @@ user-login authorization). Suggested secrets: `STUBHUB_ENV`,
 `STUBHUB_CLIENT_ID`, `STUBHUB_CLIENT_SECRET`, plus a stored refresh token.
 
 ## Mapping to Exos
+
+### Event creation (tied to Exos events, dry-run)
+
+Added 2026-09-26 (mig `20260926190000_exos_stubhub_event_request`):
+
+1. **Organizer publishes** an event with StubHub ticked in its distribution
+   networks (`exos_events.distribution_networks`) and *Primary market only*
+   off. The `exos_events_stubhub_distribution` trigger queues one
+   `exos_distribution_listings` row: channel `stubhub`, status `pending`.
+   Drafts queue nothing until published.
+2. **`exos-distribute`** reads pending `stubhub` rows and builds the
+   `PUT /sellerevents` body from the event with
+   `supabase/functions/_shared/marketplace/stubhub/eventRequest.ts`. That's
+   the same builder the app uses (`listing.ts` re-exports it), so the app and the
+   function can't drift. The builder uses:
+   - the event name and start;
+   - the venue name, plus city, region and country from the structured
+     address;
+   - the free-text country, turned into an ISO code only when it's
+     unambiguous.
+3. **Dry-run:** the body is stored in `planned_request` and the row goes to
+   `planned`. Nothing is sent. A missing venue city (or name or start) marks
+   the row `failed` with the reason instead.
+4. **The event editor** shows the state under Distribution: queued, request
+   ready (not sent), or couldn't prepare plus the reason.
+5. **Edits** re-queue the request until StubHub has the event
+   (`external_event_id`). Unpublishing, cancelling, unticking StubHub or
+   turning on *Primary market only* removes a row that never reached StubHub.
+   A row that did reach StubHub is left for a human.
+
+**Going live** needs these, in order:
+- apply the migration;
+- deploy `exos-distribute` and a cron for it;
+- get StubHub seller API access and a user-login token with
+  `write:requestedevents`;
+- record an operator `WriteAuthorization` for `createSellerEvent`;
+- a live branch in `exos-distribute` that sends the planned request and
+  stores the returned `SellerEvent` id in `external_event_id`.
+
+Every step is operator-gated, and the last one isn't built. The
+create/edit forms' distribution controls are still hidden
+(`SHOW_DISTRIBUTION` in `src/lib/tierType.ts`).
+
+### Other mappings
+
 
 - **Event xref:** `GET /catalog/events/external_mappings/{platform}/{id}` and
   `POST /catalog/mapevent` are the read-only way to fill a StubHub column in

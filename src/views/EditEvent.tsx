@@ -73,6 +73,9 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
+import { stubHubStatus, type StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
+import { getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
+import { ChannelLinks, MarketplaceOrders } from '../components/ChannelLinks';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 
@@ -85,6 +88,8 @@ export default function EditEvent() {
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [eventData, setEventData] = useState<Partial<Event>>({});
+  // The event's StubHub request (queued by the exos_events trigger on publish).
+  const [stubhubRow, setStubhubRow] = useState<StubHubDistributionRow | null>(null);
   // Accessibility fields show (and save) only once the columns exist: the
   // loaded event carries `accessibility` then (mig 20260926090000).
   const accessSupported = eventData.accessibility !== undefined;
@@ -164,6 +169,9 @@ export default function EditEvent() {
         console.warn('table tier fields unavailable:', err);
       }
       setOriginalSlug((data.branding?.customSlug || '').trim());
+      if (SHOW_DISTRIBUTION) {
+        getStubHubDistribution(eventId).then(setStubhubRow).catch((err) => console.warn('stubhub status unavailable:', err));
+      }
       setOriginalNotifiable({
         title: data.title,
         location: data.location,
@@ -1694,12 +1702,33 @@ export default function EditEvent() {
                    <input
                      type="checkbox"
                      className="w-4 h-4 accent-brand-primary"
-                     defaultChecked={true}
+                     // Bound to distributionNetworks (saved by handleSubmit), like
+                     // CreateEvent. Was defaultChecked={true}, which saved nothing.
+                     checked={(eventData.distributionNetworks || []).includes(network.id)}
+                     onChange={(e) => {
+                       const current = eventData.distributionNetworks || [];
+                       const next = e.target.checked
+                         ? Array.from(new Set([...current, network.id]))
+                         : current.filter((n) => n !== network.id);
+                       setEventData({ ...eventData, distributionNetworks: next });
+                     }}
                    />
                    <span className="type text-[10px] uppercase tracking-widest text-white/60">{network.name}</span>
                 </label>
               ))}
            </div>
+           {(() => {
+             const st = stubHubStatus(stubhubRow, {
+               stubhubTicked: (eventData.distributionNetworks || []).includes('stubhub'),
+               published: eventData.status === 'published',
+               primaryMarketOnly: !!eventData.exclusivity?.primaryMarketOnly,
+             });
+             if (!st) return null;
+             const color = { muted: 'text-white/40', info: 'text-white/70', ok: 'text-brand-primary', warn: 'text-amber-400' }[st.tone];
+             return <p role="status" className={`type text-xs ${color}`}>{st.text}</p>;
+           })()}
+           {eventId && <ChannelLinks eventId={eventId} />}
+           {eventId && <MarketplaceOrders eventId={eventId} />}
         </section>
         </>)}
 

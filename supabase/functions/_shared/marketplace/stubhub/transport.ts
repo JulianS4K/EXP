@@ -8,8 +8,8 @@
 // host root. StubHub rejects requests without a User-Agent
 // (`user_agent_required`), so one is always sent.
 
-import { buildPath, type Endpoint } from './endpoints';
-import type { ApiErrorBody } from './types';
+import { buildPath, type Endpoint } from './endpoints.ts';
+import type { ApiErrorBody } from './types.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export type TokenSource = () => string | Promise<string>;

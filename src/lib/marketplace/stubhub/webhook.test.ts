@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeTopic, parseWebhookPayload, verifyWebhookAuthorization, WebhookPayloadError } from './webhook';
+import { normalizeTopic, parseWebhookPayload, verifyWebhookAuthorization, WebhookPayloadError } from '.';
 
 describe('verifyWebhookAuthorization', () => {
   it('accepts only the exact registered value', () => {

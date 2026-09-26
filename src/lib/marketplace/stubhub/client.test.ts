@@ -10,10 +10,10 @@ import {
   clientCredentialsToken,
   refreshTokenSource,
   toQueryString,
-} from './client';
-import { DEFAULT_USER_AGENT, resolveHost } from './transport';
-import { STUBHUB_ENDPOINTS, buildPath } from './endpoints';
-import type { Page, Sale } from './types';
+} from '.';
+import { DEFAULT_USER_AGENT, resolveHost } from '.';
+import { STUBHUB_ENDPOINTS, buildPath } from '.';
+import type { Page, Sale } from '.';
 
 interface Call {
   url: string;
