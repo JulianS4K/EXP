@@ -71,13 +71,47 @@ The flow, end to end:
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
 
+### No double buys: StubHub gets its own seats
+
+The seats on a StubHub listing are the same seats Exos sells, and StubHub's
+sale reaches Exos minutes later (webhook or poll). So "sync the quantity after
+each sale" can only narrow the window where both sides sell the last seat.
+Exos closes it instead with disjoint pools (mig `20260926193000`):
+
+- **Allocate.** The event editor's "Seats for StubHub" control, or
+  `exos_set_channel_allocation`, sets N seats of one ticket type aside for
+  StubHub (`exos_distribution_listings.requested_qty`). Exos's availability
+  (`exos_tier_available`, `exos_quota_available`) leaves them out. Every Exos
+  path that sells or reserves a seat reads that availability: checkout
+  holds, free claims, comps, box office, waitlist offers.
+- **It only takes free seats.** It runs under the same locks as a cart hold
+  and writes the tier row, so a concurrent Exos checkout re-checks and can't
+  take a seat that was just allocated.
+- **A StubHub sale uses its own seats.** It takes them out of the allocation
+  in the same transaction that mints them, so it never competes with Exos
+  buyers. StubHub selling more than was allocated goes to a human.
+- **Give seats back.** Lowering the allocation, or delisting, releases the
+  seats to Exos straight away.
+- **Keep the StubHub listing quantity equal to the allocation.** StubHub
+  stops at its quantity, and Exos stops at capacity minus the allocation.
+
+Two limits are enforced, not papered over:
+- Allocation is refused when the event's overall cap is lower than its
+  ticket types add up to, because a tier-level reservation can't protect a
+  tighter house cap.
+- Table ticket types aren't sold on StubHub.
+
+`tests/exos/test_channel_allocations.sql` covers the rules.
+`tests/exos/race_channel_allocations.sh` races two real sessions for the last
+seat in three orders, and never sells it twice.
+
 Everything that would change something on StubHub is stored as a plan
 (`planned_request`, `delivery_plan`) and never sent. The buyer's Exos email
 is not a StubHub write, so it goes out as soon as `exos-marketplace-sales`
 runs.
 
 Going live needs:
-- the migrations applied (`20260926190000`, `191000`, `192000`);
+- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`);
 - `exos-distribute` and `exos-marketplace-sales` deployed with crons
   (`exos-marketplace-sales` with `--no-verify-jwt`);
 - the secrets set: `EXOS_APP_BASE_URL`, `STUBHUB_*`, and
@@ -89,8 +123,8 @@ Going live needs:
 All of these are operator-gated.
 
 Not built yet:
-- **Listings themselves:** creating and repricing them, reserving their
-  seats, and syncing quantity after a sale. `exos_distribution_listings.tier_id`
-  and `requested_qty` are ready for it. The listing table allows one StubHub
-  row per event, so one ticket type per event on StubHub for now.
+- **Listings themselves:** creating and repricing them, and keeping the
+  StubHub quantity equal to the allocation. The seats are already reserved.
+  The listing table allows one StubHub row per event, so one ticket type per
+  event on StubHub for now.
 - **Other marketplaces** (SeatGeek next).

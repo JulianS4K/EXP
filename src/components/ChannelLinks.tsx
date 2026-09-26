@@ -10,6 +10,8 @@ import {
   type MarketplaceOrder,
 } from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
+import { setStubHubAllocation } from '../lib/marketplace/stubhubStatusApi';
+import type { StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
 
 const LABEL: Record<string, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
@@ -120,6 +122,68 @@ export function MarketplaceOrders({ eventId }: { eventId: string }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Seats set aside for StubHub. Exos can't sell them, so a StubHub buyer and
+ * an Exos buyer can never get the same seat; the StubHub listing should carry
+ * exactly this many.
+ */
+export function StubHubAllocation({
+  eventId, tiers, row, onSaved,
+}: {
+  eventId: string;
+  tiers: Array<{ id: string; name: string; capacity: number }>;
+  row: StubHubDistributionRow | null;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [tierId, setTierId] = useState(row?.tier_id ?? tiers[0]?.id ?? '');
+  const [qty, setQty] = useState(String(row?.requested_qty ?? 0));
+  const [busy, setBusy] = useState(false);
+  if (!tiers.length) return null;
+  const save = async () => {
+    const n = Number.parseInt(qty, 10);
+    if (!Number.isInteger(n) || n < 0) {
+      toast({ kind: 'error', message: 'Enter a whole number of seats (0 to stop).' });
+      return;
+    }
+    setBusy(true);
+    try {
+      await setStubHubAllocation(eventId, tierId, n);
+      toast({ kind: 'success', message: n ? `${n} seat${n === 1 ? '' : 's'} set aside for StubHub.` : 'StubHub seats given back to Exos.' });
+      onSaved();
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message.replace(/^exos_set_channel_allocation: /, '') : 'Could not save that.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-2">
+      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Seats for StubHub</h3>
+      <p className="type text-xs text-white/50">
+        Exos stops selling these seats, so nobody can buy the same seat on both. Set 0 to give them back.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="type text-xs text-white/70">
+          <span className="block mb-1">Ticket type</span>
+          <select value={tierId} onChange={(e) => setTierId(e.target.value)} className="bg-black border border-white/20 px-3 py-2 text-white">
+            {tiers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+        <label className="type text-xs text-white/70">
+          <span className="block mb-1">Seats</span>
+          <input type="number" min={0} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)}
+            className="w-24 bg-black border border-white/20 px-3 py-2 text-white" />
+        </label>
+        <button type="button" onClick={save} disabled={busy || !tierId}
+          className="px-4 py-2 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   );
 }

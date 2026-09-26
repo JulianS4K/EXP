@@ -75,7 +75,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
 import { stubHubStatus, type StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
 import { getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
-import { ChannelLinks, MarketplaceOrders } from '../components/ChannelLinks';
+import { ChannelLinks, MarketplaceOrders, StubHubAllocation } from '../components/ChannelLinks';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 
@@ -1727,6 +1727,16 @@ export default function EditEvent() {
              const color = { muted: 'text-white/40', info: 'text-white/70', ok: 'text-brand-primary', warn: 'text-amber-400' }[st.tone];
              return <p role="status" className={`type text-xs ${color}`}>{st.text}</p>;
            })()}
+           {eventId && (eventData.distributionNetworks || []).includes('stubhub') && (
+             <div key={`${stubhubRow?.tier_id ?? ''}:${stubhubRow?.requested_qty ?? 0}`}>
+             <StubHubAllocation
+               eventId={eventId}
+               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
+               row={stubhubRow}
+               onSaved={() => { getStubHubDistribution(eventId).then(setStubhubRow).catch(() => undefined); }}
+             />
+             </div>
+           )}
            {eventId && <ChannelLinks eventId={eventId} />}
            {eventId && <MarketplaceOrders eventId={eventId} />}
         </section>
