@@ -2,7 +2,13 @@
 // staff decision when the automatic match wasn't sure. Lives in the event
 // editor's Distribution section.
 import { useEffect, useState } from 'react';
-import { getChannelLinks, linkChannelEvent, type ChannelLink } from '../lib/marketplace/linksApi';
+import {
+  getChannelLinks,
+  getMarketplaceOrders,
+  linkChannelEvent,
+  type ChannelLink,
+  type MarketplaceOrder,
+} from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
 
 const LABEL: Record<string, string> = {
@@ -76,6 +82,41 @@ export function ChannelLinks({ eventId }: { eventId: string }) {
                 </button>
               </div>
             )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const ORDER_STATUS: Record<MarketplaceOrder['status'], string> = {
+  received: 'received',
+  needs_attention: 'needs you',
+  fulfilled: 'tickets issued, links not sent yet',
+  delivered: 'delivered',
+  cancelled: 'cancelled',
+};
+
+/** Sales made on the marketplaces, and the ones that need a human. */
+export function MarketplaceOrders({ eventId }: { eventId: string }) {
+  const [orders, setOrders] = useState<MarketplaceOrder[] | null>(null);
+  useEffect(() => {
+    void getMarketplaceOrders(eventId).then(setOrders).catch(() => setOrders([]));
+  }, [eventId]);
+  if (!orders?.length) return null;
+  return (
+    <div className="space-y-3">
+      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Marketplace sales</h3>
+      <ul className="space-y-2">
+        {orders.map((o) => (
+          <li key={o.id} className={`border p-3 type text-xs ${o.status === 'needs_attention' ? 'border-amber-400/60 text-amber-200' : 'border-white/10 text-white/70'}`}>
+            <p>
+              <span className="text-white">{LABEL[o.channel] ?? o.channel} #{o.external_order_id}</span>
+              {' '}· {o.quantity} ticket{o.quantity === 1 ? '' : 's'} · {ORDER_STATUS[o.status]}
+              {o.sold_at ? ` · ${when(o.sold_at)}` : ''}
+            </p>
+            {o.attention_reason && <p className="mt-1">{o.attention_reason}</p>}
+            {o.delivery_plan?.kind === 'manual' && o.delivery_plan.reason && <p className="mt-1">{o.delivery_plan.reason}</p>}
           </li>
         ))}
       </ul>

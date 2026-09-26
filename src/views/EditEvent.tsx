@@ -75,7 +75,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
 import { stubHubStatus, type StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
 import { getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
-import { ChannelLinks } from '../components/ChannelLinks';
+import { ChannelLinks, MarketplaceOrders } from '../components/ChannelLinks';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 
@@ -1728,6 +1728,7 @@ export default function EditEvent() {
              return <p role="status" className={`type text-xs ${color}`}>{st.text}</p>;
            })()}
            {eventId && <ChannelLinks eventId={eventId} />}
+           {eventId && <MarketplaceOrders eventId={eventId} />}
         </section>
         </>)}
 

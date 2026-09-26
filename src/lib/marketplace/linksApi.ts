@@ -44,3 +44,26 @@ export async function linkChannelEvent(eventId: string, channel: string, externa
   if (error) throw error;
   return data as string;
 }
+
+// Marketplace orders for an event (exos_marketplace_orders, mig 20260926192000).
+export interface MarketplaceOrder {
+  id: string;
+  channel: string;
+  external_order_id: string;
+  quantity: number;
+  status: 'received' | 'needs_attention' | 'fulfilled' | 'delivered' | 'cancelled';
+  attention_reason: string | null;
+  sold_at: string | null;
+  delivery_plan: { kind: 'planned' | 'manual'; reason?: string; claim_urls: string[] } | null;
+}
+
+export async function getMarketplaceOrders(eventId: string): Promise<MarketplaceOrder[]> {
+  const { data, error } = await supabase
+    .from('exos_marketplace_orders')
+    .select('id, channel, external_order_id, quantity, status, attention_reason, sold_at, delivery_plan')
+    .eq('event_id', eventId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  return (data ?? []) as MarketplaceOrder[];
+}

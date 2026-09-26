@@ -10,3 +10,4 @@ export {
   stubHubChannel,
 } from '../../../supabase/functions/_shared/marketplace/stubhub/channel.ts';
 export * from '../../../supabase/functions/_shared/marketplace/seatgeek/channel.ts';
+export * from '../../../supabase/functions/_shared/marketplace/sales.ts';
