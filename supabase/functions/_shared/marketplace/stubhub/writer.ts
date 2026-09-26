@@ -19,9 +19,9 @@
 // blindly; `createOrAdoptListing` resolves it on the next run by looking the
 // listing up by `external_id` first.
 
-import type { StubHubClient, StubHubScope } from './client';
-import { StubHubError } from './client';
-import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints';
+import type { StubHubClient, StubHubScope } from './client.ts';
+import { StubHubError } from './client.ts';
+import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints.ts';
 import {
   RETRY_THROTTLED,
   execute,
@@ -32,13 +32,13 @@ import {
   type StubHubEnvironment,
   type TokenSource,
   type TransportConfig,
-} from './transport';
+} from './transport.ts';
 import type {
   CreateRequestedEventListingRequest,
   CreateSellerListingRequest,
   RequestedEvent,
   UpdateSellerListingRequest,
-} from './listing';
+} from './listing.ts';
 import {
   attachETicketsRequest,
   confirmSaleRequest,
@@ -46,8 +46,8 @@ import {
   mobileTransferRequest,
   type MobileTransferProvider,
   type UpdateSaleRequest,
-} from './fulfilment';
-import type { Sale, SellerEvent, SellerListing } from './types';
+} from './fulfilment.ts';
+import type { Sale, SellerEvent, SellerListing } from './types.ts';
 
 type WriteEndpoints = {
   [K in EndpointName]: (typeof STUBHUB_ENDPOINTS)[K]['access'] extends 'write' ? K : never;

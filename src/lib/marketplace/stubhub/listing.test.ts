@@ -9,7 +9,7 @@ import {
   checkListingConstraints,
   type ExosDistributionRow,
   type ListingDetails,
-} from './listing';
+} from '.';
 
 const ROW: ExosDistributionRow = {
   id: '6f1c2b1e-0000-4000-8000-000000000001',
