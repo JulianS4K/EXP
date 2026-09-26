@@ -99,6 +99,13 @@ export interface ChannelCapabilities {
   listings: boolean;
   /** A sale can be delivered by handing over one URL per ticket. */
   fulfilByUrls: boolean;
+  /**
+   * The listing can show buyers only part of its quantity at a time (StubHub:
+   * display_number_of_tickets), which caps a single order at the event's max
+   * per order. A marketplace without it would need the allocation split into
+   * several listings of at most maxPerOrder each: reserved for when one needs it.
+   */
+  displayQuantityCap: boolean;
 }
 
 export interface MarketplaceChannel {

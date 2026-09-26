@@ -75,7 +75,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
 import { stubHubStatus, type StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
 import { getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
-import { ChannelLinks, MarketplaceOrders, StubHubAllocation } from '../components/ChannelLinks';
+import { AccountLimitFlags, ChannelLinks, MarketplaceOrders, StubHubAllocation } from '../components/ChannelLinks';
+import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 
@@ -1308,6 +1309,9 @@ export default function EditEvent() {
           </section>
         )}
 
+        {/* Accounts over the per-account limit (flagged, never blocked). */}
+        {eventId && <AccountLimitFlags eventId={eventId} />}
+
         {/* Vouchers — self-contained CRUD (not part of the form submit). */}
         {eventId && <VouchersEditor eventId={eventId} tiers={(eventData.ticketTiers || []).map((t) => ({ id: t.id, name: t.name, visibility: t.visibility }))} />}
 
@@ -1733,6 +1737,7 @@ export default function EditEvent() {
                eventId={eventId}
                tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
                row={stubhubRow}
+               maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
                onSaved={() => { getStubHubDistribution(eventId).then(setStubhubRow).catch(() => undefined); }}
              />
              </div>

@@ -20,6 +20,13 @@
 //    A mapping problem (no venue city, ...) marks the row 'failed' with the
 //    reason, which the event editor shows the organizer.
 //
+// 1b. StubHub listings. For each StubHub allocation (seats set aside with
+//    exos_set_channel_allocation, mig 20260926193000) not yet on StubHub,
+//    plan the listing (_shared/marketplace/stubhub/listingPlan.ts) into
+//    planned_listing: one listing, showing buyers at most the event's
+//    maxPerOrder at a time. DRY-RUN; re-planned every run so it follows
+//    price / limit / allocation changes.
+//
 // 2. Automatiq listings. Why this is the "it's both" path: D1's storefront
 //    reads TEvo/EVO "owned" inventory, and Automatiq distributes INTO EVO, so
 //    listing an org's primary inventory via Automatiq surfaces it in the D1
@@ -43,6 +50,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from "../_shared/marketplace/stubhub/eventRequest.ts";
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
+import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
@@ -69,8 +77,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const channels = channelsFromEnv((k) => Deno.env.get(k));
     const links = await linkEvents(sb, channels);
     const stubhub = await planStubHubEvents(sb, !!channels.get("stubhub")?.findEvents);
+    const listings = await planStubHubListings(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, stubhub, automatiq });
+    return json({ links, stubhub, listings, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -156,6 +165,59 @@ async function planStubHubEvents(sb: SupabaseClient, canSearch: boolean) {
     if (upErr) console.error("exos-distribute: stubhub row update failed", row.id, upErr);
   }
   return { mode: "dry-run", pending: rows.length, planned, linked, waiting, failed };
+}
+
+// ── 1b. StubHub listings (dry-run) ───────────────────────────────────
+
+interface AllocationRow {
+  id: string;
+  event_id: string;
+  requested_qty: number | null;
+  unit_price: number | string | null;
+  planned_listing: unknown;
+  exos_events: AllocationForListing["event"];
+  exos_ticket_tiers: AllocationForListing["tier"];
+}
+
+async function planStubHubListings(sb: SupabaseClient) {
+  const { data, error } = await sb
+    .from("exos_distribution_listings")
+    .select("id, event_id, requested_qty, unit_price, planned_listing, " +
+      "exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address, currency, purchase_limits), " +
+      "exos_ticket_tiers(name, price, section_label)")
+    .eq("channel", "stubhub")
+    .gt("requested_qty", 0)
+    .not("tier_id", "is", null)
+    .is("external_listing_id", null)
+    .in("status", ["pending", "planned", "failed"])
+    .limit(200);
+  if (error) throw new Error(`read stubhub allocations: ${error.message}`);
+  const rows = (data ?? []) as unknown as AllocationRow[];
+  if (!rows.length) return { allocations: 0, planned: 0, failed: 0 };
+
+  const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
+    .eq("channel", "stubhub").in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
+  const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
+
+  let planned = 0;
+  let failed = 0;
+  for (const r of rows) {
+    let plan: unknown;
+    try {
+      plan = planStubHubListing({
+        id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+        tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
+      });
+      planned++;
+    } catch (e) {
+      plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
+      failed++;
+    }
+    if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
+    const { error: upErr } = await sb.from("exos_distribution_listings").update({ planned_listing: plan }).eq("id", r.id);
+    if (upErr) console.error("exos-distribute: planned_listing not stored", r.id, upErr.message);
+  }
+  return { mode: "dry-run", allocations: rows.length, planned, failed };
 }
 
 // ── 2. Automatiq listings (gated scaffold) ───────────────────────────

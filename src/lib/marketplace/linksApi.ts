@@ -67,3 +67,34 @@ export async function getMarketplaceOrders(eventId: string): Promise<Marketplace
   if (error) throw error;
   return (data ?? []) as MarketplaceOrder[];
 }
+
+// Accounts over an event's per-account limit (exos_account_limit_flags,
+// mig 20260926194000): flagged, never blocked. Staff review them.
+export interface AccountLimitFlag {
+  id: string;
+  email: string;
+  user_id: string | null;
+  held: number;
+  incoming: number;
+  max_per_account: number;
+  peak: number;
+  first_flagged_at: string;
+  reviewed_at: string | null;
+  review_note: string | null;
+}
+
+export async function getAccountLimitFlags(eventId: string): Promise<AccountLimitFlag[]> {
+  const { data, error } = await supabase
+    .from('exos_account_limit_flags')
+    .select('id, email, user_id, held, incoming, max_per_account, peak, first_flagged_at, reviewed_at, review_note')
+    .eq('event_id', eventId)
+    .order('reviewed_at', { ascending: true, nullsFirst: true })
+    .order('peak', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as AccountLimitFlag[];
+}
+
+export async function reviewAccountLimitFlag(flagId: string, note: string | null): Promise<void> {
+  const { error } = await supabase.rpc('exos_review_account_limit_flag', { p_flag_id: flagId, p_note: note });
+  if (error) throw error;
+}

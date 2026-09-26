@@ -75,7 +75,7 @@ export function stubHubChannel(client?: StubHubClient): MarketplaceChannel {
   return {
     id: 'stubhub',
     label: 'StubHub',
-    capabilities: { findEvents: !!client, createEvent: true, listings: true, fulfilByUrls: true },
+    capabilities: { findEvents: !!client, createEvent: true, listings: true, fulfilByUrls: true, displayQuantityCap: true },
 
     findEvents: client
       ? async (ev: ExosEventRef) => {

@@ -105,6 +105,36 @@ Two limits are enforced, not papered over:
 `tests/exos/race_channel_allocations.sh` races two real sessions for the last
 seat in three orders, and never sells it twice.
 
+### One order can't take the whole allocation; over-limit accounts are flagged
+
+- **Per order: capped on StubHub.** Each allocation becomes one listing,
+  planned by `exos-distribute` pass 1b into
+  `exos_distribution_listings.planned_listing` (dry-run). It carries
+  `display_number_of_tickets = min(maxPerOrder, allocation)`, so StubHub
+  buyers see, and can take, at most the event's max per order at a time. The
+  rest shows as tickets sell. `split_type` is `AvoidOne` so nobody strands a
+  single seat.
+  - A marketplace without a display cap (`capabilities.displayQuantityCap =
+    false`) would instead need the allocation split into several listings of
+    at most maxPerOrder each. That's reserved until such a marketplace is
+    wired.
+  - The docs don't say whether StubHub enforces `display_number_of_tickets`
+    per purchase or only for display. Check on the first sandbox listing.
+- **Per person: flagged, not blocked.** No marketplace can enforce Exos's
+  max per account: one person can place several orders under an email we
+  can't tie to them until they claim. After any change to who holds a
+  ticket, and on every new pending transfer, Exos counts for that email:
+  - held: tickets they own;
+  - incoming: pending transfers to them.
+
+  Over `maxPerAccount`, a row goes into `exos_account_limit_flags` (mig
+  `20260926194000`) and appears in the event editor under "Over the
+  per-account limit" for the organizer to review. Details:
+  - Nothing is blocked.
+  - Tickets parked on the organizer for delivery don't count, and the org's
+    own staff are exempt.
+  - A reviewed flag re-opens if the count goes higher.
+
 ### Dry run
 
 `npx tsx scripts/stubhub-dry-run.ts event.json` puts one `exos_events` row
@@ -128,7 +158,7 @@ is not a StubHub write, so it goes out as soon as `exos-marketplace-sales`
 runs.
 
 Going live needs:
-- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`);
+- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`, `194000`);
 - `exos-distribute` and `exos-marketplace-sales` deployed with crons
   (`exos-marketplace-sales` with `--no-verify-jwt`);
 - the secrets set: `EXOS_APP_BASE_URL`, `STUBHUB_*`, and
@@ -140,8 +170,9 @@ Going live needs:
 All of these are operator-gated.
 
 Not built yet:
-- **Listings themselves:** creating and repricing them, and keeping the
-  StubHub quantity equal to the allocation. The seats are already reserved.
+- **Sending listings:** creating them from `planned_listing`, repricing, and
+  keeping the StubHub quantity equal to the allocation. The seats are already
+  reserved and the listing is already planned.
   The listing table allows one StubHub row per event, so one ticket type per
   event on StubHub for now.
 - **Other marketplaces** (SeatGeek next).

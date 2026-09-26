@@ -9,6 +9,8 @@ import {
   checkListingConstraints,
   type ExosDistributionRow,
   type ListingDetails,
+  displayCap,
+  maxPerOrderFromLimits,
 } from '.';
 
 const ROW: ExosDistributionRow = {
@@ -36,6 +38,19 @@ describe('buildCreateListingRequest', () => {
       ticket_price: { amount: 85.5, currency_code: 'USD' },
       published: false,
     });
+  });
+
+  it('shows buyers at most maxPerOrder at a time, so one order cannot take the whole allocation', () => {
+    expect(buildCreateListingRequest(ROW, { ...DETAILS, maxPerOrder: 2 }).display_number_of_tickets).toBe(2);
+    // No cap needed when the listing is already within it, or no limit is set.
+    expect(buildCreateListingRequest(ROW, { ...DETAILS, maxPerOrder: 4 })).not.toHaveProperty('display_number_of_tickets');
+    expect(buildCreateListingRequest(ROW, { ...DETAILS, maxPerOrder: 0 })).not.toHaveProperty('display_number_of_tickets');
+    expect(buildCreateListingRequest(ROW, { ...DETAILS, maxPerOrder: null })).not.toHaveProperty('display_number_of_tickets');
+    expect(displayCap(8, 20)).toBe(8);
+    expect(displayCap(1.5, 20)).toBeUndefined();
+    expect(maxPerOrderFromLimits({ maxPerOrder: 8, maxPerAccount: 8 })).toBe(8);
+    expect(maxPerOrderFromLimits({ maxPerOrder: '6' })).toBe(6);
+    for (const bad of [null, {}, { maxPerOrder: 0 }, { maxPerOrder: 'x' }]) expect(maxPerOrderFromLimits(bad)).toBeNull();
   });
 
   it('can price as proceeds and carries optional fields', () => {
