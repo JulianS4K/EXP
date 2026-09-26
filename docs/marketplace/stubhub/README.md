@@ -247,7 +247,7 @@ Chosen 2026-09-26. For each StubHub sale:
 1. Read the buyer's email: `GET /sales/{id}/ticketholders` → `buyerEmail()`.
 2. Server-side, mint the sold tickets and create one Exos transfer per
    ticket to that email (the same transfer/claim flow buyers already use).
-3. `exosClaimUrl(appOrigin, transferId)` for each transfer, then
+3. `exosClaimUrl(appBase, transferId)` (base includes `/bridge`) for each transfer, then
    `writer.deliverETicketUrls(saleId, urls, sale.number_of_tickets)`, which
    confirms the sale and sends the URLs in one PATCH.
 4. The buyer opens the link and signs in with that email. Claiming rotates

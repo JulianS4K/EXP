@@ -70,11 +70,14 @@ describe('e-ticket URL route', () => {
   const T2 = '0b6f1c2e-1111-4a2b-9c3d-000000000002';
 
   it('builds https claim links from the app origin', () => {
-    expect(exosClaimUrl('https://exos.example.test/some/path', T1.toUpperCase())).toBe(
-      `https://exos.example.test/claim/${T1}`,
+    expect(exosClaimUrl('https://exos.example.test/bridge/', T1.toUpperCase())).toBe(
+      `https://exos.example.test/bridge/claim/${T1}`,
     );
+    expect(exosClaimUrl('https://exos.example.test', T1)).toBe(`https://exos.example.test/claim/${T1}`);
+    // Query and fragment on the base are dropped.
+    expect(exosClaimUrl('https://exos.example.test/bridge?x=1#y', T1)).toBe(`https://exos.example.test/bridge/claim/${T1}`);
     expect(() => exosClaimUrl('http://exos.example.test', T1)).toThrow(/https/);
-    expect(() => exosClaimUrl('not a url', T1)).toThrow(/not a URL/);
+    expect(() => exosClaimUrl('not a url', T1)).toThrow(/is not a URL/);
     expect(() => exosClaimUrl('https://exos.example.test', '../admin')).toThrow(/uuid/);
   });
 
@@ -92,7 +95,7 @@ describe('e-ticket URL route', () => {
     expect(() => eticketUrlsRequest([u], 2)).toThrow(/2 ticket\(s\) but 1 url/);
     expect(() => eticketUrlsRequest([u, u], 2)).toThrow(/duplicate/);
     expect(() => eticketUrlsRequest(['http://x.test/claim/1'], 1)).toThrow(/https/);
-    expect(() => eticketUrlsRequest(['nope'], 1)).toThrow(/not a URL/);
+    expect(() => eticketUrlsRequest(['nope'], 1)).toThrow(/is not a URL/);
   });
 
   it('finds the buyer email in any ticketholders shape', () => {
