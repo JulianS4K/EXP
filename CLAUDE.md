@@ -27,6 +27,8 @@ Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs t
   and edge-function deploys need explicit operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
   Never add order/hold/price/inventory writes to a third party.
+  Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
+  endpoint tagged read or write.
 - Edge functions are Deno; they're excluded from the Node `tsconfig`/eslint.
 
 ## Open-source references (hi.events, pretix)

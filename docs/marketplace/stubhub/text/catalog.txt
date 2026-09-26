@@ -1,0 +1,1460 @@
+StubHub Catalog API (1.0.0.75)
+Categories
+View categories on the StubHub platform
+Search categories
+Get matching category given the query string.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+string or null
+The query text to be used to match categories.
+Responses
+200
+RESPONSE SCHEMA: application/octet-stream
+string <binary>
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+401 403 404 500
+q
+GET /catalog/categories/map
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+Content type
+Events
+View events on the StubHub platform
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+List events
+Lists all events on the StubHub platform. Use this endpoint to sync the entire StubHub event catalog with your application.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+integer or null <int64>
+string
+Filters results to only include events located in the specified country.
+number or null <double>
+When provided with longitude and distance filters events returned to ones within the specified distance of the lat/long.
+number or null <double>
+When provided with latitude and distance filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+When provided with latitude and longitude filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+Filters results to only include events for the specified genre id.
+boolean or null
+Filters results to remove parking passes
+Responses
+page
+page_size
+updated_since
+sort
+min_resource_version
+country_code
+latitude
+longitude
+max_distance_in_meters
+genre_id
+exclude_parking_passes
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 401 403 500
+total_items
+page
+page_size
+_links
+_embedded
+GET /catalog/events
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+List events by event ids.
+List a specified set of events on the StubHub platform. Note that the eventID being passed can already be merged with another event. And in this case, details of the new event will be returned, if a different eventId is returned then it means that the event has been merged with the returned event.
+Also inside _embedded field of the response, a mapping between the original eventId and new eventId will be provided.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+Content type
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+integer or null <int64>
+string
+Filters results to only include events located in the specified country.
+number or null <double>
+When provided with longitude and distance filters events returned to ones within the specified distance of the lat/long.
+number or null <double>
+When provided with latitude and distance filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+When provided with latitude and longitude filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+Filters results to only include events for the specified genre id.
+boolean or null
+Filters results to remove parking passes
+REQUEST BODY SCHEMA: application/json
+Array of integers <int32> [ items <int32 > ]
+The StubHub event identifiers of the events to be retrieved.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+page
+page_size
+updated_since
+sort
+min_resource_version
+country_code
+latitude
+longitude
+max_distance_in_meters
+genre_id
+exclude_parking_passes
+event_ids
+total_items
+page
+page_size
+_links
+_embedded
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+PUT /catalog/events
+application/json
+Expand all Collapse allCopy
+{
+"event_ids": -
+[
+0
+]
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+List events by category id.
+List set of events filtered by category id on the StubHub platform.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+QUERY PARAMETERS
+categoryId
+required
+Content type
+Content type
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+integer or null <int64>
+string
+Filters results to only include events located in the specified country.
+number or null <double>
+When provided with longitude and distance filters events returned to ones within the specified distance of the lat/long.
+number or null <double>
+When provided with latitude and distance filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+When provided with latitude and longitude filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+Filters results to only include events for the specified genre id.
+boolean or null
+Filters results to remove parking passes
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+page
+page_size
+updated_since
+sort
+min_resource_version
+country_code
+latitude
+longitude
+max_distance_in_meters
+genre_id
+exclude_parking_passes
+total_items
+page
+page_size
+_links
+_embedded
+Response samples
+200 401 403 500
+GET /catalog/categories/{categoryId}/events
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+Get an event on the StubHub platform using an identifier from an external platform.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+string or null
+The name of the external platform. Can be legacy_stubhub
+integer <int32>
+The event identifier from the external platform.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+The event identifier.
+string
+The name of the event.
+string <date-time>
+The date when the event starts.
+platform
+required
+externalEventId
+required
+id
+name
+start_date
+Content type
+string or null <date-time>
+The date when the event ends.
+string or null <date-time>
+The date when tickets for the event will go onsale.
+boolean
+True if the event start and end date have been confirmed; Otherwise, false.
+boolean
+True if the event start and end time have been confirmed; Otherwise, false.
+string
+The type of the event. Can be Main  or Parking
+Money (object)
+The minimum ticket price of the event.
+string
+The status of the event. Can be Normal , Postponed , Cancelled , Rescheduled , Relocated , RelocatedAndRescheduled , Draft , Contingent  and Deleted
+(EventLinks (object or null))
+(EventEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+end_date
+on_sale_date
+date_confirmed
+time_confirmed
+type
+min_ticket_price
+status
+_links
+_embedded
+GET /catalog/events/external_mappings/{platform}/{externalEventId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"time_confirmed": true
+,
+"type": "string"
+,
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"status": "string"
+,
+Content type
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"categories":  … +
+[
+]
+,
+"external_mappings":  … +
+[
+]
+,
+"genre":  … +
+{
+}
+,
+"merged_events":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+Get an event
+Note that the eventID being passed can already be merged with another event. And in this case, details of the new event will be returned, if a different eventId is returned then it means that the event has been merged with the returned event. Also inside _embedded field of the response, a
+mapping between the original eventId and new eventId will be provided.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+The event identifier
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+The event identifier.
+string
+The name of the event.
+string <date-time>
+The date when the event starts.
+string or null <date-time>
+The date when the event ends.
+string or null <date-time>
+The date when tickets for the event will go onsale.
+boolean
+True if the event start and end date have been confirmed; Otherwise, false.
+boolean
+True if the event start and end time have been confirmed; Otherwise, false.
+string
+The type of the event. Can be Main  or Parking
+eventId
+required
+id
+name
+start_date
+end_date
+on_sale_date
+date_confirmed
+time_confirmed
+type
+Money (object)
+The minimum ticket price of the event.
+string
+The status of the event. Can be Normal , Postponed , Cancelled , Rescheduled , Relocated , RelocatedAndRescheduled , Draft , Contingent  and Deleted
+(EventLinks (object or null))
+(EventEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+min_ticket_price
+status
+_links
+_embedded
+GET /catalog/events/{eventId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"time_confirmed": true
+,
+"type": "string"
+,
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"status": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"categories":  … +
+[
+]
+,
+"external_mappings":  … +
+[
+]
+,
+"genre":  … +
+{
+}
+,
+"merged_events":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+Content type
+Search events
+Search for events on the StubHub platform. Use this endpoint to search the entire StubHub event catalog with your application.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+string or null
+The query text to be used to match events.
+string or null <date-time>
+The specific date of the event, this is optional
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+integer or null <int64>
+string
+Filters results to only include events located in the specified country.
+number or null <double>
+When provided with longitude and distance filters events returned to ones within the specified distance of the lat/long.
+number or null <double>
+When provided with latitude and distance filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+When provided with latitude and longitude filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+Filters results to only include events for the specified genre id.
+boolean or null
+Filters results to remove parking passes
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+q
+dateLocal
+page
+page_size
+updated_since
+sort
+min_resource_version
+country_code
+latitude
+longitude
+max_distance_in_meters
+genre_id
+exclude_parking_passes
+total_items
+page
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 401 403 500
+page_size
+_links
+_embedded
+GET /catalog/events/search
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+Get all events under a CategoryId
+Finds all CategoryIds under the parents, and finds all events under all of them- de-duped by storing in a HashSet.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+CategoryId for which we want all events
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+categoryId
+required
+page
+Content type
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+integer or null <int64>
+string
+Filters results to only include events located in the specified country.
+number or null <double>
+When provided with longitude and distance filters events returned to ones within the specified distance of the lat/long.
+number or null <double>
+When provided with latitude and distance filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+When provided with latitude and longitude filters events returned to ones within the specified distance of the lat/long.
+integer or null <int32>
+Filters results to only include events for the specified genre id.
+boolean or null
+Filters results to remove parking passes
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+page_size
+updated_since
+sort
+min_resource_version
+country_code
+latitude
+longitude
+max_distance_in_meters
+genre_id
+exclude_parking_passes
+total_items
+page
+page_size
+_links
+_embedded
+GET /catalog/categories/{categoryId}/allevents
+200 401 403 500
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+Map request to StubHub Event, Venue and Category
+Finds mapped Event, Venue and Category information, if available.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Request metadata for which we want all mapped information
+string
+string <date-time>
+string
+string
+string
+string
+string or null
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+(Event (object or null))
+(Venue (object or null))
+event_name
+local_date
+venue_name
+venue_state
+venue_city
+venue_country
+category_name
+EventResource
+VenueResource
+Content type
+(Category (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+CategoryResource
+POST /catalog/mapevent
+application/json
+Copy
+{
+"event_name": "string"
+,
+"local_date": "2019-08-24T14:15:22Z"
+,
+"venue_name": "string"
+,
+"venue_state": "string"
+,
+"venue_city": "string"
+,
+"venue_country": "string"
+,
+"category_name": "string"
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"EventResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"time_confirmed": true
+,
+"type": "string"
+,
+"min_ticket_price":  … +
+{
+}
+,
+"status": "string"
+,
+"_links":  … +
+{
+}
+,
+"_embedded":  … +
+{
+}
+}
+,
+Content type
+Content type
+Venues
+View venues on the StubHub platform
+"VenueResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"latitude": 0
+,
+"longitude": 0
+,
+"_links":  … +
+{
+}
+,
+"_embedded":  … +
+{
+}
+}
+,
+"CategoryResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"_links":  … +
+{
+}
+}
+}
+List venues
+Lists all venues on the StubHub platform. Use this endpoint to sync the entire StubHub Venue catalog with your application.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing resource_version .
+string
+Filters results to only include venues located in the specified country.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+page
+page_size
+updated_since
+sort
+country_code
+total_items
+integer or null <int32>
+integer or null <int32>
+(VenuesLinks (object or null))
+(VenuesEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 401 403 500
+page
+page_size
+_links
+_embedded
+GET /catalog/venues
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+Get a venue
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+The venue identifier
+Responses
+venueId
+required
+Content type
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+The venue identifier.
+string
+The name of the venue.
+string
+The name of the city where the venue is located.
+string
+The name of the State or Province where the venue is located.
+string
+The postal code for the venue.
+number or null <double>
+The latitude for the venue.
+number or null <double>
+The longitude for the venue.
+(VenueLinks (object or null))
+(VenueEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+id
+name
+city
+state_province
+postal_code
+latitude
+longitude
+_links
+_embedded
+GET /catalog/venues/{venueId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"latitude": 0
+,
+"longitude": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+Content type
+Money
+Returned for monetary values, such as ticket prices, fees charged and tax amounts.
+number or null <decimal>
+The decimal amount of the money.
+string
+The ISO 4217 currency code that the monetary value is represented in.
+string
+A user-friendly string representing the monetary value.
+Event
+An event on the StubHub platform.
+integer <int32>
+The event identifier.
+string
+The name of the event.
+string <date-time>
+The date when the event starts.
+string or null <date-time>
+The date when the event ends.
+string or null <date-time>
+The date when tickets for the event will go onsale.
+"_embedded": -
+{
+"country":  … +
+{
+}
+,
+"external_mappings":  … +
+[
+]
+}
+}
+amount
+currency_code
+display
+Copy
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+id
+name
+start_date
+end_date
+on_sale_date
+boolean
+True if the event start and end date have been confirmed; Otherwise, false.
+boolean
+True if the event start and end time have been confirmed; Otherwise, false.
+string
+The type of the event. Can be Main  or Parking
+Money (object)
+The minimum ticket price of the event.
+string
+The status of the event. Can be Normal , Postponed , Cancelled , Rescheduled , Relocated , RelocatedAndRescheduled , Draft , Contingent  and Deleted
+(EventLinks (object or null))
+(EventEmbeddedResources (object or null))
+Events
+integer or null <int32>
+date_confirmed
+time_confirmed
+type
+min_ticket_price
+status
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"time_confirmed": true
+,
+"type": "string"
+,
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"status": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"categories":  … +
+[
+]
+,
+"external_mappings":  … +
+[
+]
+,
+"genre":  … +
+{
+}
+,
+"merged_events":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+total_items
+integer or null <int32>
+integer or null <int32>
+(EventsLinks (object or null))
+(EventsEmbeddedResources (object or null))
+MapEventResponseModel
+(Event (object or null))
+(Venue (object or null))
+(Category (object or null))
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
+EventResource
+VenueResource
+CategoryResource
+Expand all Collapse allCopy
+Venue
+An venue on the StubHub platform.
+integer <int32>
+The venue identifier.
+string
+The name of the venue.
+string
+The name of the city where the venue is located.
+string
+The name of the State or Province where the venue is located.
+string
+The postal code for the venue.
+number or null <double>
+The latitude for the venue.
+number or null <double>
+The longitude for the venue.
+{
+"EventResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"time_confirmed": true
+,
+"type": "string"
+,
+"min_ticket_price":  … +
+{
+}
+,
+"status": "string"
+,
+"_links":  … +
+{
+}
+,
+"_embedded":  … +
+{
+}
+}
+,
+"VenueResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"latitude": 0
+,
+"longitude": 0
+,
+"_links":  … +
+{
+}
+,
+"_embedded":  … +
+{
+}
+}
+,
+"CategoryResource": -
+{
+"id": 0
+,
+"name": "string"
+,
+"_links":  … +
+{
+}
+}
+}
+id
+name
+city
+state_province
+postal_code
+latitude
+longitude
+(VenueLinks (object or null))
+(VenueEmbeddedResources (object or null))
+Venues
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(VenuesLinks (object or null))
+(VenuesEmbeddedResources (object or null))
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"latitude": 0
+,
+"longitude": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"country":  … +
+{
+}
+,
+"external_mappings":  … +
+[
+]
+}
+}
+total_items
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"deleted_items":  … +
+[
+]
+,
+"items":  … +
+[
+]
+}
+}
