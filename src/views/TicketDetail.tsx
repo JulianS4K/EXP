@@ -1,3 +1,4 @@
+import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTicket, listMyTicketsForEvent, setTicketAttendee } from '../lib/tickets';
@@ -446,6 +447,10 @@ export default function TicketDetail() {
                        <p className="disp text-white text-2xl tracking-wide">{currentIndex + 1} / {tickets.length}</p>
                     </div>
                  </div>
+
+                 {currentTicket.status === 'active' && !(currentTicket as any).pendingTransferId && (
+                   <TicketAccessNeeds ticketId={currentTicket.id} />
+                 )}
 
                  <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />
 

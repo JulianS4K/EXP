@@ -282,6 +282,10 @@ export interface Event {
     // Exclusive tax rate the buyer pays on top of `price` (0 when the price
     // already includes tax). From exos_public_tiers; drives all-in display.
     exclusiveTaxPercent?: number;
+    // Accessible ticket type (mig 20260926090000) + its short note, e.g.
+    // "Wheelchair space + 1 companion seat".
+    accessible?: boolean;
+    accessibleNote?: string;
   }[];
   // Promo code metadata. The redemption *count* lives in the
   // events/{id}/promoUses/{code} sub-collection so it can be
@@ -317,6 +321,8 @@ export interface Event {
   // set. The template is index 0; undefined = standalone event.
   seriesId?: string;
   seriesIndex?: number;
+  // Venue access info shown on the event page (mig 20260926090000).
+  accessibility?: import('./lib/accessibility').EventAccessibility;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

@@ -16,6 +16,7 @@ import {
   type PendingArrival,
 } from './guestLists';
 import { mapDoorTable, type DoorTable } from './tables';
+import { normalizeNeeds, type AccessNeed } from './accessibility';
 
 export interface GuestList {
   id: string;
@@ -133,7 +134,7 @@ export interface PromoterGuestList {
   eventName: string;
   startsAt: string | null;
   heads: number;
-  entries: { id: string; guestName: string; plusOnes: number; arrived: number }[];
+  entries: { id: string; guestName: string; plusOnes: number; arrived: number; accessNeeds: AccessNeed[] }[];
 }
 
 export async function getPromoterGuestLists(token: string): Promise<PromoterGuestList[]> {
@@ -145,6 +146,7 @@ export async function getPromoterGuestLists(token: string): Promise<PromoterGues
     startsAt: r.starts_at ?? null, heads: Number(r.heads) || 0,
     entries: (r.entries ?? []).map((e: any) => ({
       id: e.id, guestName: e.guest_name, plusOnes: Number(e.plus_ones) || 0, arrived: Number(e.arrived) || 0,
+      accessNeeds: normalizeNeeds(e.access_needs),
     })),
   }));
 }
@@ -171,6 +173,8 @@ export interface DoorExtras {
   tables: DoorTable[];
   lists: GuestListMeta[];
   guests: GuestEntry[];
+  /** Access needs by ticket id (mig 20260926090000). */
+  ticketAccess?: Record<string, AccessNeed[]>;
 }
 
 export async function getDoorExtras(eventId: string): Promise<DoorExtras> {
@@ -181,6 +185,9 @@ export async function getDoorExtras(eventId: string): Promise<DoorExtras> {
     tables: (d.tables ?? []).map(mapDoorTable),
     lists: (d.lists ?? []).map(mapGuestListMeta),
     guests: (d.guests ?? []).map(mapGuestEntry),
+    ticketAccess: Object.fromEntries(
+      Object.entries((d.ticket_access ?? {}) as Record<string, unknown>).map(([k, v]) => [k, normalizeNeeds(v)]),
+    ),
   };
 }
 

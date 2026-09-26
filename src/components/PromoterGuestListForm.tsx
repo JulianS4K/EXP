@@ -3,6 +3,8 @@
 // only the lists the organizer gave them, up to each list's cap, until the
 // list closes. Names already checked in can't be removed.
 
+import { GuestAccessEditor } from './Accessibility';
+import { promoterSetGuestAccessNeeds } from '../lib/accessibilityApi';
 import { useCallback, useEffect, useState } from 'react';
 import { ClipboardList, Trash2, UserPlus } from 'lucide-react';
 import {
@@ -135,10 +137,26 @@ function ListCard({ token, list, onChanged }: { token: string; list: PromoterGue
       ) : (
         <ul className="divide-y divide-white/5">
           {list.entries.map((e) => (
-            <li key={e.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-              <span className="text-white">
+            <li key={e.id} className="flex items-start justify-between gap-3 py-2 text-sm">
+              <span className="text-white min-w-0">
                 {e.guestName}
                 {e.plusOnes > 0 && <span className="text-white/50"> +{e.plusOnes}</span>}
+                <GuestAccessEditor
+                  entryId={e.id}
+                  guestName={e.guestName}
+                  needs={e.accessNeeds}
+                  canEdit={list.open}
+                  theme="dark"
+                  onSave={async (n) => {
+                    try {
+                      await promoterSetGuestAccessNeeds(token, e.id, n);
+                      await onChanged();
+                    } catch (x: any) {
+                      toast({ kind: 'error', message: (x?.message || 'Could not save access needs.').replace(/^exos: /, '') });
+                      throw x;
+                    }
+                  }}
+                />
               </span>
               {e.arrived > 0 ? (
                 <span className="type text-[10px] uppercase tracking-widest text-brand-primary">{e.arrived} in</span>

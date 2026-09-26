@@ -8,6 +8,7 @@
 // already seen, so a replay never counts twice; a replay the server refuses
 // (someone else checked that party in meanwhile) is reported, not retried.
 
+import { AccessNeedBadges } from './Accessibility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, RefreshCw, Search, Users } from 'lucide-react';
 import {
@@ -212,6 +213,9 @@ export default function GuestListDoor({
                     <span className="block text-[11px] text-slate-400 truncate">
                       {listName[g.listId] ?? 'Guest list'}{g.note ? ` · ${g.note}` : ''}
                     </span>
+                    {(g.accessNeeds?.length ?? 0) > 0 && (
+                      <span className="block mt-1"><AccessNeedBadges needs={g.accessNeeds!} /></span>
+                    )}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 shrink-0">
                     <Users className="w-3.5 h-3.5" /> {g.arrived}/{partySize(g)}

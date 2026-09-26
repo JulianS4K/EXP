@@ -9,6 +9,8 @@
 // ticket inventory. Turn it on for a list and its heads come out of the
 // event's total capacity as names are added (and go back when removed).
 
+import { GuestAccessEditor } from './Accessibility';
+import { setGuestAccessNeeds } from '../lib/accessibilityApi';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardList, Plus, Trash2, UserPlus, X } from 'lucide-react';
 import {
@@ -315,6 +317,21 @@ function GuestRows({
                 {[e.email, e.phone, e.note].filter(Boolean).join(' · ')}
               </span>
             )}
+            <GuestAccessEditor
+              entryId={e.id}
+              guestName={e.guestName}
+              needs={e.accessNeeds ?? []}
+              canEdit={canManage}
+              onSave={async (n) => {
+                try {
+                  await setGuestAccessNeeds(e.id, n);
+                  await onChanged();
+                } catch (x) {
+                  toast({ kind: 'error', message: cleanErr(x, 'Could not save access needs.') });
+                  throw x;
+                }
+              }}
+            />
           </span>
           <span className={`text-[10px] font-bold uppercase tracking-widest ${e.arrived > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
             {e.arrived}/{partySize(e)} in

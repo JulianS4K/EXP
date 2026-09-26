@@ -6,6 +6,8 @@
 // The door checks in any number of a party at a time; the total never goes
 // past 1 + plus-ones.
 
+import { normalizeNeeds, type AccessNeed } from './accessibility';
+
 export interface GuestEntry {
   id: string;
   listId: string;
@@ -16,6 +18,8 @@ export interface GuestEntry {
   note: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Access needs (mig 20260926090000); empty when none or not deployed. */
+  accessNeeds?: AccessNeed[];
 }
 
 export interface GuestListMeta {
@@ -39,6 +43,7 @@ export function mapGuestEntry(r: any): GuestEntry {
     note: r.note ?? null,
     email: r.email ?? null,
     phone: r.phone ?? null,
+    accessNeeds: normalizeNeeds(r.access_needs),
   };
 }
 

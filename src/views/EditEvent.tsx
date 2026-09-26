@@ -73,6 +73,8 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
+import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
+import { EventAccessInfoEditor } from '../components/Accessibility';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -83,6 +85,9 @@ export default function EditEvent() {
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [eventData, setEventData] = useState<Partial<Event>>({});
+  // Accessibility fields show (and save) only once the columns exist: the
+  // loaded event carries `accessibility` then (mig 20260926090000).
+  const accessSupported = eventData.accessibility !== undefined;
   // Snapshot of the original tier ids so we can compute additions/removals
   // and write the matching tierSales sub-collection updates atomically.
   const [originalTierIds, setOriginalTierIds] = useState<string[]>([]);
@@ -503,6 +508,8 @@ export default function EditEvent() {
         exclusivity: ed.exclusivity as any,
         purchaseLimits: ed.purchaseLimits as any,
         distributionNetworks: ed.distributionNetworks,
+        // Only once the column exists (the loaded row had it).
+        ...(accessSupported ? { accessibility: serializeAccessibility(ed.accessibility ?? {}) } : {}),
       });
 
       // 2. Tier diff: update existing, add new, delete removed. (Seam tier CRUD
@@ -518,6 +525,9 @@ export default function EditEvent() {
           visibility: tt.visibility,
           salesStart: tsToIso(tt.salesStart),
           salesEnd: tsToIso(tt.salesEnd),
+          ...(accessSupported
+            ? { accessible: !!tier.accessible, accessibleNote: tier.accessible ? (tier.accessibleNote || '').trim().slice(0, ACCESSIBLE_NOTE_MAX) || null : null }
+            : {}),
         };
         const draft = tableCfg[tier.id] ?? BLANK_TABLE_DRAFT;
         if (added.includes(tier.id)) {
@@ -1144,6 +1154,32 @@ export default function EditEvent() {
                          />
                       </div>
 
+                      {accessSupported && (
+                      <div className="md:col-span-2 border border-white/10 p-4 space-y-3">
+                        <label htmlFor={`tier-${tier.id}-accessible`} className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            id={`tier-${tier.id}-accessible`}
+                            type="checkbox"
+                            className="w-4 h-4 accent-brand-primary"
+                            checked={!!tier.accessible}
+                            onChange={(e) => updateTier(tier.id, 'accessible', e.target.checked)}
+                          />
+                          <span className="type text-[11px] text-white/70 uppercase tracking-widest">Accessible ticket type</span>
+                        </label>
+                        {tier.accessible && (
+                          <input
+                            type="text"
+                            aria-label="What this accessible ticket includes"
+                            maxLength={ACCESSIBLE_NOTE_MAX}
+                            placeholder="e.g. Wheelchair space + 1 companion seat"
+                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+                            value={tier.accessibleNote ?? ''}
+                            onChange={(e) => updateTier(tier.id, 'accessibleNote', e.target.value)}
+                          />
+                        )}
+                      </div>
+                      )}
+
                       <TableTierFields
                         value={tableCfg[tier.id] ?? BLANK_TABLE_DRAFT}
                         onChange={(next) => setTableCfg((prev) => ({ ...prev, [tier.id]: next }))}
@@ -1249,6 +1285,20 @@ export default function EditEvent() {
 
         {/* Add-ons & Merch — self-contained CRUD (not part of the form submit). */}
         {eventId && <AddonsEditor eventId={eventId} />}
+
+        {accessSupported && (
+          <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+            <div>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Accessibility</h2>
+              <p className="type text-xs text-white/50 mt-2">Shown on your event page. Saved with the rest of the form.</p>
+            </div>
+            <EventAccessInfoEditor
+              idPrefix="ee-access"
+              value={eventData.accessibility ?? {}}
+              onChange={(next) => setEventData({ ...eventData, accessibility: next })}
+            />
+          </section>
+        )}
 
         {/* Vouchers — self-contained CRUD (not part of the form submit). */}
         {eventId && <VouchersEditor eventId={eventId} tiers={(eventData.ticketTiers || []).map((t) => ({ id: t.id, name: t.name, visibility: t.visibility }))} />}

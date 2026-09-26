@@ -16,8 +16,10 @@
   SECURITY DEFINER RPCs and RPC-only tables show the same by-design WARN/INFO as the existing exos set.
   Not deployed: `exos-refund`, and the edited `exos-checkout` / `stripe-webhook` / `exos-mail-drain` (payments stay
   off; the drain needs the new `EXOS_APP_URL` secret before reminder mails go out).
-- **The `/bridge/` bundle (Terminal-2 `static/bridge/`, built 07-27) still works**, and it's now safe to rebuild it from
-  this repo and copy `dist/` over.
+- **Live `/bridge/` bundle:** built from EXP `2a11143` (ease-of-use pass), shipped in Terminal-2 #1005 (merged 2026-09-26).
+- **Authored, not applied:** `20260926090000_exos_accessible_tickets` (accessible tiers, event access info, holder and
+  guest access needs). Apply it before shipping a bundle built after it. The frontend degrades without it (the new
+  panels hide), except that ticking "Accessible ticket type" or filling Accessibility in Create Event fails the save.
 - **Payments are dormant by choice.** `stripe-webhook`, `exos-checkout`, `exos-reconcile-checkouts` have never been deployed.
   Before Stripe go-live: set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `CRON_SECRET`, deploy the three functions,
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
@@ -167,6 +169,18 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
 - [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
+
+## Accessible tickets 2026-09-26
+
+`claude/exos-p0` + mig `20260926090000` (tested: `test_accessible_tickets.sql` on the P0 chain and on the real-schema clone).
+- ✅ Organizers mark a ticket type accessible with a short note; buyers see an accessible badge on it.
+- ✅ Event access info: fixed venue-feature list, notes, access contact (email/phone links). Public on the event page.
+- ✅ Holders state access needs on their pass (fixed categories, no free text). Staff see them in the report
+  (Attendees tab, CSV) and at the door (name search + verdict, offline via the door download). Needs aren't readable
+  from `exos_tickets` (no column grant) and drop when the ticket changes hands.
+- ✅ Guest-list needs: staff (report) and the list's promoter (portal) set them; the door guest mode shows them.
+- [ ] Promoter kit: flag accessible ticket types in the tier picker (needs `exos_promoter_kit` to return the flag).
+- [ ] Mail the organizer when a holder adds a need close to the show (digest), and a reminder to the holder.
 
 ## Stabilization 2026-09-25
 

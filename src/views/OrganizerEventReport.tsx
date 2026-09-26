@@ -33,6 +33,7 @@ import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
 import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
+import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -311,6 +312,9 @@ export default function OrganizerEventReport() {
         </>)}
 
         {tab === 'attendees' && (<>
+        {/* Access needs guests shared (mig 20260926090000). */}
+        <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
+
         {/* Attendees + per-ticket refund/void controls. Lists every
             ticket including voided ones (greyed out, with reason).
             For events at 250-1k tickets this list is fine; for larger

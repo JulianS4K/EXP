@@ -1,3 +1,5 @@
+import { Accessibility as AccessIcon } from 'lucide-react';
+import { EventAccessInfo } from '../components/Accessibility';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
@@ -697,6 +699,8 @@ export default function EventDetails() {
                 </div>
               </div>
               <VenueMap eventId={event.id} location={event.location} address={event.address} />
+              <EventAccessInfo accessibility={event.accessibility} />
+
               {/* Performers block — only renders when the organizer
                   has set at least one. First name is treated as the
                   headliner (slightly larger). The block sits above
@@ -832,6 +836,12 @@ export default function EventDetails() {
                          </div>
 
                          <p className="type text-[10px] text-white/50 mb-3">{tier.description}</p>
+                         {tier.accessible && (
+                           <p className="type text-[11px] text-sky-200 mb-3 flex items-start gap-1.5">
+                             <AccessIcon className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
+                             <span><span className="font-bold">Accessible</span>{tier.accessibleNote ? ` · ${tier.accessibleNote}` : ''}</span>
+                           </p>
+                         )}
                          <TableTierInfo eventId={event.id} tierId={tier.id} price={buyerTierPrice(tier)} currency={event.currency} />
 
                          <div className="flex items-center gap-2">

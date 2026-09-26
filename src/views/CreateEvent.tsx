@@ -61,6 +61,8 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // gate the call behind an env flag — otherwise every event creation 404s and
 // writes a misleading `syncStatus: 'failed'` to the doc.
 import { SHOW_DISCOUNT_CODES, SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
+import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
+import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
 
 const AUTOMATIQ_ENABLED =
@@ -154,7 +156,8 @@ export default function CreateEvent() {
       maxPerOrder: '8',
       maxPerAccount: '8'
     },
-    distributionNetworks: [] as string[]
+    distributionNetworks: [] as string[],
+    accessibility: {} as EventAccessibility
   });
   const [promoCodes, setPromoCodes] = useState<PromoCodeDraft[]>([]);
 
@@ -173,6 +176,8 @@ export default function CreateEvent() {
     salesEnd: string;
     // Table package (mig 20260926050000): capacity = tables, party size = tickets per table.
     table?: TableTierDraft;
+    accessible?: boolean;
+    accessibleNote?: string;
   };
   const makeBlankTier = (preset?: Partial<TierDraft>): TierDraft => ({
     id: crypto.randomUUID(),
@@ -305,6 +310,7 @@ export default function CreateEvent() {
           subgenres: Array.isArray(src.subgenres) ? src.subgenres : [],
           performers: Array.isArray(src.performers) ? src.performers : [],
           artistLinks: Array.isArray(src.artistLinks) ? src.artistLinks : [],
+          accessibility: parseAccessibility(src.accessibility),
           totalTickets: String(src.totalTickets ?? ''),
           price: String(src.price ?? ''),
           image: src.image || '',
@@ -333,6 +339,8 @@ export default function CreateEvent() {
                 capacity: String(t.capacity ?? ''),
                 ticketType: t.ticketType ?? 'paid',
                 visibility: t.visibility ?? 'public',
+                accessible: t.accessible === true,
+                accessibleNote: t.accessibleNote || '',
               }),
             ),
           );
@@ -783,6 +791,8 @@ export default function CreateEvent() {
           visibility: t.visibility,
           salesStart: salesStartUtc ? salesStartUtc.toISOString() : null,
           salesEnd: salesEndUtc ? salesEndUtc.toISOString() : null,
+          accessible: !!t.accessible,
+          accessibleNote: t.accessible ? (t.accessibleNote || '').trim().slice(0, ACCESSIBLE_NOTE_MAX) || null : null,
         };
       });
 
@@ -851,6 +861,9 @@ export default function CreateEvent() {
             maxPerAccount: parseInt(formData.purchaseLimits.maxPerAccount, 10) || 8,
           },
           distributionNetworks: formData.distributionNetworks,
+          // Only sent when filled in (a plain event never needs the column).
+          ...(hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
+            ? { accessibility: serializeAccessibility(formData.accessibility ?? {}) } : {}),
           tiers,
           discountCodes: (SHOW_DISCOUNT_CODES ? promoCodes : [])
             .filter((p) => p.code.trim())
@@ -1456,6 +1469,31 @@ export default function CreateEvent() {
                          />
                       </div>
 
+                      <div className="md:col-span-2 border border-white/10 p-4 space-y-3">
+                        <label htmlFor={`tier-${tier.id}-accessible`} className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            id={`tier-${tier.id}-accessible`}
+                            type="checkbox"
+                            className="w-4 h-4 accent-brand-primary"
+                            checked={!!tier.accessible}
+                            onChange={(e) => updateTier(tier.id, 'accessible', e.target.checked)}
+                          />
+                          <span className="type text-[11px] text-white/70 uppercase tracking-widest">Accessible ticket type</span>
+                        </label>
+                        <p className="type text-xs text-white/40">Wheelchair spaces, companion seats, step-free viewing. Buyers see an accessible badge. Tip: set it to hidden under Advanced and hand out a voucher to keep these for people who ask.</p>
+                        {tier.accessible && (
+                          <input
+                            type="text"
+                            aria-label="What this accessible ticket includes"
+                            maxLength={ACCESSIBLE_NOTE_MAX}
+                            placeholder="e.g. Wheelchair space + 1 companion seat"
+                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+                            value={tier.accessibleNote ?? ''}
+                            onChange={(e) => updateTier(tier.id, 'accessibleNote', e.target.value)}
+                          />
+                        )}
+                      </div>
+
                       <TableTierFields
                         value={tier.table ?? BLANK_TABLE_DRAFT}
                         onChange={(next) => updateTier(tier.id, 'table', next)}
@@ -1527,6 +1565,19 @@ export default function CreateEvent() {
                 </div>
               ))}
            </div>
+        </div>
+
+        {/* Venue access info (mig 20260926090000): shown on the event page. */}
+        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+          <div>
+            <h3 className="disp text-lg uppercase tracking-wide text-white">Accessibility</h3>
+            <p className="type text-xs text-white/50 mt-1">Optional. Tell guests what to expect so they can plan. Shown on your event page.</p>
+          </div>
+          <EventAccessInfoEditor
+            idPrefix="ce-access"
+            value={formData.accessibility ?? {}}
+            onChange={(next) => setFormData({ ...formData, accessibility: next })}
+          />
         </div>
 
         {/* Promo codes: exos_discount_codes are never redeemed at checkout, so

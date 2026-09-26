@@ -1,3 +1,4 @@
+import { AccessNeedBadges } from '../components/Accessibility';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEventForEdit, getPublicEvent } from '../lib/events';
@@ -1218,6 +1219,9 @@ export default function OrganizerCheckIn() {
                        <div className="min-w-0 flex-1">
                          <p className="font-bold text-slate-900 text-sm truncate">{entry.name || 'Unnamed'}</p>
                          <p className="text-[11px] text-slate-500 truncate">{entry.tier} · …{id.slice(-6)}</p>
+                         {(doorExtras?.ticketAccess?.[id]?.length ?? 0) > 0 && (
+                           <div className="mt-1"><AccessNeedBadges needs={doorExtras!.ticketAccess![id]} /></div>
+                         )}
                        </div>
                        {entry.voided ? (
                          <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
@@ -1266,7 +1270,14 @@ export default function OrganizerCheckIn() {
               <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
                 {testScan ? 'Valid ticket · not checked in (test window)' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
               </p>
-              
+
+              {(doorExtras?.ticketAccess?.[foundTicket.id]?.length ?? 0) > 0 && (
+                <div role="note" className="w-full mb-4 p-4 rounded-2xl bg-sky-50 border border-sky-200 text-left">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-sky-800 mb-2">Access needs</p>
+                  <AccessNeedBadges needs={doorExtras!.ticketAccess![foundTicket.id]} />
+                </div>
+              )}
+
               <div className="w-full space-y-4">
                  <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-green-50">
                     <div className="flex items-center space-x-3 text-left">
