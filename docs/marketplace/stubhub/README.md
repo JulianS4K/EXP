@@ -288,6 +288,51 @@ user-login authorization). Suggested secrets: `STUBHUB_ENV`,
 
 ## Mapping to Exos
 
+### Event creation (tied to Exos events, dry-run)
+
+Added 2026-09-26 (mig `20260926190000_exos_stubhub_event_request`):
+
+1. **Organizer publishes** an event with StubHub ticked in its distribution
+   networks (`exos_events.distribution_networks`) and *Primary market only*
+   off. The `exos_events_stubhub_distribution` trigger queues one
+   `exos_distribution_listings` row: channel `stubhub`, status `pending`.
+   Drafts queue nothing until published.
+2. **`exos-distribute`** reads pending `stubhub` rows and builds the
+   `PUT /sellerevents` body from the event with
+   `supabase/functions/_shared/stubhub-event.ts`. That's the same builder
+   `src/lib/marketplace/stubhub/listing.ts` re-exports, so the app and the
+   function can't drift. The builder uses:
+   - the event name and start;
+   - the venue name, plus city, region and country from the structured
+     address;
+   - the free-text country, turned into an ISO code only when it's
+     unambiguous.
+3. **Dry-run:** the body is stored in `planned_request` and the row goes to
+   `planned`. Nothing is sent. A missing venue city (or name or start) marks
+   the row `failed` with the reason instead.
+4. **The event editor** shows the state under Distribution: queued, request
+   ready (not sent), or couldn't prepare plus the reason.
+5. **Edits** re-queue the request until StubHub has the event
+   (`external_event_id`). Unpublishing, cancelling, unticking StubHub or
+   turning on *Primary market only* removes a row that never reached StubHub.
+   A row that did reach StubHub is left for a human.
+
+**Going live** needs these, in order:
+- apply the migration;
+- deploy `exos-distribute` and a cron for it;
+- get StubHub seller API access and a user-login token with
+  `write:requestedevents`;
+- record an operator `WriteAuthorization` for `createSellerEvent`;
+- a live branch in `exos-distribute` that sends the planned request and
+  stores the returned `SellerEvent` id in `external_event_id`.
+
+Every step is operator-gated, and the last one isn't built. The
+create/edit forms' distribution controls are still hidden
+(`SHOW_DISTRIBUTION` in `src/lib/tierType.ts`).
+
+### Other mappings
+
+
 - **Event xref:** `GET /catalog/events/external_mappings/{platform}/{id}` and
   `POST /catalog/mapevent` are the read-only way to fill a StubHub column in
   `bridge_event_xref`.

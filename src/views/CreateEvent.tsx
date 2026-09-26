@@ -924,9 +924,10 @@ export default function CreateEvent() {
         throw commitErr;
       }
 
-      // Automatiq distribution sync is later-phase (env-gated + needs the
-      // distribution rails). The old Firestore-based sync write is removed; it
-      // returns with the Automatiq integration.
+      // Distribution: nothing to call here. Publishing with StubHub in
+      // distributionNetworks queues its StubHub event request server-side
+      // (exos_events trigger, mig 20260926190000; exos-distribute plans it,
+      // dry-run). Other networks wait on the Automatiq integration.
 
       // Successful save (publish or draft). Drop the localStorage draft so
       // the next visit to /create-event starts clean. The Storage upload

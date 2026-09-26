@@ -33,6 +33,28 @@
 // before listing on it.
 
 import type { BarcodeInformation, Money, MoneyInput, Seating } from './types';
+import {
+  ListingMappingError,
+  buildRequestedEvent,
+  type ExosEventForListing,
+  type RequestedEvent,
+} from '../../../../supabase/functions/_shared/stubhub-event.ts';
+
+// The requested-event mapping lives in the edge functions' _shared folder so
+// exos-distribute (Deno) builds exactly the body this client would send.
+export {
+  ListingMappingError,
+  buildRequestedEvent,
+  exosEventForListing,
+  planStubHubEventRequest,
+  countryCode,
+} from '../../../../supabase/functions/_shared/stubhub-event.ts';
+export type {
+  ExosEventForListing,
+  ExosEventRow,
+  PlannedEventRequest,
+  RequestedEvent,
+} from '../../../../supabase/functions/_shared/stubhub-event.ts';
 
 /** `split_type` values, from the SplitType schema. */
 export const SPLIT_TYPES = ['Any', 'None', 'AvoidOne', 'AvoidOneAndThree', 'Pairs'] as const;
@@ -146,13 +168,6 @@ export interface ListingDetails {
   notes?: string;
 }
 
-export class ListingMappingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ListingMappingError';
-  }
-}
-
 const money = (amount: number, currency_code: string): MoneyInput => ({
   amount: Math.round(amount * 100) / 100,
   currency_code,
@@ -195,47 +210,6 @@ export function buildCreateListingRequest(row: ExosDistributionRow, d: ListingDe
   if (d.inHandAt != null) req.in_hand_at = d.inHandAt instanceof Date ? d.inHandAt.toISOString() : d.inHandAt;
   if (d.instantDelivery != null) req.instant_delivery = d.instantDelivery;
   if (d.notes) req.notes = d.notes;
-  return req;
-}
-
-/** The Exos event, as StubHub's requested-event endpoints need it. */
-export interface ExosEventForListing {
-  name: string;
-  startsAt: Date | string;
-  venueName: string;
-  venueCity: string;
-  venueStateProvince?: string;
-  /** Two-letter ISO 3166, e.g. "US". */
-  countryCode?: string;
-  /** Default true: Exos events have a fixed start. */
-  dateConfirmed?: boolean;
-}
-
-/**
- * PutRequestedEventRequest: the body of both PUT /sellerevents (ask StubHub
- * to create the event) and PUT /listingconstraints (constraints for it).
- */
-export interface RequestedEvent {
-  event: { name: string; start_date: string; date_confirmed?: boolean; note?: string };
-  venue: { name: string; city: string; state_province?: string };
-  /** Two-letter ISO 3166. */
-  country?: { code: string };
-}
-
-export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
-  const start = ev.startsAt instanceof Date ? ev.startsAt : new Date(ev.startsAt);
-  if (Number.isNaN(start.getTime())) throw new ListingMappingError('event start is not a date');
-  if (!ev.name.trim()) throw new ListingMappingError('event name is required');
-  if (!ev.venueName.trim() || !ev.venueCity.trim()) throw new ListingMappingError('venue name and city are required');
-  if (ev.countryCode != null && !/^[A-Z]{2}$/.test(ev.countryCode)) {
-    throw new ListingMappingError(`country must be ISO 3166 alpha-2, got "${ev.countryCode}"`);
-  }
-  const req: RequestedEvent = {
-    event: { name: ev.name.trim(), start_date: start.toISOString(), date_confirmed: ev.dateConfirmed ?? true },
-    venue: { name: ev.venueName.trim(), city: ev.venueCity.trim() },
-  };
-  if (ev.venueStateProvince) req.venue.state_province = ev.venueStateProvince;
-  if (ev.countryCode) req.country = { code: ev.countryCode };
   return req;
 }
 
