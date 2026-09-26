@@ -3,6 +3,10 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
+import fs from "fs";
+import { securityHeaders } from "./src/lib/hosting/headers";
+import { isLinkCrawler } from "./src/lib/hosting/crawler";
+import { buildPreview, buildSitemap, inject, previewTarget, type PublicReader } from "./src/lib/hosting/seo";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,20 +67,23 @@ async function startServer() {
   // strict CSP yet because the SPA pulls Stripe.js + Firebase from CDNs and
   // a misconfigured CSP would silently break checkout. Add one once the
   // origin allowlist is known.
-  app.use((_req, res, next) => {
+  // Behind Render's proxy, plus Terminal-2's /bridge reverse proxy when the
+  // app is reached through the Render link: trust that many X-Forwarded-For
+  // hops so req.ip (rate limits, logs) is the real client.
+  app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
+  // Production gets the per-page /bridge policy that Terminal-2 used to set
+  // (src/lib/hosting/headers.ts: CSP, camera for the door scanner, framing
+  // only for the embed). Dev keeps the loose set so Vite's HMR still works.
+  app.use((req, res, next) => {
+    if (isProd) {
+      for (const [k, v] of Object.entries(securityHeaders(req.path, { hsts: true }))) res.setHeader(k, v);
+      return next();
+    }
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader(
-      "Permissions-Policy",
-      "camera=(self), geolocation=(), microphone=()"
-    );
-    if (isProd) {
-      res.setHeader(
-        "Strict-Transport-Security",
-        "max-age=31536000; includeSubDomains"
-      );
-    }
+    res.setHeader("Permissions-Policy", "camera=(self), geolocation=(), microphone=()");
     next();
   });
 
@@ -122,105 +129,76 @@ async function startServer() {
   // X-Forwarded-Proto header can't poison robots.txt or the cached sitemap.
   // Request-header fallback is dev-only convenience when the env is unset.
   const publicBase = (req: express.Request): string => {
-    const configured = (process.env.VITE_APP_URL || '').replace(/\/$/, '');
+    const configured = (process.env.EXOS_PUBLIC_BASE_URL || process.env.VITE_APP_URL || '').replace(/\/+$/, '').replace(/\/bridge$/, '');
     if (configured) return configured;
     const host = req.get('host') || 'localhost';
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https') as string;
     return `${proto}://${host}`;
   };
 
+  // -- Public views reader (link previews + sitemap) ----------------------
+  // Anon key + the exos_public_* projections only: published events, public
+  // tiers, public orgs. Nothing here can read private data.
+  let reader: PublicReader | null | undefined;
+  const getReader = async (): Promise<PublicReader | null> => {
+    if (reader !== undefined) return reader;
+    const sbUrl = process.env.VITE_SUPABASE_URL;
+    const sbKey = process.env.VITE_SUPABASE_ANON_KEY;
+    if (!sbUrl || !sbKey) return (reader = null);
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
+    reader = async (table, cols, filter, limit) => {
+      let q = sb.from(table).select(cols);
+      if (filter) q = q.eq(filter.col, filter.val);
+      const { data, error } = await q.limit(limit);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<Record<string, unknown>>;
+    };
+    return reader;
+  };
+
   // -- robots.txt -----------------------------------------------------------
-  // Allow indexing of public surfaces, deny embed routes (those are
-  // for iframe consumption, not for crawler ingestion). Points at the
-  // sitemap so Googlebot finds the full event list.
+  // On this host the app lives under /bridge/ (vite base). Through the Render
+  // link, Terminal-2 serves its own robots.txt and only proxies /bridge/*,
+  // which is why the sitemap lives at /bridge/sitemap.xml.
   app.get('/robots.txt', (req, res) => {
     res.type('text/plain').send(
       [
         'User-agent: *',
-        'Allow: /',
-        'Disallow: /embed/',
-        'Disallow: /api/',
-        'Disallow: /dashboard',
-        'Disallow: /create-event',
-        'Disallow: /edit-event/',
-        'Disallow: /checkin/',
-        'Disallow: /onboarding',
+        'Allow: /bridge/',
+        'Disallow: /bridge/embed/',
+        'Disallow: /bridge/dashboard',
+        'Disallow: /bridge/create-event',
+        'Disallow: /bridge/edit-event/',
+        'Disallow: /bridge/checkin/',
+        'Disallow: /bridge/onboarding',
         '',
-        `Sitemap: ${publicBase(req)}/sitemap.xml`,
+        `Sitemap: ${publicBase(req)}/bridge/sitemap.xml`,
         '',
       ].join('\n'),
     );
   });
 
   // -- sitemap.xml ----------------------------------------------------------
-  // Generates a sitemap pointing at every published event + every org
-  // storefront. Queries the public Supabase projections (exos_public_events /
-  // exos_public_orgs) with the anon key — both are anon-readable views.
-  // Cached in-memory for 10 minutes so a hammering crawler doesn't
-  // burn reads on every hit.
+  // Published events that haven't ended + organizer pages
+  // (src/lib/hosting/seo.ts buildSitemap), cached 10 minutes.
   let sitemapCache: { generatedAt: number; xml: string } | null = null;
   const SITEMAP_TTL_MS = 10 * 60 * 1000;
-  app.get('/sitemap.xml', async (req, res, next) => {
+  app.get('/bridge/sitemap.xml', async (req, res) => {
     try {
-      if (
-        sitemapCache &&
-        Date.now() - sitemapCache.generatedAt < SITEMAP_TTL_MS
-      ) {
-        res.type('application/xml').send(sitemapCache.xml);
-        return;
+      if (!sitemapCache || Date.now() - sitemapCache.generatedAt >= SITEMAP_TTL_MS) {
+        const read = await getReader();
+        if (!read) return res.status(404).type('text/plain').send('not found');
+        sitemapCache = { generatedAt: Date.now(), xml: await buildSitemap(read, publicBase(req)) };
       }
-      // Read published events + org storefronts from the public Supabase
-      // projections. exos_public_events is already status=published (the view's
-      // WHERE clause) and exos_public_orgs/events are anon-readable, so the
-      // anon key suffices. Lazy-import keeps dev-mode boot snappy. Absent env →
-      // throws, caught below → graceful empty-sitemap stub.
-      const { createClient } = await import('@supabase/supabase-js');
-      const sbUrl = process.env.VITE_SUPABASE_URL;
-      const sbKey = process.env.VITE_SUPABASE_ANON_KEY;
-      if (!sbUrl || !sbKey) throw new Error('Supabase env (VITE_SUPABASE_URL / _ANON_KEY) missing');
-      const sb = createClient(sbUrl, sbKey);
-      const [{ data: events }, { data: orgs }] = await Promise.all([
-        sb.from('exos_public_events').select('id, starts_at').limit(1000),
-        sb.from('exos_public_orgs').select('slug').limit(500),
-      ]);
-
-      const base = publicBase(req);
-      const urls: string[] = [
-        `<url><loc>${base}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
-      ];
-      for (const e of events ?? []) {
-        const row = e as { id: string; starts_at?: string | null };
-        const lastmod = row.starts_at ? new Date(row.starts_at).toISOString() : null;
-        urls.push(
-          `<url><loc>${base}/event/${row.id}</loc>${
-            lastmod ? `<lastmod>${lastmod}</lastmod>` : ''
-          }<changefreq>daily</changefreq><priority>0.8</priority></url>`,
-        );
-      }
-      for (const o of orgs ?? []) {
-        const slug = (o as { slug?: string }).slug;
-        if (!slug) continue;
-        urls.push(
-          `<url><loc>${base}/o/${slug}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`,
-        );
-      }
-      const xml =
-        '<?xml version="1.0" encoding="UTF-8"?>\n' +
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
-        urls.join('\n') +
-        '\n</urlset>\n';
-      sitemapCache = { generatedAt: Date.now(), xml };
-      res.type('application/xml').send(xml);
+      return res.type('application/xml').send(sitemapCache.xml);
     } catch (err) {
-      // Sitemap failure shouldn't 500 the whole server; serve a stub.
-      res.type('application/xml').send(
-        '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>\n',
-      );
-      next?.(); // eslint-disable-line @typescript-eslint/no-unused-expressions
+      console.error(JSON.stringify({ lvl: 'error', msg: 'sitemap failed', error: String(err) }));
+      return res.status(503).type('text/plain').send('sitemap unavailable');
     }
   });
+  app.get('/sitemap.xml', (_req, res) => res.redirect(301, '/bridge/sitemap.xml'));
 
-  // -- Vite middleware for dev / static assets in prod --------------------
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -228,26 +206,63 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
+    // The app is built with vite base '/bridge/' and <Router basename="/bridge">,
+    // so it's served under /bridge/ here too. That keeps one set of URLs whether
+    // a visitor comes straight to this service or through the Render link
+    // (Terminal-2 reverse-proxies /bridge/* here, same origin, shared login).
     const distPath = path.join(process.cwd(), "dist");
+    const indexPath = path.join(distPath, "index.html");
+    let shell: string | null = null;
+    const getShell = () => (shell ??= fs.readFileSync(indexPath, "utf8"));
+
+    const withQuery = (req: Request, target: string) => {
+      const q = req.originalUrl.indexOf("?");
+      return q === -1 ? target : target + req.originalUrl.slice(q);
+    };
+    app.get("/", (req, res) => res.redirect(308, withQuery(req, "/bridge/")));
+    // Express matches "/bridge" and "/bridge/" alike (non-strict routing), so
+    // only redirect the bare form or this would loop.
+    app.get("/bridge", (req, res, next) =>
+      req.originalUrl.split("?")[0] === "/bridge" ? res.redirect(308, withQuery(req, "/bridge/")) : next(),
+    );
     app.use(
+      "/bridge",
       express.static(distPath, {
+        index: false,
         // Hashed assets are immutable — let CDNs cache them aggressively.
         // index.html is served below with no-cache so the user always gets
         // a fresh entrypoint.
         setHeaders: (res, filePath) => {
-          if (/\.[a-f0-9]{8,}\./.test(filePath)) {
-            res.setHeader(
-              "Cache-Control",
-              "public, max-age=31536000, immutable"
-            );
+          if (/\.[a-f0-9]{8,}\./.test(filePath) || /-[A-Za-z0-9_-]{8,}\.(js|css)$/.test(filePath)) {
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
           }
         },
       })
     );
 
-    app.get("*", (_req, res) => {
+    // A missing asset is a 404, not the SPA shell (a stale chunk request
+    // must fail loudly instead of parsing HTML as JS).
+    const ASSET_EXT = /\.(js|mjs|css|map|json|svg|png|jpe?g|webp|ico|woff2?|txt|webmanifest)$/i;
+
+    app.get("/bridge/*", async (req, res, next) => {
+      if (ASSET_EXT.test(req.path)) return next();
       res.setHeader("Cache-Control", "no-cache");
-      res.sendFile(path.join(distPath, "index.html"));
+      // Link-unfurl bots don't run JS: give them the event / org preview
+      // server-side. Humans get the plain shell. A failed preview must never
+      // break the page.
+      if (isLinkCrawler(req.get("user-agent"))) {
+        try {
+          const page = req.path.replace(/^\/bridge\//, "");
+          const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?") + 1) : "";
+          const target = previewTarget(page, query);
+          const read = target ? await getReader() : null;
+          const tags = target && read ? await buildPreview(read, target, publicBase(req)) : null;
+          if (tags) return res.type("html").send(inject(getShell(), tags));
+        } catch (err) {
+          console.error(JSON.stringify({ lvl: "error", msg: "link preview failed", path: req.path, error: String(err) }));
+        }
+      }
+      res.sendFile(indexPath);
     });
   }
 
