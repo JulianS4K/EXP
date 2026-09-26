@@ -3,6 +3,7 @@
 // only the lists the organizer gave them, up to each list's cap, until the
 // list closes. Names already checked in can't be removed.
 
+import { useAccessColumns } from '../hooks/useAccessColumns';
 import { GuestAccessEditor } from './Accessibility';
 import { promoterSetGuestAccessNeeds } from '../lib/accessibilityApi';
 import { useCallback, useEffect, useState } from 'react';
@@ -52,6 +53,7 @@ function ListCard({ token, list, onChanged }: { token: string; list: PromoterGue
   const [name, setName] = useState('');
   const [plus, setPlus] = useState(0);
   const [busy, setBusy] = useState(false);
+  const accessOk = useAccessColumns();
   const left = list.cap != null ? Math.max(0, list.cap - list.heads) : null;
   const when = list.startsAt ? new Date(list.startsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
 
@@ -145,7 +147,7 @@ function ListCard({ token, list, onChanged }: { token: string; list: PromoterGue
                   entryId={e.id}
                   guestName={e.guestName}
                   needs={e.accessNeeds}
-                  canEdit={list.open}
+                  canEdit={list.open && accessOk}
                   theme="dark"
                   onSave={async (n) => {
                     try {

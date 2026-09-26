@@ -1,3 +1,4 @@
+import { useAccessColumns } from '../hooks/useAccessColumns';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createEvent, getEventForEdit, type EventInput } from '../lib/events';
@@ -98,7 +99,15 @@ const SUPPORTED_CURRENCIES: { code: string; label: string }[] = [
   { code: 'BRL', label: 'BRL — Brazilian Real' },
 ];
 
+// A unique violation (23505) on the events slug: the only failure a new
+// slug can fix. Anything else (including a later tier insert) is rethrown.
+function isSlugConflict(err: unknown): boolean {
+  const e = err as { code?: string; message?: string; details?: string } | null;
+  return e?.code === '23505' && /slug/i.test(`${e.message ?? ''} ${e.details ?? ''}`);
+}
+
 export default function CreateEvent() {
+  const accessOk = useAccessColumns();
   const { user } = useAuth();
   // Bridge multi-tenant: every new event must belong to the active org.
   // Falls back to legacy uid-only path if the user has no orgs yet so
@@ -791,8 +800,8 @@ export default function CreateEvent() {
           visibility: t.visibility,
           salesStart: salesStartUtc ? salesStartUtc.toISOString() : null,
           salesEnd: salesEndUtc ? salesEndUtc.toISOString() : null,
-          accessible: !!t.accessible,
-          accessibleNote: t.accessible ? (t.accessibleNote || '').trim().slice(0, ACCESSIBLE_NOTE_MAX) || null : null,
+          accessible: accessOk && !!t.accessible,
+          accessibleNote: accessOk && t.accessible ? (t.accessibleNote || '').trim().slice(0, ACCESSIBLE_NOTE_MAX) || null : null,
         };
       });
 
@@ -862,7 +871,7 @@ export default function CreateEvent() {
           },
           distributionNetworks: formData.distributionNetworks,
           // Only sent when filled in (a plain event never needs the column).
-          ...(hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
+          ...(accessOk && hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
             ? { accessibility: serializeAccessibility(formData.accessibility ?? {}) } : {}),
           tiers,
           discountCodes: (SHOW_DISCOUNT_CODES ? promoCodes : [])
@@ -885,7 +894,7 @@ export default function CreateEvent() {
         } catch (firstErr) {
           // The event row insert is the first write, so a slug collision
           // leaves nothing behind and is safe to retry with a new slug.
-          if (!autoSlug || !/duplicate|unique|exists/i.test(String((firstErr as any)?.message ?? firstErr))) throw firstErr;
+          if (!autoSlug || !isSlugConflict(firstErr)) throw firstErr;
           slug = `${autoSlug}-${Math.random().toString(36).slice(2, 6)}`;
           created = await createEvent(input(slug));
         }
@@ -904,7 +913,7 @@ export default function CreateEvent() {
         void geocodeEvent(created.eventId);
       } catch (commitErr) {
         // exos_events.slug is UNIQUE — a collision surfaces as a unique violation.
-        if (customSlug && /duplicate|unique|exists/i.test(String((commitErr as any)?.message ?? commitErr))) {
+        if (customSlug && isSlugConflict(commitErr)) {
           toast({
             kind: 'error',
             title: 'Slug already taken',
@@ -1469,6 +1478,7 @@ export default function CreateEvent() {
                          />
                       </div>
 
+                      {accessOk && (
                       <div className="md:col-span-2 border border-white/10 p-4 space-y-3">
                         <label htmlFor={`tier-${tier.id}-accessible`} className="flex items-center gap-3 cursor-pointer">
                           <input
@@ -1493,6 +1503,7 @@ export default function CreateEvent() {
                           />
                         )}
                       </div>
+                      )}
 
                       <TableTierFields
                         value={tier.table ?? BLANK_TABLE_DRAFT}
@@ -1567,7 +1578,9 @@ export default function CreateEvent() {
            </div>
         </div>
 
-        {/* Venue access info (mig 20260926090000): shown on the event page. */}
+        {/* Venue access info (mig 20260926090000): shown on the event page.
+            Hidden until the columns exist, so a save can't hit a missing one. */}
+        {accessOk && (
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
           <div>
             <h3 className="disp text-lg uppercase tracking-wide text-white">Accessibility</h3>
@@ -1579,6 +1592,7 @@ export default function CreateEvent() {
             onChange={(next) => setFormData({ ...formData, accessibility: next })}
           />
         </div>
+        )}
 
         {/* Promo codes: exos_discount_codes are never redeemed at checkout, so
             the editor stays hidden until percent-off codes reach the server

@@ -46,7 +46,9 @@ const RESUME_TTL_MS = 10 * 60 * 1000;
 export default function EventDetails() {
   const { id } = useParams();
   const t = useT();
-  const { user, isAdmin, signIn } = useAuth();
+  const { user, isAdmin, signIn, isAuthModalOpen } = useAuth();
+  // Set when Buy opened the sign-in modal on this page (state still intact).
+  const pendingBuyRef = useRef(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const [event, setEvent] = useState<Event | null>(null);
@@ -280,7 +282,12 @@ export default function EventDetails() {
     if (!user) {
       // Pick up where they left off once signed in (survives the OAuth
       // round trip, which reloads the page).
-      try { sessionStorage.setItem(RESUME_KEY, `${event.id}|${Date.now()}`); } catch { /* storage blocked */ }
+      pendingBuyRef.current = true;
+      // A redirect sign-in (Google/Apple) reloads the page: keep the choice so
+      // it can be put back, never replayed without a tap.
+      try {
+        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
+      } catch { /* storage blocked */ }
       toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
       await signIn();
       return;
@@ -405,22 +412,37 @@ export default function EventDetails() {
     }
   };
 
-  // Resume the purchase the buyer started before signing in.
+  // After sign-in. Same page (email sign-in, nothing reloaded): the buyer's
+  // choices are intact, so carry on with the purchase they tapped. After a
+  // redirect sign-in the page reloaded: put their ticket type and quantity
+  // back and ask for one more tap. Never buys on a later, unrelated visit.
   useEffect(() => {
     if (!user || !event) return;
-    let pending: string | null = null;
-    try { pending = sessionStorage.getItem(RESUME_KEY); } catch { /* storage blocked */ }
-    if (!pending) return;
-    const [pendingId, at] = pending.split('|');
-    // Only a sign-in finished within a few minutes resumes the purchase; a
-    // stale intent from an abandoned sign-in must never buy on a later visit.
-    const fresh = Date.now() - Number(at) < RESUME_TTL_MS;
-    if (pendingId !== event.id && fresh) return;
-    try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage blocked */ }
-    if (pendingId !== event.id || !fresh) return;
-    void handlePurchase();
+    let saved: { id?: string; at?: number; tierId?: string | null; qty?: number } | null = null;
+    try {
+      const raw = sessionStorage.getItem(RESUME_KEY);
+      if (raw) saved = JSON.parse(raw);
+      sessionStorage.removeItem(RESUME_KEY);
+    } catch { /* storage blocked or bad JSON */ }
+    if (pendingBuyRef.current) {
+      pendingBuyRef.current = false;
+      void handlePurchase();
+      return;
+    }
+    if (!saved || saved.id !== event.id || !saved.at || Date.now() - saved.at > RESUME_TTL_MS) return;
+    if (saved.tierId && (event.ticketTiers ?? []).some((t) => t.id === saved!.tierId)) setSelectedTierId(saved.tierId);
+    if (saved.qty && saved.qty > 0) setQuantity(Math.min(maxPerOrder, saved.qty));
+    toast({ kind: 'info', message: "You're signed in. Check your tickets and tap Buy to finish." });
+    buyCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, event?.id]);
+
+  // Closing the sign-in modal without signing in drops the pending purchase.
+  useEffect(() => {
+    if (isAuthModalOpen || user || !pendingBuyRef.current) return;
+    pendingBuyRef.current = false;
+    try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage blocked */ }
+  }, [isAuthModalOpen, user]);
 
   useEffect(() => {
     const el = buyCardRef.current;

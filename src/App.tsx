@@ -83,9 +83,11 @@ function ChromeLayout({ children }: { children: ReactNode }) {
   }, [location.pathname]);
   // A new page starts at the top (back/forward keeps the browser's own
   // restoration; tab switches via ?tab= don't change the pathname).
+  // Keyed on the path only: a ?tab= replace on the same page must not jump.
   useEffect(() => {
     if (navType !== 'POP') window.scrollTo(0, 0);
-  }, [location.pathname, navType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
   const isBare =
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||

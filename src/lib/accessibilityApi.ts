@@ -54,3 +54,16 @@ export async function promoterSetGuestAccessNeeds(token: string, entryId: string
   if (error) throw error;
   return normalizeNeeds(data);
 }
+
+// Whether mig 20260926090000 is on this database. One cheap probe per page
+// load (a column that doesn't exist fails the select); screens that write the
+// new columns stay hidden until it answers yes.
+let accessColumns: Promise<boolean> | null = null;
+export function hasAccessColumns(): Promise<boolean> {
+  if (!accessColumns) {
+    accessColumns = Promise.resolve(
+      supabase.from('exos_ticket_tiers').select('accessible').limit(1),
+    ).then(({ error }) => !error, () => false);
+  }
+  return accessColumns;
+}

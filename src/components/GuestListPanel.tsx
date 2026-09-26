@@ -9,6 +9,7 @@
 // ticket inventory. Turn it on for a list and its heads come out of the
 // event's total capacity as names are added (and go back when removed).
 
+import { useAccessColumns } from '../hooks/useAccessColumns';
 import { GuestAccessEditor } from './Accessibility';
 import { setGuestAccessNeeds } from '../lib/accessibilityApi';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -279,6 +280,7 @@ function GuestRows({
   const { toast } = useToast();
   const [editing, setEditing] = useState<string | null>(null);
   const [plus, setPlus] = useState(0);
+  const accessOk = useAccessColumns();
 
   if (entries.length === 0) return <p className="text-[11px] text-slate-400 italic">No names yet.</p>;
 
@@ -321,7 +323,7 @@ function GuestRows({
               entryId={e.id}
               guestName={e.guestName}
               needs={e.accessNeeds ?? []}
-              canEdit={canManage}
+              canEdit={canManage && accessOk}
               onSave={async (n) => {
                 try {
                   await setGuestAccessNeeds(e.id, n);

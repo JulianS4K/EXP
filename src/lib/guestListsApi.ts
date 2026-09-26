@@ -17,6 +17,7 @@ import {
 } from './guestLists';
 import { mapDoorTable, type DoorTable } from './tables';
 import { normalizeNeeds, type AccessNeed } from './accessibility';
+import { hasAccessColumns } from './accessibilityApi';
 
 export interface GuestList {
   id: string;
@@ -57,11 +58,13 @@ function mapList(r: any): GuestList {
 }
 
 export async function listGuestLists(eventId: string): Promise<{ lists: GuestList[]; entries: GuestEntry[] }> {
+  // access_needs only once mig 20260926090000 is there (else the select fails).
+  const cols = `id, list_id, guest_name, email, phone, plus_ones, arrived, arrived_at, note${(await hasAccessColumns()) ? ', access_needs' : ''}`;
   const [{ data: lists, error: e1 }, { data: entries, error: e2 }] = await Promise.all([
     supabase.from('exos_guest_lists').select('*').eq('event_id', eventId).order('created_at', { ascending: true }),
     supabase
       .from('exos_guest_list_entries')
-      .select('id, list_id, guest_name, email, phone, plus_ones, arrived, arrived_at, note')
+      .select(cols)
       .eq('event_id', eventId)
       .order('guest_name', { ascending: true }),
   ]);
