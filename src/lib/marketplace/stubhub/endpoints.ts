@@ -1,5 +1,8 @@
-// Every StubHub endpoint in the vendor reference, tagged by what it does to
+// Every StubHub endpoint in the vendor reference (the printed PDFs and the
+// OpenAPI specs in docs/marketplace/stubhub/), tagged by what it does to
 // StubHub. Mirrors the R / W / R* table in docs/marketplace/stubhub/README.md.
+// Paths are relative to the API root: transport.ts adds `/v2` for every API
+// except Catalog.
 //
 //   read   — GET, changes nothing.
 //   lookup — PUT/POST verb but changes nothing (batch get, previews, mapping).
@@ -89,6 +92,9 @@ export const STUBHUB_ENDPOINTS = {
   printSaleShipmentLabel: e('PUT', '/sales/{saleId}/shipments', 'write'),
   updateSaleShipment: e('PATCH', '/sales/{saleId}/shipments/{shipmentId}', 'write'),
   listSaleTicketHolders: e('GET', '/sales/{saleId}/ticketholders', 'read'),
+  // In the OpenAPI spec, not in the printed PDFs.
+  uploadSaleTransferProof: e('POST', '/sales/{saleId}/transferuploads/{transferType}', 'write'),
+  uploadSaleTransferStatusProof: e('POST', '/sales/{saleId}/transferstatusproof', 'write'),
   listPayments: e('GET', '/payments', 'read'),
   getPayment: e('GET', '/payments/{paymentId}', 'read'),
   getNextPayment: e('GET', '/payments/next', 'read'),
@@ -101,6 +107,7 @@ export const STUBHUB_ENDPOINTS = {
   createAddress: e('POST', '/addresses', 'write'),
   updateAddress: e('PATCH', '/addresses/{addressId}', 'write'),
   deleteAddress: e('DELETE', '/addresses/{addressId}', 'write'),
+  // In the printed PDFs, not in the OpenAPI spec.
   listPaymentMethods: e('GET', '/paymentmethods', 'read'),
   getPaymentMethod: e('GET', '/paymentmethods/{paymentMethodId}', 'read'),
   listListingPaymentMethods: e('PUT', '/listings/{listingId}/paymentmethods', 'lookup'),

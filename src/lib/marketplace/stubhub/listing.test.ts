@@ -3,6 +3,7 @@ import {
   ListingMappingError,
   allowedValues,
   buildCreateListingRequest,
+  buildRequestedEventListingRequest,
   checkListingConstraints,
   type ExosDistributionRow,
   type ListingDetails,
@@ -74,6 +75,8 @@ describe('buildCreateListingRequest', () => {
     [{ ...ROW, unit_price: 0 }, DETAILS, /unit_price/],
     [ROW, { ...DETAILS, currency: 'usd' }, /ISO 4217/],
     [ROW, { ...DETAILS, section: '  ' }, /section/],
+    [ROW, { ...DETAILS, splitType: 'Triples' as ListingDetails['splitType'] }, /split type/],
+    [ROW, { ...DETAILS, ticketType: ' ' }, /ticket type/],
   ] as const)('rejects bad input %#', (row, details, msg) => {
     expect(() => buildCreateListingRequest(row as ExosDistributionRow, details)).toThrow(ListingMappingError);
     expect(() => buildCreateListingRequest(row as ExosDistributionRow, details)).toThrow(msg);
@@ -81,10 +84,11 @@ describe('buildCreateListingRequest', () => {
 });
 
 describe('allowedValues', () => {
-  it('reads strings or id/name/value objects, null when unknown', () => {
+  it('reads the `type` field of SplitType / TicketType items, null when unknown', () => {
     expect(allowedValues(['Any', 'Pairs'])).toEqual(new Set(['Any', 'Pairs']));
-    expect(allowedValues([{ id: 3, name: 'ETicket' }])).toEqual(new Set(['3', 'ETicket']));
-    expect(allowedValues([{ other: 1 }])).toBeNull();
+    expect(allowedValues([{ type: 'Pairs', name: 'In pairs', description: '' }])).toEqual(new Set(['Pairs']));
+    expect(allowedValues([{ id: 3, type: 'ETicket', name: 'E-ticket' }])).toEqual(new Set(['ETicket']));
+    expect(allowedValues([{ id: 1, name: 'x' }])).toBeNull();
     expect(allowedValues([])).toBeNull();
     expect(allowedValues(undefined)).toBeNull();
   });
@@ -116,12 +120,33 @@ describe('checkListingConstraints', () => {
     const issues = checkListingConstraints(req, {
       seats_required: true,
       ticket_location_required: true,
-      _embedded: { split_types: ['Pairs'], ticket_types: [{ name: 'Paper' }] },
+      _embedded: { split_types: [{ type: 'Pairs' }], ticket_types: [{ id: 1, type: 'Paper', name: 'Paper' }] },
     });
     expect(issues.map((i) => i.field)).toEqual(['seating', 'ticket_location_address_id', 'split_type', 'ticket_type']);
   });
 
   it('does not demand a location on an update', () => {
     expect(checkListingConstraints({ number_of_tickets: 2 }, { ticket_location_required: true })).toEqual([]);
+  });
+});
+
+describe('buildRequestedEventListingRequest', () => {
+  const EV = { name: ' Exos Show ', startsAt: new Date(Date.UTC(2026, 10, 1, 2)), venueName: 'The Hall', venueCity: 'Austin' };
+
+  it('adds event, venue and country to the base listing', () => {
+    const req = buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, venueStateProvince: 'TX', countryCode: 'US' });
+    expect(req).toMatchObject({
+      external_id: ROW.id,
+      event: { name: 'Exos Show', start_date: '2026-11-01T02:00:00.000Z', date_confirmed: true },
+      venue: { name: 'The Hall', city: 'Austin', state_province: 'TX' },
+      country: { code: 'US' },
+    });
+  });
+
+  it('rejects missing or malformed event data', () => {
+    expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, startsAt: 'soon' })).toThrow(/not a date/);
+    expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, name: ' ' })).toThrow(/event name/);
+    expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, venueCity: '' })).toThrow(/venue/);
+    expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, countryCode: 'USA' })).toThrow(/3166/);
   });
 });

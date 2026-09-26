@@ -13,18 +13,23 @@
 // Writes live in writer.ts, which is dry-run unless the operator authorizes
 // them.
 //
-// The vendor reference documents neither the API host nor the OAuth token
-// URL, so both are required config (no guessed defaults). Auth is OAuth2
-// bearer; `clientCredentialsToken()` below is a caching provider for the
-// standard client-credentials grant if that's what the account is issued.
+// Hosts and auth are from StubHub's OpenAPI specs + guides
+// (docs/marketplace/stubhub/openapi/): pass `environment: 'production' |
+// 'sandbox'`. Two token flows matter:
+//   • clientCredentialsToken(): application-only; PUBLIC data only (catalog).
+//   • refreshTokenSource(): user-login tokens, needed for anything seller-
+//     side (listings, sales, payments, webhooks). StubHub's refresh tokens
+//     are single-use, so each refresh persists the new one.
 
 import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints';
 import {
+  DEFAULT_USER_AGENT,
   RETRY_TRANSIENT,
   StubHubError,
   execute,
   transportConfig,
   type FetchLike,
+  type HostOptions,
   type RequestParts,
   type TokenSource,
   type TransportConfig,
@@ -50,11 +55,9 @@ import type {
   CatalogPageQuery,
 } from './types';
 
-export { StubHubError, toQueryString } from './transport';
+export { StubHubError, STUBHUB_ENVIRONMENTS, toQueryString, type StubHubEnvironment } from './transport';
 
-export interface StubHubClientOptions {
-  /** API host, e.g. from STUBHUB_API_BASE_URL. No trailing path needed. */
-  baseUrl: string;
+export interface StubHubClientOptions extends HostOptions {
   /** Returns a current OAuth2 access token. */
   accessToken: TokenSource;
   fetch?: FetchLike;
@@ -276,48 +279,115 @@ function serializeDraft(draft: SellerListingDraft): Record<string, unknown> {
     : { ...rest, in_hand_at: in_hand_at instanceof Date ? in_hand_at.toISOString() : in_hand_at };
 }
 
-// ── OAuth2 client-credentials token provider ─────────────────────────
+// ── OAuth2 token sources ─────────────────────────────────────────────
 
-export interface ClientCredentialsOptions {
+/** Scopes from authentication/scopes.md. */
+export const STUBHUB_SCOPES = [
+  'read:events',
+  'read:payment',
+  'read:sales',
+  'write:sales',
+  'read:sellerlistings',
+  'write:sellerlistings',
+  'read:webhooks',
+  'write:webhooks',
+  'write:requestedevents',
+] as const;
+export type StubHubScope = (typeof STUBHUB_SCOPES)[number];
+
+interface TokenEndpointOptions {
   tokenUrl: string;
   clientId: string;
   clientSecret: string;
-  scope?: string;
+  scopes?: readonly StubHubScope[];
+  userAgent?: string;
   fetch?: FetchLike;
   now?: () => number;
 }
 
-/**
- * Returns an `accessToken` source that fetches with the client-credentials
- * grant and caches until 60s before expiry. Concurrent callers share one
- * in-flight request.
- */
-export function clientCredentialsToken(opts: ClientCredentialsOptions): TokenSource {
+interface TokenResponse {
+  access_token?: string;
+  expires_in?: number;
+  refresh_token?: string;
+}
+
+/** Basic auth per the docs: URL-encode id and secret (RFC 1738), then base64. */
+export function basicAuthHeader(clientId: string, clientSecret: string): string {
+  return `Basic ${btoa(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`)}`;
+}
+
+async function requestToken(opts: TokenEndpointOptions, form: URLSearchParams): Promise<TokenResponse & { access_token: string }> {
   const fetchImpl: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
-  const now = opts.now ?? Date.now;
+  if (opts.scopes?.length) form.set('scope', opts.scopes.join(' '));
+  const res = await fetchImpl(opts.tokenUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: basicAuthHeader(opts.clientId, opts.clientSecret),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': opts.userAgent ?? DEFAULT_USER_AGENT,
+    },
+    body: form.toString(),
+  });
+  if (!res.ok) throw new StubHubError(`stubhub token -> ${res.status}`, res.status, await res.text());
+  const data = (await res.json()) as TokenResponse;
+  if (!data.access_token) throw new StubHubError('stubhub token: no access_token in response', res.status, null);
+  return data as TokenResponse & { access_token: string };
+}
+
+/** Caches a token until 60s before expiry; concurrent callers share one fetch. */
+function cachedSource(now: () => number, fetchToken: () => Promise<TokenResponse & { access_token: string }>): TokenSource {
   let cached: { token: string; expiresAt: number } | null = null;
   let inflight: Promise<string> | null = null;
-
-  const refresh = async (): Promise<string> => {
-    const form = new URLSearchParams({ grant_type: 'client_credentials' });
-    if (opts.scope) form.set('scope', opts.scope);
-    const basic = btoa(`${opts.clientId}:${opts.clientSecret}`);
-    const res = await fetchImpl(opts.tokenUrl, {
-      method: 'POST',
-      headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
-    });
-    if (!res.ok) throw new StubHubError(`stubhub token -> ${res.status}`, res.status, await res.text());
-    const data = (await res.json()) as { access_token?: string; expires_in?: number };
-    if (!data.access_token) throw new StubHubError('stubhub token: no access_token in response', res.status, null);
-    const ttlMs = (data.expires_in ?? 3600) * 1000;
-    cached = { token: data.access_token, expiresAt: now() + ttlMs - 60_000 };
-    return data.access_token;
-  };
-
   return () => {
     if (cached && now() < cached.expiresAt) return cached.token;
-    if (!inflight) inflight = refresh().finally(() => { inflight = null; });
+    if (!inflight) {
+      inflight = fetchToken()
+        .then((data) => {
+          cached = { token: data.access_token, expiresAt: now() + (data.expires_in ?? 3600) * 1000 - 60_000 };
+          return data.access_token;
+        })
+        .finally(() => {
+          inflight = null;
+        });
+    }
     return inflight;
   };
+}
+
+export type ClientCredentialsOptions = TokenEndpointOptions;
+
+/**
+ * Application-only flow (client credentials). Public data only: catalog
+ * events and venues. No refresh token is issued; we just fetch a new one.
+ */
+export function clientCredentialsToken(opts: ClientCredentialsOptions): TokenSource {
+  return cachedSource(opts.now ?? Date.now, () =>
+    requestToken(opts, new URLSearchParams({ grant_type: 'client_credentials' })),
+  );
+}
+
+export interface RefreshTokenOptions extends TokenEndpointOptions {
+  /** Current refresh token (from the one-time user-login authorization). */
+  loadRefreshToken: () => string | Promise<string>;
+  /** StubHub refresh tokens are single-use: persist the rotated one. */
+  saveRefreshToken: (token: string) => void | Promise<void>;
+}
+
+/**
+ * User-login flow. Seller data (listings, sales, payments, webhooks) needs a
+ * user token; after the one-time authorization-code exchange, keep it fresh
+ * with the refresh-token grant. The new refresh token is saved *before* the
+ * access token is handed out, so a crash can't strand us on a spent token.
+ */
+export function refreshTokenSource(opts: RefreshTokenOptions): TokenSource {
+  return cachedSource(opts.now ?? Date.now, async () => {
+    const refresh = await opts.loadRefreshToken();
+    if (!refresh) throw new StubHubError('stubhub token: no refresh token stored', 0, null);
+    const data = await requestToken(opts, new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh }));
+    if (!data.refresh_token) {
+      throw new StubHubError('stubhub token: refresh response had no refresh_token (single-use; cannot continue)', 0, null);
+    }
+    await opts.saveRefreshToken(data.refresh_token);
+    return data;
+  });
 }

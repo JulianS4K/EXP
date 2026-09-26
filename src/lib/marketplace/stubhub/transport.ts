@@ -1,6 +1,12 @@
 // Shared HTTP transport for the StubHub reader (client.ts) and writer
 // (writer.ts). Knows nothing about read/write policy; each caller decides
 // what it's allowed to send before it gets here.
+//
+// Hosts and paths are from StubHub's published OpenAPI specs
+// (docs/marketplace/stubhub/openapi/, viagogo/stubhub-api-docs): Account,
+// Inventory, Sales and Webhooks are served under `{host}/v2`, Catalog at the
+// host root. StubHub rejects requests without a User-Agent
+// (`user_agent_required`), so one is always sent.
 
 import { buildPath, type Endpoint } from './endpoints';
 import type { ApiErrorBody } from './types';
@@ -15,8 +21,19 @@ export interface RequestParts {
   body?: unknown;
 }
 
+export type StubHubEnvironment = 'production' | 'sandbox';
+
+/** API host + OAuth2 token endpoint per environment (overview/sandbox-environment.md). */
+export const STUBHUB_ENVIRONMENTS: Record<StubHubEnvironment, { apiHost: string; tokenUrl: string }> = {
+  production: { apiHost: 'https://api.stubhub.net', tokenUrl: 'https://account.stubhub.com/oauth2/token' },
+  sandbox: { apiHost: 'https://sandbox.api.stubhub.net', tokenUrl: 'https://sandbox.account.stubhub.com/oauth2/token' },
+};
+
+export const DEFAULT_USER_AGENT = 'Exos-StubHub/1.0';
+
 export interface TransportConfig {
   baseUrl: string;
+  userAgent: string;
   accessToken: TokenSource;
   fetch: FetchLike;
   maxRetries: number;
@@ -49,9 +66,14 @@ export function toQueryString(query: Record<string, QueryValue> = {}): string {
   return s ? `?${s}` : '';
 }
 
+/** Catalog lives at the host root; every other API is versioned under /v2. */
+export function apiPrefix(path: string): string {
+  return path.startsWith('/catalog/') ? '' : '/v2';
+}
+
 /** Path + query, relative to the API host. */
 export function relativeUrl(ep: Endpoint, parts: RequestParts = {}): string {
-  return buildPath(ep.path, parts.path) + toQueryString(parts.query);
+  return apiPrefix(ep.path) + buildPath(ep.path, parts.path) + toQueryString(parts.query);
 }
 
 /** Retry-After is seconds or an HTTP date; fall back to exponential backoff. */
@@ -66,16 +88,33 @@ function retryDelayMs(res: Response, attempt: number): number {
   return 500 * 2 ** attempt;
 }
 
-export function transportConfig(opts: {
-  baseUrl: string;
-  accessToken: TokenSource;
-  fetch?: FetchLike;
-  maxRetries?: number;
-  sleep?: (ms: number) => Promise<void>;
-}): TransportConfig {
-  if (!opts.baseUrl) throw new Error('stubhub: baseUrl is required');
+export interface HostOptions {
+  /** Pick the documented host for an environment... */
+  environment?: StubHubEnvironment;
+  /** ...or give one explicitly (host only; `/v2` is added per endpoint). */
+  baseUrl?: string;
+  userAgent?: string;
+}
+
+export function resolveHost(opts: HostOptions): string {
+  const host = opts.baseUrl ?? (opts.environment ? STUBHUB_ENVIRONMENTS[opts.environment].apiHost : undefined);
+  if (!host) throw new Error('stubhub: pass environment or baseUrl');
+  const trimmed = host.replace(/\/+$/, '');
+  if (/\/v2$/.test(trimmed)) throw new Error('stubhub: baseUrl is the host only; /v2 is added per endpoint');
+  return trimmed;
+}
+
+export function transportConfig(
+  opts: HostOptions & {
+    accessToken: TokenSource;
+    fetch?: FetchLike;
+    maxRetries?: number;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): TransportConfig {
   return {
-    baseUrl: opts.baseUrl.replace(/\/+$/, ''),
+    baseUrl: resolveHost(opts),
+    userAgent: opts.userAgent ?? DEFAULT_USER_AGENT,
     accessToken: opts.accessToken,
     fetch: opts.fetch ?? ((input, init) => fetch(input, init)),
     maxRetries: opts.maxRetries ?? 2,
@@ -99,6 +138,7 @@ export async function execute(
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/hal+json, application/json',
+        'User-Agent': cfg.userAgent,
         ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       },
       body: hasBody ? JSON.stringify(parts.body) : undefined,

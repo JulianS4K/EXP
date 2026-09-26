@@ -16,7 +16,7 @@
 // Mobile transfer would need "Exos" on StubHub's provider list, which it
 // isn't.
 
-import type { Sale, Seating, TicketHolder } from './types';
+import type { BarcodeInformation, Sale, Seating, TicketHolder } from './types';
 
 /** `mobile_provider` values, verbatim from the Sales reference. */
 export const MOBILE_TRANSFER_PROVIDERS = [
@@ -41,7 +41,7 @@ export interface UpdateSaleRequest {
   eticket_type?: string;
   tracking_number?: string;
   seating?: Seating;
-  barcodes?: unknown[];
+  barcodes?: BarcodeInformation[];
   mobile_provider?: MobileTransferProvider;
 }
 
@@ -73,13 +73,11 @@ export function attachETicketsRequest(eticketIds: number[]): UpdateSaleRequest {
 
 // ── E-ticket URL route (Exos default) ────────────────────────────────
 
-/**
- * One `ETicketUrlRequest`. The printed docs collapse this object, so its
- * field name is UNCONFIRMED. `{ url }` is the working assumption; when it's
- * checked against the sandbox, fix it here (and in toETicketUrlItem) only.
- */
+/** `ETicketUrlRequest` (sales.json): `{ url, index? }`. */
 export interface ETicketUrlItem {
   url: string;
+  /** "Index of E-Ticket". Base (0 or 1) isn't documented, so we omit it. */
+  index?: number;
 }
 
 export function toETicketUrlItem(url: string): ETicketUrlItem {
@@ -129,8 +127,8 @@ export function eticketUrlsRequest(urls: string[], ticketCount: number): UpdateS
 
 /**
  * The email Exos should address the transfers to, from
- * GET /sales/{id}/ticketholders. The response shape (single object, array,
- * or paged list) isn't pinned down in the docs, so accept all three. Returns
+ * GET /sales/{id}/ticketholders. The spec returns a single TicketHolder;
+ * arrays and paged lists are accepted too in case that changes. Returns
  * null when there's no usable address: that sale can't go down the URL
  * route automatically and needs a human.
  */

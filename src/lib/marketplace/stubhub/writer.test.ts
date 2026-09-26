@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StubHubClient } from './client';
 import { STUBHUB_ENDPOINTS } from './endpoints';
-import { buildCreateListingRequest } from './listing';
+import { buildCreateListingRequest, buildRequestedEventListingRequest } from './listing';
 import {
   STUBHUB_WRITE_ROADMAP,
   StubHubWriter,
@@ -37,7 +37,7 @@ function liveWriter(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
 
 describe('write roadmap', () => {
   it('starts with listing creation, then sales, and only lists write endpoints once', () => {
-    expect(STUBHUB_WRITE_ROADMAP[0].endpoints).toEqual(['createSellerListing']);
+    expect(STUBHUB_WRITE_ROADMAP[0].endpoints).toEqual(['createSellerListingForRequestedEvent', 'createSellerListing']);
     expect(STUBHUB_WRITE_ROADMAP[2].phase).toMatch(/Sale fulfilment/);
     const all = STUBHUB_WRITE_ROADMAP.flatMap((p) => p.endpoints);
     expect(new Set(all).size).toBe(all.length);
@@ -63,14 +63,14 @@ describe('StubHubWriter dry-run (default)', () => {
     ];
     expect(results.every((r) => r.dryRun)).toBe(true);
     expect(plans.map((p) => `${p.method} ${p.url}`)).toEqual([
-      'POST /events/123/sellerlistings',
-      'PATCH /externalsellerlistings/row-1',
-      'DELETE /externalsellerlistings/row-1',
-      'PATCH /sales/9',
-      'PATCH /sales/9',
-      'PATCH /sales/9',
-      'PATCH /sales/9',
-      'DELETE /sales/9',
+      'POST /v2/events/123/sellerlistings',
+      'PATCH /v2/externalsellerlistings/row-1',
+      'DELETE /v2/externalsellerlistings/row-1',
+      'PATCH /v2/sales/9',
+      'PATCH /v2/sales/9',
+      'PATCH /v2/sales/9',
+      'PATCH /v2/sales/9',
+      'DELETE /v2/sales/9',
     ]);
     expect(plans[0].body).toBe(REQ);
     expect(plans[4].body).toEqual({ confirmed: true, mobile_provider: 'AXS', transfer_confirmation_number: 'AXS-1' });
@@ -102,7 +102,7 @@ describe('StubHubWriter live mode gate', () => {
   });
 
   it('needs a host and token', () => {
-    expect(() => new StubHubWriter({ mode: { mode: 'live', authorization: AUTH } })).toThrow(/baseUrl/);
+    expect(() => new StubHubWriter({ mode: { mode: 'live', authorization: AUTH } })).toThrow(/environment/);
   });
 
   it('refuses endpoints outside the authorized scope before calling fetch', async () => {
@@ -119,7 +119,7 @@ describe('StubHubWriter live mode gate', () => {
     const res = await w.createSellerListing(123, REQ);
     expect(res).toMatchObject({ dryRun: false, response: { id: 77 } });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.example.test/events/123/sellerlistings');
+    expect(url).toBe('https://api.example.test/v2/events/123/sellerlistings');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual(REQ);
   });
@@ -153,7 +153,7 @@ describe('createOrAdoptListing', () => {
     const writeFetch = vi.fn();
     const w = liveWriter(writeFetch, AUTH, { reader: reader(readFetch) });
     expect(await w.createOrAdoptListing(1, REQ)).toMatchObject({ adopted: true, listing: { id: 55 } });
-    expect(readFetch.mock.calls[0][0]).toBe('https://api.example.test/externalsellerlistings/row-1');
+    expect(readFetch.mock.calls[0][0]).toBe('https://api.example.test/v2/externalsellerlistings/row-1');
     expect(writeFetch).not.toHaveBeenCalled();
   });
 
@@ -165,5 +165,42 @@ describe('createOrAdoptListing', () => {
   it('surfaces other lookup failures rather than risking a duplicate', async () => {
     const w = new StubHubWriter({ reader: reader(async () => new Response('', { status: 403 })) });
     await expect(w.createOrAdoptListing(1, REQ)).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('requested-event listings', () => {
+  const REQ2 = buildRequestedEventListingRequest(
+    { id: 'row-2', channel: 'stubhub', requested_qty: 2, unit_price: 40 },
+    { ticketType: 'ETicket', splitType: 'Any', section: 'GA', currency: 'USD' },
+    { name: 'Exos Show', startsAt: '2026-11-01T02:00:00Z', venueName: 'The Hall', venueCity: 'Austin', countryCode: 'US' },
+  );
+
+  it('plans POST /v2/sellerlistings with the event and venue as text', async () => {
+    const res = await new StubHubWriter().createListingForRequestedEvent(REQ2);
+    expect(res).toMatchObject({ dryRun: true, planned: { method: 'POST', url: '/v2/sellerlistings' } });
+  });
+
+  it('adopts an existing listing with the same external_id', async () => {
+    const reader = new StubHubClient({
+      environment: 'sandbox',
+      accessToken: () => 't',
+      fetch: async () => json({ id: 9, external_id: 'row-2', created_at: '', number_of_tickets: 2 }),
+    });
+    expect(await new StubHubWriter({ reader }).createOrAdoptRequestedEventListing(REQ2)).toMatchObject({
+      adopted: true,
+      listing: { id: 9 },
+    });
+  });
+
+  it('live mode accepts an environment instead of a baseUrl', async () => {
+    const fetchImpl = vi.fn(async () => json({ id: 1, created_at: '', number_of_tickets: 2 }, 201));
+    const w = new StubHubWriter({
+      mode: { mode: 'live', authorization: { ...AUTH, endpoints: ['createSellerListingForRequestedEvent'] } },
+      environment: 'sandbox',
+      accessToken: () => 't',
+      fetch: fetchImpl,
+    });
+    await w.createListingForRequestedEvent(REQ2);
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe('https://sandbox.api.stubhub.net/v2/sellerlistings');
   });
 });

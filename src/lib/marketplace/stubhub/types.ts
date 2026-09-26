@@ -46,6 +46,14 @@ export interface ApiErrorBody {
   errors?: Record<string, string[]> | null;
 }
 
+/** BarcodeInformation2 (request side): barcodes for one seat. */
+export interface BarcodeInformation {
+  seat_ordinal?: number | null;
+  seat?: string | null;
+  row?: string | null;
+  barcode_values?: string[] | null;
+}
+
 export interface Seating {
   section?: string | null;
   row?: string | null;
@@ -157,7 +165,7 @@ export interface SellerListing {
   is_ticket_concierge?: boolean;
   is_auto_po?: boolean;
   sales_tax_paid?: boolean;
-  barcodes?: unknown[] | null;
+  barcodes?: BarcodeInformation[] | null;
   _links?: HalLinks;
   _embedded?: Record<string, unknown>;
 }

@@ -1,9 +1,39 @@
 # StubHub API reference
 
-Source: <https://developer.stubhub.com/api-reference/> (printed 2026-09-14).
+Sources:
+
+- <https://developer.stubhub.com/api-reference/> (printed 2026-09-14): `pdf/`, `text/`.
+- [viagogo/stubhub-api-docs](https://github.com/viagogo/stubhub-api-docs)
+  (MIT, commit `190be51`, 2026-03-04): the OpenAPI specs behind that site,
+  vendored in `openapi/`. `openapi.test.ts` checks our request shapes
+  against them. Its Catalog spec is v1.0.0.40, older than the printed
+  v1.0.0.75; the other four match (2.249.0.0).
+
 Auth on every endpoint: **OAuth2** (bearer token). Responses are
 `application/hal+json` with `_links` / `_embedded`; lists are paged with
-`page` / `page_size` / `sort` and return `total_items`.
+`page` / `page_size` (default 100) / `sort`, return `total_items`, and carry
+`first` / `prev` / `next` / `last` links.
+
+## Verified facts (from the OpenAPI specs and guides)
+
+| Topic | What the spec says |
+|---|---|
+| Hosts | Production `https://api.stubhub.net`, sandbox `https://sandbox.api.stubhub.net`. Account, Inventory, Sales and Webhooks are under **`/v2`**; Catalog is at the host root. |
+| Token endpoint | Production `https://account.stubhub.com/oauth2/token`, sandbox `https://sandbox.account.stubhub.com/oauth2/token`. Basic auth with the URL-encoded client id and secret. |
+| Which token | Client credentials (app-only) covers **public data only** (catalog). Seller listings, sales, payments and webhooks need a **user-login** (authorization-code) token. Its refresh token is **single-use**, so every refresh must store the new one. App-only tokens don't get one. |
+| Scopes | `read:events`, `read:payment`, `read:sales`, `write:sales`, `read:sellerlistings`, `write:sellerlistings`, `read:webhooks`, `write:webhooks`, `write:requestedevents` |
+| User-Agent | **Required**: missing → 400 `user_agent_required`. |
+| Listing create | StubHub recommends `POST /sellerlistings` (**requested event**: event + venue as text, and StubHub maps or creates the event). Required: `seating` (`section` required), `ticket_type`, `split_type`, `number_of_tickets`, plus `ticket_price` **or** `ticket_proceeds`. |
+| `external_id` | Creating with an `external_id` that already exists makes StubHub **delete the old listing and create a new one**. |
+| `split_type` | `Any`, `None`, `AvoidOne`, `AvoidOneAndThree`, `Pairs`. Constraint items are `{ type, name, description }`; send `type`. |
+| `ticket_type` | Not enumerated. The guide uses `ETicket`. Per-event values come from the constraints' `ticket_types[]` = `{ type, name, id }`; send `type`. |
+| `eticket_urls` item | `{ url, index? }` |
+| `barcodes` item | `{ seat_ordinal, seat, row, barcode_values[] }` |
+| Ticket holders | `GET /sales/{id}/ticketholders` returns one `TicketHolder`, which includes `email_address`. |
+| Webhook topics | Payload `topic` is PascalCase (`Sales`, `ProvisionalSale`, `CancelProvisionalSale`, `SaleUpdates`, `SellerListingUpdates`, `ReTransferTicket`, `Ping`); subscription keys are kebab-case (`provisional-sale`, …). `SaleUpdates` action: `FailedBarcodeValidation`. `SellerListingUpdates` actions: `FailedBarcodeValidation`, `ListingDeliverabilityExpired`. Each delivery carries a unique delivery id. |
+| Webhook auth | Only the echoed `authorization_header`; no signature in the spec. |
+| Error body | `{ code, message, errors: { "<field>": ["…"] } }`. Codes include `validation_failed`, `insufficient_scope`, `create_listing_not_allowed`, `invalid_seller_listing_action`, `invalid_delete`. |
+| Endpoint drift | The spec adds `POST /sales/{id}/transferuploads/{transferType}` and `POST /sales/{id}/transferstatusproof` (both W, both now in the registry). `GET /paymentmethods[/{id}]` is only in the PDFs. |
 
 | API | Version | PDF | Text |
 |---|---|---|---|
@@ -28,11 +58,11 @@ Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/wr
 
 | # | Phase | Endpoints | Needs first |
 |---|---|---|---|
-| 1 | **Listing creation** | `POST /events/{eventId}/sellerlistings` | Event xref (Catalog), listing constraints, preview |
+| 1 | **Listing creation** | `POST /sellerlistings` (requested event, recommended), then `POST /events/{eventId}/sellerlistings` (known event) | User-login token with `write:sellerlistings`; preview; constraints for known events |
 | 2 | Listing management | `PATCH` / `DELETE /externalsellerlistings/{externalId}` | Phase 1; oversell guard |
-| 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm + `eticket_urls`), `DELETE /sales/{saleId}` (reject) | `Sales` webhook or `/sales/recentupdates`; buyer email from `/ticketholders` |
+| 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm + `eticket_urls`), `DELETE /sales/{saleId}` (reject) | `write:sales`; `Sales` webhook or `/sales/recentupdates`; buyer email from `/ticketholders` |
 | 4 | E-ticket PDF delivery (fallback) | `POST /sales/{saleId}/eticketuploads`, `POST`/`DELETE .../etickets` | Phase 3 |
-| 5 | Webhook registration | `POST`/`PATCH`/`DELETE /webhooks`, ping | A deployed receiver |
+| 5 | Webhook registration | `POST`/`PATCH`/`DELETE /webhooks`, ping | `write:webhooks`; a deployed receiver |
 
 The sections below follow the same order.
 
@@ -100,6 +130,8 @@ omitted seating fields are blanked.
 | W | `PUT /sales/{saleId}/shipments` | Print a shipping label |
 | W | `PATCH /sales/{saleId}/shipments/{shipmentId}` | Update a shipment |
 | R | `GET /sales/{saleId}/ticketholders` | Ticket-holder details |
+| W | `POST /sales/{saleId}/transferuploads/{transferType}` | Upload transfer proof (`acceptance`); OpenAPI only |
+| W | `POST /sales/{saleId}/transferstatusproof` | Upload transfer status proof (`TransferCreated`/`Active`/`Accepted`/`Cancelled`); OpenAPI only |
 | R | `GET /payments` | List payouts |
 | R | `GET /payments/{paymentId}` | Get a payout |
 | R | `GET /payments/next` | Preview the next payout |
@@ -170,9 +202,9 @@ with a different `id`. Treat a changed id as a merge and update the xref.
 
 **Read side (usable now):**
 
-- `endpoints.ts`: all 81 endpoints above with their R/W tag. A test checks
-  it against `text/*.txt`, so a doc refresh that adds an endpoint fails CI
-  until the endpoint is tagged.
+- `endpoints.ts`: all 83 endpoints above with their R/W tag. A test checks
+  it against `text/*.txt` and `openapi/*.json`, so a doc refresh that adds an
+  endpoint fails CI until the endpoint is tagged.
 - `client.ts`: `StubHubClient` with a method for every **R** and **R\***
   endpoint Exos needs, plus `paginate()`, 429/5xx retry, and
   `clientCredentialsToken()` (cached OAuth2 client-credentials). It has **no
@@ -185,9 +217,10 @@ with a different `id`. Treat a changed id as a merge and update the xref.
 
 Built and tested, **not live**. Nothing in Exos constructs a live writer.
 
-- `listing.ts` (phase 1): `CreateSellerListingRequest`,
-  `buildCreateListingRequest()` (an `exos_distribution_listings` row →
-  StubHub listing; `external_id` = row id; unpublished by default), and
+- `listing.ts` (phase 1): `buildRequestedEventListingRequest()` (the
+  recommended route: Exos event + venue as text), `buildCreateListingRequest()`
+  (known StubHub event), `SPLIT_TYPES`; `external_id` = distribution row id,
+  unpublished by default; and
   `checkListingConstraints()` (pre-flight against
   `GET /events/{id}/listingconstraints`; the preview endpoint remains the
   authoritative check).
@@ -226,21 +259,25 @@ the DB is shared.
 
 Open questions for go-live:
 
-- **`eticket_urls` item shape.** Collapsed in the printed docs. The code
-  assumes `{ url }`. If that's wrong, the only place to change is
-  `ETicketUrlItem` / `toETicketUrlItem()` in `fulfilment.ts`.
-- **Buyer email.** If `/ticketholders` has no email, or StubHub gives a
-  masked relay address the buyer can't sign in with, the claim can't
-  complete. `buyerEmail()` returns null in the first case, and that sale
-  needs a human. The second case needs a check against a real sale.
-- **Enum values.** `ticket_type`, `split_type`, and the item shapes of
-  `barcodes` and the constraints lists are collapsed in the printed docs.
-  Confirm them against the sandbox before the first live call.
+- **Buyer email.** The spec confirms `TicketHolder.email_address`, but not
+  whether it's the buyer's real address or a masked relay address. With a
+  relay address the buyer can't sign in to claim. Check on a real sandbox
+  sale. If there's no email, `buyerEmail()` returns null and that sale
+  needs a human.
+- **`ticket_type` for Exos tickets.** Not enumerated. `ETicket` (the guide's
+  example) is the likely fit for URL delivery. Confirm with a sandbox
+  preview.
+- **Webhook delivery-id header name.** The spec says each delivery has a
+  unique id but doesn't name the header. Read it off the first sandbox
+  delivery.
+- **API access.** Seller-side API access is granted by StubHub on request
+  (api.support@stubhub.com, per their 2022 migration note).
 
-The reference gives neither the API host nor the OAuth token URL. Both are
-constructor arguments; take them from the StubHub account onboarding
-(suggested env: `STUBHUB_API_BASE_URL`, `STUBHUB_TOKEN_URL`,
-`STUBHUB_CLIENT_ID`, `STUBHUB_CLIENT_SECRET`).
+Configuration: `new StubHubClient({ environment: 'sandbox' | 'production', … })`
+picks the documented hosts. Tokens: `clientCredentialsToken()` for catalog
+reads, and `refreshTokenSource()` for seller-side calls (after a one-time
+user-login authorization). Suggested secrets: `STUBHUB_ENV`,
+`STUBHUB_CLIENT_ID`, `STUBHUB_CLIENT_SECRET`, plus a stored refresh token.
 
 ## Mapping to Exos
 

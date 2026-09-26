@@ -2,19 +2,34 @@
 // Exos → StubHub mapping, and a pre-flight check against StubHub's listing
 // constraints. Pure: nothing here talks to the network.
 //
-// Flow once writes are authorized (see writer.ts):
-//   1. client.listEventListingConstraints(eventId)  → ListingConstraints
-//   2. buildCreateListingRequest(exos row …)          → CreateSellerListingRequest
-//   3. checkListingConstraints(request, constraints)  → [] or issues to fix
-//   4. client.previewSellerListing(eventId, request)  → StubHub's fee/proceeds quote
-//   5. writer.createOrAdoptListing(eventId, request)  → dry-run plan, or live call
+// Shapes verified against StubHub's OpenAPI specs (docs/marketplace/stubhub/
+// openapi/inventory.json) and guides/creating-a-listing.mdx.
 //
-// The docs require seating, ticket_type, split_type and number_of_tickets on
-// create. They don't enumerate ticket_type / split_type values: those come
-// per event from the constraints endpoint, so callers pass them through
-// rather than us hard-coding a list.
+// Two ways to create a listing:
+//   • For a *requested* event (POST /sellerlistings), StubHub's recommended
+//     route: we send the event and venue as text and StubHub maps it, or
+//     creates the event asynchronously if it doesn't have it. That fits Exos
+//     primary events, which usually aren't in StubHub's catalog yet.
+//   • For a known StubHub event (POST /events/{id}/sellerlistings), once the
+//     event is in bridge_event_xref.
+//
+// `external_id` (our distribution row id) is StubHub's de-dup key: creating
+// with an external_id that already exists makes StubHub DELETE the old
+// listing and create a new one. writer.createOrAdopt* looks it up first so
+// a retry doesn't churn a live listing.
+//
+// Flow once writes are authorized (see writer.ts):
+//   1. build*ListingRequest(exos row …)               → request
+//   2. constraints (known events): client.listEventListingConstraints(id)
+//      then checkListingConstraints(request, constraints)
+//   3. preview: client.previewSellerListing[ForRequestedEvent](…)
+//   4. writer.createOrAdopt*(…)                       → dry-run plan, or live call
 
-import type { Money, MoneyInput, Seating } from './types';
+import type { BarcodeInformation, Money, MoneyInput, Seating } from './types';
+
+/** `split_type` values, from the SplitType schema. */
+export const SPLIT_TYPES = ['Any', 'None', 'AvoidOne', 'AvoidOneAndThree', 'Pairs'] as const;
+export type SplitType = (typeof SPLIT_TYPES)[number];
 
 export interface SeatingRequest extends Seating {
   hide_seat_details?: boolean;
@@ -24,8 +39,9 @@ export interface SeatingRequest extends Seating {
 export interface CreateSellerListingRequest {
   // Required by the docs.
   seating: SeatingRequest;
+  /** e.g. "ETicket"; valid values per event come from the constraints' ticket_types[].type. */
   ticket_type: string;
-  split_type: string;
+  split_type: SplitType;
   number_of_tickets: number;
   // Price: send ticket_price (buyer-facing) or ticket_proceeds (seller net).
   ticket_price?: MoneyInput;
@@ -35,7 +51,7 @@ export interface CreateSellerListingRequest {
   ticket_location_address_id?: number;
   listing_note_ids?: number[];
   in_hand_at?: string;
-  /** Idempotency key: the exos_distribution_listings.id this listing came from. */
+  /** exos_distribution_listings.id. StubHub replaces any listing with the same external_id. */
   external_id: string;
   notes?: string;
   instant_delivery?: boolean;
@@ -45,9 +61,25 @@ export interface CreateSellerListingRequest {
   purchase_price_per_ticket?: MoneyInput;
   total_purchase_price?: MoneyInput;
   sales_tax_paid?: boolean;
-  /** Shape collapsed in the printed docs; confirm against the sandbox. */
-  external_event_information?: unknown[];
-  barcodes?: unknown[];
+  external_event_information?: ExternalEventInformation[];
+  barcodes?: BarcodeInformation[];
+}
+
+export interface ExternalEventInformation {
+  /** int32 on StubHub's side, so Exos uuids can't go here. */
+  id: number;
+  platform?: string;
+  url?: string;
+  venue_id?: number;
+  performer_id?: number;
+}
+
+/** Body of POST /sellerlistings (create for a requested event). */
+export interface CreateRequestedEventListingRequest extends CreateSellerListingRequest {
+  event: { name: string; start_date: string; date_confirmed?: boolean; note?: string };
+  venue: { name: string; city: string; state_province?: string };
+  /** Two-letter ISO 3166. */
+  country?: { code: string };
 }
 
 /**
@@ -69,8 +101,11 @@ export interface ListingConstraints {
   primary_order_id_required?: boolean | null;
   home_or_away_required?: boolean | null;
   _embedded?: {
+    /** { type: SplitType, name, description } */
     split_types?: unknown[];
+    /** { type, name, id } */
     ticket_types?: unknown[];
+    /** { code, name, symbol, decimal_places } */
     currencies?: unknown[];
     listing_notes?: unknown[];
     [key: string]: unknown;
@@ -88,10 +123,9 @@ export interface ExosDistributionRow {
 }
 
 export interface ListingDetails {
-  /** From the event's constraints (`_embedded.ticket_types`). */
+  /** e.g. "ETicket"; for a known event, one of its constraints' ticket_types[].type. */
   ticketType: string;
-  /** From the event's constraints (`_embedded.split_types`). */
-  splitType: string;
+  splitType: SplitType;
   section: string;
   row?: string;
   seatFrom?: string;
@@ -136,6 +170,10 @@ export function buildCreateListingRequest(row: ExosDistributionRow, d: ListingDe
   }
   if (!/^[A-Z]{3}$/.test(d.currency)) throw new ListingMappingError(`currency must be ISO 4217, got "${d.currency}"`);
   if (!d.section.trim()) throw new ListingMappingError('section is required');
+  if (!(SPLIT_TYPES as readonly string[]).includes(d.splitType)) {
+    throw new ListingMappingError(`split type must be one of ${SPLIT_TYPES.join(', ')}, got "${d.splitType}"`);
+  }
+  if (!d.ticketType.trim()) throw new ListingMappingError('ticket type is required');
 
   const req: CreateSellerListingRequest = {
     external_id: row.id,
@@ -158,6 +196,42 @@ export function buildCreateListingRequest(row: ExosDistributionRow, d: ListingDe
   return req;
 }
 
+/** The Exos event, as StubHub's requested-event listing needs it. */
+export interface ExosEventForListing {
+  name: string;
+  startsAt: Date | string;
+  venueName: string;
+  venueCity: string;
+  venueStateProvince?: string;
+  /** Two-letter ISO 3166, e.g. "US". */
+  countryCode?: string;
+  /** Default true: Exos events have a fixed start. */
+  dateConfirmed?: boolean;
+}
+
+export function buildRequestedEventListingRequest(
+  row: ExosDistributionRow,
+  d: ListingDetails,
+  ev: ExosEventForListing,
+): CreateRequestedEventListingRequest {
+  const base = buildCreateListingRequest(row, d);
+  const start = ev.startsAt instanceof Date ? ev.startsAt : new Date(ev.startsAt);
+  if (Number.isNaN(start.getTime())) throw new ListingMappingError('event start is not a date');
+  if (!ev.name.trim()) throw new ListingMappingError('event name is required');
+  if (!ev.venueName.trim() || !ev.venueCity.trim()) throw new ListingMappingError('venue name and city are required');
+  if (ev.countryCode != null && !/^[A-Z]{2}$/.test(ev.countryCode)) {
+    throw new ListingMappingError(`country must be ISO 3166 alpha-2, got "${ev.countryCode}"`);
+  }
+  const req: CreateRequestedEventListingRequest = {
+    ...base,
+    event: { name: ev.name.trim(), start_date: start.toISOString(), date_confirmed: ev.dateConfirmed ?? true },
+    venue: { name: ev.venueName.trim(), city: ev.venueCity.trim() },
+  };
+  if (ev.venueStateProvince) req.venue.state_province = ev.venueStateProvince;
+  if (ev.countryCode) req.country = { code: ev.countryCode };
+  return req;
+}
+
 // ── Pre-flight constraint check ──────────────────────────────────────
 
 export interface ConstraintIssue {
@@ -166,10 +240,9 @@ export interface ConstraintIssue {
 }
 
 /**
- * Allowed values from a constraints `_embedded` list. The item shape is
- * collapsed in the docs, so accept plain strings or objects carrying
- * `id` / `name` / `value`, and return null (unknown, skip the check) if
- * nothing recognizable is there.
+ * Allowed request values from a constraints `_embedded` list. SplitType and
+ * TicketType items carry the value to send in `type` (`name` is localised
+ * display text). Returns null (skip the check) if there's nothing to go on.
  */
 export function allowedValues(list: unknown[] | undefined): Set<string> | null {
   if (!list?.length) return null;
@@ -177,10 +250,8 @@ export function allowedValues(list: unknown[] | undefined): Set<string> | null {
   for (const item of list) {
     if (typeof item === 'string') out.add(item);
     else if (item && typeof item === 'object') {
-      for (const k of ['id', 'name', 'value'] as const) {
-        const v = (item as Record<string, unknown>)[k];
-        if (typeof v === 'string' || typeof v === 'number') out.add(String(v));
-      }
+      const v = (item as Record<string, unknown>).type;
+      if (typeof v === 'string' && v) out.add(v);
     }
   }
   return out.size ? out : null;

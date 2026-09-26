@@ -1,7 +1,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
-import { StubHubClient, StubHubError, UpstreamWriteForbiddenError, clientCredentialsToken, toQueryString } from './client';
+import {
+  STUBHUB_ENVIRONMENTS,
+  StubHubClient,
+  StubHubError,
+  UpstreamWriteForbiddenError,
+  basicAuthHeader,
+  clientCredentialsToken,
+  refreshTokenSource,
+  toQueryString,
+} from './client';
+import { DEFAULT_USER_AGENT, resolveHost } from './transport';
 import { STUBHUB_ENDPOINTS, buildPath } from './endpoints';
 import type { Page, Sale } from './types';
 
@@ -28,6 +38,7 @@ function client(responses: Array<Response | (() => Response)>, extra: { sleep?: 
   const f = fakeFetch(responses);
   const c = new StubHubClient({
     baseUrl: 'https://api.example.test/',
+    userAgent: 'exos-test/1',
     accessToken: () => 'tok',
     fetch: f.fn,
     sleep: extra.sleep ?? (async () => {}),
@@ -53,12 +64,20 @@ describe('endpoint registry', () => {
     }
   });
 
-  it('matches the endpoints in the vendor reference exactly', () => {
-    const dir = resolve(__dirname, '../../../../docs/marketplace/stubhub/text');
+  it('matches the endpoints in the vendor reference (PDF text + OpenAPI) exactly', () => {
+    const docs = resolve(__dirname, '../../../../docs/marketplace/stubhub');
     const documented = new Set<string>();
-    for (const f of readdirSync(dir)) {
-      for (const m of readFileSync(resolve(dir, f), 'utf8').matchAll(/^(GET|POST|PUT|PATCH|DELETE) (\/\S+)$/gm)) {
+    for (const f of readdirSync(resolve(docs, 'text'))) {
+      for (const m of readFileSync(resolve(docs, 'text', f), 'utf8').matchAll(/^(GET|POST|PUT|PATCH|DELETE) (\/\S+)$/gm)) {
         documented.add(`${m[1]} ${m[2].replace(/\{\w+\}/g, '{}')}`);
+      }
+    }
+    for (const f of readdirSync(resolve(docs, 'openapi')).filter((x) => x.endsWith('.json'))) {
+      const spec = JSON.parse(readFileSync(resolve(docs, 'openapi', f), 'utf8')) as { paths: Record<string, object> };
+      for (const [path, ops] of Object.entries(spec.paths)) {
+        for (const method of Object.keys(ops)) {
+          if (/^(get|post|put|patch|delete)$/.test(method)) documented.add(`${method.toUpperCase()} ${path.replace(/\{\w+\}/g, '{}')}`);
+        }
       }
     }
     // Param names differ in places ({ETicketId} vs {eticketId}); only the shape matters.
@@ -97,7 +116,20 @@ describe('StubHubClient', () => {
     expect(calls[0].url).toBe('https://api.example.test/catalog/events/7');
     expect(calls[0].init.method).toBe('GET');
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    expect((calls[0].init.headers as Record<string, string>)['User-Agent']).toBe('exos-test/1');
     expect(calls[0].init.body).toBeUndefined();
+  });
+
+  it('serves catalog at the host root and everything else under /v2', async () => {
+    const { c, calls } = client([json({}), json({}), json({})]);
+    await c.getVenue(1);
+    await c.getSale(2);
+    await c.getUser();
+    expect(calls.map((x) => x.url)).toEqual([
+      'https://api.example.test/catalog/venues/1',
+      'https://api.example.test/v2/sales/2',
+      'https://api.example.test/v2/user',
+    ]);
   });
 
   it('sends lookup bodies as JSON (batch get uses event_ids)', async () => {
@@ -114,7 +146,7 @@ describe('StubHubClient', () => {
       ticket_price: { amount: 50, currency_code: 'USD' },
       in_hand_at: new Date(Date.UTC(2026, 9, 1)),
     });
-    expect(calls[0].url).toBe('https://api.example.test/events/9/sellerlistingpreview');
+    expect(calls[0].url).toBe('https://api.example.test/v2/events/9/sellerlistingpreview');
     expect(JSON.parse(calls[0].init.body as string)).toMatchObject({ in_hand_at: '2026-10-01T00:00:00.000Z' });
   });
 
@@ -181,9 +213,77 @@ describe('StubHubClient', () => {
     for await (const s of c.paginate((p) => c.listSales({ page: p, page_size: 2 }))) ids.push(s.id);
     expect(ids).toEqual([1, 2, 3]);
     expect(calls.map((x) => x.url)).toEqual([
-      'https://api.example.test/sales?page=1&page_size=2',
-      'https://api.example.test/sales?page=2&page_size=2',
+      'https://api.example.test/v2/sales?page=1&page_size=2',
+      'https://api.example.test/v2/sales?page=2&page_size=2',
     ]);
+  });
+});
+
+describe('hosts', () => {
+  it('resolves documented environments and rejects a /v2 base', () => {
+    expect(resolveHost({ environment: 'production' })).toBe('https://api.stubhub.net');
+    expect(resolveHost({ environment: 'sandbox' })).toBe('https://sandbox.api.stubhub.net');
+    expect(resolveHost({ baseUrl: 'https://x.test/' })).toBe('https://x.test');
+    expect(() => resolveHost({})).toThrow(/environment or baseUrl/);
+    expect(() => resolveHost({ baseUrl: 'https://api.stubhub.net/v2' })).toThrow(/host only/);
+    expect(STUBHUB_ENVIRONMENTS.sandbox.tokenUrl).toBe('https://sandbox.account.stubhub.com/oauth2/token');
+  });
+
+  it('sends a default User-Agent (StubHub rejects requests without one)', async () => {
+    const fetchImpl = vi.fn(async () => json({ id: 1 }));
+    await new StubHubClient({ environment: 'sandbox', accessToken: () => 't', fetch: fetchImpl }).getUser();
+    const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect((init.headers as Record<string, string>)['User-Agent']).toBe(DEFAULT_USER_AGENT);
+  });
+});
+
+describe('basicAuthHeader', () => {
+  it('URL-encodes id and secret before base64 (per the auth guide)', () => {
+    expect(basicAuthHeader('id', 'se:cr et')).toBe(`Basic ${btoa('id:se%3Acr%20et')}`);
+  });
+});
+
+describe('refreshTokenSource', () => {
+  it('persists each rotated single-use refresh token before handing out the access token', async () => {
+    let stored = 'r1';
+    const saves: string[] = [];
+    let t = 0;
+    const { fn, calls } = fakeFetch([
+      () => json({ access_token: 'a1', expires_in: 3600, refresh_token: 'r2' }),
+      () => json({ access_token: 'a2', expires_in: 3600, refresh_token: 'r3' }),
+    ]);
+    const token = refreshTokenSource({
+      tokenUrl: STUBHUB_ENVIRONMENTS.sandbox.tokenUrl,
+      clientId: 'id',
+      clientSecret: 'secret',
+      scopes: ['read:sales', 'write:sales'],
+      loadRefreshToken: () => stored,
+      saveRefreshToken: (r) => {
+        stored = r;
+        saves.push(r);
+      },
+      fetch: fn,
+      now: () => t,
+    });
+    expect(await token()).toBe('a1');
+    expect(calls[0].init.body).toBe('grant_type=refresh_token&refresh_token=r1&scope=read%3Asales+write%3Asales');
+    t += 3600_000;
+    expect(await token()).toBe('a2');
+    expect(calls[1].init.body).toContain('refresh_token=r2');
+    expect(saves).toEqual(['r2', 'r3']);
+  });
+
+  it('refuses a response without a new refresh token', async () => {
+    const { fn } = fakeFetch([() => json({ access_token: 'a1', expires_in: 3600 })]);
+    const token = refreshTokenSource({
+      tokenUrl: 'https://auth.example.test/token',
+      clientId: 'id',
+      clientSecret: 's',
+      loadRefreshToken: () => 'r1',
+      saveRefreshToken: () => {},
+      fetch: fn,
+    });
+    await expect(token()).rejects.toThrow(/single-use/);
   });
 });
 
@@ -198,7 +298,7 @@ describe('clientCredentialsToken', () => {
       tokenUrl: 'https://auth.example.test/token',
       clientId: 'id',
       clientSecret: 'secret',
-      scope: 'read:events',
+      scopes: ['read:events'],
       fetch: fn,
       now: () => t,
     });

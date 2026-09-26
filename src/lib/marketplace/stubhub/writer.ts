@@ -29,10 +29,15 @@ import {
   transportConfig,
   type FetchLike,
   type RequestParts,
+  type StubHubEnvironment,
   type TokenSource,
   type TransportConfig,
 } from './transport';
-import type { CreateSellerListingRequest, UpdateSellerListingRequest } from './listing';
+import type {
+  CreateRequestedEventListingRequest,
+  CreateSellerListingRequest,
+  UpdateSellerListingRequest,
+} from './listing';
 import {
   attachETicketsRequest,
   confirmSaleRequest,
@@ -51,8 +56,10 @@ export type WriteEndpointName = WriteEndpoints;
 /** Build order for the write side: listing creation first, then sales. */
 export const STUBHUB_WRITE_ROADMAP: ReadonlyArray<{ phase: string; endpoints: readonly WriteEndpointName[] }> = [
   {
+    // Requested-event create first: StubHub's recommended route, and Exos
+    // events usually aren't in their catalog.
     phase: '1. Listing creation',
-    endpoints: ['createSellerListing'],
+    endpoints: ['createSellerListingForRequestedEvent', 'createSellerListing'],
   },
   {
     phase: '2. Listing management (price/qty sync, delist)',
@@ -107,8 +114,10 @@ export class WriteNotAuthorizedError extends Error {
 export interface StubHubWriterOptions {
   /** Default dry-run. */
   mode?: WriterMode;
-  /** Needed for live mode only. */
+  /** Needed for live mode only (environment or baseUrl, plus a user-login token source). */
+  environment?: StubHubEnvironment;
   baseUrl?: string;
+  userAgent?: string;
   accessToken?: TokenSource;
   fetch?: FetchLike;
   maxRetries?: number;
@@ -143,10 +152,10 @@ export class StubHubWriter {
     if (this.mode.mode === 'live') {
       const bad = validateAuthorization(this.mode.authorization);
       if (bad) throw new WriteNotAuthorizedError('*', bad);
-      if (!opts.baseUrl || !opts.accessToken) {
-        throw new Error('stubhub writer: live mode needs baseUrl and accessToken');
+      if ((!opts.baseUrl && !opts.environment) || !opts.accessToken) {
+        throw new Error('stubhub writer: live mode needs environment (or baseUrl) and accessToken');
       }
-      this.cfg = transportConfig({ ...opts, baseUrl: opts.baseUrl, accessToken: opts.accessToken });
+      this.cfg = transportConfig({ ...opts, accessToken: opts.accessToken });
     } else {
       this.cfg = null;
     }
@@ -174,28 +183,49 @@ export class StubHubWriter {
 
   // ── 1. Listing creation ────────────────────────────────────────────
 
+  /** POST /sellerlistings: StubHub maps (or creates) the event from the text we send. */
+  createListingForRequestedEvent(req: CreateRequestedEventListingRequest) {
+    return this.write<SellerListing>('createSellerListingForRequestedEvent', { body: req });
+  }
+
+  /**
+   * Requested-event create, but adopt an existing listing with the same
+   * external_id instead (StubHub would otherwise delete and recreate it).
+   */
+  async createOrAdoptRequestedEventListing(
+    req: CreateRequestedEventListingRequest,
+  ): Promise<WriteResult<SellerListing> | { adopted: true; listing: SellerListing }> {
+    const existing = await this.findByExternalId(req.external_id);
+    if (existing) return { adopted: true, listing: existing };
+    return this.createListingForRequestedEvent(req);
+  }
+
+  private async findByExternalId(externalId: string): Promise<SellerListing | null> {
+    if (!this.reader) return null;
+    try {
+      return await this.reader.getSellerListingByExternalId(externalId);
+    } catch (e) {
+      if (e instanceof StubHubError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
   createSellerListing(eventId: number, req: CreateSellerListingRequest) {
     return this.write<SellerListing>('createSellerListing', { path: { eventId }, body: req });
   }
 
   /**
-   * Idempotent create keyed on `external_id` (our distribution row id): if
-   * StubHub already has a listing with that id (e.g. a previous run's create
-   * succeeded but the response was lost), adopt it instead of creating a
-   * duplicate. Without a `reader`, behaves like createSellerListing.
+   * Create keyed on `external_id` (our distribution row id): if StubHub
+   * already has a listing with that id (e.g. a previous run's create landed
+   * but the response was lost), adopt it. Re-creating would make StubHub
+   * delete and replace it. Without a `reader`, behaves like createSellerListing.
    */
   async createOrAdoptListing(
     eventId: number,
     req: CreateSellerListingRequest,
   ): Promise<WriteResult<SellerListing> | { adopted: true; listing: SellerListing }> {
-    if (this.reader) {
-      try {
-        const existing = await this.reader.getSellerListingByExternalId(req.external_id);
-        return { adopted: true, listing: existing };
-      } catch (e) {
-        if (!(e instanceof StubHubError && e.status === 404)) throw e;
-      }
-    }
+    const existing = await this.findByExternalId(req.external_id);
+    if (existing) return { adopted: true, listing: existing };
     return this.createSellerListing(eventId, req);
   }
 

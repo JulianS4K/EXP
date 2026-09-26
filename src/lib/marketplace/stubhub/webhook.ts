@@ -6,9 +6,11 @@
 // in constant time and treat the payload as a hint: re-read the sale/listing
 // through the client before acting on it.
 //
-// The docs name the topics (Sales, ProvisionalSale, …) but not their exact
-// wire spelling, so `normalizeTopic` matches loosely and returns `unknown`
-// for anything new rather than guessing.
+// Topic names per the OpenAPI spec (webhooks.json x-webhooks): PascalCase in
+// the payload ("Ping", "Sales", …), kebab-case as subscription keys
+// ("provisional-sale", "sellerlisting-updates"). `normalizeTopic` accepts
+// both and returns `unknown` for anything new. Each delivery also carries a
+// unique delivery id (the spec gives no header name) usable for de-dup.
 
 import type { CatalogEvent, HalLinks, Sale, SellerListing, Venue, Webhook } from './types';
 
@@ -23,6 +25,12 @@ export const STUBHUB_WEBHOOK_TOPICS = [
 ] as const;
 
 export type StubHubWebhookTopic = (typeof STUBHUB_WEBHOOK_TOPICS)[number];
+
+/** Documented `action` values for the update topics. */
+export const STUBHUB_WEBHOOK_ACTIONS = {
+  SaleUpdates: ['FailedBarcodeValidation'],
+  SellerListingUpdates: ['FailedBarcodeValidation', 'ListingDeliverabilityExpired'],
+} as const;
 
 export interface StubHubWebhookPayload {
   topic: string | null;
