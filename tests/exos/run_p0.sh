@@ -45,7 +45,8 @@ for m in \
 done
 # Distribution queue + StubHub event requests (the stub needs the phase-1 columns first).
 $PSQL -f "$DIR/prereq_distribution.sql"
-for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_request; do
+for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_request \
+         20260926191000_exos_channel_event_links; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -72,6 +73,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_price_dis
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_refund_tables.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_accessible_tickets.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_stubhub_event_request.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_event_links.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout_attribution \
   20260924230000_exos_event_geo 20260924233000_exos_promoters 20260924234500_exos_fan_referrals \
@@ -85,7 +87,7 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
   20260926040000_exos_organizer_refunds 20260926050000_exos_tables_guest_lists \
   20260926060000_exos_abandoned_checkout 20260926070000_exos_price_disclosure \
   20260926080000_exos_refund_tables_fix 20260926090000_exos_accessible_tickets \
-  20260926190000_exos_stubhub_event_request; do
+  20260926190000_exos_stubhub_event_request 20260926191000_exos_channel_event_links; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
