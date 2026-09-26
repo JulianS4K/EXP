@@ -58,7 +58,8 @@ export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
   if (ev.countryCode != null && !/^[A-Z]{2}$/.test(ev.countryCode)) {
     throw new ListingMappingError(`country must be ISO 3166 alpha-2, got "${ev.countryCode}"`);
   }
-  const local = ev.startsLocal && LOCAL_RE.test(ev.startsLocal) && Date.parse(ev.startsLocal) === start.getTime()
+  // Same instant, to the second (occurs_at_local carries no milliseconds).
+  const local = ev.startsLocal && LOCAL_RE.test(ev.startsLocal) && Math.abs(Date.parse(ev.startsLocal) - start.getTime()) < 1000
     ? ev.startsLocal
     : null;
   const req: RequestedEvent = {

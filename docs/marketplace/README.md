@@ -139,6 +139,25 @@ seat in three orders, and never sells it twice.
 
 ### Dry run
 
+**End to end:** `bash scripts/e2e-dry-run.sh` builds a throwaway Postgres
+from every migration. It takes one event from creation to the door, through
+Exos's own checkout and StubHub, using the real database functions and the
+real TypeScript planners. What it covers:
+1. Create a draft, then publish.
+2. Allocate seats to StubHub, and plan the StubHub event and listing.
+3. An Exos paid checkout through a promoter.
+4. StubHub sales and their buyer transfers.
+5. Claims.
+6. Account flags, with the promoter note and the org review.
+7. Exos selling out while StubHub still sells its own seats.
+8. StubHub overselling its allocation, and a StubHub cancellation.
+9. The door: valid, used, expired screenshot, wrong event, voided, and
+   unclaimed tickets.
+
+Stripe, StubHub, the clock and email delivery are simulated. Every step
+asserts.
+
+**One event only:**
 `npx tsx scripts/stubhub-dry-run.ts event.json` puts one `exos_events` row
 (as JSON) through the same code as `exos-distribute`, and prints:
 - what Exos reads off the event;
