@@ -1,0 +1,1373 @@
+StubHub Account API (2.249.0.0)
+Addresses
+List addresses
+List addresses for the current user.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+page
+page_size
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 1/43
+string
+Determines the ordering of items. A comma-separated string containing default , or id .
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(AddresssLinks (object or null))
+(AddresssEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+sort
+total_items
+page
+page_size
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 2/43
+500 Internal server error
+Response samples
+200 401 403 404 500
+GET /addresses
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 3/43
+Create an address
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PostAddressRequest
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the current user's default address; Otherwise, false.
+string or null
+The first line of the address.
+string or null
+The second line of the address.
+string or null
+The third line of the address.
+string or null
+The name of the city where the address is located.
+string or null
+full_name
+default
+address_1
+address_2
+address_3
+city
+state_province
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 4/43
+The name of the State or Province where the address is located.
+string or null
+The postal code for the address.
+string or null
+The 2 character ISO code that identifies the country in which the address is located.
+Responses
+201
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The address identifier.
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the user’s default address; Otherwise, false.
+string or null
+The first line of the address.
+postal_code
+country_code
+id
+full_name
+default
+address_1
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 5/43
+string or null
+The second line of the address.
+string or null
+The third line of the address.
+string or null
+The name of the city where the address is located.
+string or null
+The name of the State or Province where the address is located.
+string or null
+The postal code for the address.
+(AddressLinks (object or null))
+(AddressEmbeddedResources (object or null))
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+address_2
+address_3
+city
+state_province
+postal_code
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 6/43
+Request samples
+Payload
+Response samples
+201 400 401 403 500
+POST /addresses
+application/json
+Copy
+{
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"country_code": "string"
+}
+application/hal+json
+Content type
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 7/43
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"address:carrier":  … +
+{
+}
+,
+"address:delete":  … +
+{
+}
+,
+"address:update":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"country":  … +
+{
+}
+}
+}
+Get an address
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 8/43
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The address identifier.
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the user’s default address; Otherwise, false.
+string or null
+The first line of the address.
+string or null
+The second line of the address.
+string or null
+The third line of the address.
+addressId
+required
+id
+full_name
+default
+address_1
+address_2
+address_3
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 9/43
+string or null
+The name of the city where the address is located.
+string or null
+The name of the State or Province where the address is located.
+string or null
+The postal code for the address.
+(AddressLinks (object or null))
+(AddressEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+city
+state_province
+postal_code
+_links
+_embedded
+GET /addresses/{addressId}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 10/43
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"address:carrier":  … +
+{
+}
+,
+"address:delete":  … +
+{
+}
+,
+"address:update":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"country":  … +
+{
+}
+}
+}
+Update an address
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 11/43
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+REQUEST BODY SCHEMA: application/json
+One of PatchAddressRequest
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the current user's default address; Otherwise, false.
+string or null
+The first line of the address.
+string or null
+The second line of the address.
+string or null
+The third line of the address.
+string or null
+The name of the city where the address is located.
+string or null
+The name of the State or Province where the address is located.
+addressId
+required
+full_name
+default
+address_1
+address_2
+address_3
+city
+state_province
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 12/43
+string or null
+The postal code for the address.
+string or null
+The 2 character ISO code that identifies the country in which the address is located.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The address identifier.
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the user’s default address; Otherwise, false.
+string or null
+The first line of the address.
+postal_code
+country_code
+id
+full_name
+default
+address_1
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 13/43
+string or null
+The second line of the address.
+string or null
+The third line of the address.
+string or null
+The name of the city where the address is located.
+string or null
+The name of the State or Province where the address is located.
+string or null
+The postal code for the address.
+(AddressLinks (object or null))
+(AddressEmbeddedResources (object or null))
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+address_2
+address_3
+city
+state_province
+postal_code
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 14/43
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+PATCH /addresses/{addressId}
+application/json
+Copy
+{
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"country_code": "string"
+}
+application/hal+json
+Content type
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 15/43
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"address:carrier":  … +
+{
+}
+,
+"address:delete":  … +
+{
+}
+,
+"address:update":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"country":  … +
+{
+}
+}
+}
+Delete an address
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 16/43
+integer <int32>
+Responses
+— 204
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+addressId
+required
+DELETE /addresses/{addressId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 17/43
+PaymentMethods
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+List payment methods
+List payment methods for the authenticated user.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+boolean or null
+boolean or null
+buyer_method
+seller_method
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 18/43
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(PaymentMethodssLinks (object or null))
+(PaymentMethodssEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 19/43
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+GET /paymentmethods
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 20/43
+}
+Get a payment method
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The payment method identifier.
+string or null
+The obfuscated details of the payment method.
+string or null
+paymentMethodId
+required
+id
+details
+type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 21/43
+The type of the payment method.
+string or null
+A localised string describing the type of payment method.
+boolean or null
+True if the payment method can be used for purchasing listings; otherwise, false.
+boolean or null
+True if the payment method is the user’s default payment method for purchasing listings.
+boolean or null
+True if the payment method can be used for receiving payments; otherwise, false.
+boolean or null
+True if the payment method is the user’s default payment method for receiving payments.
+(PaymentMethodLinks (object or null))
+(PaymentMethodEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+type_description
+buyer_method
+default_buyer_method
+seller_method
+default_seller_method
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 22/43
+Response samples
+200 401 403 404 500
+GET /paymentmethods/{paymentMethodId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"details": "string"
+,
+"type": "string"
+,
+"type_description": "string"
+,
+"buyer_method": true
+,
+"default_buyer_method": true
+,
+"seller_method": true
+,
+"default_seller_method": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"paymentmethod:delete":  … +
+{
+}
+,
+"paymentmethod:updatecreditcard":  … +
+{
+}
+,
+"paymentmethod:updatedefaults":  … +
+{
+}
+,
+"paymentmethod:updatepaypal":  … +
+{
+}
+}
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 23/43
+"_embedded": -
+{
+"billing_address":  … +
+{
+}
+,
+"type_details":  … +
+{
+}
+}
+}
+List payment methods for a listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+REQUEST BODY SCHEMA: application/json
+One of PutListingPaymentMethodsRequest
+listingId
+required
+page
+page_size
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 24/43
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+Array of strings or null
+string or null
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(PaymentMethodsLinks (object or null))
+(PaymentMethodsEmbeddedResources (object or null))
+number_of_tickets
+delivery_address_id
+delivery_method_id
+coupons
+pickup_full_name
+total_items
+page
+page_size
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 25/43
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+PUT /listings/{listingId}/paymentmethods
+application/json
+Expand all Collapse allCopy
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 26/43
+Response samples
+200 400 401 403 500
+{
+"number_of_tickets": 0
+,
+"delivery_address_id": 0
+,
+"delivery_method_id": 0
+,
+"coupons": -
+[
+"string"
+]
+,
+"pickup_full_name": "string"
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"paymentmethod:createcreditcard":  … +
+{
+}
+,
+"paymentmethod:createpaypal":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 27/43
+User
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Get the authenticated user
+AUTHORIZATIONS: OAuth2
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+string or null
+The full name of the user.
+full_name
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 28/43
+string or null
+The email address of the user.
+string or null
+The primary phone number of the user.
+boolean
+True if the user is signed up for the StubHub email newsletter; otherwise, false.
+(UserLinks (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+email
+primary_phone
+email_optin
+_links
+GET /user
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 29/43
+application/hal+json
+Expand all Collapse allCopy
+{
+"full_name": "string"
+,
+"email": "string"
+,
+"primary_phone": "string"
+,
+"email_optin": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"user:addresses":  … +
+{
+}
+,
+"user:paymentmethods":  … +
+{
+}
+,
+"user:sales":  … +
+{
+}
+,
+"user:salesaggregates":  … +
+{
+}
+,
+"user:sellerlistings":  … +
+{
+}
+,
+"user:update":  … +
+{
+}
+,
+"user:webhooks":  … +
+{
+}
+}
+}
+Update the authenticated user
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 30/43
+One of PatchUserRequest
+string or null
+The full name of the user.
+boolean or null
+True if the user is signed up for the StubHub email newsletter; otherwise, false.
+Responses
+200
+RESPONSE SCHEMA: application/octet-stream
+string <binary>
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+full_name
+email_optin
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 31/43
+Request samples
+Payload
+Response samples
+400 401 403 500
+PATCH /user
+application/json
+Copy
+{
+"full_name": "string"
+,
+"email_optin": true
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+Content type
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 32/43
+Address
+An address is a delivery, pickup or billing address associated with the current user.
+integer or null <int32>
+The address identifier.
+string or null
+The full name of the recipient.
+boolean or null
+True if the address is the user’s default address; Otherwise, false.
+string or null
+The first line of the address.
+string or null
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+id
+full_name
+default
+address_1
+address_2
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 33/43
+The second line of the address.
+string or null
+The third line of the address.
+string or null
+The name of the city where the address is located.
+string or null
+The name of the State or Province where the address is located.
+string or null
+The postal code for the address.
+(AddressLinks (object or null))
+(AddressEmbeddedResources (object or null))
+address_3
+city
+state_province
+postal_code
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"full_name": "string"
+,
+"default": true
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 34/43
+Addresss
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(AddresssLinks (object or null))
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"address:carrier":  … +
+{
+}
+,
+"address:delete":  … +
+{
+}
+,
+"address:update":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"country":  … +
+{
+}
+}
+}
+total_items
+page
+page_size
+_links
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 35/43
+(AddresssEmbeddedResources (object or null))
+PaymentMethod
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 36/43
+A method to send or receive payment.
+integer or null <int32>
+The payment method identifier.
+string or null
+The obfuscated details of the payment method.
+string or null
+The type of the payment method.
+string or null
+A localised string describing the type of payment method.
+boolean or null
+True if the payment method can be used for purchasing listings; otherwise, false.
+boolean or null
+True if the payment method is the user’s default payment method for purchasing listings.
+boolean or null
+True if the payment method can be used for receiving payments; otherwise, false.
+boolean or null
+True if the payment method is the user’s default payment method for receiving payments.
+(PaymentMethodLinks (object or null))
+id
+details
+type
+type_description
+buyer_method
+default_buyer_method
+seller_method
+default_seller_method
+_links
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 37/43
+(PaymentMethodEmbeddedResources (object or null))_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"details": "string"
+,
+"type": "string"
+,
+"type_description": "string"
+,
+"buyer_method": true
+,
+"default_buyer_method": true
+,
+"seller_method": true
+,
+"default_seller_method": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"paymentmethod:delete":  … +
+{
+}
+,
+"paymentmethod:updatecreditcard":  … +
+{
+}
+,
+"paymentmethod:updatedefaults":  … +
+{
+}
+,
+"paymentmethod:updatepaypal":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"billing_address":  … +
+{
+}
+,
+"type_details":  … +
+{
+}
+}
+}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 38/43
+PaymentMethods
+The PaymentMethods resource is a collection resource that contains zero or more references to a set of payment methods, and
+links that guide you on ways to interact with the payment methods. The collection offers a paginated view of payment
+methods.
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(PaymentMethodsLinks (object or null))
+(PaymentMethodsEmbeddedResources (object or null))
+total_items
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 39/43
+PaymentMethodss
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(PaymentMethodssLinks (object or null))
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"paymentmethod:createcreditcard":  … +
+{
+}
+,
+"paymentmethod:createpaypal":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+total_items
+page
+page_size
+_links
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 40/43
+(PaymentMethodssEmbeddedResources (object or null))
+User
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 41/43
+An authenticated user.
+string or null
+The full name of the user.
+string or null
+The email address of the user.
+string or null
+The primary phone number of the user.
+boolean
+True if the user is signed up for the StubHub email newsletter; otherwise, false.
+(UserLinks (object or null))
+full_name
+email
+primary_phone
+email_optin
+_links
+Expand all Collapse allCopy
+{
+"full_name": "string"
+,
+"email": "string"
+,
+"primary_phone": "string"
+,
+"email_optin": true
+,
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 42/43
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"user:addresses":  … +
+{
+}
+,
+"user:paymentmethods":  … +
+{
+}
+,
+"user:sales":  … +
+{
+}
+,
+"user:salesaggregates":  … +
+{
+}
+,
+"user:sellerlistings":  … +
+{
+}
+,
+"user:update":  … +
+{
+}
+,
+"user:webhooks":  … +
+{
+}
+}
+}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/account 43/43

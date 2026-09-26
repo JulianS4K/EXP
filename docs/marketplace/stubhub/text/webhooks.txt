@@ -1,0 +1,1089 @@
+StubHub Webhooks API (2.249.0.0)
+Topics
+When configuring a webhook, you can choose the topics you would like to receive payloads for. You should only subscribe to
+the specific topics that you plan on handling so that you can limit the number of HTTP requests to your server.
+Sales Webhook
+Triggered when something happens that affects a sale (e.g. you sell one or more tickets).
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Array of objects or null (BarcodeInformation)
+The barcodes that are linked to the sale.
+string or null
+The topic of the webhook.
+barcodes
+topic
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 1/36
+string or null
+The action that triggered this webhook.
+(SalesTopicLinks (object or null))
+(SalesTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+action
+_links
+_embedded
+application/json
+Expand all Collapse allCopy
+{
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"topic": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 2/36
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"sale":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+ProvisionalSale Webhook
+Triggered when a provisional sale occurs. The normal SalesTopic  webhook will confirm the provisional sale. If you want to
+reject the provisional sale, ignore it and reject the sale when it comes through as normal.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Array of objects or null (BarcodeInformation)
+The barcodes that are linked to the sale.
+barcodes
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 3/36
+string or null
+The topic of the webhook.
+string or null
+The action that triggered this webhook.
+(ProvisionalSaleTopicLinks (object or null))
+(ProvisionalSaleTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+topic
+action
+_links
+_embedded
+application/json
+Expand all Collapse allCopy
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 4/36
+{
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"topic": "string"
+,
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"sale":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+CancelProvisionalSale Webhook
+Triggered when a provisional sale is cancelled.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Array of objects or null (BarcodeInformation)barcodes
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 5/36
+The barcodes that are linked to the sale.
+string or null
+The topic of the webhook.
+string or null
+The action that triggered this webhook.
+(CancelProvisionalSaleTopicLinks (object or null))
+(CancelProvisionalSaleTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+topic
+action
+_links
+_embedded
+application/json
+Expand all Collapse allCopy
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 6/36
+{
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"topic": "string"
+,
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"sale":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+SaleUpdates Webhook
+Triggered when an update is made to a sale that you did not initiate. You will need to filter by the action that you are interested
+in. The currently support action is FailedBarcodeValidation  which will tell you if validation of a set of barcodes uploaded
+against an order has failed, and barcodes need re-uploading.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 7/36
+Array of objects or null (BarcodeInformation)
+The barcodes that are linked to the sale.
+string or null
+The topic of the webhook.
+string or null
+The action that trigger this webhook. Can be FailedBarcodeValidation
+(SaleUpdatesTopicLinks (object or null))
+(SaleUpdatesTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+barcodes
+topic
+action
+_links
+_embedded
+application/json
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 8/36
+Expand all Collapse allCopy
+{
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"topic": "string"
+,
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"sale":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+SellerListingUpdates Webhook
+Triggered when an update is made to a listing that you did not initiate. You will need to filter by the action that you are
+interested in. The currently support actions are FailedBarcodeValidation  and ListingDeliverabilityExpired .
+FailedBarcodeValidation  will tell you if validation of a set of barcodes uploaded against a listing has failed, and barcodes need
+re-uploading. ListingDeliverabilityExpired  will tell you that a listing is not longer deliverable to a customer. To increase the
+deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 9/36
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+string or null
+The topic of the webhook.
+string or null
+The action that trigger this webhook. Can be FailedBarcodeValidation  or
+ListingDeliverabilityExpired
+Array of objects or null (BarcodeInformation2)
+The barcodes that are linked to the listing.
+(SellerListingUpdatesTopicLinks (object or null))
+(SellerListingUpdatesTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+topic
+action
+barcodes
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 10/36
+Payload
+application/json
+Expand all Collapse allCopy
+{
+"topic": "string"
+,
+"action": "string"
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+Ping Webhook
+Triggered any time a Webhook is pinged.
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 11/36
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+string or null
+The topic of the webhook.
+string or null
+The action that triggered this webhook.
+(PingTopicLinks (object or null))
+(PingTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+topic
+action
+_links
+_embedded
+application/json
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 12/36
+Expand all Collapse allCopy
+{
+"topic": "string"
+,
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"webhook":  … +
+{
+}
+}
+}
+ReTransferTicket Webhook
+Triggered when a ticket was not received by the buyer, so the ticket must be re-transferred from the 3rd party provider.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+Array of objects or null (BarcodeInformation)
+The barcodes that are linked to the sale.
+string or null
+The topic of the webhook.
+barcodes
+topic
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 13/36
+string or null
+The action that triggered this webhook.
+(ReTransferTicketTopicLinks (object or null))
+(ReTransferTicketTopicEmbeddedResources (object or null))
+Responses
+— 200 The data was received successfully.
+Request samples
+Payload
+action
+_links
+_embedded
+application/json
+Expand all Collapse allCopy
+{
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"topic": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 14/36
+Webhooks
+"action": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"event":  … +
+{
+}
+,
+"sale":  … +
+{
+}
+,
+"seller_listing":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+,
+"webhook":  … +
+{
+}
+}
+}
+List webhooks
+List webhooks for the authenticated user.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 15/36
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string
+Determines the ordering of items. A comma-separated string containing created_at .
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(WebhooksLinks (object or null))
+(WebhooksEmbeddedResources (object or null))
+page
+page_size
+sort
+total_items
+page
+page_size
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 16/36
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+GET /webhooks
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 17/36
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Create a webhook
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PostWebhookRequest
+string or null
+The name of the webhook.
+string or null
+The server endpoint that will receive the webhook payload.
+name
+url
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 18/36
+string or null
+The Authorization header value that should be included in requests to the webhook.
+Array of strings or null
+An array of the topics the webhook is trigger for.
+Responses
+201
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The webhook identifier.
+string or null
+The name of the webhook.
+string <date-time>
+The date when the webhook was created.
+Array of strings or null
+An array of the topics the webhook is trigger for.
+authorization_header
+topics
+id
+name
+created_at
+topics
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 19/36
+string or null
+The server endpoint that will receive the webhook payload.
+string or null
+The Authorization header value that should be included in requests to the webhook.
+(WebhookLinks (object or null))
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+url
+authorization_header
+_links
+POST /webhooks
+application/json
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 20/36
+Response samples
+201 400 401 403 500
+Expand all Collapse allCopy
+{
+"name": "string"
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+"topics": -
+[
+"string"
+]
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"topics": -
+[
+"string"
+]
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 21/36
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"webhook:delete":  … +
+{
+}
+,
+"webhook:ping":  … +
+{
+}
+,
+"webhook:update":  … +
+{
+}
+}
+}
+Get a webhook
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+webhookId
+required
+id
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 22/36
+The webhook identifier.
+string or null
+The name of the webhook.
+string <date-time>
+The date when the webhook was created.
+Array of strings or null
+An array of the topics the webhook is trigger for.
+string or null
+The server endpoint that will receive the webhook payload.
+string or null
+The Authorization header value that should be included in requests to the webhook.
+(WebhookLinks (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+name
+created_at
+topics
+url
+authorization_header
+_links
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 23/36
+Response samples
+200 401 403 404 500
+GET /webhooks/{webhookId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"topics": -
+[
+"string"
+]
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"webhook:delete":  … +
+{
+}
+,
+"webhook:ping":  … +
+{
+}
+,
+"webhook:update":  … +
+{
+}
+}
+}
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 24/36
+Update a webhook
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+REQUEST BODY SCHEMA: application/json
+One of PatchWebhookRequest
+string or null
+The name of the webhook.
+string or null
+The server endpoint that will receive the webhook payload.
+string or null
+The Authorization header value that should be included in requests to the webhook.
+Array of strings or null
+An array of the topics the webhook is trigger for.
+Responses
+webhookId
+required
+name
+url
+authorization_header
+topics
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 25/36
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The webhook identifier.
+string or null
+The name of the webhook.
+string <date-time>
+The date when the webhook was created.
+Array of strings or null
+An array of the topics the webhook is trigger for.
+string or null
+The server endpoint that will receive the webhook payload.
+string or null
+The Authorization header value that should be included in requests to the webhook.
+(WebhookLinks (object or null))
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+id
+name
+created_at
+topics
+url
+authorization_header
+_links
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 26/36
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+PATCH /webhooks/{webhookId}
+application/json
+Expand all Collapse allCopy
+{
+"name": "string"
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+"topics": -
+[
+"string"
+]
+}
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 27/36
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"topics": -
+[
+"string"
+]
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"webhook:delete":  … +
+{
+}
+,
+"webhook:ping":  … +
+{
+}
+,
+"webhook:update":  … +
+{
+}
+}
+}
+Delete a webhook
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 28/36
+integer <int32>
+Responses
+— 204
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+webhookId
+required
+DELETE /webhooks/{webhookId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 29/36
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+Ping a webhook
+Triggers a request to be sent to your webhook. Call this endpoint to test your webhook.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+Responses
+202
+400
+The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+webhookId
+required
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 30/36
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+202 400 401 403 500
+POST /webhooks/{webhookId}/ping
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"topics": -
+[
+"string"
+]
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+Content type
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 31/36
+Money
+Returned for monetary values, such as ticket prices, fees charged and tax amounts.
+number or null <decimal>
+The decimal amount of the money.
+string or null
+The ISO 4217 currency code that the monetary value is represented in.
+string or null
+A user-friendly string representing the monetary value.
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"webhook:delete":  … +
+{
+}
+,
+"webhook:ping":  … +
+{
+}
+,
+"webhook:update":  … +
+{
+}
+}
+}
+amount
+required
+currency_code
+required
+display
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 32/36
+Webhook
+A webhook is a subscription from a server application to certain topics on the StubHub platform. When an occurrence of a topic
+is triggered, we’ll POST a payload to the webhook’s configured url.
+integer or null <int32>
+The webhook identifier.
+string or null
+The name of the webhook.
+string <date-time>
+The date when the webhook was created.
+Copy
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+id
+name
+created_at
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 33/36
+Array of strings or null
+An array of the topics the webhook is trigger for.
+string or null
+The server endpoint that will receive the webhook payload.
+string or null
+The Authorization header value that should be included in requests to the webhook.
+(WebhookLinks (object or null))
+topics
+url
+authorization_header
+_links
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"topics": -
+[
+"string"
+]
+,
+"url": "string"
+,
+"authorization_header": "string"
+,
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 34/36
+Webhooks
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(WebhooksLinks (object or null))
+(WebhooksEmbeddedResources (object or null))
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"webhook:delete":  … +
+{
+}
+,
+"webhook:ping":  … +
+{
+}
+,
+"webhook:update":  … +
+{
+}
+}
+}
+total_items
+page
+page_size
+_links
+_embedded
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 35/36
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+9/14/26, 12:57 PM API Docs | StubHub API
+https://developer.stubhub.com/api-reference/webhooks 36/36
