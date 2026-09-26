@@ -31,6 +31,7 @@ export const en = {
   'addon.title': 'Add-ons',
 
   'waitlist.join': 'Join the Waitlist',
+  'waitlist.signIn': 'Sign in to join the waitlist',
   'waitlist.heading': 'Sold out — get notified if a spot opens',
   'waitlist.emailPlaceholder': 'you@email.com',
   'waitlist.namePlaceholder': 'Name (optional)',
@@ -138,6 +139,7 @@ export const es: Record<DictKey, string> = {
   'addon.title': 'Complementos',
 
   'waitlist.join': 'Unirse a la Lista de Espera',
+  'waitlist.signIn': 'Inicia sesión para unirte a la lista de espera',
   'waitlist.heading': 'Agotado — recibe aviso si se libera un lugar',
   'waitlist.emailPlaceholder': 'tu@email.com',
   'waitlist.namePlaceholder': 'Nombre (opcional)',

@@ -1,16 +1,18 @@
 // Sold-out waitlist call-to-action (Hi.Events parity).
 //
 // Rendered on EventDetails in place of the disabled "Buy Tickets" button when an
-// event/tier is sold out. Collects email (+ optional name) and joins the
-// waitlist via the anon-callable exos_join_waitlist RPC, so a signed-out buyer
-// can register interest. On success it shows the queue position; the organizer
-// releases spots later (exos_notify_waitlist) which emails the joiner.
+// event/tier is sold out. Joining needs a signed-in account with a confirmed
+// email (mig 20260926010000): anonymous joins let anyone fill a sold-out
+// show's list with other people's addresses. The list uses the account's own
+// email; on success it shows the queue position, and the organizer releases
+// spots later (exos_notify_waitlist), which emails the joiner.
 
 import { useState, type CSSProperties } from 'react';
 import { Bell, Check } from 'lucide-react';
 import { joinWaitlist } from '../lib/waitlist';
 import { useToast } from '../context/ToastContext';
 import { useT } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 
 interface Props {
   eventId: string;
@@ -24,6 +26,7 @@ interface Props {
 
 export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName, accentStyle }: Props) {
   const { toast } = useToast();
+  const { user, signIn } = useAuth();
   const t = useT();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(defaultEmail || '');
@@ -33,7 +36,7 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
   const [position, setPosition] = useState<number | null>(null);
 
   const submit = async () => {
-    const trimmed = email.trim().toLowerCase();
+    const trimmed = (user?.email ?? email).trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) {
       toast({ kind: 'error', message: t('waitlist.emailInvalid') });
       return;
@@ -78,11 +81,11 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => (user ? setOpen(true) : signIn())}
         className="w-full flex items-center justify-center space-x-3 border-2 border-white/20 hover:border-brand-primary hover:text-brand-primary text-white/70 py-4 font-black uppercase italic tracking-tighter text-sm transition-all"
       >
         <Bell className="w-5 h-5" />
-        <span>{t('waitlist.join')}</span>
+        <span>{user ? t('waitlist.join') : t('waitlist.signIn')}</span>
       </button>
     );
   }
@@ -94,7 +97,8 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
       </p>
       <input
         type="email"
-        value={email}
+        value={user?.email ?? email}
+        readOnly={!!user?.email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder={t('waitlist.emailPlaceholder')}
         autoComplete="email"

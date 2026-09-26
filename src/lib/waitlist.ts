@@ -1,8 +1,8 @@
 // Sold-out event/tier waitlist (Hi.Events parity).
 //
-// Thin wrappers over the SECDEF RPCs in migration 20260616180000. The buyer
-// JOIN path is anon-callable (a sold-out public event captures demand without a
-// login); the notify/summary paths are org-staff-gated server-side.
+// Thin wrappers over the SECDEF RPCs in migration 20260616180000. Joining needs
+// a signed-in account with a confirmed email and uses that account's email
+// (mig 20260926010000); the notify/summary paths are org-staff-gated server-side.
 
 import { supabase } from './supabase';
 
@@ -20,7 +20,7 @@ export interface WaitlistSummary {
   totalQuantity: number;
 }
 
-/** Join a sold-out event (optionally a specific tier). Works signed-out. */
+/** Join a sold-out event (optionally a specific tier). Requires sign-in. */
 export async function joinWaitlist(input: {
   eventId: string;
   email: string;
