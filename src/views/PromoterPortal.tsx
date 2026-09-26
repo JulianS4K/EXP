@@ -17,18 +17,25 @@ import PromoterKitPanel from '../components/PromoterKitPanel';
 import PromoterSocialsForm from '../components/PromoterSocialsForm';
 import PromoterGuestListForm from '../components/PromoterGuestListForm';
 import PromoterEarningsPanel from '../components/PromoterEarningsPanel';
+import PromoterLimitFlags from '../components/PromoterLimitFlags';
+import { getPromoterLimitFlags, type PromoterLimitFlag } from '../lib/marketplace/linksApi';
 
 export default function PromoterPortal() {
   const { token } = useParams();
   const [kit, setKit] = useState<PromoterKitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [openEvent, setOpenEvent] = useState<Event | null>(null);
+  const [tab, setTab] = useState<'events' | 'flags'>('events');
+  const [flags, setFlags] = useState<PromoterLimitFlag[]>([]);
+  const loadFlags = () => { if (token) getPromoterLimitFlags(token).then(setFlags).catch(() => setFlags([])); };
   const { toast } = useToast();
 
   useEffect(() => {
     try { applyMeta({ title: 'Promoter portal', description: 'Your events and sales.', noindex: true }); } catch { /* non-fatal */ }
     if (!token || !/^[0-9a-f-]{36}$/i.test(token)) { setLoading(false); return; }
     getPromoterKit(token).then(setKit).finally(() => setLoading(false));
+    // Limit flags need mig 20260926194000; the portal works without it.
+    getPromoterLimitFlags(token).then(setFlags).catch(() => setFlags([]));
   }, [token]);
 
   const open = async (eventId: string) => {
@@ -77,7 +84,18 @@ export default function PromoterPortal() {
         />
       )}
       {token && <PromoterGuestListForm token={token} />}
-      <div className="space-y-3">
+      <div className="flex gap-6 border-b border-white/10 mb-4" role="tablist">
+        <button role="tab" aria-selected={tab === 'events'} onClick={() => setTab('events')}
+          className={`pb-2 type text-[11px] uppercase tracking-widest ${tab === 'events' ? 'text-white border-b-2 border-brand-primary -mb-px' : 'text-white/40'}`}>
+          Your events
+        </button>
+        <button role="tab" aria-selected={tab === 'flags'} onClick={() => setTab('flags')}
+          className={`pb-2 type text-[11px] uppercase tracking-widest ${tab === 'flags' ? 'text-white border-b-2 border-brand-primary -mb-px' : 'text-white/40'}`}>
+          Limit flags{flags.filter((f) => !f.reviewed).length ? ` (${flags.filter((f) => !f.reviewed).length})` : ''}
+        </button>
+      </div>
+      {tab === 'flags' && token && <PromoterLimitFlags token={token} flags={flags} onChanged={loadFlags} />}
+      <div className={`space-y-3 ${tab === 'events' ? '' : 'hidden'}`}>
         {kit.events.length === 0 && <p className="text-[11px] text-white/40 italic">No events on sale right now.</p>}
         {kit.events.map((e) => (
           <section key={e.event_id} className="bg-[#111] border border-white/10">

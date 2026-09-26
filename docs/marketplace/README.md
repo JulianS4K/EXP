@@ -120,20 +120,22 @@ seat in three orders, and never sells it twice.
     wired.
   - The docs don't say whether StubHub enforces `display_number_of_tickets`
     per purchase or only for display. Check on the first sandbox listing.
-- **Per person: flagged, not blocked.** No marketplace can enforce Exos's
-  max per account: one person can place several orders under an email we
-  can't tie to them until they claim. After any change to who holds a
-  ticket, and on every new pending transfer, Exos counts for that email:
-  - held: tickets they own;
-  - incoming: pending transfers to them.
-
-  Over `maxPerAccount`, a row goes into `exos_account_limit_flags` (mig
-  `20260926194000`) and appears in the event editor under "Over the
-  per-account limit" for the organizer to review. Details:
-  - Nothing is blocked.
+- **Per person: the account is flagged, the sale is not.** No marketplace
+  can enforce Exos's max per account: one person can place several orders
+  there. So nothing is blocked. Instead, once an Exos **account** actually
+  holds more of an event's tickets than `maxPerAccount`, it's flagged
+  (`exos_account_limit_flags`, mig `20260926194000`).
+  - A sale, or tickets still on their way by transfer, never raises a flag.
   - Tickets parked on the organizer for delivery don't count, and the org's
     own staff are exempt.
-  - A reviewed flag re-opens if the count goes higher.
+  - Each flag records the promoter codes the tickets were sold through.
+  - **Org tab:** owners and managers review flags under Org settings →
+    **Limit flags** (`/orgs/:orgId/flags`, also linked from the dashboard)
+    and mark them reviewed with a note.
+  - **Promoter tab:** the promoter portal has a **Limit flags** tab listing
+    flagged accounts that bought through that promoter's links. The email is
+    masked, and the promoter can leave a note for the organizer.
+  - A reviewed flag re-opens if the account later holds more than ever.
 
 ### Dry run
 

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
@@ -132,6 +132,9 @@ export default function OrganizerDashboard() {
                 </Link>
                 <Link to={`/orgs/${activeOrg.id}/members`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                   <Users className="w-4 h-4" /><span>Team</span>
+                </Link>
+                <Link to={`/orgs/${activeOrg.id}/flags`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                  <Flag className="w-4 h-4" /><span>Limit flags</span>
                 </Link>
               </>
             )}

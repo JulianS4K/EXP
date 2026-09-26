@@ -4,11 +4,8 @@
 import { useEffect, useState } from 'react';
 import {
   getChannelLinks,
-  getAccountLimitFlags,
   getMarketplaceOrders,
   linkChannelEvent,
-  reviewAccountLimitFlag,
-  type AccountLimitFlag,
   type ChannelLink,
   type MarketplaceOrder,
 } from '../lib/marketplace/linksApi';
@@ -196,58 +193,3 @@ export function StubHubAllocation({
   );
 }
 
-/**
- * Accounts holding (or about to receive) more tickets than the event's max
- * per account. Marketplace sales can't be held to that limit, so they're
- * flagged here instead of blocked. Shown only when something is flagged.
- */
-export function AccountLimitFlags({ eventId }: { eventId: string }) {
-  const { toast } = useToast();
-  const [flags, setFlags] = useState<AccountLimitFlag[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const load = () => getAccountLimitFlags(eventId).then(setFlags).catch(() => setFlags([]));
-  useEffect(() => {
-    void getAccountLimitFlags(eventId).then(setFlags).catch(() => setFlags([]));
-  }, [eventId]);
-  if (!flags?.length) return null;
-  const review = async (f: AccountLimitFlag) => {
-    const note = window.prompt(`Note for ${f.email} (optional)`, f.review_note ?? '');
-    if (note === null) return;
-    setBusy(f.id);
-    try {
-      await reviewAccountLimitFlag(f.id, note);
-      await load();
-    } catch (err) {
-      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not save that.' });
-    } finally {
-      setBusy(null);
-    }
-  };
-  const open = flags.filter((f) => !f.reviewed_at).length;
-  return (
-    <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-3">
-      <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Over the per-account limit</h2>
-      <p className="type text-xs text-white/50">
-        {open} to review. These accounts hold or are being sent more tickets than your max per account, usually
-        from several marketplace orders. Nothing was blocked; decide whether to act.
-      </p>
-      <ul className="space-y-2">
-        {flags.map((f) => (
-          <li key={f.id} className={`border p-3 type text-xs flex flex-wrap items-center justify-between gap-2 ${f.reviewed_at ? 'border-white/10 text-white/50' : 'border-amber-400/60 text-amber-100'}`}>
-            <span>
-              <span className="text-white">{f.email}</span>
-              {' '}· {f.held} held{f.incoming ? ` + ${f.incoming} on the way` : ''} (limit {f.max_per_account}, most {f.peak})
-              {f.reviewed_at ? ` · reviewed${f.review_note ? `: ${f.review_note}` : ''}` : ''}
-            </span>
-            {!f.reviewed_at && (
-              <button type="button" disabled={busy === f.id} onClick={() => review(f)}
-                className="px-3 py-2 border border-white/20 text-white/80 text-[10px] uppercase tracking-widest disabled:opacity-50">
-                Mark reviewed
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
