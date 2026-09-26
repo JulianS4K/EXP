@@ -19,6 +19,7 @@ import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
 import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
+import ReferralProgress from '../components/ReferralProgress';
 import { useT } from '../context/LanguageContext';
 
 export default function TicketDetail() {
@@ -445,17 +446,7 @@ export default function TicketDetail() {
                     </div>
                  </div>
 
-                 {referral && (
-                   <div className="mb-6 border border-brand-primary/40 bg-brand-primary/5 p-5">
-                     <p className="type text-[10px] uppercase tracking-widest text-brand-primary mb-1">Bring your friends</p>
-                     <p className="disp text-2xl tracking-wide text-white">
-                       {referral.friends === 0 ? 'Nobody yet' : `${referral.friends} friend${referral.friends === 1 ? '' : 's'} coming`}
-                     </p>
-                     <p className="text-xs text-white/60 mt-1">
-                       Share from here: your links are tagged, so we count everyone who gets tickets through you.
-                     </p>
-                   </div>
-                 )}
+                 <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />
 
                  <div className="space-y-3 mb-10">
                     <div className="grid grid-cols-2 gap-3">

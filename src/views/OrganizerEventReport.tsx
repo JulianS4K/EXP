@@ -28,6 +28,11 @@ import ReleasePolicyPanel from '../components/ReleasePolicyPanel';
 import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
+import RefundPanel from '../components/RefundPanel';
+import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
+import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
+import GuestListPanel from '../components/GuestListPanel';
+import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -109,11 +114,10 @@ export default function OrganizerEventReport() {
   // refunds). Optimistic local update so the UI reflects the change
   // without re-fetching.
   //
-  // Note: this flow does NOT issue a Stripe refund. The actual money
-  // movement is a separate step the organizer arranges via their
-  // Stripe dashboard. The void is sticky regardless: the ticket is
-  // unscannable even if the refund hasn't cleared yet, which is the
-  // important property for the door.
+  // Note: this flow does NOT issue a Stripe refund. Money refunds go
+  // through RefundPanel (exos-refund) below. The void is sticky
+  // regardless: the ticket is unscannable even if a refund hasn't
+  // cleared yet, which is the important property for the door.
   const handleVoidTicket = async (ticket: Ticket) => {
     if (!user || !ticket || ticket.status !== 'active') return;
     const reason = window.prompt(
@@ -304,6 +308,18 @@ export default function OrganizerEventReport() {
           onIssued={() => void reloadTickets()}
         />
 
+        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
+        <RefundPanel
+          event={event}
+          canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+          canCancel={canAct}
+          onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+        />
+
+        {/* Nightlife: table labels for sold tables, and guest lists. */}
+        <TableAssignmentsPanel event={event} canManage={canAct} />
+        <GuestListPanel event={event} canManage={canAct} />
+
         {/* Self-serve RSVP release policy (owner/manager) — holders of free
             tickets can give the seat back; the waitlist auto-offers it. */}
         <ReleasePolicyPanel
@@ -311,6 +327,12 @@ export default function OrganizerEventReport() {
           canManage={canAct}
           onSaved={(p) => setEvent((ev) => (ev ? { ...ev, ...p } : ev))}
         />
+
+        {/* Fan referral rewards: rule (owner/manager) + top referrers. */}
+        <ReferralRewardsPanel event={event} canManage={canAct} />
+
+        {/* Price shown vs charged per order (NY ACAL 25.07 / FTC fee rule record). */}
+        <PriceDisclosureExport eventId={eventId!} eventTitle={event.title} />
 
         {/* Attendance funnel + attribution (server-side document) + CSV exports. */}
         <EventAnalyticsPanel

@@ -1,6 +1,7 @@
 // /p/:token — a promoter's private portal (mig 20260924233000). No login: the
 // token in the link is the secret. Shows their own tickets + gross per event
 // and, for any event, their kit (buy-now link, story poster, tracked links).
+// Earnings (commission owed / paid, mig 20260926020000): PromoterEarningsPanel.
 
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -14,6 +15,8 @@ import { applyMeta } from '../lib/meta';
 import { formatCurrency } from '../lib/utils';
 import PromoterKitPanel from '../components/PromoterKitPanel';
 import PromoterSocialsForm from '../components/PromoterSocialsForm';
+import PromoterGuestListForm from '../components/PromoterGuestListForm';
+import PromoterEarningsPanel from '../components/PromoterEarningsPanel';
 
 export default function PromoterPortal() {
   const { token } = useParams();
@@ -65,6 +68,7 @@ export default function PromoterPortal() {
           {publicUrl(linkInBioPath(kit.org.slug, kit.promoter.code))}
         </button>
       </div>
+      {token && <PromoterEarningsPanel token={token} />}
       {token && (
         <PromoterSocialsForm
           token={token}
@@ -72,6 +76,7 @@ export default function PromoterPortal() {
           allowTagging={kit.promoter.allow_tagging !== false}
         />
       )}
+      {token && <PromoterGuestListForm token={token} />}
       <div className="space-y-3">
         {kit.events.length === 0 && <p className="text-[11px] text-white/40 italic">No events on sale right now.</p>}
         {kit.events.map((e) => (

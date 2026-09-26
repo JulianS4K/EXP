@@ -2,20 +2,25 @@
 //
 // Add a promoter (name → code), send them their private kit link, and see a
 // leaderboard of tickets + gross per promoter. Every free and paid ticket
-// bought through a promoter's links carries their code.
+// bought through a promoter's links carries their code. Commissions (mig
+// 20260926020000): per-promoter terms, owed / paid, and recording payouts, in
+// PromoterCommissionPanel.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Copy, Pause, Play, RefreshCw, Trophy, UserPlus } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronUp, Copy, Pause, Play, RefreshCw, Trophy, UserPlus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { getOrganization } from '../lib/orgs';
+import { getOrganization, getUserRoleInOrg } from '../lib/orgs';
+import { listOrgEvents } from '../lib/events';
+import PromoterCommissionPanel from '../components/PromoterCommissionPanel';
 import { typedCode } from '../lib/shareLinks';
 import { cleanHandle, type SocialHandles } from '../lib/socialTags';
 import { publicUrl, formatCurrency } from '../lib/utils';
 import {
-  codeFromName, linkInBioPath, listPromoters, orgPromoterStats, setPromoterStatus, upsertPromoter,
-  type Promoter, type PromoterStat,
+  codeFromName, linkInBioPath, listPromoterEventTerms, listPromoters, orgPromoterCommissions, orgPromoterStats,
+  setPromoterStatus, upsertPromoter,
+  type Promoter, type PromoterCommissionSummary, type PromoterEventTerms, type PromoterStat,
 } from '../lib/promoters';
 
 export default function OrgPromoters() {
@@ -33,9 +38,18 @@ export default function OrgPromoters() {
   const [tiktok, setTiktok] = useState('');
   const [busy, setBusy] = useState(false);
   const [orgSlug, setOrgSlug] = useState<string | null>(null);
+  const [commissions, setCommissions] = useState<PromoterCommissionSummary[]>([]);
+  const [overrides, setOverrides] = useState<PromoterEventTerms[]>([]);
+  const [events, setEvents] = useState<{ id: string; title: string }[]>([]);
+  const [canWrite, setCanWrite] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   useEffect(() => {
     if (orgId) getOrganization(orgId).then((o) => setOrgSlug(o?.slug ?? null)).catch(() => {});
-  }, [orgId]);
+    if (orgId) listOrgEvents(orgId).then((es) => setEvents(es.map((e) => ({ id: e.id, title: e.title })))).catch(() => {});
+    if (orgId && user?.uid) {
+      getUserRoleInOrg(orgId, user.uid).then((r) => setCanWrite(r === 'owner' || r === 'manager')).catch(() => setCanWrite(false));
+    }
+  }, [orgId, user?.uid]);
 
   const load = async () => {
     if (!orgId) return;
@@ -43,6 +57,13 @@ export default function OrgPromoters() {
       const [ps, st] = await Promise.all([listPromoters(orgId), orgPromoterStats(orgId).catch(() => [] as PromoterStat[])]);
       setPromoters(ps);
       setStats(new Map(st.map((s) => [s.promoterId, s])));
+      // Commissions need mig 20260926020000; the leaderboard works without it.
+      const [cs, ov] = await Promise.all([
+        orgPromoterCommissions(orgId).catch(() => [] as PromoterCommissionSummary[]),
+        listPromoterEventTerms(orgId).catch(() => [] as PromoterEventTerms[]),
+      ]);
+      setCommissions(cs);
+      setOverrides(ov);
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not load promoters.' });
     } finally {
@@ -137,8 +158,12 @@ export default function OrgPromoters() {
         <div className="space-y-2">
           {ranked.map((p, i) => {
             const s = stats.get(p.id);
+            const cs = commissions.filter((c) => c.promoterId === p.id);
+            const earned = cs.filter((c) => c.currency);
+            const open = openId === p.id;
             return (
-              <div key={p.id} className={`flex flex-wrap items-center gap-3 bg-[#111] border border-white/10 px-4 py-3 ${p.status === 'paused' ? 'opacity-60' : ''}`}>
+              <div key={p.id} className={`bg-[#111] border border-white/10 px-4 py-3 ${p.status === 'paused' ? 'opacity-60' : ''}`}>
+              <div className="flex flex-wrap items-center gap-3">
                 <span className="disp text-xl w-8 text-white/40">{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <p className="font-black text-white truncate">
@@ -149,7 +174,16 @@ export default function OrgPromoters() {
                   <p className="type text-[10px] uppercase tracking-widest text-white/50">
                     {s?.tickets ?? 0} tickets · {formatCurrency(s?.gross ?? 0)} incl. add-ons &amp; tax{p.status === 'paused' ? ' · paused' : ''}
                   </p>
+                  {earned.map((c) => (
+                    <p key={c.currency} className="type text-[10px] uppercase tracking-widest text-white/50">
+                      <span className={c.owedCents !== 0 ? 'text-brand-primary' : ''}>{formatCurrency(c.owedCents / 100, (c.currency || 'usd').toUpperCase())} owed</span>
+                      {' · '}{formatCurrency(c.paidCents / 100, (c.currency || 'usd').toUpperCase())} paid
+                    </p>
+                  ))}
                 </div>
+                <button onClick={() => setOpenId(open ? null : p.id)} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-white/60 hover:text-white" aria-expanded={open} aria-label={`Commission for ${p.name}`}>
+                  {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />} Commission
+                </button>
                 <button onClick={() => copy(kitUrl(p), `Kit link for ${p.name} copied.`)} disabled={p.status === 'paused'} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-brand-primary disabled:opacity-40" aria-label={`Copy kit link for ${p.name}`}>
                   <Copy className="w-3 h-3" /> Kit link
                 </button>
@@ -164,6 +198,19 @@ export default function OrgPromoters() {
                 <button onClick={() => toggle(p, true)} className="p-2 text-white/40 hover:text-white" aria-label={`New kit link for ${p.name}`} title="Make a new kit link (the old one stops working)">
                   <RefreshCw className="w-4 h-4" />
                 </button>
+              </div>
+              {open && (
+                <PromoterCommissionPanel
+                  promoterId={p.id}
+                  promoterName={p.name}
+                  defaults={{ rateBps: cs[0]?.rateBps ?? 0, flatCents: cs[0]?.flatCents ?? 0 }}
+                  summaries={cs}
+                  overrides={overrides.filter((o) => o.promoterId === p.id)}
+                  events={events}
+                  canWrite={canWrite}
+                  onChanged={load}
+                />
+              )}
               </div>
             );
           })}

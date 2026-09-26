@@ -20,6 +20,17 @@ import { verifyBarcode, extractTicketIdFromAny } from '../lib/barcode';
 import { joinCheckinChannel } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
+import GuestListDoor from '../components/GuestListDoor';
+import {
+  getDoorExtras,
+  loadCachedDoorExtras,
+  loadPendingArrivals,
+  pruneStaleDoorExtras,
+  saveCachedDoorExtras,
+  type DoorExtras,
+} from '../lib/guestListsApi';
+import { overlayPending } from '../lib/guestLists';
+import { indexTablesByTicket, tableSummary } from '../lib/tables';
 
 // Anything older than this is dropped from localStorage when the page mounts.
 // Set to a generous 7 days so a multi-day festival is still cached on day 3.
@@ -123,6 +134,36 @@ export default function OrganizerCheckIn() {
   // fires and starts the camera with no owner to shut it down.
   const startScannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasOfflineRef = useRef(isOffline);
+  // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
+  const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
+  // Offline door download: table labels by ticket + every guest-list entry.
+  const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
+  const [extrasSyncing, setExtrasSyncing] = useState(false);
+  const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+
+  const updateDoorExtras = (next: DoorExtras) => {
+    setDoorExtras(next);
+    if (eventId) saveCachedDoorExtras(eventId, next);
+  };
+
+  // Best-effort: a failure here never blocks ticket check-in.
+  const downloadDoorExtras = async (opts: { silent?: boolean } = {}) => {
+    if (!eventId || !user) return;
+    setExtrasSyncing(true);
+    try {
+      const fresh = await getDoorExtras(eventId);
+      // Arrivals still waiting to sync stay applied on top of the fresh copy.
+      updateDoorExtras({ ...fresh, guests: overlayPending(fresh.guests, loadPendingArrivals(eventId)) });
+      if (!opts.silent && mode === 'guests') {
+        toast({ kind: 'success', message: `Synced ${fresh.guests.length} guest-list name(s) for offline check-in.` });
+      }
+    } catch (err) {
+      console.warn('door extras (tables / guest lists) unavailable:', err);
+      if (!opts.silent && mode === 'guests') toast({ kind: 'error', message: 'Failed to sync guest lists.' });
+    } finally {
+      setExtrasSyncing(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchEvent() {
@@ -148,6 +189,7 @@ export default function OrganizerCheckIn() {
     // attendees in for accumulates ~one entry per attendee in localStorage
     // forever and eventually trips the ~5MB browser quota.
     pruneStaleCheckInCaches();
+    pruneStaleDoorExtras();
 
     // Load registry and pending updates for THIS event, if cached.
     if (eventId) {
@@ -167,6 +209,7 @@ export default function OrganizerCheckIn() {
           localStorage.removeItem(`registry_${eventId}`);
         }
       }
+      setDoorExtras(loadCachedDoorExtras(eventId));
       const pending = localStorage.getItem(`pending_updates_${eventId}`);
       if (pending) {
         try {
@@ -387,6 +430,7 @@ export default function OrganizerCheckIn() {
 
       setOfflineRegistry(registry);
       saveRegistry(eventId, registry);
+      void downloadDoorExtras({ silent: true });
       if (!silent) {
         toast({
           kind: 'success',
@@ -1028,6 +1072,38 @@ export default function OrganizerCheckIn() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* SCANNER STAGE */}
         <div className="lg:col-span-2 space-y-6">
+      <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
+        {(['tickets', 'guests'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            onClick={() => {
+              if (m === 'guests' && scanning) {
+                void stopScanner();
+                setScanning(false);
+              }
+              setMode(m);
+            }}
+            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+          >
+            {m === 'tickets' ? 'Tickets' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+          </button>
+        ))}
+      </div>
+      {mode === 'guests' && eventId ? (
+      <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <GuestListDoor
+          eventId={eventId}
+          isOffline={isOffline}
+          extras={doorExtras}
+          onExtrasChange={updateDoorExtras}
+          onSync={() => void downloadDoorExtras()}
+          syncing={extrasSyncing}
+        />
+      </div>
+      ) : (
       <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {scanning ? (
            <div className="relative mb-2">
@@ -1131,6 +1207,18 @@ export default function OrganizerCheckIn() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
+                 {tableByTicket[foundTicket.id] && (() => {
+                   const tb = tableByTicket[foundTicket.id];
+                   return (
+                     <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
+                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Table</p>
+                       <p className="font-bold text-slate-900">{tb.label || 'Not assigned yet'}</p>
+                       <p className="text-xs text-slate-500 mt-1">
+                         {tableSummary({ partySize: tb.partySize, minSpendCents: tb.minSpendCents, sectionLabel: tb.sectionLabel }, event?.currency || 'USD')}
+                       </p>
+                     </div>
+                   );
+                 })()}
               </div>
             </motion.div>
           )}
@@ -1212,6 +1300,7 @@ export default function OrganizerCheckIn() {
           )}
         </AnimatePresence>
       </div>
+      )}
         </div>
 
         {/* SIDEBAR: stats + scan log */}

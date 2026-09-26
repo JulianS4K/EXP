@@ -25,6 +25,9 @@ import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
+import TableTierFields from '../components/TableTierFields';
+import { BLANK_TABLE_DRAFT, admissionsForTier, rowToTableDraft, validateTableDraft, type TableTierDraft } from '../lib/tables';
+import { getTierTableRows, saveTierTableConfig } from '../lib/tablesApi';
 import {
   COMMON_TIMEZONES,
   utcToZonedWallClock,
@@ -124,6 +127,9 @@ export default function EditEvent() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [notifying, setNotifying] = useState(false);
+  // Table packages (mig 20260926050000), keyed by tier id (client id for new tiers).
+  const [tableCfg, setTableCfg] = useState<Record<string, TableTierDraft>>({});
+  const [originalTableCfg, setOriginalTableCfg] = useState<Record<string, TableTierDraft>>({});
   const [promoUsesState, setPromoUsesState] = useState<
     Record<string, { usedCount: number; usageLimit: number | null; expiresAt: Timestamp | null }>
   >({});
@@ -142,6 +148,15 @@ export default function EditEvent() {
       setOriginalTierIds((data.ticketTiers || []).map((t) => t.id));
       setOriginalTiers((data.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalCodes(data.discountCodes || []);
+      try {
+        const rows = await getTierTableRows(eventId);
+        const cfg: Record<string, TableTierDraft> = {};
+        for (const [id, row] of Object.entries(rows)) cfg[id] = rowToTableDraft(row);
+        setTableCfg(cfg);
+        setOriginalTableCfg(cfg);
+      } catch (err) {
+        console.warn('table tier fields unavailable:', err);
+      }
       setOriginalSlug((data.branding?.customSlug || '').trim());
       setOriginalNotifiable({
         title: data.title,
@@ -240,6 +255,8 @@ export default function EditEvent() {
       if (!Number.isInteger(tc) || tc < 1) {
         return `Tier "${tier.name}" has an invalid capacity.`;
       }
+      const tableErr = validateTableDraft(tableCfg[tier.id] ?? BLANK_TABLE_DRAFT, tier.name);
+      if (tableErr) return tableErr;
 
       // Refuse a capacity drop that would make the new cap smaller than
       // the number of tickets already sold from that tier. The Firestore
@@ -251,10 +268,11 @@ export default function EditEvent() {
         return `Can't reduce "${tier.name}" capacity to ${tc} — ${liveSold} ticket(s) already sold.`;
       }
 
-      capacitySum += tc;
+      // A table tier's capacity is tables; the house total counts people.
+      capacitySum += admissionsForTier(tc, tableCfg[tier.id]);
     }
     if (capacitySum > total) {
-      return `Tier capacities sum to ${capacitySum}, but the event total is ${total}.`;
+      return `Tier capacities sum to ${capacitySum} people (tables count their party size), but the event total is ${total}.`;
     }
 
     // Tier removals: refuse any tier whose live sold count is non-zero.
@@ -500,10 +518,14 @@ export default function EditEvent() {
           salesStart: tsToIso(tt.salesStart),
           salesEnd: tsToIso(tt.salesEnd),
         };
+        const draft = tableCfg[tier.id] ?? BLANK_TABLE_DRAFT;
         if (added.includes(tier.id)) {
-          await seamAddTier(eventId, tin);
+          const { tierId } = await seamAddTier(eventId, tin);
+          if (draft.isTable) await saveTierTableConfig(tierId, draft);
         } else {
           await seamUpdateTier(tier.id, tin);
+          const before = originalTableCfg[tier.id] ?? BLANK_TABLE_DRAFT;
+          if (JSON.stringify(before) !== JSON.stringify(draft)) await saveTierTableConfig(tier.id, draft);
         }
       }
       for (const removedId of removed) {
@@ -1098,7 +1120,7 @@ export default function EditEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[9px] text-white/40 uppercase tracking-widest ml-1">Inventory Allocation</label>
+                         <label className="type text-[9px] text-white/40 uppercase tracking-widest ml-1">{tableCfg[tier.id]?.isTable ? 'Tables Available' : 'Inventory Allocation'}</label>
                          <input 
                            required 
                            type="number"
@@ -1118,6 +1140,13 @@ export default function EditEvent() {
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
                       </div>
+
+                      <TableTierFields
+                        value={tableCfg[tier.id] ?? BLANK_TABLE_DRAFT}
+                        onChange={(next) => setTableCfg((prev) => ({ ...prev, [tier.id]: next }))}
+                        locked={(tierSalesState[tier.id]?.sold ?? 0) > 0}
+                        currency={eventData.currency || 'USD'}
+                      />
 
                       {/* Advanced controls — same shape as CreateEvent.
                           Times round-trip through Firestore Timestamps;

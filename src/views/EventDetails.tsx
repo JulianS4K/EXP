@@ -32,6 +32,7 @@ import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
 import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
@@ -824,6 +825,7 @@ export default function EventDetails() {
                          </div>
 
                          <p className="type text-[10px] text-white/50 mb-3">{tier.description}</p>
+                         <TableTierInfo eventId={event.id} tierId={tier.id} price={buyerTierPrice(tier)} currency={event.currency} />
 
                          {(() => {
                            const live = liveTier(tier.id, tier.capacity);

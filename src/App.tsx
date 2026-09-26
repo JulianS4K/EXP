@@ -17,6 +17,7 @@ import { isPixelRoute, leavePixelScope } from './lib/pixels';
 import Home from './views/Home';
 const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
+const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
@@ -119,6 +120,7 @@ export default function App() {
                     <Route path="/event/:id" element={<EventDetails />} />
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
+                    <Route path="/unsubscribe" element={<MailUnsubscribe />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />

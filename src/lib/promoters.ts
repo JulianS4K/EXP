@@ -4,6 +4,7 @@
 
 import { supabase } from './supabase';
 import type { SocialHandles } from './socialTags';
+import type { CommissionRow } from './commissions';
 
 export interface Promoter {
   id: string;
@@ -107,4 +108,122 @@ export async function setPromoterSocials(token: string, socials: SocialHandles, 
 // One public link a promoter can put in their Instagram / TikTok bio.
 export function linkInBioPath(orgSlug: string, code: string): string {
   return `l/${encodeURIComponent(orgSlug)}/${encodeURIComponent(code)}`;
+}
+
+// --- Commissions (mig 20260926020000) ---------------------------------------
+// Math lives in ./commissions.ts (pure, tested); these are the RPC wrappers.
+// All amounts are integer cents.
+
+export interface PromoterCommissionSummary {
+  promoterId: string;
+  code: string;
+  name: string;
+  status: 'active' | 'paused';
+  rateBps: number;
+  flatCents: number;
+  /** null for a promoter with no paid sales yet. */
+  currency: string | null;
+  tickets: number;
+  grossCents: number;
+  baseCents: number;
+  accruedCents: number;
+  reversedCents: number;
+  paidCents: number;
+  clawbackCents: number;
+  owedCents: number;
+}
+
+export async function orgPromoterCommissions(orgId: string, eventId?: string): Promise<PromoterCommissionSummary[]> {
+  const { data, error } = await supabase.rpc('exos_org_promoter_commissions', { p_org_id: orgId, p_event_id: eventId ?? null });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    promoterId: r.promoter_id, code: r.code, name: r.name, status: r.status,
+    rateBps: Number(r.rate_bps) || 0, flatCents: Number(r.flat_cents) || 0, currency: r.currency ?? null,
+    tickets: Number(r.tickets) || 0, grossCents: Number(r.gross_cents) || 0, baseCents: Number(r.base_cents) || 0,
+    accruedCents: Number(r.accrued_cents) || 0, reversedCents: Number(r.reversed_cents) || 0,
+    paidCents: Number(r.paid_cents) || 0, clawbackCents: Number(r.clawback_cents) || 0, owedCents: Number(r.owed_cents) || 0,
+  }));
+}
+
+export interface PromoterEventTerms { promoterId: string; eventId: string; rateBps: number; flatCents: number }
+
+export async function listPromoterEventTerms(orgId: string): Promise<PromoterEventTerms[]> {
+  const { data, error } = await supabase
+    .from('exos_promoter_event_terms')
+    .select('promoter_id, event_id, rate_bps, flat_cents')
+    .eq('org_id', orgId);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ promoterId: r.promoter_id, eventId: r.event_id, rateBps: r.rate_bps, flatCents: r.flat_cents }));
+}
+
+/** eventId omitted: the promoter's default. eventId with both null: remove that event's override.
+ *  repriceAccrued re-prices sales not yet paid. Returns how many were re-priced. */
+export async function setPromoterTerms(
+  promoterId: string,
+  terms: { rateBps: number | null; flatCents: number | null },
+  opts: { eventId?: string; repriceAccrued?: boolean } = {},
+): Promise<number> {
+  const { data, error } = await supabase.rpc('exos_set_promoter_terms', {
+    p_promoter_id: promoterId, p_rate_bps: terms.rateBps, p_flat_cents: terms.flatCents,
+    p_event_id: opts.eventId ?? null, p_reprice_accrued: !!opts.repriceAccrued,
+  });
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
+export interface UnpaidCommission extends CommissionRow {
+  eventId: string;
+  eventName: string | null;
+  baseCents: number;
+  accruedAt: string;
+}
+
+// Rows a payout can cover (staff read through RLS; no buyer data selected).
+export async function listUnpaidCommissions(promoterId: string): Promise<UnpaidCommission[]> {
+  const { data, error } = await supabase
+    .from('exos_promoter_commissions')
+    .select('id, event_id, currency, base_cents, commission_cents, status, payout_id, recovered_payout_id, accrued_at, exos_events(name)')
+    .eq('promoter_id', promoterId)
+    .eq('status', 'accrued')
+    .order('accrued_at', { ascending: true })
+    .limit(2000);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id, eventId: r.event_id, eventName: r.exos_events?.name ?? null, currency: r.currency,
+    baseCents: r.base_cents, commissionCents: r.commission_cents, status: r.status,
+    payoutId: r.payout_id, recoveredPayoutId: r.recovered_payout_id, accruedAt: r.accrued_at,
+  }));
+}
+
+export async function recordPromoterPayout(input: {
+  promoterId: string; commissionIds: string[]; amountCents: number; method: string; note?: string; paidOn?: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('exos_record_promoter_payout', {
+    p_promoter_id: input.promoterId, p_commission_ids: input.commissionIds, p_amount_cents: input.amountCents,
+    p_method: input.method, p_note: input.note || null, p_paid_on: input.paidOn || null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export interface PromoterEarningsTotals {
+  currency: string; tickets: number; accrued_cents: number; paid_cents: number;
+  reversed_cents: number; clawback_cents: number; owed_cents: number;
+}
+export interface PromoterEarnings {
+  promoter: { name: string; code: string };
+  terms: { rate_bps: number; flat_cents: number };
+  totals: PromoterEarningsTotals[];
+  events: {
+    event_id: string; name: string; starts_at: string | null; currency: string; rate_bps: number; flat_cents: number;
+    tickets: number; base_cents: number; accrued_cents: number; paid_cents: number; reversed_cents: number;
+  }[];
+  payouts: { paid_on: string; amount_cents: number; currency: string; method: string; sales: number }[];
+}
+
+// The promoter's own earnings for the portal (token-gated, anon-callable).
+export async function getPromoterEarnings(token: string): Promise<PromoterEarnings | null> {
+  const { data, error } = await supabase.rpc('exos_promoter_earnings', { p_token: token });
+  if (error || !data) return null;
+  return data as PromoterEarnings;
 }

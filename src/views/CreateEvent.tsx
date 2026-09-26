@@ -17,6 +17,9 @@ import { EVENT_CATEGORIES, genresFor } from '../lib/eventTaxonomy';
 import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
+import TableTierFields from '../components/TableTierFields';
+import { BLANK_TABLE_DRAFT, admissionsForTier, validateTableDraft, type TableTierDraft } from '../lib/tables';
+import { applyTableConfigsBySortOrder } from '../lib/tablesApi';
 import type { ArtistLink } from '../types';
 
 // Image is now uploaded to Firebase Storage and only the download URL ends
@@ -165,6 +168,8 @@ export default function CreateEvent() {
     visibility: 'public' | 'hidden';
     salesStart: string; // datetime-local string, empty = no window
     salesEnd: string;
+    // Table package (mig 20260926050000): capacity = tables, party size = tickets per table.
+    table?: TableTierDraft;
   };
   const makeBlankTier = (preset?: Partial<TierDraft>): TierDraft => ({
     id: crypto.randomUUID(),
@@ -177,6 +182,7 @@ export default function CreateEvent() {
     visibility: 'public',
     salesStart: '',
     salesEnd: '',
+    table: { ...BLANK_TABLE_DRAFT },
     ...(preset || {}),
   });
   const [ticketTiers, setTicketTiers] = useState<TierDraft[]>([
@@ -613,6 +619,8 @@ export default function CreateEvent() {
       if (!Number.isInteger(tc) || tc < 1) {
         return `Tier "${t.name}" has an invalid capacity.`;
       }
+      const tableErr = validateTableDraft(t.table ?? BLANK_TABLE_DRAFT, t.name);
+      if (tableErr) return tableErr;
       // Ticket-type / price interaction.
       if (t.ticketType === 'free' && tp !== 0) {
         return `Tier "${t.name}" is marked Free — set price to 0.`;
@@ -636,10 +644,11 @@ export default function CreateEvent() {
           return `Tier "${t.name}": sales end is after the event ends.`;
         }
       }
-      capacitySum += tc;
+      // A table tier's capacity is tables; the house total counts people.
+      capacitySum += admissionsForTier(tc, t.table);
     }
     if (capacitySum > total) {
-      return `Tier capacities sum to ${capacitySum}, but the event total is ${total}. Reduce tier capacities or raise the total.`;
+      return `Tier capacities sum to ${capacitySum} people (tables count their party size), but the event total is ${total}. Reduce tier capacities or raise the total.`;
     }
 
     // Currency: ISO 4217 three-letter code.
@@ -842,6 +851,16 @@ export default function CreateEvent() {
               };
             }),
         });
+        // Table tiers: mark them now that the tiers exist (sort_order = form index).
+        try {
+          await applyTableConfigsBySortOrder(
+            created.eventId,
+            ticketTiers.map((t, i) => ({ sortOrder: i, draft: t.table ?? BLANK_TABLE_DRAFT })),
+          );
+        } catch (tableErr) {
+          console.error('table tier setup failed:', tableErr);
+          toast({ kind: 'error', message: 'Event saved, but the table settings did not save. Open Edit event to set them again.' });
+        }
         // Pin the venue for the map (server-side geocode; best-effort).
         void geocodeEvent(created.eventId);
       } catch (commitErr) {
@@ -1405,7 +1424,7 @@ export default function CreateEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[9px] text-white/40 uppercase tracking-widest ml-1">Quantity Available</label>
+                         <label className="type text-[9px] text-white/40 uppercase tracking-widest ml-1">{tier.table?.isTable ? 'Tables Available' : 'Quantity Available'}</label>
                          <input 
                            required 
                            type="number"
@@ -1426,6 +1445,12 @@ export default function CreateEvent() {
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
                       </div>
+
+                      <TableTierFields
+                        value={tier.table ?? BLANK_TABLE_DRAFT}
+                        onChange={(next) => updateTier(tier.id, 'table', next)}
+                        currency={formData.currency}
+                      />
 
                       {/* Advanced controls — drives sale-window
                           enforcement at the rule layer (tierSales doc),
