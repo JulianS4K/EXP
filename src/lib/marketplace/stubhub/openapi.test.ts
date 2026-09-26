@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { MOBILE_TRANSFER_PROVIDERS, attachETicketsRequest, eticketUrlsRequest, mobileTransferRequest } from './fulfilment';
-import { SPLIT_TYPES, buildRequestedEventListingRequest } from './listing';
+import { SPLIT_TYPES, buildRequestedEvent, buildRequestedEventListingRequest } from './listing';
 import { STUBHUB_WEBHOOK_TOPICS, normalizeTopic } from './webhook';
 
 type Schema = { properties?: Record<string, { description?: string }>; required?: string[] };
@@ -32,6 +32,12 @@ describe('StubHub OpenAPI conformance', () => {
     expect(Object.keys(req.event).filter((k) => !props(inventory, 'EventRequest').includes(k))).toEqual([]);
     expect(Object.keys(req.venue).filter((k) => !props(inventory, 'VenueRequest').includes(k))).toEqual([]);
     expect(Object.keys(req.ticket_price!).filter((k) => !props(inventory, 'Money').includes(k))).toEqual([]);
+  });
+
+  it('the requested-event body matches PutRequestedEventRequest (sellerevents + listingconstraints)', () => {
+    const body = buildRequestedEvent({ name: 'Show', startsAt: '2026-11-01T00:00:00Z', venueName: 'Hall', venueCity: 'Austin', countryCode: 'US' });
+    expect(Object.keys(body).filter((k) => !props(inventory, 'PutRequestedEventRequest').includes(k))).toEqual([]);
+    expect(Object.keys(body.country!).filter((k) => !props(inventory, 'CountryRequest').includes(k))).toEqual([]);
   });
 
   it('split types match the SplitType schema', () => {

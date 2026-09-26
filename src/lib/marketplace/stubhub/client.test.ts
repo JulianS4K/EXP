@@ -127,6 +127,16 @@ describe('StubHubClient', () => {
     expect(await c.searchCategories('rock')).toBe('not json');
   });
 
+  it('gets requested-event constraints with a PUT that changes nothing', async () => {
+    const { c, calls } = client([json({ _embedded: { ticket_types: [{ type: 'MobileTransfer' }] } })]);
+    const body = { event: { name: 'Show', start_date: '2026-11-01T00:00:00.000Z' }, venue: { name: 'Hall', city: 'Austin' } };
+    const res = await c.getRequestedEventListingConstraints(body);
+    expect(res._embedded?.ticket_types).toHaveLength(1);
+    expect(calls[0].url).toBe('https://api.example.test/v2/listingconstraints');
+    expect(calls[0].init.method).toBe('PUT');
+    expect(JSON.parse(calls[0].init.body as string)).toEqual(body);
+  });
+
   it('serves catalog at the host root and everything else under /v2', async () => {
     const { c, calls } = client([json({}), json({}), json({})]);
     await c.getVenue(1);

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { StubHubClient } from './client';
 import { STUBHUB_ENDPOINTS } from './endpoints';
-import { buildCreateListingRequest, buildRequestedEventListingRequest } from './listing';
+import { buildCreateListingRequest, buildRequestedEvent, buildRequestedEventListingRequest } from './listing';
 import {
   STUBHUB_WRITE_ROADMAP,
   StubHubWriter,
@@ -37,7 +37,12 @@ function liveWriter(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
 
 describe('write roadmap', () => {
   it('starts with listing creation, then sales, and only lists write endpoints once', () => {
-    expect(STUBHUB_WRITE_ROADMAP[0].endpoints).toEqual(['createSellerListingForRequestedEvent', 'createSellerListing']);
+    expect(STUBHUB_WRITE_ROADMAP[0].endpoints).toEqual([
+      'createSellerListingForRequestedEvent',
+      'createSellerEvent',
+      'createSellerListing',
+    ]);
+    expect(STUBHUB_WRITE_ROADMAP[0].scopes).toContain('write:requestedevents');
     expect(STUBHUB_WRITE_ROADMAP[2].phase).toMatch(/Sale fulfilment/);
     const all = STUBHUB_WRITE_ROADMAP.flatMap((p) => p.endpoints);
     expect(new Set(all).size).toBe(all.length);
@@ -207,5 +212,15 @@ describe('requested-event listings', () => {
     });
     await w.createListingForRequestedEvent(REQ2);
     expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe('https://sandbox.api.stubhub.net/v2/sellerlistings');
+  });
+});
+
+describe('requestEvent', () => {
+  it('plans PUT /v2/sellerevents with the requested-event body', async () => {
+    const body = buildRequestedEvent({ name: 'Show', startsAt: '2026-11-01T00:00:00Z', venueName: 'Hall', venueCity: 'Austin' });
+    expect(await new StubHubWriter().requestEvent(body)).toEqual({
+      dryRun: true,
+      planned: { endpoint: 'createSellerEvent', method: 'PUT', url: '/v2/sellerevents', body },
+    });
   });
 });
