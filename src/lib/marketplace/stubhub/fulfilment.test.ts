@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   FulfilmentError,
   attachETicketsRequest,
+  buyerEmail,
   confirmSaleRequest,
+  eticketUrlsRequest,
+  exosClaimUrl,
   mobileTransferRequest,
   saleDeadline,
   type MobileTransferProvider,
@@ -59,5 +62,48 @@ describe('saleDeadline', () => {
       overdue: false,
       remainingMs: null,
     });
+  });
+});
+
+describe('e-ticket URL route', () => {
+  const T1 = '0b6f1c2e-1111-4a2b-9c3d-000000000001';
+  const T2 = '0b6f1c2e-1111-4a2b-9c3d-000000000002';
+
+  it('builds https claim links from the app origin', () => {
+    expect(exosClaimUrl('https://exos.example.test/some/path', T1.toUpperCase())).toBe(
+      `https://exos.example.test/claim/${T1}`,
+    );
+    expect(() => exosClaimUrl('http://exos.example.test', T1)).toThrow(/https/);
+    expect(() => exosClaimUrl('not a url', T1)).toThrow(/not a URL/);
+    expect(() => exosClaimUrl('https://exos.example.test', '../admin')).toThrow(/uuid/);
+  });
+
+  it('confirms the sale with one url per ticket', () => {
+    const urls = [T1, T2].map((t) => exosClaimUrl('https://exos.example.test', t));
+    expect(eticketUrlsRequest(urls, 2)).toEqual({
+      confirmed: true,
+      eticket_urls: urls.map((url) => ({ url })),
+    });
+  });
+
+  it('refuses a count mismatch, duplicates, or non-https urls', () => {
+    const u = exosClaimUrl('https://exos.example.test', T1);
+    expect(() => eticketUrlsRequest([], 0)).toThrow(FulfilmentError);
+    expect(() => eticketUrlsRequest([u], 2)).toThrow(/2 ticket\(s\) but 1 url/);
+    expect(() => eticketUrlsRequest([u, u], 2)).toThrow(/duplicate/);
+    expect(() => eticketUrlsRequest(['http://x.test/claim/1'], 1)).toThrow(/https/);
+    expect(() => eticketUrlsRequest(['nope'], 1)).toThrow(/not a URL/);
+  });
+
+  it('finds the buyer email in any ticketholders shape', () => {
+    expect(buyerEmail({ id: 1, email_address: ' Buyer@Example.TEST ' })).toBe('buyer@example.test');
+    expect(buyerEmail([{ email_address: null }, { email_address: 'b@x.test' }])).toBe('b@x.test');
+    expect(buyerEmail({ _embedded: { items: [{ email_address: 'c@x.test' }] } })).toBe('c@x.test');
+  });
+
+  it('returns null when there is no usable email', () => {
+    expect(buyerEmail(null)).toBeNull();
+    expect(buyerEmail({ full_name: 'No Email' })).toBeNull();
+    expect(buyerEmail([{ email_address: 'not-an-email' }])).toBeNull();
   });
 });

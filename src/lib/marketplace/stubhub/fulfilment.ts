@@ -10,12 +10,13 @@
 //   • e-ticket URL:    PATCH eticket_urls
 //   • reject:          DELETE /sales/{id} (report a problem; no body)
 //
-// For Exos primary inventory the natural route is mobile transfer: the
-// ticket already lives in Exos, so we reissue it to the buyer and report
-// the transfer. "Exos" isn't one of StubHub's providers yet; that's a
-// partner conversation, flagged in docs/marketplace/stubhub/README.md.
+// Exos uses the e-ticket URL route (decided 2026-09-26): each ticket sold
+// on StubHub becomes an Exos transfer addressed to the buyer's email, and
+// StubHub hands the buyer one claim link per ticket (/claim/{transferId}).
+// Mobile transfer would need "Exos" on StubHub's provider list, which it
+// isn't.
 
-import type { Sale, Seating } from './types';
+import type { Sale, Seating, TicketHolder } from './types';
 
 /** `mobile_provider` values, verbatim from the Sales reference. */
 export const MOBILE_TRANSFER_PROVIDERS = [
@@ -33,8 +34,7 @@ export interface UpdateSaleRequest {
   confirmed?: boolean;
   eticket_ids?: number[];
   transfer_confirmation_number?: string;
-  /** Item shape collapsed in the docs; confirm against the sandbox. */
-  eticket_urls?: unknown[];
+  eticket_urls?: ETicketUrlItem[];
   change_paper_ticket_to_eticket?: boolean;
   confirm_same_day_shipment?: boolean;
   in_hand_at?: string;
@@ -69,6 +69,83 @@ export function attachETicketsRequest(eticketIds: number[]): UpdateSaleRequest {
   if (!eticketIds.length) throw new FulfilmentError('at least one e-ticket id is required');
   if (new Set(eticketIds).size !== eticketIds.length) throw new FulfilmentError('duplicate e-ticket ids');
   return { confirmed: true, eticket_ids: eticketIds };
+}
+
+// ── E-ticket URL route (Exos default) ────────────────────────────────
+
+/**
+ * One `ETicketUrlRequest`. The printed docs collapse this object, so its
+ * field name is UNCONFIRMED. `{ url }` is the working assumption; when it's
+ * checked against the sandbox, fix it here (and in toETicketUrlItem) only.
+ */
+export interface ETicketUrlItem {
+  url: string;
+}
+
+export function toETicketUrlItem(url: string): ETicketUrlItem {
+  return { url };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The buyer-facing claim link for one Exos transfer. `appOrigin` is the
+ * public SPA origin (https only; claim links carry ticket ownership).
+ */
+export function exosClaimUrl(appOrigin: string, transferId: string): string {
+  let origin: URL;
+  try {
+    origin = new URL(appOrigin);
+  } catch {
+    throw new FulfilmentError(`app origin "${appOrigin}" is not a URL`);
+  }
+  if (origin.protocol !== 'https:') throw new FulfilmentError('claim links must use https');
+  if (!UUID_RE.test(transferId)) throw new FulfilmentError(`transfer id "${transferId}" is not a uuid`);
+  return `${origin.origin}/claim/${transferId.toLowerCase()}`;
+}
+
+/**
+ * Confirm the sale and hand StubHub one URL per ticket. `ticketCount` is
+ * the sale's `number_of_tickets`; a mismatch means we'd under- or
+ * over-deliver, so it's refused.
+ */
+export function eticketUrlsRequest(urls: string[], ticketCount: number): UpdateSaleRequest {
+  if (!urls.length) throw new FulfilmentError('at least one e-ticket url is required');
+  if (urls.length !== ticketCount) {
+    throw new FulfilmentError(`sale has ${ticketCount} ticket(s) but ${urls.length} url(s) were given`);
+  }
+  if (new Set(urls).size !== urls.length) throw new FulfilmentError('duplicate e-ticket urls');
+  for (const u of urls) {
+    let parsed: URL;
+    try {
+      parsed = new URL(u);
+    } catch {
+      throw new FulfilmentError(`"${u}" is not a URL`);
+    }
+    if (parsed.protocol !== 'https:') throw new FulfilmentError(`"${u}" is not https`);
+  }
+  return { confirmed: true, eticket_urls: urls.map(toETicketUrlItem) };
+}
+
+/**
+ * The email Exos should address the transfers to, from
+ * GET /sales/{id}/ticketholders. The response shape (single object, array,
+ * or paged list) isn't pinned down in the docs, so accept all three. Returns
+ * null when there's no usable address: that sale can't go down the URL
+ * route automatically and needs a human.
+ */
+export function buyerEmail(holders: unknown): string | null {
+  let list: TicketHolder[] = [];
+  if (Array.isArray(holders)) list = holders as TicketHolder[];
+  else if (holders && typeof holders === 'object') {
+    const items = (holders as { _embedded?: { items?: unknown } })._embedded?.items;
+    list = Array.isArray(items) ? (items as TicketHolder[]) : [holders as TicketHolder];
+  }
+  for (const h of list) {
+    const e = h?.email_address?.trim().toLowerCase();
+    if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return e;
+  }
+  return null;
 }
 
 // ── Deadlines ────────────────────────────────────────────────────────

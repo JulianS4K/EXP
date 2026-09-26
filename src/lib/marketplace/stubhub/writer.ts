@@ -36,6 +36,7 @@ import type { CreateSellerListingRequest, UpdateSellerListingRequest } from './l
 import {
   attachETicketsRequest,
   confirmSaleRequest,
+  eticketUrlsRequest,
   mobileTransferRequest,
   type MobileTransferProvider,
   type UpdateSaleRequest,
@@ -58,11 +59,11 @@ export const STUBHUB_WRITE_ROADMAP: ReadonlyArray<{ phase: string; endpoints: re
     endpoints: ['updateSellerListingByExternalId', 'deleteSellerListingByExternalId'],
   },
   {
-    phase: '3. Sale fulfilment',
+    phase: '3. Sale fulfilment (confirm + e-ticket URLs)',
     endpoints: ['updateSale', 'rejectSale'],
   },
   {
-    phase: '4. E-ticket delivery',
+    phase: '4. E-ticket PDF delivery (fallback)',
     endpoints: ['uploadSaleETickets', 'saveSaleETickets', 'deleteSaleETicket'],
   },
   {
@@ -220,6 +221,11 @@ export class StubHubWriter {
 
   reportMobileTransfer(saleId: number, provider: MobileTransferProvider, confirmationNumber: string) {
     return this.updateSale(saleId, mobileTransferRequest(provider, confirmationNumber));
+  }
+
+  /** Exos default delivery: one claim URL per ticket (see fulfilment.ts). */
+  deliverETicketUrls(saleId: number, urls: string[], ticketCount: number) {
+    return this.updateSale(saleId, eticketUrlsRequest(urls, ticketCount));
   }
 
   attachETickets(saleId: number, eticketIds: number[]) {

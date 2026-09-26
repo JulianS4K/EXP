@@ -213,6 +213,7 @@ export class StubHubClient {
     return this.json<Sale>('getSale', { path: { saleId } });
   }
 
+  /** Shape not pinned down in the docs; pass the result to buyerEmail(). */
   listSaleTicketHolders(saleId: number) {
     return this.json<unknown>('listSaleTicketHolders', { path: { saleId } });
   }

@@ -30,8 +30,8 @@ Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/wr
 |---|---|---|---|
 | 1 | **Listing creation** | `POST /events/{eventId}/sellerlistings` | Event xref (Catalog), listing constraints, preview |
 | 2 | Listing management | `PATCH` / `DELETE /externalsellerlistings/{externalId}` | Phase 1; oversell guard |
-| 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm, transfer, e-tickets), `DELETE /sales/{saleId}` (reject) | `Sales` webhook or `/sales/recentupdates` |
-| 4 | E-ticket delivery | `POST /sales/{saleId}/eticketuploads`, `POST`/`DELETE .../etickets` | Phase 3 |
+| 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm + `eticket_urls`), `DELETE /sales/{saleId}` (reject) | `Sales` webhook or `/sales/recentupdates`; buyer email from `/ticketholders` |
+| 4 | E-ticket PDF delivery (fallback) | `POST /sales/{saleId}/eticketuploads`, `POST`/`DELETE .../etickets` | Phase 3 |
 | 5 | Webhook registration | `POST`/`PATCH`/`DELETE /webhooks`, ping | A deployed receiver |
 
 The sections below follow the same order.
@@ -191,9 +191,11 @@ Built and tested, **not live**. Nothing in Exos constructs a live writer.
   `checkListingConstraints()` (pre-flight against
   `GET /events/{id}/listingconstraints`; the preview endpoint remains the
   authoritative check).
-- `fulfilment.ts` (phase 3): `PATCH /sales/{id}` bodies for confirm, mobile
-  transfer (the 29 documented `mobile_provider` values) and e-ticket attach,
-  plus `saleDeadline()` (confirm by `confirm_by`, then deliver by `ship_by`).
+- `fulfilment.ts` (phase 3): `PATCH /sales/{id}` bodies for the **e-ticket
+  URL route** (`eticketUrlsRequest`, `exosClaimUrl`, `buyerEmail`; see
+  below), plus confirm, e-ticket PDF attach and mobile transfer (the 29
+  documented `mobile_provider` values, kept for reference), and
+  `saleDeadline()` (confirm by `confirm_by`, then deliver by `ship_by`).
 - `writer.ts`: `StubHubWriter` and `STUBHUB_WRITE_ROADMAP`.
   - **Dry-run by default.** Every method returns the request it *would* send
     (`{ method, url, body }`) and never calls `fetch`.
@@ -204,14 +206,36 @@ Built and tested, **not live**. Nothing in Exos constructs a live writer.
     `createOrAdoptListing()` looks the listing up by `external_id` first
     and adopts it rather than creating a duplicate.
 
+### Delivery: e-ticket URL route
+
+Chosen 2026-09-26. For each StubHub sale:
+
+1. Read the buyer's email: `GET /sales/{id}/ticketholders` → `buyerEmail()`.
+2. Server-side, mint the sold tickets and create one Exos transfer per
+   ticket to that email (the same transfer/claim flow buyers already use).
+3. `exosClaimUrl(appOrigin, transferId)` for each transfer, then
+   `writer.deliverETicketUrls(saleId, urls, sale.number_of_tickets)`, which
+   confirms the sale and sends the URLs in one PATCH.
+4. The buyer opens the link and signs in with that email. Claiming rotates
+   the barcode secret, so nothing sent before the claim scans at the door.
+
+Not built yet (step 2): a service-side "mint + transfer to email" RPC. The
+current `exos_create_transfer` runs as the ticket's owner via the caller's
+JWT. It's a migration + edge function, so it's authored in Terminal-2 while
+the DB is shared.
+
 Open questions for go-live:
 
-- **Transfer provider.** Exos isn't one of StubHub's `mobile_provider` values,
-  so delivering Exos-issued tickets needs either a StubHub partner listing
-  for Exos or the e-ticket PDF/URL route.
+- **`eticket_urls` item shape.** Collapsed in the printed docs. The code
+  assumes `{ url }`. If that's wrong, the only place to change is
+  `ETicketUrlItem` / `toETicketUrlItem()` in `fulfilment.ts`.
+- **Buyer email.** If `/ticketholders` has no email, or StubHub gives a
+  masked relay address the buyer can't sign in with, the claim can't
+  complete. `buyerEmail()` returns null in the first case, and that sale
+  needs a human. The second case needs a check against a real sale.
 - **Enum values.** `ticket_type`, `split_type`, and the item shapes of
-  `eticket_urls`, `barcodes` and the constraints lists are collapsed in the
-  printed docs. Confirm them against the sandbox before the first live call.
+  `barcodes` and the constraints lists are collapsed in the printed docs.
+  Confirm them against the sandbox before the first live call.
 
 The reference gives neither the API host nor the OAuth token URL. Both are
 constructor arguments; take them from the StubHub account onboarding

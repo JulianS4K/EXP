@@ -232,6 +232,18 @@ export interface SaleQuery {
   sort?: string;
 }
 
+/** GET /sales/{saleId}/ticketholders (identity fields depend on the event). */
+export interface TicketHolder {
+  id?: number | null;
+  title?: string | null;
+  full_name?: string | null;
+  email_address?: string | null;
+  date_of_birth?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  [key: string]: unknown;
+}
+
 export interface Payment {
   /** Absent on the `payments/next` preview. */
   id?: number;

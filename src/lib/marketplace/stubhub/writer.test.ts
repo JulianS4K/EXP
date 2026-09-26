@@ -58,6 +58,7 @@ describe('StubHubWriter dry-run (default)', () => {
       await w.confirmSale(9),
       await w.reportMobileTransfer(9, 'AXS', 'AXS-1'),
       await w.attachETickets(9, [5]),
+      await w.deliverETicketUrls(9, ['https://exos.example.test/claim/0b6f1c2e-1111-4a2b-9c3d-000000000001'], 1),
       await w.rejectSale(9),
     ];
     expect(results.every((r) => r.dryRun)).toBe(true);
@@ -68,11 +69,16 @@ describe('StubHubWriter dry-run (default)', () => {
       'PATCH /sales/9',
       'PATCH /sales/9',
       'PATCH /sales/9',
+      'PATCH /sales/9',
       'DELETE /sales/9',
     ]);
     expect(plans[0].body).toBe(REQ);
     expect(plans[4].body).toEqual({ confirmed: true, mobile_provider: 'AXS', transfer_confirmation_number: 'AXS-1' });
-    expect('body' in plans[6]).toBe(false);
+    expect(plans[6].body).toEqual({
+      confirmed: true,
+      eticket_urls: [{ url: 'https://exos.example.test/claim/0b6f1c2e-1111-4a2b-9c3d-000000000001' }],
+    });
+    expect('body' in plans[7]).toBe(false);
   });
 
   it('ignores credentials and a fetch passed in dry-run mode', async () => {
