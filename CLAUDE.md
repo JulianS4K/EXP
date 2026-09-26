@@ -28,7 +28,10 @@ Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs t
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
   Never add order/hold/price/inventory writes to a third party.
   Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
-  endpoint tagged read or write.
+  endpoint tagged read or write. The StubHub write foundation
+  (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it
+  live needs a recorded operator `WriteAuthorization`, and nothing in Exos
+  does that today.
 - Edge functions are Deno; they're excluded from the Node `tsconfig`/eslint.
 
 ## Open-source references (hi.events, pretix)

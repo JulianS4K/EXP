@@ -19,7 +19,7 @@ export interface Endpoint {
   access: Access;
 }
 
-const e = (method: HttpMethod, path: string, access: Access): Endpoint => ({ method, path, access });
+const e = <A extends Access>(method: HttpMethod, path: string, access: A) => ({ method, path, access });
 
 export const STUBHUB_ENDPOINTS = {
   // Catalog

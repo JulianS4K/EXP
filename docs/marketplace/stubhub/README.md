@@ -21,26 +21,22 @@ expanded, so it has the same endpoints with more field detail.
 forbidden under Hard Rule #2 without operator sign-off. **R\*** = lookup
 that uses a PUT/POST verb but changes nothing.
 
-## Catalog: events, venues, categories
+## Build order
 
-| R/W | Endpoint | Purpose |
-|---|---|---|
-| R | `GET /catalog/events` | List all events (full catalog sync) |
-| R\* | `PUT /catalog/events` | List a given set of events by id |
-| R | `GET /catalog/events/{eventId}` | Get an event |
-| R | `GET /catalog/events/search` | Search events |
-| R | `GET /catalog/events/external_mappings/{platform}/{externalEventId}` | Resolve an event from another platform's id (xref) |
-| R | `GET /catalog/categories/map` | Match a category from a query string |
-| R | `GET /catalog/categories/{categoryId}/events` | Events in a category |
-| R | `GET /catalog/categories/{categoryId}/allevents` | Events in a category and all its children, de-duped |
-| R\* | `POST /catalog/mapevent` | Map a request to a StubHub event/venue/category |
-| R | `GET /catalog/venues` | List all venues |
-| R | `GET /catalog/venues/{venueId}` | Get a venue |
+The write side is built but **not live** (see [Write foundation](#write-foundation)).
+Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/writer.ts`):
 
-Event ids can be merged: a lookup by an old id returns the surviving event
-with a different `id`. Treat a changed id as a merge and update the xref.
+| # | Phase | Endpoints | Needs first |
+|---|---|---|---|
+| 1 | **Listing creation** | `POST /events/{eventId}/sellerlistings` | Event xref (Catalog), listing constraints, preview |
+| 2 | Listing management | `PATCH` / `DELETE /externalsellerlistings/{externalId}` | Phase 1; oversell guard |
+| 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm, transfer, e-tickets), `DELETE /sales/{saleId}` (reject) | `Sales` webhook or `/sales/recentupdates` |
+| 4 | E-ticket delivery | `POST /sales/{saleId}/eticketuploads`, `POST`/`DELETE .../etickets` | Phase 3 |
+| 5 | Webhook registration | `POST`/`PATCH`/`DELETE /webhooks`, ping | A deployed receiver |
 
-## Inventory: seller listings, seller events, e-tickets
+The sections below follow the same order.
+
+## 1–2. Inventory: listing creation and management
 
 | R/W | Endpoint | Purpose |
 |---|---|---|
@@ -82,7 +78,7 @@ Listing bodies carry `ticket_price` (buyer-facing) *and* `ticket_proceeds`
 (seller net) as `Money`. On PATCH, `seating` must be sent in full, because
 omitted seating fields are blanked.
 
-## Sales: orders, fulfilment, payouts
+## 3–4. Sales: fulfilment, e-tickets, payouts
 
 | R/W | Endpoint | Purpose |
 |---|---|---|
@@ -108,18 +104,7 @@ omitted seating fields are blanked.
 | R | `GET /payments/{paymentId}` | Get a payout |
 | R | `GET /payments/next` | Preview the next payout |
 
-## Account
-
-| R/W | Endpoint | Purpose |
-|---|---|---|
-| R | `GET /user` | Authenticated user |
-| W | `PATCH /user` | Update user |
-| R | `GET /addresses`, `GET /addresses/{addressId}` | Addresses |
-| W | `POST /addresses`, `PATCH /addresses/{addressId}`, `DELETE /addresses/{addressId}` | Manage addresses |
-| R | `GET /paymentmethods`, `GET /paymentmethods/{paymentMethodId}` | Payout methods |
-| R\* | `PUT /listings/{listingId}/paymentmethods` | Payment methods usable for a listing |
-
-## Webhooks
+## 5. Webhooks
 
 Management endpoints (all W except the GETs, since registering a hook
 changes StubHub-side config):
@@ -149,9 +134,41 @@ Topics (payload: `{ topic, action, barcodes[], _links, _embedded: { event, sale,
 | ReTransferTicket | Buyer didn't receive the ticket, so re-transfer from the 3rd-party provider |
 | Ping | Test delivery |
 
+## Catalog: events, venues, categories (read-only; feeds phase 1)
+
+| R/W | Endpoint | Purpose |
+|---|---|---|
+| R | `GET /catalog/events` | List all events (full catalog sync) |
+| R\* | `PUT /catalog/events` | List a given set of events by id |
+| R | `GET /catalog/events/{eventId}` | Get an event |
+| R | `GET /catalog/events/search` | Search events |
+| R | `GET /catalog/events/external_mappings/{platform}/{externalEventId}` | Resolve an event from another platform's id (xref) |
+| R | `GET /catalog/categories/map` | Match a category from a query string |
+| R | `GET /catalog/categories/{categoryId}/events` | Events in a category |
+| R | `GET /catalog/categories/{categoryId}/allevents` | Events in a category and all its children, de-duped |
+| R\* | `POST /catalog/mapevent` | Map a request to a StubHub event/venue/category |
+| R | `GET /catalog/venues` | List all venues |
+| R | `GET /catalog/venues/{venueId}` | Get a venue |
+
+Event ids can be merged: a lookup by an old id returns the surviving event
+with a different `id`. Treat a changed id as a merge and update the xref.
+
+## Account
+
+| R/W | Endpoint | Purpose |
+|---|---|---|
+| R | `GET /user` | Authenticated user |
+| W | `PATCH /user` | Update user |
+| R | `GET /addresses`, `GET /addresses/{addressId}` | Addresses |
+| W | `POST /addresses`, `PATCH /addresses/{addressId}`, `DELETE /addresses/{addressId}` | Manage addresses |
+| R | `GET /paymentmethods`, `GET /paymentmethods/{paymentMethodId}` | Payout methods |
+| R\* | `PUT /listings/{listingId}/paymentmethods` | Payment methods usable for a listing |
+
 ## Client
 
-`src/lib/marketplace/stubhub/` is a dependency-free, `fetch`-based client:
+`src/lib/marketplace/stubhub/` is dependency-free and `fetch`-based.
+
+**Read side (usable now):**
 
 - `endpoints.ts`: all 81 endpoints above with their R/W tag. A test checks
   it against `text/*.txt`, so a doc refresh that adds an endpoint fails CI
@@ -163,6 +180,38 @@ Topics (payload: `{ topic, action, barcodes[], _links, _embedded: { event, sale,
   any `write` entry before calling `fetch`.
 - `webhook.ts`: `verifyWebhookAuthorization` (constant-time, fails closed),
   `parseWebhookPayload`, `normalizeTopic`.
+
+### Write foundation
+
+Built and tested, **not live**. Nothing in Exos constructs a live writer.
+
+- `listing.ts` (phase 1): `CreateSellerListingRequest`,
+  `buildCreateListingRequest()` (an `exos_distribution_listings` row →
+  StubHub listing; `external_id` = row id; unpublished by default), and
+  `checkListingConstraints()` (pre-flight against
+  `GET /events/{id}/listingconstraints`; the preview endpoint remains the
+  authoritative check).
+- `fulfilment.ts` (phase 3): `PATCH /sales/{id}` bodies for confirm, mobile
+  transfer (the 29 documented `mobile_provider` values) and e-ticket attach,
+  plus `saleDeadline()` (confirm by `confirm_by`, then deliver by `ship_by`).
+- `writer.ts`: `StubHubWriter` and `STUBHUB_WRITE_ROADMAP`.
+  - **Dry-run by default.** Every method returns the request it *would* send
+    (`{ method, url, body }`) and never calls `fetch`.
+  - **Live** needs a `WriteAuthorization` (who approved, when, where it's
+    recorded, and which write endpoints). Anything outside that list is
+    refused before `fetch`.
+  - Writes retry only on 429. A 5xx on a create is ambiguous, so
+    `createOrAdoptListing()` looks the listing up by `external_id` first
+    and adopts it rather than creating a duplicate.
+
+Open questions for go-live:
+
+- **Transfer provider.** Exos isn't one of StubHub's `mobile_provider` values,
+  so delivering Exos-issued tickets needs either a StubHub partner listing
+  for Exos or the e-ticket PDF/URL route.
+- **Enum values.** `ticket_type`, `split_type`, and the item shapes of
+  `eticket_urls`, `barcodes` and the constraints lists are collapsed in the
+  printed docs. Confirm them against the sandbox before the first live call.
 
 The reference gives neither the API host nor the OAuth token URL. Both are
 constructor arguments; take them from the StubHub account onboarding
@@ -179,4 +228,5 @@ constructor arguments; take them from the StubHub account onboarding
   webhooks are the read side of `exos-distribute`'s reconcile loop.
 - **Listing push** (`POST .../sellerlistings`, keyed by
   `externalsellerlistings/{externalId}` = our `exos_distribution_listings.id`)
-  is the gated write path. It stays a TODO until the operator signs off.
+  is `StubHubWriter.createOrAdoptListing()`. `exos-distribute` would call it
+  in dry-run until the operator signs off.

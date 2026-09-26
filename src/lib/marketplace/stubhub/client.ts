@@ -8,19 +8,28 @@
 // listing previews (fee/proceeds quotes; nothing is created), and webhook
 // config reads.
 //
-// What it deliberately doesn't: any `write`. `request()` refuses an endpoint
+// What it deliberately doesn't: any `write`. `send()` refuses an endpoint
 // tagged `write` before a byte leaves the process (CLAUDE.md Hard Rule #2).
-// Listing push stays with exos-distribute, which is gated on operator
-// sign-off.
+// Writes live in writer.ts, which is dry-run unless the operator authorizes
+// them.
 //
 // The vendor reference documents neither the API host nor the OAuth token
 // URL, so both are required config (no guessed defaults). Auth is OAuth2
 // bearer; `clientCredentialsToken()` below is a caching provider for the
 // standard client-credentials grant if that's what the account is issued.
 
-import { STUBHUB_ENDPOINTS, buildPath, type EndpointName } from './endpoints';
+import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints';
+import {
+  RETRY_TRANSIENT,
+  StubHubError,
+  execute,
+  transportConfig,
+  type FetchLike,
+  type RequestParts,
+  type TokenSource,
+  type TransportConfig,
+} from './transport';
 import type {
-  ApiErrorBody,
   CatalogEvent,
   EventFilterQuery,
   EventSearchQuery,
@@ -41,9 +50,7 @@ import type {
   CatalogPageQuery,
 } from './types';
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-type TokenSource = () => string | Promise<string>;
-type QueryValue = string | number | boolean | Date | null | undefined;
+export { StubHubError, toQueryString } from './transport';
 
 export interface StubHubClientOptions {
   /** API host, e.g. from STUBHUB_API_BASE_URL. No trailing path needed. */
@@ -57,114 +64,38 @@ export interface StubHubClientOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-export class StubHubError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly body: ApiErrorBody | string | null,
-  ) {
-    super(message);
-    this.name = 'StubHubError';
-  }
-}
-
 export class UpstreamWriteForbiddenError extends Error {
   constructor(readonly endpoint: string) {
     super(
-      `stubhub: "${endpoint}" writes to StubHub. Upstream writes are forbidden ` +
-        'without explicit operator authorization (CLAUDE.md Hard Rule #2).',
+      `stubhub: "${endpoint}" writes to StubHub. The read client never sends writes; ` +
+        'use StubHubWriter, which is dry-run unless the operator has authorized it (CLAUDE.md Hard Rule #2).',
     );
     this.name = 'UpstreamWriteForbiddenError';
   }
 }
 
-const RETRYABLE = new Set([429, 502, 503, 504]);
-
-export function toQueryString(query: Record<string, QueryValue> = {}): string {
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(query)) {
-    if (v === undefined || v === null || v === '') continue;
-    params.set(k, v instanceof Date ? v.toISOString() : String(v));
-  }
-  const s = params.toString();
-  return s ? `?${s}` : '';
-}
-
-/** Retry-After is seconds or an HTTP date; fall back to exponential backoff. */
-function retryDelayMs(res: Response, attempt: number): number {
-  const header = res.headers.get('retry-after');
-  if (header) {
-    const secs = Number(header);
-    if (Number.isFinite(secs)) return Math.min(secs * 1000, 60_000);
-    const at = Date.parse(header);
-    if (Number.isFinite(at)) return Math.max(0, Math.min(at - Date.now(), 60_000));
-  }
-  return 500 * 2 ** attempt;
-}
-
 export class StubHubClient {
-  private readonly baseUrl: string;
-  private readonly accessToken: TokenSource;
-  private readonly fetchImpl: FetchLike;
-  private readonly maxRetries: number;
-  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly cfg: TransportConfig;
 
   constructor(opts: StubHubClientOptions) {
-    if (!opts.baseUrl) throw new Error('stubhub: baseUrl is required');
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
-    this.accessToken = opts.accessToken;
-    this.fetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
-    this.maxRetries = opts.maxRetries ?? 2;
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.cfg = transportConfig(opts);
   }
 
   // ── Transport ──────────────────────────────────────────────────────
 
-  private async send(
-    name: EndpointName,
-    opts: { path?: Record<string, string | number>; query?: Record<string, QueryValue>; body?: unknown } = {},
-  ): Promise<Response> {
+  private async send(name: EndpointName, parts: RequestParts = {}): Promise<Response> {
     const ep = STUBHUB_ENDPOINTS[name];
     if (ep.access === 'write') throw new UpstreamWriteForbiddenError(name);
-
-    const url = this.baseUrl + buildPath(ep.path, opts.path) + toQueryString(opts.query);
-    const hasBody = opts.body !== undefined;
-
-    for (let attempt = 0; ; attempt++) {
-      const token = await this.accessToken();
-      const res = await this.fetchImpl(url, {
-        method: ep.method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/hal+json, application/json',
-          ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-        },
-        body: hasBody ? JSON.stringify(opts.body) : undefined,
-      });
-      if (res.ok) return res;
-      if (RETRYABLE.has(res.status) && attempt < this.maxRetries) {
-        await this.sleep(retryDelayMs(res, attempt));
-        continue;
-      }
-      const text = await res.text();
-      let body: ApiErrorBody | string | null = text || null;
-      try {
-        body = text ? (JSON.parse(text) as ApiErrorBody) : null;
-      } catch {
-        // non-JSON error body; keep the raw text
-      }
-      const detail = typeof body === 'object' && body?.message ? `: ${body.message}` : '';
-      throw new StubHubError(`stubhub ${ep.method} ${ep.path} -> ${res.status}${detail}`, res.status, body);
-    }
+    return execute(this.cfg, ep, parts, RETRY_TRANSIENT);
   }
 
-  private async json<T>(name: EndpointName, opts?: Parameters<StubHubClient['send']>[1]): Promise<T> {
-    const res = await this.send(name, opts);
+  private async json<T>(name: EndpointName, parts?: RequestParts): Promise<T> {
+    const res = await this.send(name, parts);
     return (await res.json()) as T;
   }
 
-  private async bytes(name: EndpointName, opts?: Parameters<StubHubClient['send']>[1]): Promise<ArrayBuffer> {
-    const res = await this.send(name, opts);
+  private async bytes(name: EndpointName, parts?: RequestParts): Promise<ArrayBuffer> {
+    const res = await this.send(name, parts);
     return res.arrayBuffer();
   }
 
