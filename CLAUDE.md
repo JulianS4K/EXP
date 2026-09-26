@@ -23,9 +23,11 @@ Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs t
 
 - **The database is shared with Terminal-2's broker data.** Read `supabase/README.md`
   before writing a migration or touching an edge function. Edge functions (`exos-*`,
-  `stripe-webhook`) are authored **here**; migrations are still authored in Terminal-2
-  and copied here while the DB is shared. Prod `apply_migration`, DML/DDL, cron changes,
-  and edge-function deploys need explicit operator permission. Reads are free.
+  `stripe-webhook`), `*exos*` migrations and the `tests/exos` SQL harnesses are all
+  authored **here**. Migration filenames must contain `exos`, and their timestamps
+  share one history with Terminal-2's (check both repos for the prefix). Prod
+  `apply_migration`, DML/DDL, cron changes, and edge-function deploys need explicit
+  operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
   Never add order/hold/price/inventory writes to a third party.
   Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
