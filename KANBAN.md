@@ -514,6 +514,28 @@ indie-cap + secondary-market positioning.
 - Pretix has a dozen payment methods via plugins. Once the plugin
   loader exists, this becomes someone-else's-problem.
 
+## Post-launch (operator, 2026-09-26)
+
+- `[ ]` **Group buy: split with friends (Venmo, restaurant-style).** Tabled until after launch.
+  - The host buys every ticket in one normal checkout: no holds, no Stripe changes, no inventory risk.
+  - After purchase, a "Split with friends" screen: add friends by name or phone, even or custom amounts.
+  - Each friend gets one text: their ticket (existing transfer claim link, so it's in their own account)
+    plus a prefilled Venmo pay link to the host (`venmo.com/<host>?txn=pay&amount=…&note=…`), with a Cash App
+    link as backup. Exos never touches the friends' money.
+  - The host sees a paid / not-paid checklist and can nudge. Paid is a host checkbox, because Venmo has no
+    public person-to-person API. Setting: send tickets now (default) or when the host marks them paid.
+  - The Venmo link format is undocumented. If it breaks, fall back to showing the host's @handle and amount.
+  - Build: the split screen, a bulk-transfer RPC on top of `exos_create_transfer`, and SQL + vitest tests.
+    Tables are the main use case.
+  - Rejected for v1: in-app split with seats held until friends pay (a 24h hold is too long; if it's ever
+    built, cap holds at 15–30 min).
+- `[ ]` **Instant ticket return ("can't go? money back"), organizer / promoter opt-in only.**
+  - The organizer switches it on per event and sets the return window, refund % (e.g. 80–100% of face) and
+    whether it's only when sold out.
+  - A return refunds through `exos-refund`, the seat goes to the waitlist and then back on sale, and the
+    organizer keeps the resale. Exos takes no risk; any S4K backstop would be a separate opt-in deal.
+  - Check NY ACAL Art. 25 before launch.
+
 ## To Do (existing kanban, deferred)
 
 - ~~**Auto-firing pre-event reminder emails**~~ — ✅ done 2026-09-11 as a
