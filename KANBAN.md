@@ -1,11 +1,19 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-09-24, after the operator-approved apply)
+## Prod state vs this repo (updated 2026-09-26)
 
 - **DB caught up.** Applied to prod 2026-09-24: the 2026-09-11 Stage 2/3 set and
   `20260924200848_exos_audit_hardening_quota_transfer_waitlist` (which also carries the transfer secret leak fix).
   Then the P0 set and all-in pricing: `20260924205115`, `205508`, `205916`, `210103`, `211840` (verified on prod).
   `20260702121000` and `20260911130000` were not applied on their own; later migrations supersede them (see their headers).
+- **Applied 2026-09-26 (operator-approved, md5-verified against the tested copy):** `20260926000000_exos_advisor_cleanup`
+  and `20260926010000_exos_waitlist_signin_account_deletion`. Until the new bundle ships, the 07-27 `/bridge/` waitlist
+  button errors for signed-out visitors ("sign in to join").
+- **Authored + CI-tested, NOT applied (need operator apply):** `20260926020000` promoter commissions, `030000` referral
+  rewards, `040000` organizer refunds, `050000` tables + guest lists, `060000` abandoned-checkout reminder (adds an hourly
+  cron), `070000` price-disclosure record, `080000` refund/tables fix. Apply in that order; all seven also apply cleanly to a
+  real-schema clone. `exos-refund` is new and, like the other payment functions, not deployed; `exos-mail-drain` needs the
+  new secret `EXOS_APP_URL` before reminder mails go out.
 - **The `/bridge/` bundle (Terminal-2 `static/bridge/`, built 07-27) still works**, and it's now safe to rebuild it from
   this repo and copy `dist/` over.
 - **Payments are dormant by choice.** `stripe-webhook`, `exos-checkout`, `exos-reconcile-checkouts` have never been deployed.
