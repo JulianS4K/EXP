@@ -116,7 +116,8 @@ export interface EventFilterQuery extends CatalogPageQuery {
 
 export interface EventSearchQuery extends EventFilterQuery {
   q?: string;
-  date?: Date | string;
+  /** The event's local date (query param name per the OpenAPI spec). */
+  dateLocal?: Date | string;
 }
 
 export interface VenueQuery extends CatalogPageQuery {

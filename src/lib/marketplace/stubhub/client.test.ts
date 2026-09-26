@@ -120,6 +120,13 @@ describe('StubHubClient', () => {
     expect(calls[0].init.body).toBeUndefined();
   });
 
+  it('searches events by dateLocal and tolerates a non-JSON category response', async () => {
+    const { c, calls } = client([json({ total_items: 0, page: 1, page_size: 0 }), new Response('not json')]);
+    await c.searchEvents({ q: 'show', dateLocal: '2026-11-01' });
+    expect(calls[0].url).toBe('https://api.example.test/catalog/events/search?q=show&dateLocal=2026-11-01');
+    expect(await c.searchCategories('rock')).toBe('not json');
+  });
+
   it('serves catalog at the host root and everything else under /v2', async () => {
     const { c, calls } = client([json({}), json({}), json({})]);
     await c.getVenue(1);

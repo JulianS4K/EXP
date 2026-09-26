@@ -130,8 +130,14 @@ export class StubHubClient {
     return this.json<CatalogEvent>('getEventByExternalId', { path: { platform, externalEventId } });
   }
 
-  searchCategories(q: string) {
-    return this.json<unknown>('searchCategories', { query: { q } });
+  /** The spec declares this response as octet-stream; parse JSON when it is JSON. */
+  async searchCategories(q: string): Promise<unknown> {
+    const text = await (await this.send('searchCategories', { query: { q } })).text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   listCategoryEvents(categoryId: number, query: CatalogPageQuery = {}) {

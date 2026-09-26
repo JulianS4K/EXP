@@ -178,7 +178,16 @@ export class StubHubWriter {
     }
     const res = await execute(this.cfg, ep, parts, RETRY_THROTTLED);
     const text = res.status === 204 ? '' : await res.text();
-    return { dryRun: false, planned, response: (text ? JSON.parse(text) : null) as T };
+    // The write already happened; a non-JSON body must not turn it into a thrown "failure".
+    let response: unknown = null;
+    if (text) {
+      try {
+        response = JSON.parse(text);
+      } catch {
+        response = text;
+      }
+    }
+    return { dryRun: false, planned, response: response as T };
   }
 
   // ── 1. Listing creation ────────────────────────────────────────────

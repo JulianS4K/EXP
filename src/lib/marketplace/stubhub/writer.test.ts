@@ -137,6 +137,11 @@ describe('StubHubWriter live mode gate', () => {
     expect(failing).toHaveBeenCalledTimes(1);
   });
 
+  it('does not throw on a non-JSON success body (the write already happened)', async () => {
+    const w = liveWriter(async () => new Response('Created', { status: 201 }));
+    expect(await w.createSellerListing(1, REQ)).toMatchObject({ dryRun: false, response: 'Created' });
+  });
+
   it('handles 204 No Content', async () => {
     const auth = { ...AUTH, endpoints: ['rejectSale'] as const };
     const w = liveWriter(async () => new Response(null, { status: 204 }), auth);

@@ -69,3 +69,15 @@ describe('StubHub OpenAPI conformance', () => {
     expect(Object.values(hooks).map((h) => h.post.summary).sort()).toEqual([...STUBHUB_WEBHOOK_TOPICS].sort());
   });
 });
+
+describe('StubHub OpenAPI query params', () => {
+  type Op = { parameters?: Array<{ name: string; in: string }> };
+  const catalog = JSON.parse(
+    readFileSync(resolve(__dirname, '../../../../docs/marketplace/stubhub/openapi/catalog.json'), 'utf8'),
+  ) as { paths: Record<string, { get?: Op }> };
+  const query = (path: string) => (catalog.paths[path].get?.parameters ?? []).filter((p) => p.in === 'query').map((p) => p.name);
+
+  it('event search takes q and dateLocal', () => {
+    expect(query('/catalog/events/search')).toEqual(expect.arrayContaining(['q', 'dateLocal']));
+  });
+});
