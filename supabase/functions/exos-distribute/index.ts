@@ -5,7 +5,7 @@
 //
 // 1. StubHub event requests (mig 20260926190000). Publishing an event with
 //    StubHub ticked queues a 'stubhub' row. This pass builds the StubHub
-//    PUT /sellerevents body from the event (_shared/stubhub-event.ts) and
+//    PUT /sellerevents body from the event (_shared/marketplace/stubhub/eventRequest.ts) and
 //    records it as planned_request, status 'planned'. DRY-RUN ONLY: nothing is
 //    sent to StubHub. Sending needs an operator WriteAuthorization (Hard Rule
 //    #2) and seller credentials; see EXP docs/marketplace/stubhub/README.md.
@@ -31,7 +31,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
-import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from "../_shared/stubhub-event.ts";
+import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from "../_shared/marketplace/stubhub/eventRequest.ts";
 
 const BATCH = 25;
 

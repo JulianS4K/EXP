@@ -16,7 +16,7 @@
 // Mobile transfer would need "Exos" on StubHub's provider list, which it
 // isn't.
 
-import type { BarcodeInformation, Sale, Seating, TicketHolder } from './types';
+import type { BarcodeInformation, Sale, Seating, TicketHolder } from './types.ts';
 
 /** `mobile_provider` values, verbatim from the Sales reference. */
 export const MOBILE_TRANSFER_PROVIDERS = [

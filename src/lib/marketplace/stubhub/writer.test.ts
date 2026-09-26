@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { StubHubClient } from './client';
-import { STUBHUB_ENDPOINTS } from './endpoints';
-import { buildCreateListingRequest, buildRequestedEvent, buildRequestedEventListingRequest } from './listing';
+import { StubHubClient } from '.';
+import { STUBHUB_ENDPOINTS } from '.';
+import { buildCreateListingRequest, buildRequestedEvent, buildRequestedEventListingRequest } from '.';
 import {
   STUBHUB_WRITE_ROADMAP,
   StubHubWriter,
   WriteNotAuthorizedError,
   type PlannedWrite,
   type WriteAuthorization,
-} from './writer';
+} from '.';
 
 const REQ = buildCreateListingRequest(
   { id: 'row-1', channel: 'stubhub', requested_qty: 2, unit_price: 40 },

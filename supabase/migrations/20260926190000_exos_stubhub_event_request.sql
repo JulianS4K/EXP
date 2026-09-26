@@ -15,7 +15,7 @@
 -- them (and isn't primary-market-only), it gets one exos_distribution_listings
 -- row, channel 'stubhub', status 'pending'. exos-distribute picks that up,
 -- builds the PUT /sellerevents body from the event
--- (supabase/functions/_shared/stubhub-event.ts), and:
+-- (supabase/functions/_shared/marketplace/stubhub/eventRequest.ts), and:
 --   * dry-run (the default, and the only mode today): stores that body in
 --     planned_request and sets status 'planned'. Nothing is sent to StubHub.
 --   * a mapping problem (no venue city, ...): status 'failed' + error, which

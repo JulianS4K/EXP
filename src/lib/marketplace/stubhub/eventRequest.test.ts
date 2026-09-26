@@ -5,8 +5,8 @@ import {
   exosEventForListing,
   planStubHubEventRequest,
   type ExosEventRow,
-} from './listing';
-import { STUBHUB_ENDPOINTS } from './endpoints';
+} from '.';
+import { STUBHUB_ENDPOINTS } from '.';
 
 const ROW: ExosEventRow = {
   name: '  Late Night Jazz ',

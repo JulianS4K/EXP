@@ -55,7 +55,7 @@ that uses a PUT/POST verb but changes nothing.
 ## Build order
 
 The write side is built but **not live** (see [Write foundation](#write-foundation)).
-Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/writer.ts`):
+Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`supabase/functions/_shared/marketplace/stubhub/writer.ts`):
 
 | # | Phase | Endpoints | Needs first |
 |---|---|---|---|
@@ -199,7 +199,7 @@ with a different `id`. Treat a changed id as a merge and update the xref.
 
 ## Client
 
-`src/lib/marketplace/stubhub/` is dependency-free and `fetch`-based.
+`supabase/functions/_shared/marketplace/stubhub/` is dependency-free and `fetch`-based, so the edge functions (Deno) and the app (through `src/lib/marketplace/stubhub/index.ts`) share one copy. Tests live in `src/lib/marketplace/stubhub/`.
 
 **Read side (usable now):**
 
@@ -299,8 +299,8 @@ Added 2026-09-26 (mig `20260926190000_exos_stubhub_event_request`):
    Drafts queue nothing until published.
 2. **`exos-distribute`** reads pending `stubhub` rows and builds the
    `PUT /sellerevents` body from the event with
-   `supabase/functions/_shared/stubhub-event.ts`. That's the same builder
-   `src/lib/marketplace/stubhub/listing.ts` re-exports, so the app and the
+   `supabase/functions/_shared/marketplace/stubhub/eventRequest.ts`. That's
+   the same builder the app uses (`listing.ts` re-exports it), so the app and the
    function can't drift. The builder uses:
    - the event name and start;
    - the venue name, plus city, region and country from the structured

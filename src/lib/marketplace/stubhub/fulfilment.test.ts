@@ -9,7 +9,7 @@ import {
   mobileTransferRequest,
   saleDeadline,
   type MobileTransferProvider,
-} from './fulfilment';
+} from '.';
 
 describe('sale request builders', () => {
   it('confirm', () => {

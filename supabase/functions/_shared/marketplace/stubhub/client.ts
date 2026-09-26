@@ -21,7 +21,7 @@
 //     side (listings, sales, payments, webhooks). StubHub's refresh tokens
 //     are single-use, so each refresh persists the new one.
 
-import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints';
+import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints.ts';
 import {
   DEFAULT_USER_AGENT,
   RETRY_TRANSIENT,
@@ -33,7 +33,7 @@ import {
   type RequestParts,
   type TokenSource,
   type TransportConfig,
-} from './transport';
+} from './transport.ts';
 import type {
   CatalogEvent,
   EventFilterQuery,
@@ -53,10 +53,10 @@ import type {
   VenueQuery,
   Webhook,
   CatalogPageQuery,
-} from './types';
-import type { ListingConstraints, RequestedEvent } from './listing';
+} from './types.ts';
+import type { ListingConstraints, RequestedEvent } from './listing.ts';
 
-export { StubHubError, STUBHUB_ENVIRONMENTS, toQueryString, type StubHubEnvironment } from './transport';
+export { StubHubError, STUBHUB_ENVIRONMENTS, toQueryString, type StubHubEnvironment } from './transport.ts';
 
 export interface StubHubClientOptions extends HostOptions {
   /** Returns a current OAuth2 access token. */

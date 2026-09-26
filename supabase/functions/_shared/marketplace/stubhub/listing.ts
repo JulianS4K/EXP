@@ -32,13 +32,13 @@
 // event implicitly, so requestEvent is only needed to create an event
 // before listing on it.
 
-import type { BarcodeInformation, Money, MoneyInput, Seating } from './types';
+import type { BarcodeInformation, Money, MoneyInput, Seating } from './types.ts';
 import {
   ListingMappingError,
   buildRequestedEvent,
   type ExosEventForListing,
   type RequestedEvent,
-} from '../../../../supabase/functions/_shared/stubhub-event.ts';
+} from './eventRequest.ts';
 
 // The requested-event mapping lives in the edge functions' _shared folder so
 // exos-distribute (Deno) builds exactly the body this client would send.
@@ -48,13 +48,13 @@ export {
   exosEventForListing,
   planStubHubEventRequest,
   countryCode,
-} from '../../../../supabase/functions/_shared/stubhub-event.ts';
+} from './eventRequest.ts';
 export type {
   ExosEventForListing,
   ExosEventRow,
   PlannedEventRequest,
   RequestedEvent,
-} from '../../../../supabase/functions/_shared/stubhub-event.ts';
+} from './eventRequest.ts';
 
 /** `split_type` values, from the SplitType schema. */
 export const SPLIT_TYPES = ['Any', 'None', 'AvoidOne', 'AvoidOneAndThree', 'Pairs'] as const;
