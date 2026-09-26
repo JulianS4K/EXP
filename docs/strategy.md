@@ -19,6 +19,8 @@ It gets there in two steps:
 
 ## Competitive position
 
+The full, sourced comparison and the build order that follows from it are in `docs/competition.md`.
+
 | Competitor | Who they win | Where Exos wins |
 |---|---|---|
 | Ticketmaster, AXS | arenas, big rooms, exclusive contracts | no exclusivity, no buyer fees, a venue can set itself up in an afternoon |
