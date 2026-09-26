@@ -529,6 +529,19 @@ indie-cap + secondary-market positioning.
     Tables are the main use case.
   - Rejected for v1: in-app split with seats held until friends pay (a 24h hold is too long; if it's ever
     built, cap holds at 15–30 min).
+- `[ ]` **White label, level 2: organizer's own domain (`tickets.venue.com`).** Paid-tier candidate.
+  - DNS verification plus automatic TLS (Cloudflare for SaaS, or Render's custom-domains API).
+  - Resolve org by Host header: storefront, event pages, sitemap and link previews under their brand.
+  - Sign-in bounces through the Exos domain, because Supabase redirect URLs are an allowlist.
+  - Add verified domains to the checkout redirect allowlist.
+  - Level 1 extras: cover media, custom sections, "hide Powered by Exos" (paid).
+  - Level 3 (checkout inside the venue's existing site, Stripe Embedded Checkout) is being built now.
+- `[ ]` **"I was there" collectible (proof of attendance).**
+  - Minted after check-in on a cheap L2 (Base or Polygon) with custodial wallets per email
+    (Crossmint / thirdweb), crypto invisible. No PII on-chain; the Exos DB stays the source of truth.
+  - Uses: show history, badges, organizer loyalty perks (early access). Don't market it as "NFT".
+  - Rejected: NFT tickets themselves (no door or fraud benefit over rotating barcodes, KYD's turf,
+    resale royalties conflict with capped resale and NY law).
 - `[ ]` **Instant ticket return ("can't go? money back"), organizer / promoter opt-in only.**
   - The organizer switches it on per event and sets the return window, refund % (e.g. 80–100% of face) and
     whether it's only when sold out.
