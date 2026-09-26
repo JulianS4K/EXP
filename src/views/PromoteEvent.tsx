@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { publicUrl } from '../lib/utils';
+import { buildEmbedSnippet } from '../lib/embed';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
 import PromoterKitPanel from '../components/PromoterKitPanel';
@@ -137,19 +138,9 @@ export default function PromoteEvent() {
     `Don't miss ${title}. Limited tickets, secure yours here: ${url}`,
   ];
 
-  // The title goes inside an HTML comment: strip anything that could close it.
-  const commentTitle = title.replace(/-{2,}/g, '—').replace(/[<>]/g, '');
-  const embedSnippet = `<!-- Exos embed — ${commentTitle} -->
-<iframe id="vibepass-embed" src="${publicUrl(`embed/event/${eventId}`)}" style="width:100%;border:0;min-height:200px" loading="lazy" title="Tickets"></iframe>
-<script>
-window.addEventListener('message', function(e) {
-  if (e.origin !== '${typeof window !== 'undefined' ? window.location.origin : ''}') return;
-  if (e.data && e.data.type === 'vibepass:resize') {
-    var f = document.getElementById('vibepass-embed');
-    if (f) f.style.height = e.data.height + 'px';
-  }
-});
-</script>`;
+  // Loader snippet (public/embed.js): the fan picks tickets and pays inside
+  // the iframe without leaving the venue's site (lib/embed.ts).
+  const embedSnippet = buildEmbedSnippet({ loaderUrl: publicUrl('embed.js'), eventId: eventId ?? '', title });
 
   const twitterHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(`${title} ${url}`)}`;
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
@@ -311,7 +302,7 @@ window.addEventListener('message', function(e) {
             <Code2 className="w-4 h-4 text-brand-primary" /> Embed on your site
           </h2>
           <p className="text-sm text-white/60 mb-3">
-            Paste this into your own website (WordPress, Wix, Squarespace, or hand-written HTML). It self-resizes.
+            Paste this into your own website (WordPress, Wix, Squarespace, or hand-written HTML). Fans pick tickets and pay right there, without leaving your site. It self-resizes.
           </p>
           <pre className="bg-black border border-white/10 text-brand-primary text-[11px] p-4 overflow-x-auto font-mono whitespace-pre-wrap break-all">{embedSnippet}</pre>
           <button onClick={() => copy(embedSnippet, 'Embed snippet copied.')} className="mt-3 flex items-center gap-2 px-4 py-2.5 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest hover:bg-brand-primary/90 transition-colors">

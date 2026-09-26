@@ -44,6 +44,7 @@ const OrgSettings = lazy(() => import('./views/OrgSettings'));
 const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
+const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
@@ -157,6 +158,8 @@ export default function App() {
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />
+                    {/* Stripe Embedded Checkout return page, inside the same iframe. */}
+                    <Route path="/embed/return" element={<EmbedReturn />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />

@@ -15,6 +15,7 @@ import { ArrowLeft, Upload } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { publicUrl } from '../lib/utils';
+import { buildEmbedSnippet } from '../lib/embed';
 import { useToast } from '../context/ToastContext';
 import { getOrgCompUsage, setOrgCompBudget } from '../lib/comps';
 import { getOrganization, updateOrganization } from '../lib/orgs';
@@ -229,24 +230,12 @@ export default function OrgSettings() {
     }
   }
 
-  // Generate the embed snippet that venues paste on their own site.
-  // The snippet is a tiny self-resizing iframe with a postMessage
-  // listener for height updates from EmbedEvent.tsx. The host gets
-  // a copy-paste-ready string they can drop into WordPress, Wix,
-  // Squarespace, or a hand-written site.
-  function buildEmbedSnippet(orgIdValue: string): string {
-    const origin = window.location.origin;
-    return `<!-- Exos embed for ${orgIdValue}. Replace EVENT_ID with your event id. -->
-<iframe id="vibepass-embed" src="${publicUrl('embed/event/EVENT_ID')}" style="width:100%;border:0;min-height:200px" loading="lazy" title="Tickets"></iframe>
-<script>
-window.addEventListener('message', function(e) {
-  if (e.origin !== '${origin}') return;
-  if (e.data && e.data.type === 'vibepass:resize') {
-    var f = document.getElementById('vibepass-embed');
-    if (f) f.style.height = e.data.height + 'px';
-  }
-});
-</script>`;
+  // The embed snippet venues paste on their own site: a div + the
+  // public/embed.js loader, which creates a self-resizing iframe of
+  // EmbedEvent.tsx (ticket picker + in-frame Stripe checkout). Drops into
+  // WordPress, Wix, Squarespace, or a hand-written site.
+  function buildOrgEmbedSnippet(): string {
+    return buildEmbedSnippet({ loaderUrl: publicUrl('embed.js'), eventId: 'EVENT_ID' });
   }
 
   const previewColor = HEX_COLOR.test(primaryColor) ? primaryColor : '#00FF00';
@@ -540,20 +529,20 @@ window.addEventListener('message', function(e) {
               <p className="text-xs text-slate-400 mb-4">
                 Paste this snippet on your venue's site (WordPress, Wix, Squarespace,
                 or any HTML page). Replace <code className="text-tm-blue font-mono">EVENT_ID</code>{' '}
-                with your event's id from the dashboard. The iframe self-resizes.
+                with your event's id from the dashboard (each event's Promote page has the snippet ready-made). Fans buy without leaving your site; the frame self-resizes.
               </p>
               <textarea
                 readOnly
-                value={buildEmbedSnippet(org.id)}
+                value={buildOrgEmbedSnippet()}
                 onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                rows={9}
+                rows={4}
                 className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-100 font-mono whitespace-pre-wrap break-all focus:outline-none focus:border-tm-blue"
               />
               <button
                 type="button"
                 onClick={() => {
                   navigator.clipboard
-                    .writeText(buildEmbedSnippet(org.id))
+                    .writeText(buildOrgEmbedSnippet())
                     .then(() => toast({ kind: 'success', message: 'Snippet copied.' }))
                     .catch(() => toast({ kind: 'error', message: 'Copy failed — select and copy manually.' }));
                 }}

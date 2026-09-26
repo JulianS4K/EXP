@@ -41,6 +41,40 @@ export async function startCheckout(input: {
   return url;
 }
 
+/** Create an Embedded Checkout Session (the venue-site iframe mounts it in
+ *  place). returnUrl must be our /embed/return page (see lib/embed.ts). */
+export async function startEmbeddedCheckout(input: {
+  eventId: string;
+  tierId: string;
+  quantity: number;
+  returnUrl: string;
+  attribution?: Attribution;
+}): Promise<{ clientSecret: string; sessionId: string }> {
+  const { data, error } = await supabase.functions.invoke('exos-checkout', {
+    body: {
+      ui_mode: 'embedded',
+      event_id: input.eventId,
+      tier_id: input.tierId,
+      quantity: input.quantity,
+      return_url: input.returnUrl,
+      attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+    },
+  });
+  if (error) {
+    // Surface the function's own message ("sold out", "purchase limit…").
+    let payload: { error?: string } | null = null;
+    try {
+      payload = await (error as { context?: Response }).context?.json();
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(payload?.error || error.message || 'Could not start checkout.');
+  }
+  const d = data as { client_secret?: string; session_id?: string } | null;
+  if (!d?.client_secret || !d.session_id) throw new Error('startEmbeddedCheckout: no client secret returned');
+  return { clientSecret: d.client_secret, sessionId: d.session_id };
+}
+
 /** Start (or resume) Stripe Connect onboarding for an org; returns the link URL. */
 export async function startStripeOnboarding(input: {
   orgId: string;
