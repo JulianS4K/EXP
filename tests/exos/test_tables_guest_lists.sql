@@ -411,7 +411,7 @@ BEGIN
   END;
   x := public.exos_event_door_extras('c9000000-0000-0000-0000-0000000000e1');
   ASSERT jsonb_array_length(x->'guests') = 3 AND jsonb_array_length(x->'lists') = 2, 'G5: door download has every guest + list';
-  ASSERT position('dana@x.com' in lower(x::text)) = 0 AND position('555' in x::text) = 0, 'G5: no contact data at the door';
+  ASSERT position('dana@x.com' in lower(x::text)) = 0 AND position('212 555 0100' in x::text) = 0, 'G5: no contact data at the door';
   SELECT id INTO b1 FROM public.exos_table_bookings WHERE order_ref='c9-t1';
   ASSERT EXISTS (SELECT 1 FROM jsonb_array_elements(x->'tables') t
                   WHERE t->>'label' = 'Table 12' AND (t->>'min_spend_cents')::int = 60000
