@@ -91,6 +91,7 @@ export function stubHubChannel(client?: StubHubClient): MarketplaceChannel {
         ...planStubHubEventRequest({
           name: ev.name,
           starts_at: ev.startsAt,
+          occurs_at_local: ev.occursAtLocal ?? null,
           venue_name: ev.venueName,
           venue_address: { city: ev.venueCity ?? '', region: ev.venueRegion ?? '', country: ev.countryCode ?? '' },
         }),

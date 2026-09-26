@@ -105,6 +105,23 @@ Two limits are enforced, not papered over:
 `tests/exos/race_channel_allocations.sh` races two real sessions for the last
 seat in three orders, and never sells it twice.
 
+### Dry run
+
+`npx tsx scripts/stubhub-dry-run.ts event.json` puts one `exos_events` row
+(as JSON) through the same code as `exos-distribute`, and prints:
+- what Exos reads off the event;
+- the venue-local search date;
+- the `PUT /sellerevents` plan, or what the organizer must fix;
+- what `StubHubWriter` would send (it never sends in dry-run);
+- the event-editor status line.
+
+Run on 2026-09-26 against prod's one event, it was refused because the event
+has no venue address, so there's no city to send. With an address added, the
+plan is `PUT /sellerevents`:
+- start `2028-05-16T23:11:00-04:00`, the venue-local time with its offset;
+- venue Somewhere, Brooklyn, NY;
+- country US.
+
 Everything that would change something on StubHub is stored as a plan
 (`planned_request`, `delivery_plan`) and never sent. The buyer's Exos email
 is not a StubHub write, so it goes out as soon as `exos-marketplace-sales`

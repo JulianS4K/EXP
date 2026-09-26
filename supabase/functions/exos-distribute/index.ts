@@ -92,7 +92,7 @@ interface StubHubRow {
 async function planStubHubEvents(sb: SupabaseClient, canSearch: boolean) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, updated_at, exos_events(name, starts_at, venue_name, venue_location, venue_address)")
+    .select("id, event_id, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
     .eq("channel", "stubhub")
     .eq("status", "pending")
     .order("updated_at", { ascending: true })
