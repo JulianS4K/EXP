@@ -4,7 +4,8 @@
 --   M1 a sale that isn't on an Exos listing is ignored (broker inventory)
 --   M2 an Exos-listing sale is recorded once, by our id or the marketplace's
 --   M3 fulfil: tickets on the org owner + pending transfer to the buyer,
---      capacity claimed, listing count decremented; idempotent
+--      the buyer emailed with claim links, capacity claimed, listing count
+--      decremented; idempotent
 --   M4 oversold / no email / no tier -> needs_attention, nothing minted
 --   M5 cancellations: before tickets -> cancelled; after -> needs a human
 --   M6 service_role only
@@ -19,19 +20,21 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('3d000000-0000-0000-0000-000000000001','3d000000-0000-0000-0000-0000000000a0','owner');
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES
-  ('3d000000-0000-0000-0000-0000000000e1','3d000000-0000-0000-0000-000000000001','Show','published','2027-01-01T02:00:00Z','Hall',100,0);
+  ('3d000000-0000-0000-0000-0000000000e1','3d000000-0000-0000-0000-000000000001','Show <b>&</b>','published','2027-01-01T02:00:00Z','Hall',100,0),
+  ('3d000000-0000-0000-0000-0000000000e2','3d000000-0000-0000-0000-000000000001','Sold out','published','2027-01-02T02:00:00Z','Hall',100,2);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('3d000000-0000-0000-0000-0000000000d1','3d000000-0000-0000-0000-0000000000e1','GA',50,10,0),
-  ('3d000000-0000-0000-0000-0000000000d2','3d000000-0000-0000-0000-0000000000e1','VIP',150,2,2);
+  ('3d000000-0000-0000-0000-0000000000d2','3d000000-0000-0000-0000-0000000000e2','VIP',150,2,2);
 INSERT INTO public.exos_distribution_listings(id,event_id,org_id,channel,status,tier_id,requested_qty,unit_price,external_listing_id) VALUES
   ('3d000000-0000-0000-0000-0000000000b1','3d000000-0000-0000-0000-0000000000e1','3d000000-0000-0000-0000-000000000001','stubhub','listed','3d000000-0000-0000-0000-0000000000d1',6,60,'SH-L-1'),
-  ('3d000000-0000-0000-0000-0000000000b2','3d000000-0000-0000-0000-0000000000e1','3d000000-0000-0000-0000-000000000001','seatgeek','listed','3d000000-0000-0000-0000-0000000000d2',2,160,'567142963');
+  ('3d000000-0000-0000-0000-0000000000b2','3d000000-0000-0000-0000-0000000000e2','3d000000-0000-0000-0000-000000000001','stubhub','listed','3d000000-0000-0000-0000-0000000000d2',2,160,'SH-L-2');
 
 CREATE OR REPLACE FUNCTION pg_temp.rec(p jsonb) RETURNS text LANGUAGE sql AS $$
   SELECT status FROM public.exos_record_marketplace_order(p)
 $$;
 CREATE OR REPLACE FUNCTION pg_temp.ful(p_ext text) RETURNS record LANGUAGE sql AS $$
-  SELECT f FROM public.exos_marketplace_orders m, public.exos_fulfil_marketplace_order(m.id) f
+  SELECT f FROM public.exos_marketplace_orders m,
+         public.exos_fulfil_marketplace_order(m.id, 'https://exos.example.test/bridge/') f
    WHERE m.external_order_id = p_ext
 $$;
 
@@ -39,7 +42,7 @@ $$;
 DO $$
 BEGIN
   IF pg_temp.rec('{"channel":"stubhub","external_order_id":"B-1","external_listing_id":"broker-listing","quantity":2,"sale_status":"confirmed"}') IS NOT NULL
-     OR pg_temp.rec('{"channel":"seatgeek","external_order_id":"B-2","external_listing_id":"SH-L-1","quantity":1}') IS NOT NULL  -- right id, wrong channel
+     OR pg_temp.rec('{"channel":"vivid","external_order_id":"B-2","external_listing_id":"SH-L-1","quantity":1}') IS NOT NULL  -- right id, wrong channel
      OR pg_temp.rec('{"channel":"stubhub","external_order_id":"B-3","quantity":2}') IS NOT NULL THEN
     RAISE EXCEPTION 'M1 FAIL: recorded a sale that is not on an Exos listing';
   END IF;
@@ -98,24 +101,35 @@ BEGIN
      OR (SELECT transfer_ids FROM public.exos_marketplace_orders WHERE external_order_id = '555') <> tr THEN
     RAISE EXCEPTION 'M3 FAIL: fulfil is not idempotent';
   END IF;
-  RAISE NOTICE 'M3 ok: minted to the org owner with claim-by-email transfers; idempotent';
+  IF (SELECT count(*) FROM public.exos_mail WHERE to_email = 'buyer@example.com') <> 1 THEN
+    RAISE EXCEPTION 'M3 FAIL: buyer emailed twice';
+  END IF;
+  -- The buyer is told: one email, one claim link per transfer, names escaped.
+  SELECT count(*) INTO n FROM public.exos_mail
+   WHERE template = 'transfer-initiated' AND to_email = 'buyer@example.com'
+     AND html LIKE '%https://exos.example.test/bridge/claim/' || o.transfer_ids[1] || '%'
+     AND html LIKE '%https://exos.example.test/bridge/claim/' || o.transfer_ids[2] || '%'
+     AND html LIKE '%Show &lt;b&gt;&amp;&lt;/b&gt;%' AND html NOT LIKE '%<b>&</b>%'
+     AND subject LIKE 'Your StubHub tickets for %';
+  IF n <> 1 THEN RAISE EXCEPTION 'M3 FAIL: % buyer emails with both claim links', n; END IF;
+  RAISE NOTICE 'M3 ok: minted to the org owner, transferred + emailed to the buyer; idempotent';
 END $$;
 
 -- M4 ---------------------------------------------------------------------------
 DO $$
 DECLARE o record;
 BEGIN
-  -- VIP is full (2/2): a SeatGeek sale of it is an oversell. Matched by SeatGeek's listing id.
-  PERFORM pg_temp.rec('{"channel":"seatgeek","external_order_id":"SG-9","external_listing_id":"567142963","quantity":1,"sale_status":"confirmed","buyer_email":"b@x.com"}');
-  PERFORM pg_temp.ful('SG-9');
-  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'SG-9';
+  -- VIP is full (2/2): selling it on StubHub is an oversell. Matched by StubHub's listing id.
+  PERFORM pg_temp.rec('{"channel":"stubhub","external_order_id":"SH-9","external_listing_id":"SH-L-2","quantity":1,"sale_status":"confirmed","buyer_email":"b@x.com"}');
+  PERFORM pg_temp.ful('SH-9');
+  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'SH-9';
   IF o.status <> 'needs_attention' OR o.attention_reason NOT LIKE 'oversold:%' OR cardinality(o.ticket_ids) <> 0 THEN
     RAISE EXCEPTION 'M4 FAIL: oversell %', row_to_json(o);
   END IF;
-  IF (SELECT tickets_sold FROM public.exos_events WHERE id = '3d000000-0000-0000-0000-0000000000e1') <> 2 THEN
+  IF (SELECT tickets_sold FROM public.exos_events WHERE id = '3d000000-0000-0000-0000-0000000000e2') <> 2 THEN
     RAISE EXCEPTION 'M4 FAIL: house cap claim not undone';
   END IF;
-  -- No buyer email (SeatGeek never sends one).
+  -- No buyer email from StubHub.
   PERFORM pg_temp.rec('{"channel":"stubhub","external_order_id":"556","external_listing_id":"SH-L-1","quantity":1,"sale_status":"confirmed"}');
   PERFORM pg_temp.ful('556');
   IF (SELECT attention_reason FROM public.exos_marketplace_orders WHERE external_order_id = '556') NOT LIKE 'no buyer email%' THEN
@@ -128,8 +142,9 @@ BEGIN
   IF (SELECT attention_reason FROM public.exos_marketplace_orders WHERE external_order_id = '557') NOT LIKE '%no ticket type%' THEN
     RAISE EXCEPTION 'M4 FAIL: missing tier not flagged';
   END IF;
-  IF (SELECT count(*) FROM public.exos_tickets WHERE channel_source IN ('stubhub','seatgeek')) <> 2 THEN
-    RAISE EXCEPTION 'M4 FAIL: minted on a refused order';
+  IF (SELECT count(*) FROM public.exos_tickets WHERE channel_source = 'stubhub') <> 2
+     OR (SELECT count(*) FROM public.exos_mail WHERE to_email IN ('b@x.com','c@x.com')) <> 0 THEN
+    RAISE EXCEPTION 'M4 FAIL: minted or emailed on a refused order';
   END IF;
   RAISE NOTICE 'M4 ok: oversold / no email / no tier go to a human, nothing minted';
 END $$;

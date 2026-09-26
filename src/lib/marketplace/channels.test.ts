@@ -4,12 +4,8 @@ import {
   decideMatch,
   exosEventRef,
   localDate,
-  normalizeSeatGeekOrder,
   normalizeStubHubSale,
-  platformEventToCandidate,
   scoreMatch,
-  seatGeekChannel,
-  seatGeekEventSearchUrl,
   stubHubChannel,
   catalogEventToCandidate,
   type EventCandidate,
@@ -121,64 +117,35 @@ describe('StubHub channel', () => {
   });
 });
 
-describe('SeatGeek channel', () => {
-  it('cannot create events or fulfil, and searches only with a client id', () => {
-    expect(seatGeekChannel().capabilities).toEqual({ findEvents: false, createEvent: false, listings: false, fulfilByUrls: false });
-    expect(seatGeekChannel().planCreateEvent).toBeUndefined();
-    expect(seatGeekChannel({ clientId: 'k' }).capabilities.findEvents).toBe(true);
-  });
-
-  it('searches the local day on the Platform API', async () => {
-    const url = seatGeekEventSearchUrl(EV, 'cid');
-    const u = new URL(url);
-    expect(u.origin + u.pathname).toBe('https://api.seatgeek.com/2/events');
-    expect(u.searchParams.get('datetime_local.gte')).toBe('2026-11-06T00:00:00');
-    expect(u.searchParams.get('datetime_local.lte')).toBe('2026-11-06T23:59:59');
-    expect(u.searchParams.get('client_id')).toBe('cid');
-
+describe('StubHub catalog search', () => {
+  it('searches by name + local date and links the right event', async () => {
     const seen: string[] = [];
-    const ch = seatGeekChannel({
-      clientId: 'cid',
-      fetch: (async (input: string) => {
-        seen.push(input);
-        return new Response(JSON.stringify({ events: [{
-          id: 777, title: 'Late Night Jazz with the Blue Trio', datetime_local: '2026-11-06T21:00:00',
-          datetime_utc: '2026-11-07T02:00:00', venue: { name: 'Blue Room', city: 'Brooklyn' },
-        }] }), { status: 200 });
-      }) as typeof fetch,
-    });
+    const fetchImpl = (async (input: string) => {
+      seen.push(input);
+      if (input.includes('oauth2/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: 3600 }), { status: 200 });
+      return new Response(JSON.stringify({ _embedded: { items: [
+        { id: 104857, name: EV.name, start_date: '2026-11-06T21:00:00-05:00', _embedded: { venue: { id: 1, name: 'Blue Room', city: 'Brooklyn' } } },
+        { id: 99, name: 'Morning Yoga', start_date: '2026-11-06T09:00:00-05:00', _embedded: { venue: { id: 2, name: 'Park', city: 'Brooklyn' } } },
+      ] } }), { status: 200 });
+    }) as typeof fetch;
+    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b' };
+    const ch = channelsFromEnv((k) => env[k], fetchImpl).get('stubhub')!;
     const found = await ch.findEvents!(EV);
-    expect(seen).toHaveLength(1);
-    expect(found[0]).toMatchObject({ channel: 'seatgeek', externalEventId: '777', startsAt: '2026-11-07T02:00:00Z' });
-    expect(decideMatch(EV, found).decision).toBe('link');
-  });
-
-  it('keeps an explicit zone on datetime_utc', () => {
-    expect(platformEventToCandidate({ id: 1, title: 't', datetime_utc: '2026-11-07T02:00:00Z' }).startsAt).toBe('2026-11-07T02:00:00Z');
-  });
-
-  it('reads Terminal-2 seatgeek_orders rows as sales', () => {
-    const s = normalizeSeatGeekOrder({
-      sg_order_id: 'SG-1', status: 'fulfilled', sg_event_id: 17692085, sg_listing_id: '567142963',
-      sale_quantity: 4, payment_total: '533.75', created_at_sg: '2026-09-26T10:00:00Z', sale_section: 'LB104', sale_row: '9',
-    });
-    expect(s).toMatchObject({
-      channel: 'seatgeek', externalOrderId: 'SG-1', externalEventId: '17692085', externalListingId: '567142963',
-      quantity: 4, status: 'delivered', proceeds: { amount: 533.75, currency: 'USD' }, buyerEmail: null,
-    });
-    expect(normalizeSeatGeekOrder({ sg_order_id: 'x', status: 'confirmed' }).status).toBe('confirmed');
-    expect(() => normalizeSeatGeekOrder({})).toThrow();
+    const search = new URL(seen.find((u) => u.includes('/catalog/events/search'))!);
+    expect(search.searchParams.get('q')).toBe(EV.name);
+    expect([...search.searchParams.values()]).toContain('2026-11-06');
+    const d = decideMatch(EV, found);
+    expect(d.decision).toBe('link');
+    expect(d.best?.candidate.externalEventId).toBe('104857');
   });
 });
 
 describe('channelsFromEnv', () => {
-  it('builds every channel; catalog search only with credentials', () => {
+  it('wires StubHub only; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek']);
+    expect([...none.keys()]).toEqual(['stubhub']);
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
-    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c' };
-    const all = channelsFromEnv((k) => env[k]);
-    expect(all.get('stubhub')!.capabilities.findEvents).toBe(true);
-    expect(all.get('seatgeek')!.capabilities.findEvents).toBe(true);
+    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b' };
+    expect(channelsFromEnv((k) => env[k]).get('stubhub')!.capabilities.findEvents).toBe(true);
   });
 });

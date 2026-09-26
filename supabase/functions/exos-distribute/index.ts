@@ -5,8 +5,8 @@
 //
 // 0. Event links (link.ts). Published, upcoming events are linked to their
 //    event on each marketplace the organizer ticked, with a read-only catalog
-//    search (_shared/marketplace) or Terminal-2's own TEvo->SeatGeek mapping.
-//    Close calls go to staff as 'review'. Writes exos_channel_event_links only.
+//    search (_shared/marketplace; StubHub today). Close calls go to staff as
+//    'review'. Writes exos_channel_event_links only.
 //
 // 1. StubHub event requests (mig 20260926190000). Publishing an event with
 //    StubHub ticked queues a 'stubhub' row. If the event is already linked
@@ -34,7 +34,7 @@
 //
 // Required secrets (operator, when activated): CRON_SECRET, SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY. Optional: STUBHUB_ENV / STUBHUB_CLIENT_ID /
-// STUBHUB_CLIENT_SECRET and SEATGEEK_CLIENT_ID (catalog reads, pass 0),
+// STUBHUB_CLIENT_SECRET (catalog reads, pass 0),
 // AUTOMATIQ_API_KEY (pass 2). Per-org distribution creds (e.g.
 // lystedSellerId) live in exos_org_secrets.distribution.
 

@@ -1,22 +1,22 @@
 // exos-marketplace-sales — marketplace sales become Exos tickets
 // (mig 20260926192000; the marketplace layer is _shared/marketplace).
 //
-// Two ways in:
-//   * POST with x-cron-secret (pg_cron): poll.
-//       StubHub   GET /sales/recentupdates (seller token, read-only)
-//       SeatGeek  Terminal-2's seatgeek_orders (already pulled every 30 min)
+// StubHub only for now. Two ways in:
+//   * POST with x-cron-secret (pg_cron): poll GET /sales/recentupdates
+//     (seller token, read-only)
 //   * POST from StubHub's Sales webhook: Authorization must equal
 //     STUBHUB_WEBHOOK_AUTHORIZATION (the value registered with the webhook).
 //
 // For each sale: exos_record_marketplace_order keeps it only if it sold from
 // an Exos listing (the seller accounts also carry broker inventory);
-// exos_fulfil_marketplace_order mints the tickets with a claim-by-email
-// transfer to the buyer (or flags it for a human: oversold, no email, ...);
-// then the delivery plan is stored: the marketplace call that would hand the
-// buyer one claim link per ticket. DRY-RUN: nothing is sent to a
-// marketplace (Hard Rule #2). The buyer can't claim until someone delivers
-// the links (the plan), which is also why a minted ticket can't be scanned
-// early: claiming rotates its barcode secret.
+// exos_fulfil_marketplace_order mints the tickets and issues them to the
+// buyer as an Exos transfer (they're emailed claim links, and the transfer
+// shows under their tickets when they sign in with that email), or flags the
+// order for a human (oversold, no email, ...); then the delivery plan is
+// stored: the marketplace call that would hand StubHub the same claim links.
+// DRY-RUN for the marketplace side: nothing is sent to StubHub (Hard Rule #2).
+// A minted ticket can't be scanned before it's claimed: claiming rotates its
+// barcode secret.
 //
 // Secrets: CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 // EXOS_APP_BASE_URL (e.g. https://vibepass-storefront-test.onrender.com/bridge).
@@ -76,8 +76,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else {
       result.stubhub = { skipped: "no StubHub seller credentials" };
     }
-
-    result.seatgeek = await ingest(sb, channels.get("seatgeek")!, await seatGeekOrders(sb, since), undefined);
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
@@ -110,22 +108,6 @@ function stubhubClient(sb: SupabaseClient): StubHubClient | undefined {
   });
 }
 
-/** SeatGeek orders Terminal-2 pulled, on the listings Exos has on SeatGeek. */
-async function seatGeekOrders(sb: SupabaseClient, since: Date): Promise<unknown[]> {
-  const { data: listings, error } = await sb.from("exos_distribution_listings")
-    .select("external_listing_id").eq("channel", "seatgeek").not("external_listing_id", "is", null);
-  if (error) throw new Error(`read seatgeek listings: ${error.message}`);
-  const ids = (listings ?? []).map((l) => l.external_listing_id as string);
-  if (!ids.length) return [];
-  const { data, error: oErr } = await sb.from("seatgeek_orders")
-    .select("sg_order_id, status, sg_event_id, sg_listing_id, sale_quantity, payment_total, created_at_sg, sale_section, sale_row, last_status_at")
-    .in("sg_listing_id", ids)
-    .gte("last_status_at", since.toISOString())
-    .limit(500);
-  if (oErr) throw new Error(`read seatgeek_orders: ${oErr.message}`);
-  return data ?? [];
-}
-
 async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unknown[], sh: StubHubClient | undefined) {
   const counts = { seen: raws.length, exos: 0, fulfilled: 0, needs_attention: 0, cancelled: 0, errors: 0 };
   for (const raw of raws) {
@@ -146,7 +128,10 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
         if (row.status === "cancelled") counts.cancelled++;
         continue;
       }
-      const { data: ful, error: fErr } = await sb.rpc("exos_fulfil_marketplace_order", { p_order_id: row.order_id });
+      const { data: ful, error: fErr } = await sb.rpc("exos_fulfil_marketplace_order", {
+        p_order_id: row.order_id,
+        p_app_base: env("EXOS_APP_BASE_URL") ?? null,
+      });
       if (fErr) throw new Error(`fulfil: ${fErr.message}`);
       const f = (ful as Array<{ status: string; transfer_ids: string[]; reason: string | null }>)[0];
       if (f.status === "fulfilled") {

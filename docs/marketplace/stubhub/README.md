@@ -253,10 +253,11 @@ Chosen 2026-09-26. For each StubHub sale:
 4. The buyer opens the link and signs in with that email. Claiming rotates
    the barcode secret, so nothing sent before the claim scans at the door.
 
-Not built yet (step 2): a service-side "mint + transfer to email" RPC. The
-current `exos_create_transfer` runs as the ticket's owner via the caller's
-JWT. The RPC is an `*exos*` migration and the caller an Exos edge function;
-both are authored in this repo.
+Step 2 is `exos_fulfil_marketplace_order` (mig `20260926192000`), called by
+`exos-marketplace-sales`. It parks the tickets on the org owner with a
+pending transfer to the buyer's email. It also emails the buyer the claim
+links, so the tickets reach them as an Exos transfer as well as through
+StubHub. See [How StubHub ties into Exos](../README.md#how-stubhub-ties-into-exos).
 
 Ticket type vs. delivery: Exos lists as **ticket transfer / mobile
 transfer** and delivers by e-ticket URL. StubHub may expect a transfer-type

@@ -3,16 +3,15 @@
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: exos_channel_event_links (new)
---              bridge_event_xref (W: sg_event_id / tevo_event_id / aq_short_event_id
---                mirrored from links; existing rows backfilled into links)
 --              exos_distribution_listings (W: a manual decision re-queues the
 --                event's StubHub request)
 --              FUNCTION exos_link_channel_event (new)
---              FUNCTION exos_channel_links_mirror_xref (new, trigger)
--- Pre-reqs: 20260926190000 (StubHub event requests), 20260520120000 (bridge_event_xref)
+-- Pre-reqs: 20260926190000 (StubHub event requests)
 --
 -- One row per (Exos event, marketplace): which of the marketplace's events it
--- is. exos-distribute fills it with a read-only catalog search
+-- is. StubHub is the only marketplace wired today; the table is keyed by
+-- channel so the others slot in. exos-distribute fills it with a read-only
+-- catalog search
 -- (_shared/marketplace/match.ts):
 --   linked     confident match (same local day, name, venue) or set by staff
 --   created    the event was created on the marketplace from Exos (StubHub
@@ -23,10 +22,9 @@
 -- A marketplace event maps to at most one Exos event (partial unique index),
 -- so two Exos events can never both claim the same StubHub/SeatGeek event.
 --
--- bridge_event_xref is the older per-event row Terminal-2 reads (D1 routes a
--- buy back to the Exos primary by tevo_event_id). Its SeatGeek / TEvo /
--- Automatiq ids now follow the links table (trigger), and existing values
--- are backfilled into links, so both stay in step.
+-- bridge_event_xref (the older per-event SeatGeek / TEvo / Automatiq ids
+-- Terminal-2 reads) is left as is; syncing it with this table comes with
+-- those channels.
 --
 -- Staff decide review rows with exos_link_channel_event(event, channel, id)
 -- (id NULL = reject all candidates). Deciding a StubHub row re-queues the
@@ -64,64 +62,6 @@ CREATE POLICY exos_channel_event_links_sel ON public.exos_channel_event_links FO
   USING (exos_has_org_role(org_id, ARRAY['owner','manager','finance']));
 REVOKE ALL ON public.exos_channel_event_links FROM anon, authenticated;
 GRANT  SELECT ON public.exos_channel_event_links TO authenticated;
-
--- ---------------------------------------------------------------------------
--- Mirror into bridge_event_xref (the row Terminal-2 reads).
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.exos_channel_links_mirror_xref()
-RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_ext  text;
-  v_live boolean;
-BEGIN
-  IF NEW.channel NOT IN ('seatgeek','evo','automatiq') THEN
-    RETURN NULL;
-  END IF;
-  v_live := NEW.status IN ('linked','created');
-  v_ext  := CASE WHEN v_live THEN NEW.external_event_id END;
-  -- bigint columns only take numeric ids; anything else stays out of the xref.
-  IF v_ext IS NOT NULL AND NEW.channel IN ('seatgeek','evo') AND v_ext !~ '^[0-9]{1,18}$' THEN
-    v_ext := NULL;
-  END IF;
-
-  INSERT INTO public.bridge_event_xref (exos_event_id, match_method, matched_at)
-  VALUES (NEW.event_id, NEW.method, CASE WHEN v_live THEN now() END)
-  ON CONFLICT (exos_event_id) DO NOTHING;
-
-  UPDATE public.bridge_event_xref
-     SET sg_event_id       = CASE WHEN NEW.channel = 'seatgeek'  THEN v_ext::bigint ELSE sg_event_id END,
-         tevo_event_id     = CASE WHEN NEW.channel = 'evo'       THEN v_ext::bigint ELSE tevo_event_id END,
-         aq_short_event_id = CASE WHEN NEW.channel = 'automatiq' THEN v_ext         ELSE aq_short_event_id END,
-         match_method      = CASE WHEN v_ext IS NOT NULL THEN coalesce(NEW.method, match_method) ELSE match_method END,
-         matched_at        = CASE WHEN v_ext IS NOT NULL THEN now() ELSE matched_at END,
-         updated_at        = now()
-   WHERE exos_event_id = NEW.event_id;
-  RETURN NULL;
-END $$;
-REVOKE EXECUTE ON FUNCTION public.exos_channel_links_mirror_xref() FROM PUBLIC, anon, authenticated;
-
-DROP TRIGGER IF EXISTS exos_channel_event_links_mirror ON public.exos_channel_event_links;
-CREATE TRIGGER exos_channel_event_links_mirror
-  AFTER INSERT OR UPDATE OF status, external_event_id ON public.exos_channel_event_links
-  FOR EACH ROW EXECUTE FUNCTION public.exos_channel_links_mirror_xref();
-
--- Backfill: ids already in bridge_event_xref become links (never overwrite one).
-INSERT INTO public.exos_channel_event_links (event_id, org_id, channel, status, external_event_id, method, confidence, checked_at)
-SELECT x.exos_event_id, e.org_id, v.channel, 'linked', v.ext, 'backfill', NULL, x.matched_at
-  FROM public.bridge_event_xref x
-  JOIN public.exos_events e ON e.id = x.exos_event_id
- CROSS JOIN LATERAL (VALUES
-   ('seatgeek',  x.sg_event_id::text),
-   ('evo',       x.tevo_event_id::text),
-   ('automatiq', nullif(btrim(x.aq_short_event_id), ''))
- ) AS v(channel, ext)
- WHERE v.ext IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM public.exos_channel_event_links l
-                    WHERE l.channel = v.channel AND l.external_event_id = v.ext)
-ON CONFLICT (event_id, channel) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- Staff: link an event by hand, or reject every candidate (id NULL).

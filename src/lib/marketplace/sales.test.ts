@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import {
-  normalizeSeatGeekOrder,
   normalizeStubHubSale,
   planDelivery,
   recordPayload,
-  seatGeekChannel,
   stubHubChannel,
+  type MarketplaceChannel,
 } from '.';
+
+// A channel that can't take ticket links through its API.
+const NO_LINKS: MarketplaceChannel = {
+  id: 'vivid', label: 'Vivid Seats',
+  capabilities: { findEvents: false, createEvent: false, listings: false, fulfilByUrls: false },
+};
 
 const T1 = '00000000-0000-4000-8000-000000000001';
 const T2 = '00000000-0000-4000-8000-000000000002';
@@ -26,7 +31,7 @@ describe('recordPayload', () => {
   });
 
   it('leaves out what the marketplace did not send', () => {
-    const p = recordPayload(normalizeSeatGeekOrder({ sg_order_id: 'SG-1', status: 'confirmed', sale_quantity: 1 }));
+    const p = recordPayload(normalizeStubHubSale({ id: 1, status: 'Confirmed', number_of_tickets: 1 }));
     expect(p).not.toHaveProperty('proceeds');
     expect(p).not.toHaveProperty('confirm_by');
     expect(p).not.toHaveProperty('raw');
@@ -51,8 +56,8 @@ describe('planDelivery', () => {
     });
   });
 
-  it('hands SeatGeek sales to a human with the links ready', () => {
-    const plan = planDelivery(seatGeekChannel(), order, 'https://x.test/bridge');
+  it('hands a channel without link delivery to a human, links ready', () => {
+    const plan = planDelivery(NO_LINKS, order, 'https://x.test/bridge');
     expect(plan).toMatchObject({ kind: 'manual', claim_urls: [`https://x.test/bridge/claim/${T1}`, `https://x.test/bridge/claim/${T2}`] });
     expect(plan.kind === 'manual' && plan.reason).toMatch(/by hand/);
   });

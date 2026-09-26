@@ -5,8 +5,8 @@
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: exos_marketplace_orders (new)
 --              exos_distribution_listings (+tier_id; requested_qty decremented on a sale)
---              exos_tickets, exos_transfers, exos_ticket_tiers.sold, exos_events.tickets_sold
---                (via exos_fulfil_marketplace_order)
+--              exos_tickets, exos_transfers, exos_ticket_tiers.sold, exos_events.tickets_sold,
+--                exos_mail ('transfer-initiated' to the buyer) (via exos_fulfil_marketplace_order)
 --              exos_marketplace_credentials (new, service_role only)
 --              FUNCTION exos_record_marketplace_order, exos_fulfil_marketplace_order (new,
 --                service_role only)
@@ -14,25 +14,29 @@
 -- Pre-reqs: 20260926191000 (links), 20260924210103 (exos_seats_available),
 --           20260523190000 (exos_distribution_listings)
 --
--- A StubHub sale (webhook / recent updates) or a SeatGeek order (Terminal-2's
--- seatgeek_orders) comes in through exos-marketplace-sales:
+-- A StubHub sale (webhook / recent updates) comes in through
+-- exos-marketplace-sales (StubHub only for now; the table is keyed by channel):
 --
 --   1. exos_record_marketplace_order(sale jsonb): stores it ONLY if it sold
 --      from an Exos listing, matched by the listing id (StubHub external_id =
 --      our exos_distribution_listings.id, or the marketplace's listing id we
 --      recorded). The same seller accounts also carry broker inventory, so an
 --      event match alone is never enough. Idempotent per (channel, order id).
---   2. exos_fulfil_marketplace_order(order): mints the tickets and parks them
---      on the org owner with a pending claim-by-email transfer to the buyer,
---      the same claim flow comps and transfers use (claiming rotates the
---      barcode secret, so nothing handed to the marketplace scans until the
---      buyer claims it). Capacity is claimed like every other mint (house cap,
+--   2. exos_fulfil_marketplace_order(order, app_base): mints the tickets and
+--      parks them on the org owner with a pending claim-by-email transfer to
+--      the buyer, the same claim flow comps and transfers use (claiming
+--      rotates the barcode secret, so nothing handed to the marketplace scans
+--      until the buyer claims it). The tickets reach the buyer two ways:
+--        * as an Exos transfer: it shows under their tickets when they sign
+--          in with that email, and they're emailed ('transfer-initiated')
+--          with one claim link per ticket;
+--        * through the marketplace: the same links, handed over by step 3. Capacity is claimed like every other mint (house cap,
 --      then tier + exos_seats_available), so a marketplace sale takes the seat
 --      from Exos's own storefront and every other channel. If the seat isn't
 --      there (oversold), or there's no buyer email / tier / owner, the order
 --      goes to 'needs_attention' with the reason instead. Idempotent.
---   3. The edge function turns the transfer ids into claim links and plans
---      the marketplace's delivery call (StubHub PATCH /sales/{id}), dry-run.
+--   3. The edge function plans the marketplace's delivery call with those
+--      links (StubHub PATCH /sales/{id}), dry-run.
 --
 -- A cancellation after tickets were issued isn't undone automatically: the
 -- order goes to 'needs_attention' so a human voids the tickets.
@@ -186,7 +190,11 @@ GRANT  EXECUTE ON FUNCTION public.exos_record_marketplace_order(jsonb) TO servic
 -- ---------------------------------------------------------------------------
 -- 2. Fulfil (service_role): mint + claim-by-email transfer per ticket.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.exos_fulfil_marketplace_order(p_order_id uuid)
+-- p_app_base: the public SPA base URL (https, path included, e.g.
+-- https://host/bridge) for the claim links in the buyer's email; without it
+-- the email says to sign in instead.
+DROP FUNCTION IF EXISTS public.exos_fulfil_marketplace_order(uuid);
+CREATE OR REPLACE FUNCTION public.exos_fulfil_marketplace_order(p_order_id uuid, p_app_base text DEFAULT NULL)
 RETURNS TABLE (status text, transfer_ids uuid[], reason text)
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -205,6 +213,10 @@ DECLARE
   v_tr      uuid;
   v_n       int;
   v_why     text;
+  v_label   text;
+  v_safe    text;
+  v_base    text;
+  v_links   text := '';
   i         int;
 BEGIN
   SELECT * INTO o FROM public.exos_marketplace_orders WHERE id = p_order_id FOR UPDATE;
@@ -295,6 +307,30 @@ BEGIN
     UPDATE public.exos_tickets SET pending_transfer_id = v_tr, last_reissue_at = now() WHERE id = v_id;
   END LOOP;
 
+  -- Issue them to the buyer as a transfer they're told about, not only as the
+  -- links the marketplace passes on. Server-built body; names are escaped.
+  v_label := CASE o.channel WHEN 'stubhub' THEN 'StubHub' ELSE initcap(o.channel) END;
+  v_safe := replace(replace(replace(coalesce(v_ev.name, 'your event'), '&', '&amp;'), '<', '&lt;'), '>', '&gt;');
+  IF p_app_base ~ '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$' THEN
+    v_base := rtrim(p_app_base, '/');
+    FOR i IN 1..cardinality(v_trs) LOOP
+      v_links := v_links || '<li><a href="' || v_base || '/claim/' || v_trs[i] || '">Claim ticket ' || i || '</a></li>';
+    END LOOP;
+    v_links := '<ul>' || v_links || '</ul>';
+  END IF;
+  INSERT INTO public.exos_mail (template, to_email, subject, html, created_by, status)
+  VALUES ('transfer-initiated', o.buyer_email,
+          left('Your ' || v_label || ' ticket' || CASE WHEN o.quantity > 1 THEN 's' ELSE '' END || ' for ' || v_safe, 200),
+          '<p>Your ' || v_label || ' order ' ||
+          replace(replace(replace(o.external_order_id, '&', '&amp;'), '<', '&lt;'), '>', '&gt;') ||
+          ' is ' || o.quantity || ' ticket' || CASE WHEN o.quantity > 1 THEN 's' ELSE '' END ||
+          ' for <strong>' || v_safe || '</strong>. ' ||
+          CASE WHEN o.quantity > 1 THEN 'They have' ELSE 'It has' END ||
+          ' been transferred to you on Exos. Sign in with ' || o.buyer_email || ' to claim ' ||
+          CASE WHEN o.quantity > 1 THEN 'them' ELSE 'it' END ||
+          ' and get your entry QR code.</p>' || v_links,
+          v_owner, 'pending');
+
   -- The marketplace took these off its listing; keep our count in step.
   UPDATE public.exos_distribution_listings
      SET requested_qty = greatest(coalesce(requested_qty, 0) - o.quantity, 0), updated_at = now()
@@ -306,5 +342,5 @@ BEGIN
   status := 'fulfilled'; transfer_ids := v_trs; reason := NULL;
   RETURN NEXT;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_fulfil_marketplace_order(uuid) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.exos_fulfil_marketplace_order(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_fulfil_marketplace_order(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_fulfil_marketplace_order(uuid, text) TO service_role;

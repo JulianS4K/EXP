@@ -4,10 +4,9 @@
 // For each channel the organizer ticked (distribution_networks):
 //   * decisions stand: linked / created / rejected rows, and review rows
 //     (waiting on staff), are never touched here
-//   * SeatGeek first tries Terminal-2's own mapping: bridge_event_xref's
-//     tevo_event_id -> seatgeek_event_xref.sg_event_id (read by value)
-//   * otherwise the channel's read-only catalog search + decideMatch();
-//     'unmatched' rows are searched again after RECHECK_HOURS
+//   * the channel's read-only catalog search + decideMatch(); 'unmatched'
+//     rows are searched again after RECHECK_HOURS
+// Only channels in the registry with catalog access take part (StubHub today).
 // Nothing here writes to a marketplace.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -63,15 +62,10 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
   if (!rows.length) return { events: 0, linked: 0, review: 0, unmatched: 0, errors: 0 };
 
   const ids = rows.map((r) => r.id);
-  const [{ data: links, error: lErr }, { data: xrefs, error: xErr }] = await Promise.all([
-    sb.from("exos_channel_event_links").select("event_id, channel, status, checked_at").in("event_id", ids),
-    sb.from("bridge_event_xref").select("exos_event_id, tevo_event_id").in("exos_event_id", ids),
-  ]);
+  const { data: links, error: lErr } = await sb.from("exos_channel_event_links")
+    .select("event_id, channel, status, checked_at").in("event_id", ids);
   if (lErr) throw new Error(`read links: ${lErr.message}`);
-  if (xErr) throw new Error(`read bridge_event_xref: ${xErr.message}`);
-  const linkBy = new Map((links as LinkRow[] ?? []).map((l) => [`${l.event_id}:${l.channel}`, l]));
-  const tevoBy = new Map(((xrefs ?? []) as Array<{ exos_event_id: string; tevo_event_id: number | null }>)
-    .filter((x) => x.tevo_event_id != null).map((x) => [x.exos_event_id, x.tevo_event_id!]));
+  const linkBy = new Map(((links ?? []) as LinkRow[]).map((l) => [`${l.event_id}:${l.channel}`, l]));
 
   const counts = { events: rows.length, linked: 0, review: 0, unmatched: 0, errors: 0 };
   const recheckBefore = now.getTime() - RECHECK_HOURS * 3_600_000;
@@ -88,32 +82,20 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
       if (prior?.checked_at && Date.parse(prior.checked_at) > recheckBefore) continue;
 
       const base = { event_id: ev.id, org_id: ev.org_id, channel: net, checked_at: now.toISOString(), updated_at: now.toISOString() };
-      let row: Record<string, unknown> | null = null;
-
-      // SeatGeek: Terminal-2 already maps TEvo events to SeatGeek events.
-      if (net === "seatgeek" && tevoBy.has(ev.id)) {
-        const { data: sg } = await sb.from("seatgeek_event_xref")
-          .select("sg_event_id").eq("tevo_event_id", tevoBy.get(ev.id)!).not("sg_event_id", "is", null).maybeSingle();
-        if (sg?.sg_event_id != null) {
-          row = { ...base, status: "linked", external_event_id: String(sg.sg_event_id), method: "tevo_xref", confidence: 1, candidates: null };
-        }
-      }
-
-      if (!row) {
-        if (!ch.findEvents) continue; // no catalog access for this channel (yet)
-        try {
-          const d = decideMatch(ref, await ch.findEvents(ref));
-          const top = d.candidates.slice(0, 5).map(candidateJson);
-          row = d.decision === "link"
-            ? { ...base, status: "linked", external_event_id: d.best.candidate.externalEventId, method: "auto_match", confidence: d.best.score, candidates: top }
-            : d.decision === "review"
-            ? { ...base, status: "review", external_event_id: null, method: "auto_match", confidence: d.best.score, candidates: top }
-            : { ...base, status: "unmatched", external_event_id: null, method: "auto_match", confidence: null, candidates: top.length ? top : null };
-        } catch (e) {
-          counts.errors++;
-          console.error("exos-distribute: catalog search failed", net, ev.id, String(e));
-          continue;
-        }
+      if (!ch.findEvents) continue; // no catalog access for this channel (yet)
+      let row: Record<string, unknown>;
+      try {
+        const d = decideMatch(ref, await ch.findEvents(ref));
+        const top = d.candidates.slice(0, 5).map(candidateJson);
+        row = d.decision === "link"
+          ? { ...base, status: "linked", external_event_id: d.best.candidate.externalEventId, method: "auto_match", confidence: d.best.score, candidates: top }
+          : d.decision === "review"
+          ? { ...base, status: "review", external_event_id: null, method: "auto_match", confidence: d.best.score, candidates: top }
+          : { ...base, status: "unmatched", external_event_id: null, method: "auto_match", confidence: null, candidates: top.length ? top : null };
+      } catch (e) {
+        counts.errors++;
+        console.error("exos-distribute: catalog search failed", net, ev.id, String(e));
+        continue;
       }
 
       let { error: upErr } = await sb.from("exos_channel_event_links").upsert(row, { onConflict: "event_id,channel" });

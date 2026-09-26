@@ -1,6 +1,7 @@
 // One interface over the resale marketplaces Exos distributes into.
 //
-// Each marketplace (StubHub, SeatGeek, ...) is a MarketplaceChannel adapter.
+// Each marketplace is a MarketplaceChannel adapter. StubHub is the only one
+// wired today (./stubhub/channel.ts); the others plug in the same way.
 // The edge functions (exos-distribute, exos-marketplace-sales) run every
 // channel the same way:
 //
@@ -90,7 +91,7 @@ export interface MarketplaceSale {
 export interface ChannelCapabilities {
   /** Read-only catalog search to link events. */
   findEvents: boolean;
-  /** The marketplace lets a seller create an event (StubHub yes, SeatGeek no). */
+  /** The marketplace lets a seller create an event (StubHub: PUT /sellerevents). */
   createEvent: boolean;
   /** Exos can list inventory on it directly (vs through Automatiq). */
   listings: boolean;
