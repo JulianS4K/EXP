@@ -54,6 +54,7 @@ import type {
   Webhook,
   CatalogPageQuery,
 } from './types';
+import type { ListingConstraints, RequestedEvent } from './listing';
 
 export { StubHubError, STUBHUB_ENVIRONMENTS, toQueryString, type StubHubEnvironment } from './transport';
 
@@ -193,11 +194,21 @@ export class StubHubClient {
   }
 
   listEventListingConstraints(eventId: number) {
-    return this.json<unknown>('listEventListingConstraints', { path: { eventId } });
+    return this.json<ListingConstraints>('listEventListingConstraints', { path: { eventId } });
   }
 
   getSellerListingConstraints(listingId: number) {
-    return this.json<unknown>('getSellerListingConstraints', { path: { listingId } });
+    return this.json<ListingConstraints>('getSellerListingConstraints', { path: { listingId } });
+  }
+
+  /** Constraints (incl. accepted ticket types) for an event StubHub may not have yet. Changes nothing. */
+  getRequestedEventListingConstraints(req: RequestedEvent) {
+    return this.json<ListingConstraints>('getRequestedEventListingConstraints', { body: req });
+  }
+
+  /** Quote a requested-event listing. StubHub creates nothing. */
+  previewSellerListingForRequestedEvent(draft: SellerListingDraft & RequestedEvent) {
+    return this.json<SellerListing>('previewSellerListingForRequestedEvent', { body: serializeDraft(draft) });
   }
 
   listSellerEvents(query: Omit<SellerListingQuery, 'event_id' | 'requested_event_id'> = {}) {

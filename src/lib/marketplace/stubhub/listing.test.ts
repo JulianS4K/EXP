@@ -3,7 +3,9 @@ import {
   ListingMappingError,
   allowedValues,
   buildCreateListingRequest,
+  buildRequestedEvent,
   buildRequestedEventListingRequest,
+  pickTicketType,
   checkListingConstraints,
   type ExosDistributionRow,
   type ListingDetails,
@@ -148,5 +150,42 @@ describe('buildRequestedEventListingRequest', () => {
     expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, name: ' ' })).toThrow(/event name/);
     expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, venueCity: '' })).toThrow(/venue/);
     expect(() => buildRequestedEventListingRequest(ROW, DETAILS, { ...EV, countryCode: 'USA' })).toThrow(/3166/);
+  });
+});
+
+describe('pickTicketType', () => {
+  const types = (...items: Array<{ type: string; name?: string }>) => ({ _embedded: { ticket_types: items } });
+
+  it('prefers ticket transfer, then mobile transfer, returning the event\'s own type string', () => {
+    expect(pickTicketType(types({ type: 'ETicket' }, { type: 'MobileTransfer' }, { type: 'TicketTransfer' }))).toBe('TicketTransfer');
+    expect(pickTicketType(types({ type: 'ETicket' }, { type: 'MobileTransfer' }))).toBe('MobileTransfer');
+  });
+
+  it('matches on display name and ignores case/spacing', () => {
+    expect(pickTicketType(types({ type: '7', name: 'Mobile Transfer' }))).toBe('7');
+    expect(pickTicketType(types({ type: 'mobile_transfer' }))).toBe('mobile_transfer');
+  });
+
+  it('refuses to guess when the event accepts neither, listing what it does accept', () => {
+    expect(() => pickTicketType(types({ type: 'ETicket', name: 'E-ticket' }, { type: 'Paper' }))).toThrow(
+      /TicketTransfer \/ MobileTransfer; available: ETicket \(E-ticket\), Paper/,
+    );
+    expect(() => pickTicketType({})).toThrow(/none listed/);
+  });
+
+  it('takes a custom preference', () => {
+    expect(pickTicketType(types({ type: 'ETicket' }), ['ETicket'])).toBe('ETicket');
+  });
+});
+
+describe('buildRequestedEvent', () => {
+  it('is the shared event/venue/country body', () => {
+    expect(
+      buildRequestedEvent({ name: 'Show', startsAt: '2026-11-01T00:00:00Z', venueName: 'Hall', venueCity: 'Austin', countryCode: 'US' }),
+    ).toEqual({
+      event: { name: 'Show', start_date: '2026-11-01T00:00:00.000Z', date_confirmed: true },
+      venue: { name: 'Hall', city: 'Austin' },
+      country: { code: 'US' },
+    });
   });
 });

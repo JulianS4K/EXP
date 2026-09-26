@@ -23,10 +23,11 @@ Auth on every endpoint: **OAuth2** (bearer token). Responses are
 | Which token | Client credentials (app-only) covers **public data only** (catalog). Seller listings, sales, payments and webhooks need a **user-login** (authorization-code) token. Its refresh token is **single-use**, so every refresh must store the new one. App-only tokens don't get one. |
 | Scopes | `read:events`, `read:payment`, `read:sales`, `write:sales`, `read:sellerlistings`, `write:sellerlistings`, `read:webhooks`, `write:webhooks`, `write:requestedevents` |
 | User-Agent | **Required**: missing → 400 `user_agent_required`. |
+| Event create | `PUT /sellerevents` with `{ event: { name, start_date, date_confirmed?, note? }, venue: { name, city, state_province? }, country?: { code } }` asks StubHub to create an event (scope `write:requestedevents`) and returns a `SellerEvent`. A requested-event listing (`POST /sellerlistings`) also creates its event, asynchronously. The same body on `PUT /listingconstraints` returns that event's listing constraints without creating anything. |
 | Listing create | StubHub recommends `POST /sellerlistings` (**requested event**: event + venue as text, and StubHub maps or creates the event). Required: `seating` (`section` required), `ticket_type`, `split_type`, `number_of_tickets`, plus `ticket_price` **or** `ticket_proceeds`. |
 | `external_id` | Creating with an `external_id` that already exists makes StubHub **delete the old listing and create a new one**. |
 | `split_type` | `Any`, `None`, `AvoidOne`, `AvoidOneAndThree`, `Pairs`. Constraint items are `{ type, name, description }`; send `type`. |
-| `ticket_type` | Not enumerated. The guide uses `ETicket`. Per-event values come from the constraints' `ticket_types[]` = `{ type, name, id }`; send `type`. |
+| `ticket_type` | Not enumerated anywhere. Each event's constraints list what it accepts in `ticket_types[]` = `{ type, name, id }`; send `type`. For an event StubHub doesn't have yet, `PUT /listingconstraints` with the requested-event body returns them. **Exos uses ticket transfer, then mobile transfer**, picked from that list by `pickTicketType()`. |
 | `eticket_urls` item | `{ url, index? }` |
 | `barcodes` item | `{ seat_ordinal, seat, row, barcode_values[] }` |
 | Ticket holders | `GET /sales/{id}/ticketholders` returns one `TicketHolder`, which includes `email_address`. |
@@ -58,7 +59,7 @@ Priority, as encoded in `STUBHUB_WRITE_ROADMAP` (`src/lib/marketplace/stubhub/wr
 
 | # | Phase | Endpoints | Needs first |
 |---|---|---|---|
-| 1 | **Listing creation** | `POST /sellerlistings` (requested event, recommended), then `POST /events/{eventId}/sellerlistings` (known event) | User-login token with `write:sellerlistings`; preview; constraints for known events |
+| 1 | **Event + listing creation** | `POST /sellerlistings` (requested event, recommended; creates the event too), `PUT /sellerevents` (create the event on its own), `POST /events/{eventId}/sellerlistings` (known event) | User-login token with `write:sellerlistings` + `write:requestedevents`; constraints via `PUT /listingconstraints`; preview |
 | 2 | Listing management | `PATCH` / `DELETE /externalsellerlistings/{externalId}` | Phase 1; oversell guard |
 | 3 | **Sale fulfilment** | `PATCH /sales/{saleId}` (confirm + `eticket_urls`), `DELETE /sales/{saleId}` (reject) | `write:sales`; `Sales` webhook or `/sales/recentupdates`; buyer email from `/ticketholders` |
 | 4 | E-ticket PDF delivery (fallback) | `POST /sales/{saleId}/eticketuploads`, `POST`/`DELETE .../etickets` | Phase 3 |
@@ -254,8 +255,14 @@ Chosen 2026-09-26. For each StubHub sale:
 
 Not built yet (step 2): a service-side "mint + transfer to email" RPC. The
 current `exos_create_transfer` runs as the ticket's owner via the caller's
-JWT. It's a migration + edge function, so it's authored in Terminal-2 while
-the DB is shared.
+JWT. The RPC is a migration (authored in Terminal-2 while the DB is shared);
+the edge function that calls it lives here with the other Exos functions.
+
+Ticket type vs. delivery: Exos lists as **ticket transfer / mobile
+transfer** and delivers by e-ticket URL. StubHub may expect a transfer-type
+listing to be fulfilled with `mobile_provider` + `transfer_confirmation_number`
+rather than `eticket_urls`. Exos isn't on the provider list, so run the
+first sandbox sale end to end before going live.
 
 Open questions for go-live:
 
@@ -264,9 +271,9 @@ Open questions for go-live:
   relay address the buyer can't sign in to claim. Check on a real sandbox
   sale. If there's no email, `buyerEmail()` returns null and that sale
   needs a human.
-- **`ticket_type` for Exos tickets.** Not enumerated. `ETicket` (the guide's
-  example) is the likely fit for URL delivery. Confirm with a sandbox
-  preview.
+- **Transfer ticket types per event.** `pickTicketType()` throws when an event
+  accepts neither ticket transfer nor mobile transfer, listing what it does
+  accept. Decide per case whether to fall back (e.g. `ETicket`).
 - **Webhook delivery-id header name.** The spec says each delivery has a
   unique id but doesn't name the header. Read it off the first sandbox
   delivery.

@@ -19,7 +19,7 @@
 // blindly; `createOrAdoptListing` resolves it on the next run by looking the
 // listing up by `external_id` first.
 
-import type { StubHubClient } from './client';
+import type { StubHubClient, StubHubScope } from './client';
 import { StubHubError } from './client';
 import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints';
 import {
@@ -36,6 +36,7 @@ import {
 import type {
   CreateRequestedEventListingRequest,
   CreateSellerListingRequest,
+  RequestedEvent,
   UpdateSellerListingRequest,
 } from './listing';
 import {
@@ -46,7 +47,7 @@ import {
   type MobileTransferProvider,
   type UpdateSaleRequest,
 } from './fulfilment';
-import type { Sale, SellerListing } from './types';
+import type { Sale, SellerEvent, SellerListing } from './types';
 
 type WriteEndpoints = {
   [K in EndpointName]: (typeof STUBHUB_ENDPOINTS)[K]['access'] extends 'write' ? K : never;
@@ -54,28 +55,38 @@ type WriteEndpoints = {
 export type WriteEndpointName = WriteEndpoints;
 
 /** Build order for the write side: listing creation first, then sales. */
-export const STUBHUB_WRITE_ROADMAP: ReadonlyArray<{ phase: string; endpoints: readonly WriteEndpointName[] }> = [
+export const STUBHUB_WRITE_ROADMAP: ReadonlyArray<{
+  phase: string;
+  endpoints: readonly WriteEndpointName[];
+  scopes: readonly StubHubScope[];
+}> = [
   {
     // Requested-event create first: StubHub's recommended route, and Exos
-    // events usually aren't in their catalog.
-    phase: '1. Listing creation',
-    endpoints: ['createSellerListingForRequestedEvent', 'createSellerListing'],
+    // events usually aren't in their catalog. createSellerEvent creates the
+    // event on its own (PUT /sellerevents) when we want it before listing.
+    phase: '1. Event + listing creation',
+    endpoints: ['createSellerListingForRequestedEvent', 'createSellerEvent', 'createSellerListing'],
+    scopes: ['write:sellerlistings', 'write:requestedevents'],
   },
   {
     phase: '2. Listing management (price/qty sync, delist)',
     endpoints: ['updateSellerListingByExternalId', 'deleteSellerListingByExternalId'],
+    scopes: ['write:sellerlistings'],
   },
   {
     phase: '3. Sale fulfilment (confirm + e-ticket URLs)',
     endpoints: ['updateSale', 'rejectSale'],
+    scopes: ['write:sales'],
   },
   {
     phase: '4. E-ticket PDF delivery (fallback)',
     endpoints: ['uploadSaleETickets', 'saveSaleETickets', 'deleteSaleETicket'],
+    scopes: ['write:sales'],
   },
   {
     phase: '5. Webhook registration',
     endpoints: ['createWebhook', 'updateWebhook', 'deleteWebhook', 'pingWebhook'],
+    scopes: ['write:webhooks'],
   },
 ];
 
@@ -190,7 +201,17 @@ export class StubHubWriter {
     return { dryRun: false, planned, response: response as T };
   }
 
-  // ── 1. Listing creation ────────────────────────────────────────────
+  // ── 1. Event + listing creation ────────────────────────────────────
+
+  /**
+   * PUT /sellerevents: ask StubHub to create the event (scope
+   * write:requestedevents). Returns a SellerEvent; poll getSellerEvent with
+   * the returned id until it goes live. Not needed before a requested-event
+   * listing, which creates the event itself.
+   */
+  requestEvent(req: RequestedEvent) {
+    return this.write<SellerEvent>('createSellerEvent', { body: req });
+  }
 
   /** POST /sellerlistings: StubHub maps (or creates) the event from the text we send. */
   createListingForRequestedEvent(req: CreateRequestedEventListingRequest) {

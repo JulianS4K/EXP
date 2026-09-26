@@ -19,11 +19,18 @@
 // a retry doesn't churn a live listing.
 //
 // Flow once writes are authorized (see writer.ts):
-//   1. build*ListingRequest(exos row …)               → request
-//   2. constraints (known events): client.listEventListingConstraints(id)
+//   1. constraints: client.getRequestedEventListingConstraints(buildRequestedEvent(ev))
+//      (or listEventListingConstraints(id) for a known event)
+//   2. ticketType = pickTicketType(constraints)       → ticket / mobile transfer
+//   3. build*ListingRequest(exos row, { ticketType, … }, ev)
 //      then checkListingConstraints(request, constraints)
-//   3. preview: client.previewSellerListing[ForRequestedEvent](…)
-//   4. writer.createOrAdopt*(…)                       → dry-run plan, or live call
+//   4. preview: client.previewSellerListing[ForRequestedEvent](…)
+//   5. writer.createOrAdopt*(…)                       → dry-run plan, or live call
+//
+// Event creation on its own: writer.requestEvent(buildRequestedEvent(ev))
+// (PUT /sellerevents). The requested-event listing create also creates the
+// event implicitly, so requestEvent is only needed to create an event
+// before listing on it.
 
 import type { BarcodeInformation, Money, MoneyInput, Seating } from './types';
 
@@ -39,7 +46,7 @@ export interface SeatingRequest extends Seating {
 export interface CreateSellerListingRequest {
   // Required by the docs.
   seating: SeatingRequest;
-  /** e.g. "ETicket"; valid values per event come from the constraints' ticket_types[].type. */
+  /** Per-event value from the constraints' ticket_types[].type; Exos uses pickTicketType(). */
   ticket_type: string;
   split_type: SplitType;
   number_of_tickets: number;
@@ -75,12 +82,7 @@ export interface ExternalEventInformation {
 }
 
 /** Body of POST /sellerlistings (create for a requested event). */
-export interface CreateRequestedEventListingRequest extends CreateSellerListingRequest {
-  event: { name: string; start_date: string; date_confirmed?: boolean; note?: string };
-  venue: { name: string; city: string; state_province?: string };
-  /** Two-letter ISO 3166. */
-  country?: { code: string };
-}
+export type CreateRequestedEventListingRequest = CreateSellerListingRequest & RequestedEvent;
 
 /**
  * Body of PATCH /sellerlistings/{id}. StubHub blanks any seating field left
@@ -123,7 +125,7 @@ export interface ExosDistributionRow {
 }
 
 export interface ListingDetails {
-  /** e.g. "ETicket"; for a known event, one of its constraints' ticket_types[].type. */
+  /** From pickTicketType(constraints): the event's ticket-transfer / mobile-transfer type. */
   ticketType: string;
   splitType: SplitType;
   section: string;
@@ -196,7 +198,7 @@ export function buildCreateListingRequest(row: ExosDistributionRow, d: ListingDe
   return req;
 }
 
-/** The Exos event, as StubHub's requested-event listing needs it. */
+/** The Exos event, as StubHub's requested-event endpoints need it. */
 export interface ExosEventForListing {
   name: string;
   startsAt: Date | string;
@@ -209,12 +211,18 @@ export interface ExosEventForListing {
   dateConfirmed?: boolean;
 }
 
-export function buildRequestedEventListingRequest(
-  row: ExosDistributionRow,
-  d: ListingDetails,
-  ev: ExosEventForListing,
-): CreateRequestedEventListingRequest {
-  const base = buildCreateListingRequest(row, d);
+/**
+ * PutRequestedEventRequest: the body of both PUT /sellerevents (ask StubHub
+ * to create the event) and PUT /listingconstraints (constraints for it).
+ */
+export interface RequestedEvent {
+  event: { name: string; start_date: string; date_confirmed?: boolean; note?: string };
+  venue: { name: string; city: string; state_province?: string };
+  /** Two-letter ISO 3166. */
+  country?: { code: string };
+}
+
+export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
   const start = ev.startsAt instanceof Date ? ev.startsAt : new Date(ev.startsAt);
   if (Number.isNaN(start.getTime())) throw new ListingMappingError('event start is not a date');
   if (!ev.name.trim()) throw new ListingMappingError('event name is required');
@@ -222,14 +230,60 @@ export function buildRequestedEventListingRequest(
   if (ev.countryCode != null && !/^[A-Z]{2}$/.test(ev.countryCode)) {
     throw new ListingMappingError(`country must be ISO 3166 alpha-2, got "${ev.countryCode}"`);
   }
-  const req: CreateRequestedEventListingRequest = {
-    ...base,
+  const req: RequestedEvent = {
     event: { name: ev.name.trim(), start_date: start.toISOString(), date_confirmed: ev.dateConfirmed ?? true },
     venue: { name: ev.venueName.trim(), city: ev.venueCity.trim() },
   };
   if (ev.venueStateProvince) req.venue.state_province = ev.venueStateProvince;
   if (ev.countryCode) req.country = { code: ev.countryCode };
   return req;
+}
+
+export function buildRequestedEventListingRequest(
+  row: ExosDistributionRow,
+  d: ListingDetails,
+  ev: ExosEventForListing,
+): CreateRequestedEventListingRequest {
+  return { ...buildCreateListingRequest(row, d), ...buildRequestedEvent(ev) };
+}
+
+// ── Ticket type ──────────────────────────────────────────────────────
+
+/**
+ * Exos lists tickets as a transfer (decided 2026-09-26): ticket transfer
+ * first, mobile transfer second. StubHub doesn't enumerate ticket_type
+ * values; each event's constraints list what it accepts. So we never send a
+ * guessed string: `pickTicketType` returns the constraint's own `type`.
+ */
+export const EXOS_TICKET_TYPE_PREFERENCE = ['TicketTransfer', 'MobileTransfer'] as const;
+
+const squashType = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+
+/**
+ * The first preferred type the event accepts, matched on the constraint's
+ * `type` or display `name` ignoring case, spaces and punctuation ("Mobile
+ * Transfer", "mobile_transfer" and "MobileTransfer" all match). Throws with
+ * the available types when none match, so a human picks rather than us.
+ */
+export function pickTicketType(
+  constraints: ListingConstraints,
+  preference: readonly string[] = EXOS_TICKET_TYPE_PREFERENCE,
+): string {
+  const available: Array<{ type: string; name?: string }> = [];
+  for (const item of constraints._embedded?.ticket_types ?? []) {
+    if (item && typeof item === 'object') {
+      const t = (item as Record<string, unknown>).type;
+      const n = (item as Record<string, unknown>).name;
+      if (typeof t === 'string' && t) available.push({ type: t, name: typeof n === 'string' ? n : undefined });
+    }
+  }
+  for (const want of preference) {
+    const key = squashType(want);
+    const hit = available.find((a) => squashType(a.type) === key || (a.name != null && squashType(a.name) === key));
+    if (hit) return hit.type;
+  }
+  const listed = available.map((a) => (a.name ? `${a.type} (${a.name})` : a.type)).join(', ') || 'none listed';
+  throw new ListingMappingError(`event accepts none of ${preference.join(' / ')}; available: ${listed}`);
 }
 
 // ── Pre-flight constraint check ──────────────────────────────────────
