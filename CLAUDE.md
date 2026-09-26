@@ -24,11 +24,19 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
 ## Rules carried over from Terminal-2
 
 - **The database is shared with Terminal-2's broker data.** Read `supabase/README.md`
-  before writing a migration or touching an edge function: while the DB is shared,
-  migrations and `exos-*` functions are authored in Terminal-2 and copied here. Prod `apply_migration`, DML/DDL, cron changes,
-  and edge-function deploys need explicit operator permission. Reads are free.
+  before writing a migration or touching an edge function. Edge functions (`exos-*`,
+  `stripe-webhook`), `*exos*` migrations and the `tests/exos` SQL harnesses are all
+  authored **here**. Migration filenames must contain `exos`, and their timestamps
+  share one history with Terminal-2's (check both repos for the prefix). Prod
+  `apply_migration`, DML/DDL, cron changes, and edge-function deploys need explicit
+  operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
   Never add order/hold/price/inventory writes to a third party.
+  Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
+  endpoint tagged read or write. The StubHub write foundation
+  (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it
+  live needs a recorded operator `WriteAuthorization`, and nothing in Exos
+  does that today.
 - Edge functions are Deno; they're excluded from the Node `tsconfig`/eslint.
 
 ## Open-source references (hi.events, pretix)

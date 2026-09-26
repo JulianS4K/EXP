@@ -1,0 +1,7412 @@
+StubHub Inventory API (2.249.0.0)
+SellerListings
+List tickets, update your listings and search your inventory.
+Update a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+REQUEST BODY SCHEMA: application/json
+One of PatchSellerListingRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+string or null
+listingId
+required
+ticket_price
+ticket_proceeds
+seating
+face_value
+ticket_type
+split_type
+number_of_tickets
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+external_id
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+barcodes
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+PATCH /sellerlistings/{listingId}
+Payload
+Response samples
+application/json
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+Content type
+200 400 401 403 500
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+Content type
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Get a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+listingId
+required
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+sales_tax_paid
+_links
+_embedded
+GET /sellerlistings/{listingId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+Content type
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Delete a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+Responses
+— 204
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+listingId
+required
+DELETE /sellerlistings/{listingId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+List seller listings (recent updates)
+List seller listings for the authenticated user that have been created or updated over a certain period of time.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+updated_since
+Content type
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(SellerListingsLinks (object or null))
+(SellerListingsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerlistings/recentupdates
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+List seller listings
+List seller listings for the authenticated user.
+Content type
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+integer or null <int32>
+string or null <guid>
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing available_tickets , created_at , event_date , event_name , expiration_date , price , resource_version , or ticket_availability_date .
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(SellerListingsLinks (object or null))
+(SellerListingsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+event_id
+requested_event_id
+page
+page_size
+updated_since
+sort
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerlistings
+application/hal+json
+Expand all Collapse allCopy
+Content type
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Create a seller listing for a requested event
+Creates a seller listing for an event requested by the current user.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PostRequestedEventSellerListingRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+ticket_price
+ticket_proceeds
+seating
+required
+face_value
+ticket_type
+required
+split_type
+required
+number_of_tickets
+required
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+integer or null <int32>
+Used when relisting tickets previously purchased on Stubhub marketplace. Include the transaction ID in the id value field.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+boolean or null
+Whether the listing represents a shorted ticket
+boolean or null
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+(EventRequest (object or null))
+The event information.
+(VenueRequest (object or null))
+The venue where the event will take place.
+(CountryRequest (object or null))
+The country where the event will take place.
+Responses
+201
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+external_id
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+relist_transaction_id
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+is_ticket_concierge
+is_auto_po
+barcodes
+event
+venue
+country
+id
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+sales_tax_paid
+_links
+_embedded
+POST /sellerlistings
+application/json
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+Content type
+Response samples
+201 400 401 403 500
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"relist_transaction_id": 0
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"event": -
+{
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"note": "string"
+}
+,
+"venue": -
+{
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+}
+,
+"country": -
+{
+"code": "string"
+}
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+Content type
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Create a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+REQUEST BODY SCHEMA: application/json
+One of PostSellerListingRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+eventId
+required
+ticket_price
+ticket_proceeds
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+integer or null <int32>
+Used when relisting tickets previously purchased on Stubhub marketplace. Include the transaction ID in the id value field.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+seating
+required
+face_value
+ticket_type
+required
+split_type
+required
+number_of_tickets
+required
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+external_id
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+relist_transaction_id
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+boolean or null
+Whether the listing represents a shorted ticket
+boolean or null
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+201
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+is_ticket_concierge
+is_auto_po
+barcodes
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+POST /events/{eventId}/sellerlistings
+application/json
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+Content type
+Response samples
+201 400 401 403 500
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"relist_transaction_id": 0
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+Content type
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+SellerListings (External Id)
+Manage your inventory using identifiers from an external inventory management system.
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Get a seller listing by external ID
+Get a seller listing by identifier that has been assigned to the listing in an external inventory management system.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+string or nullexternallistingId
+required
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+GET /externalsellerlistings/{externallistingId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+Content type
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Update a seller listing by external ID
+Update a seller listing by identifier that has been assigned to the listing in an external inventory management system.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+string or null
+REQUEST BODY SCHEMA: application/json
+One of PatchSellerListingRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+externalId
+required
+ticket_price
+ticket_proceeds
+seating
+face_value
+ticket_type
+split_type
+number_of_tickets
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+external_id
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+barcodes
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+PATCH /externalsellerlistings/{externalId}
+Request samples
+Payload
+application/json
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+Content type
+Response samples
+200 400 401 403 500
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+Content type
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Delete a seller listing by external ID
+Delete a seller listing by identifier that has been assigned to the listing in an external inventory management system.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+string or null
+Responses
+— 204
+externalId
+required
+SellerListings (Preview)
+Preview the changes you want to make to your inventory.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+DELETE /externalsellerlistings/{externalId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+Preview a seller listing
+Creates a preview of a seller listing. The listing will not have an id  and will not actually be created on the StubHub marketplace.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+REQUEST BODY SCHEMA: application/json
+One of PostSellerListingPreviewRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+eventId
+required
+ticket_price
+ticket_proceeds
+seating
+required
+Content type
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+face_value
+ticket_type
+required
+split_type
+required
+number_of_tickets
+required
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+external_id
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+barcodes
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+POST /events/{eventId}/sellerlistingpreview
+application/json
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+Content type
+Response samples
+200 400 401 403 500
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+Content type
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Preview a seller listing update
+Creates a preview of an update to a seller listing. The updates will not actually be applied to the listing on the StubHub marketplace.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+REQUEST BODY SCHEMA: application/json
+One of PostSellerListingPreviewRequest
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+listingId
+required
+ticket_price
+ticket_proceeds
+seating
+required
+face_value
+ticket_type
+required
+split_type
+required
+number_of_tickets
+required
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+external_id
+notes
+instant_delivery
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+published
+lms_optin
+eticket_ids
+external_event_information
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+barcodes
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+POST /sellerlistings/{listingId}/updatepreview
+application/json
+Content type
+Response samples
+200 400 401 403 500
+Expand all Collapse allCopy
+{
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+application/hal+json
+Content type
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Preview a seller listing for a requested event
+Creates a preview of a seller listing for an event requested by the current user. The listing will not have an id  and will not actually be created on the StubHub marketplace.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PostRequestedEventSellerListingPreviewRequest
+(EventRequest (object or null))
+The event information.
+(VenueRequest (object or null))
+The venue where the event will take place.
+event
+venue
+(CountryRequest (object or null))
+The country where the event will take place.
+(Money (object or null))
+The price of each ticket in the listing.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+(SeatingRequest (object or null))
+The seating information for the ticket(s) in this listing. For PATCH Requests, you need to pass in all the fields of a Seating to update, even when you only need to update some of the fields. Otherwise the rest of the fields will
+be set to empty.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+string or null
+The type of ticket(s) in this listing.
+string or null
+The way that the ticket(s) are allowed to be split up when sold.
+integer or null <int32>
+The number of tickets available for purchase.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+integer or null <int32>
+The identifier of the address where the ticket(s) are located.
+Array of integers or null <int32>
+An array of listing note identifiers that provides additional notes on the listing
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null
+A comma-separated string of additional notes about the listing
+boolean or null
+boolean or null
+True when the listing should be published; Otherwise, false.
+boolean or null
+True when the listing should be opted into Last Minute Sales; Otherwise, false.
+Array of integers or null <int32>
+A array of the identifiers of the E-Tickets to be assigned to the listing.
+integer or null <int32>
+Used when relisting tickets previously purchased on Stubhub marketplace. Include the transaction ID in the id value field.
+Array of objects or null (SellerListingExternalEventInformation)
+Information about the listing's event on other platforms.
+country
+ticket_price
+ticket_proceeds
+seating
+required
+face_value
+ticket_type
+required
+split_type
+required
+number_of_tickets
+required
+display_number_of_tickets
+ticket_location_address_id
+listing_note_ids
+in_hand_at
+external_id
+notes
+instant_delivery
+published
+lms_optin
+eticket_ids
+relist_transaction_id
+external_event_information
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+boolean or null
+Whether the listing represents a shorted ticket
+boolean or null
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation2)
+Barcode(s) for the ticket(s) in this listing.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+is_ticket_concierge
+is_auto_po
+barcodes
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of
+paper tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+sales_tax_paid
+_links
+_embedded
+POST /sellerlistingpreview
+application/json
+Expand all Collapse allCopy
+Content type
+{
+"event": -
+{
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"note": "string"
+}
+,
+"venue": -
+{
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+}
+,
+"country": -
+{
+"code": "string"
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"hide_seat_details": true
+}
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_type": "string"
+,
+"split_type": "string"
+,
+"number_of_tickets": 0
+,
+"display_number_of_tickets": 0
+,
+"ticket_location_address_id": 0
+,
+"listing_note_ids": -
+[
+0
+]
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"notes": "string"
+,
+"instant_delivery": true
+,
+"published": true
+,
+"lms_optin": true
+,
+"eticket_ids": -
+[
+0
+]
+,
+"relist_transaction_id": 0
+,
+"external_event_information": -
+[
+ … +
+{
+}
+]
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+Response samples
+200 400 401 403 500
+"sales_tax_paid": true
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+Content type
+E-Tickets
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+Upload e-tickets for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketUploadsLinks (object or null))
+(ETicketUploadsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 400 401 403 500
+listingId
+required
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+POST /sellerlistings/{listingId}/eticketuploads
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+Content type
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+List e-ticket uploads for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketUploadsLinks (object or null))
+(ETicketUploadsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+listingId
+required
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerlistings/{listingId}/eticketuploads
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Upload e-tickets for an event
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketUploadsLinks (object or null))
+(ETicketUploadsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+eventId
+required
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+Content type
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 400 401 403 500
+POST /events/{eventId}/eticketuploads
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+List e-ticket uploads for an event
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+The identifier of the upload.
+string or null
+The name of the file that was uploaded.
+string <date-time>
+eventId
+required
+id
+file_name
+processed_at
+Content type
+The date when all of the E-Tickets in the uploaded file were processed.
+integer <int32>
+The original number of E-Tickets contained in the uploaded file.
+string or null
+A localised in-depth description of the current status of the upload.
+(ETicketUploadLinks (object or null))
+(ETicketUploadEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+original_number_of_etickets
+status_description
+_links
+_embedded
+GET /events/{eventId}/eticketuploads
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"file_name": "string"
+,
+"processed_at": "2019-08-24T14:15:22Z"
+,
+"original_number_of_etickets": 0
+,
+"status_description": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"eticketupload:document":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"etickets":  … +
+[
+]
+}
+}
+List e-tickets for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+listingId
+required
+Content type
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketsLinks (object or null))
+(ETicketsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerlistings/{listingId}/etickets
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"etickets:markback":  … +
+{
+}
+,
+"etickets:markedbackdocuments":  … +
+[
+]
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+Content type
+}
+Mark-back e-tickets from a seller listing
+Removes a certain number of e-tickets that you no longer wish to sell from your listing.
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+REQUEST BODY SCHEMA: application/json
+One of PostMarkBackETicketsRequest
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketsLinks (object or null))
+(ETicketsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+listingId
+required
+page
+page_size
+quantity
+total_items
+page
+page_size
+_links
+_embedded
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+PATCH /sellerlistings/{listingId}/etickets
+application/json
+Copy
+{
+"quantity": 0
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"etickets:markback":  … +
+{
+}
+,
+"etickets:markedbackdocuments":  … +
+[
+]
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Upload and save e-tickets for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+listingId
+required
+page
+page_size
+Content type
+Content type
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketsLinks (object or null))
+(ETicketsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+200 400 401 403 500
+total_items
+page
+page_size
+_links
+_embedded
+POST /sellerlistings/{listingId}/etickets
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"etickets:markback":  … +
+{
+}
+,
+"etickets:markedbackdocuments":  … +
+[
+]
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Delete e-ticket from a seller listing
+Content type
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+integer <int32>
+Responses
+— 204
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+listingId
+required
+eticketId
+required
+DELETE /sellerlistings/{listingId}/etickets/{ETicketId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+Delete e-ticket from an event
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+integer <int32>
+Responses
+— 204
+eventId
+required
+eticketId
+required
+Content type
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+401 403 500
+DELETE /events/{eventId}/etickets/{eticketId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+Get marked back e-ticket file for seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/octet-stream
+string <binary>
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+listingId
+required
+markedBackETicketId
+required
+Content type
+ListingConstraints
+Response samples
+401 403 404 500
+GET /sellerlistings/{listingId}/markedbacketickets/{markedBackETicketId}/document
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+List listing constraints for an event
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+(Money (object or null))
+(Money (object or null))
+integer or null <int32>
+The minimum number of tickets available for purchase.
+integer or null <int32>
+The maximum number of tickets available for purchase.
+boolean or null
+True if a ticket location is required for tickets; Otherwise, false.
+boolean or null
+eventId
+required
+min_ticket_price
+max_ticket_price
+min_number_of_tickets
+max_number_of_tickets
+ticket_location_required
+seats_required
+Content type
+True if seat-level information (seat_to and seat_from) is required; Otherwise, false.
+Array of objects or null (Section)
+The valid section and row information. If no sections are specified then any text will be accepted for section and row.
+boolean or null
+boolean or null
+(ListingConstraintsLinks (object or null))
+(ListingConstraintsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 404 500
+sections
+primary_order_id_required
+home_or_away_required
+_links
+_embedded
+GET /events/{eventId}/listingconstraints
+application/hal+json
+Expand all Collapse allCopy
+{
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"max_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"min_number_of_tickets": 0
+,
+"max_number_of_tickets": 0
+,
+"ticket_location_required": true
+,
+"seats_required": true
+,
+"sections": -
+[
+ … +
+{
+}
+]
+,
+"primary_order_id_required": true
+,
+"home_or_away_required": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"connected_seller_listing_notes":  … +
+[
+]
+,
+"currencies":  … +
+[
+]
+,
+"listing_notes":  … +
+[
+]
+,
+"required_unique_listing_notes":  … +
+[
+]
+,
+"restricted_on_use_listing_notes":  … +
+[
+]
+,
+"split_types":  … +
+[
+]
+,
+"ticket_types":  … +
+[
+]
+}
+Content type
+}
+Get listing constraints for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+(Money (object or null))
+(Money (object or null))
+integer or null <int32>
+The minimum number of tickets available for purchase.
+integer or null <int32>
+The maximum number of tickets available for purchase.
+boolean or null
+True if a ticket location is required for tickets; Otherwise, false.
+boolean or null
+True if seat-level information (seat_to and seat_from) is required; Otherwise, false.
+Array of objects or null (Section)
+The valid section and row information. If no sections are specified then any text will be accepted for section and row.
+boolean or null
+boolean or null
+(ListingConstraintsLinks (object or null))
+(ListingConstraintsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+listingId
+required
+min_ticket_price
+max_ticket_price
+min_number_of_tickets
+max_number_of_tickets
+ticket_location_required
+seats_required
+sections
+primary_order_id_required
+home_or_away_required
+_links
+_embedded
+Response samples
+200 401 403 404 500
+GET /sellerlistings/{listingId}/constraints
+application/hal+json
+Expand all Collapse allCopy
+{
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"max_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"min_number_of_tickets": 0
+,
+"max_number_of_tickets": 0
+,
+"ticket_location_required": true
+,
+"seats_required": true
+,
+"sections": -
+[
+ … +
+{
+}
+]
+,
+"primary_order_id_required": true
+,
+"home_or_away_required": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"connected_seller_listing_notes":  … +
+[
+]
+,
+"currencies":  … +
+[
+]
+,
+"listing_notes":  … +
+[
+]
+,
+"required_unique_listing_notes":  … +
+[
+]
+,
+"restricted_on_use_listing_notes":  … +
+[
+]
+,
+"split_types":  … +
+[
+]
+,
+"ticket_types":  … +
+[
+]
+}
+}
+Get listing constraints for a requested event
+Get listings constraints for an event requested by the current user.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PutRequestedEventRequest
+(EventRequest (object or null))
+The event information.
+(VenueRequest (object or null))
+The venue where the event will take place.
+event
+venue
+Content type
+(CountryRequest (object or null))
+The country where the event will take place.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+(Money (object or null))
+(Money (object or null))
+integer or null <int32>
+The minimum number of tickets available for purchase.
+integer or null <int32>
+The maximum number of tickets available for purchase.
+boolean or null
+True if a ticket location is required for tickets; Otherwise, false.
+boolean or null
+True if seat-level information (seat_to and seat_from) is required; Otherwise, false.
+Array of objects or null (Section)
+The valid section and row information. If no sections are specified then any text will be accepted for section and row.
+boolean or null
+boolean or null
+(ListingConstraintsLinks (object or null))
+(ListingConstraintsEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+country
+min_ticket_price
+max_ticket_price
+min_number_of_tickets
+max_number_of_tickets
+ticket_location_required
+seats_required
+sections
+primary_order_id_required
+home_or_away_required
+_links
+_embedded
+PUT /listingconstraints
+application/json
+Expand all Collapse allCopy
+Content type
+Response samples
+200 400 401 403 500
+{
+"event": -
+{
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"note": "string"
+}
+,
+"venue": -
+{
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+}
+,
+"country": -
+{
+"code": "string"
+}
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"max_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"min_number_of_tickets": 0
+,
+"max_number_of_tickets": 0
+,
+"ticket_location_required": true
+,
+"seats_required": true
+,
+"sections": -
+[
+ … +
+{
+}
+]
+,
+"primary_order_id_required": true
+,
+"home_or_away_required": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"connected_seller_listing_notes":  … +
+[
+]
+,
+"currencies":  … +
+[
+]
+,
+"listing_notes":  … +
+[
+]
+,
+"required_unique_listing_notes":  … +
+[
+]
+,
+"restricted_on_use_listing_notes":  … +
+[
+]
+,
+"split_types":  … +
+[
+]
+,
+"ticket_types":  … +
+[
+]
+}
+}
+Content type
+SellerEvents
+List seller events
+List events with listings that belong to the authenticated user.
+AUTHORIZATIONS: OAuth2
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+string <date-time>
+Filters the response to only return items that have been updated since the given timestamp
+string
+Determines the ordering of items. A comma-separated string containing id , number_of_tickets , or resource_version .
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+One of SellerEvents
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(SellerEventsLinks (object or null))
+(SellerEventsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+page
+page_size
+updated_since
+sort
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerevents
+200 401 403 500
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Create a seller event
+Request for an event to be created on the StubHub marketplace.
+AUTHORIZATIONS: OAuth2
+REQUEST BODY SCHEMA: application/json
+One of PutRequestedEventRequest
+(EventRequest (object or null))
+The event information.
+(VenueRequest (object or null))
+The venue where the event will take place.
+(CountryRequest (object or null))
+The country where the event will take place.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The event identifier.
+string or null
+The name of the event.
+string or null <date-time>
+The date when the event starts.
+event
+venue
+country
+id
+name
+start_date
+Content type
+string or null <date-time>
+The date when the event ends.
+string or null <date-time>
+The date when tickets for the event will go onsale.
+boolean or null
+True if the event start and end date have been confirmed; Otherwise, false.
+Array of objects or null (MergedEntity)
+The list of event ids that are merged into this event.
+(SellerEventLinks (object or null))
+boolean or null
+True if the event is a last minute sale event; otherwise, false.
+(SellerEventEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+end_date
+on_sale_date
+date_confirmed
+merged_events
+_links
+lms
+_embedded
+PUT /sellerevents
+application/json
+Expand all Collapse allCopy
+{
+"event": -
+{
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"note": "string"
+}
+,
+"venue": -
+{
+"name": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+}
+,
+"country": -
+{
+"code": "string"
+}
+}
+Content type
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"merged_events": -
+[
+ … +
+{
+}
+]
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"sellerevent:createsellerlisting":  … +
+{
+}
+,
+"sellerevent:sellerlistings":  … +
+{
+}
+}
+,
+"lms": true
+,
+"_embedded": -
+{
+"external_mappings":  … +
+[
+]
+,
+"sales_aggregates":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+Get a seller event
+Get an event with listings belonging to the current user
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+string or null
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+The event identifier.
+string or null
+The name of the event.
+string or null <date-time>
+The date when the event starts.
+string or null <date-time>
+The date when the event ends.
+eventIdOrRequestedEventId
+required
+id
+name
+start_date
+end_date
+Content type
+string or null <date-time>
+The date when tickets for the event will go onsale.
+boolean or null
+True if the event start and end date have been confirmed; Otherwise, false.
+Array of objects or null (MergedEntity)
+The list of event ids that are merged into this event.
+(SellerEventLinks (object or null))
+boolean or null
+True if the event is a last minute sale event; otherwise, false.
+(SellerEventEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+on_sale_date
+date_confirmed
+merged_events
+_links
+lms
+_embedded
+GET /sellerevents/{eventIdOrRequestedEventId}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+"merged_events": -
+[
+ … +
+{
+}
+]
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"sellerevent:createsellerlisting":  … +
+{
+}
+,
+"sellerevent:sellerlistings":  … +
+{
+}
+}
+,
+"lms": true
+,
+"_embedded": -
+{
+"external_mappings":  … +
+[
+]
+,
+"sales_aggregates":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+Content type
+Shipments
+Get a shipping label for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+integer <int32>
+Responses
+200
+RESPONSE SCHEMA: application/octet-stream
+string <binary>
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+401 403 404 500
+listingId
+required
+shipmentId
+required
+GET /sellerlistings/{listingId}/shipments/{shipmentId}/label
+application/hal+json
+Expand all Collapse allCopy
+{
+"code": "string"
+,
+"message": "string"
+,
+"errors": -
+{
+"property1":  … +
+[
+]
+,
+"property2":  … +
+[
+]
+}
+}
+Content type
+List shipments for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+QUERY PARAMETERS
+integer <int32>
+Specifies which page of data to retrieve.
+integer <int32>
+Set custom page sizes on response.
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ShipmentsLinks (object or null))
+(ShipmentsEmbeddedResources (object or null))
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+404 The URI requested is invalid or the resource requested, such as an event, does not exist.
+500 Internal server error
+Response samples
+200 401 403 404 500
+listingId
+required
+page
+page_size
+total_items
+page
+page_size
+_links
+_embedded
+GET /sellerlistings/{listingId}/shipments
+application/hal+json
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+Content type
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+,
+"shipment:create":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+Print a shipping label for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+The shipment identifier.
+string or null
+The identifier used to track the shipment of the ticket(s).
+(Address (object or null))
+The address that the seller must ship the tickets to.
+(ShipmentLinks (object or null))
+(ShipmentEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Response samples
+listingId
+required
+id
+tracking_number
+delivery_address
+_links
+_embedded
+PUT /sellerlistings/{listingId}/shipments
+200 400 401 403 500
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"tracking_number": "string"
+,
+"delivery_address": -
+{
+"full_name": "string"
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"country_code": "string"
+,
+"country": "string"
+}
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"shipment:entertrackingnumber":  … +
+{
+}
+,
+"shipment:label":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"delivery_method":  … +
+{
+}
+,
+"pickup_addresses":  … +
+[
+]
+,
+"pickups":  … +
+[
+]
+,
+"shipment_state":  … +
+{
+}
+}
+}
+Update a shipment for a seller listing
+AUTHORIZATIONS: OAuth2
+PATH PARAMETERS
+integer <int64>
+integer <int32>
+REQUEST BODY SCHEMA: application/json
+One of PatchShipmentRequest
+string or null
+The identifier used to track the shipment of the ticket(s).
+Responses
+200
+RESPONSE SCHEMA: application/hal+json
+integer <int32>
+listingId
+required
+shipmentId
+required
+tracking_number
+id
+Content type
+The shipment identifier.
+string or null
+The identifier used to track the shipment of the ticket(s).
+(Address (object or null))
+The address that the seller must ship the tickets to.
+(ShipmentLinks (object or null))
+(ShipmentEmbeddedResources (object or null))
+400 The request data is not valid. errors will contain an object with a localized message that describes the validation error for each property of the data.
+401 Authentication credentials were missing or incorrect.
+403 The request is understood, but it has been refused or access is not allowed. An accompanying error message will explain why.
+500 Internal server error
+Request samples
+Payload
+Response samples
+200 400 401 403 500
+tracking_number
+delivery_address
+_links
+_embedded
+PATCH /sellerlistings/{listingId}/shipments/{shipmentId}
+application/json
+Copy
+{
+"tracking_number": "string"
+}
+application/hal+json
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"tracking_number": "string"
+,
+"delivery_address": -
+{
+"full_name": "string"
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"country_code": "string"
+,
+"country": "string"
+}
+,
+Content type
+Content type
+Money
+Returned for monetary values, such as ticket prices, fees charged and tax amounts.
+number or null <decimal>
+The decimal amount of the money.
+string or null
+The ISO 4217 currency code that the monetary value is represented in.
+string or null
+A user-friendly string representing the monetary value.
+ETickets
+The ETickets resource is a collection resource that contains zero or more references to a set of E-Tickets, and links that guide you on ways to interact with the E-Tickets. The collection offers a paginated view of E-Tickets.
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketsLinks (object or null))
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"shipment:entertrackingnumber":  … +
+{
+}
+,
+"shipment:label":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"delivery_method":  … +
+{
+}
+,
+"pickup_addresses":  … +
+[
+]
+,
+"pickups":  … +
+[
+]
+,
+"shipment_state":  … +
+{
+}
+}
+}
+amount
+required
+currency_code
+required
+display
+Copy
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+total_items
+page
+page_size
+_links
+(ETicketsEmbeddedResources (object or null))
+ETicketUpload
+Represents an uploaded file that contains one or more E-Tickets.
+integer <int32>
+The identifier of the upload.
+string or null
+The name of the file that was uploaded.
+string <date-time>
+The date when all of the E-Tickets in the uploaded file were processed.
+integer <int32>
+The original number of E-Tickets contained in the uploaded file.
+string or null
+A localised in-depth description of the current status of the upload.
+(ETicketUploadLinks (object or null))
+(ETicketUploadEmbeddedResources (object or null))
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"etickets:markback":  … +
+{
+}
+,
+"etickets:markedbackdocuments":  … +
+[
+]
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+id
+file_name
+processed_at
+original_number_of_etickets
+status_description
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+ETicketUploads
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ETicketUploadsLinks (object or null))
+(ETicketUploadsEmbeddedResources (object or null))
+ListingConstraints
+The constraints applied to a listing for a particular event on the StubHub marketplace.
+"file_name": "string"
+,
+"processed_at": "2019-08-24T14:15:22Z"
+,
+"original_number_of_etickets": 0
+,
+"status_description": "string"
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"eticketupload:document":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"etickets":  … +
+[
+]
+}
+}
+total_items
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+(Money (object or null))
+(Money (object or null))
+integer or null <int32>
+The minimum number of tickets available for purchase.
+integer or null <int32>
+The maximum number of tickets available for purchase.
+boolean or null
+True if a ticket location is required for tickets; Otherwise, false.
+boolean or null
+True if seat-level information (seat_to and seat_from) is required; Otherwise, false.
+Array of objects or null (Section)
+The valid section and row information. If no sections are specified then any text will be accepted for section and row.
+boolean or null
+boolean or null
+(ListingConstraintsLinks (object or null))
+(ListingConstraintsEmbeddedResources (object or null))
+min_ticket_price
+max_ticket_price
+min_number_of_tickets
+max_number_of_tickets
+ticket_location_required
+seats_required
+sections
+primary_order_id_required
+home_or_away_required
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"min_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"max_ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"min_number_of_tickets": 0
+,
+"max_number_of_tickets": 0
+,
+"ticket_location_required": true
+,
+"seats_required": true
+,
+"sections": -
+[
+ … +
+{
+}
+]
+,
+"primary_order_id_required": true
+,
+"home_or_away_required": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+}
+,
+SellerEvent
+An event on the StubHub marketplace with listings that belong to the currently authenticated user.
+integer or null <int32>
+The event identifier.
+string or null
+The name of the event.
+string or null <date-time>
+The date when the event starts.
+string or null <date-time>
+The date when the event ends.
+string or null <date-time>
+The date when tickets for the event will go onsale.
+boolean or null
+True if the event start and end date have been confirmed; Otherwise, false.
+Array of objects or null (MergedEntity)
+The list of event ids that are merged into this event.
+(SellerEventLinks (object or null))
+boolean or null
+True if the event is a last minute sale event; otherwise, false.
+(SellerEventEmbeddedResources (object or null))
+"_embedded": -
+{
+"connected_seller_listing_notes":  … +
+[
+]
+,
+"currencies":  … +
+[
+]
+,
+"listing_notes":  … +
+[
+]
+,
+"required_unique_listing_notes":  … +
+[
+]
+,
+"restricted_on_use_listing_notes":  … +
+[
+]
+,
+"split_types":  … +
+[
+]
+,
+"ticket_types":  … +
+[
+]
+}
+}
+id
+name
+start_date
+end_date
+on_sale_date
+date_confirmed
+merged_events
+_links
+lms
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"name": "string"
+,
+"start_date": "2019-08-24T14:15:22Z"
+,
+"end_date": "2019-08-24T14:15:22Z"
+,
+"on_sale_date": "2019-08-24T14:15:22Z"
+,
+"date_confirmed": true
+,
+SellerEvents
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(SellerEventsLinks (object or null))
+(SellerEventsEmbeddedResources (object or null))
+SellerListing
+"merged_events": -
+[
+ … +
+{
+}
+]
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"sellerevent:createsellerlisting":  … +
+{
+}
+,
+"sellerevent:sellerlistings":  … +
+{
+}
+}
+,
+"lms": true
+,
+"_embedded": -
+{
+"external_mappings":  … +
+[
+]
+,
+"sales_aggregates":  … +
+[
+]
+,
+"venue":  … +
+{
+}
+}
+}
+total_items
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+A set of tickets for sale on the StubHub marketplace that belong to the currently authenticated user.
+integer or null <int64>
+The listing identifier.
+string or null <date-time>
+The date when the listing was created.
+integer or null <int32>
+The number of tickets available for purchase.
+(SeatingDetail (object or null))
+The seating information for the ticket(s) in this listing.
+(SeatingDetail (object or null))
+The seating information that will be displayed to buyers for the ticket(s) in this listing.
+(Money (object or null))
+The price of each ticket in the listing.
+string or null <date-time>
+The date when the listing was last updated.
+string or null
+An identifier that has been assigned to the listing in an external inventory management system.
+string or null <date-time>
+The date when the listing will be automatically unpublished from the marketplace.
+integer or null <int32>
+The number of tickets that should be displayed to buyers as available for purchase.
+(Money (object or null))
+The price printed on the ticket, not including any booking fees.
+(Money (object or null))
+The amount that the seller will receive for each ticket sold.
+string or null <date-time>
+The date when the seller will have the tickets in hand.
+boolean
+Whether the listing represents a shorted ticket
+boolean
+Whether a listing was automatically generated from a purchase order
+Array of objects or null (BarcodeInformation)
+Barcode(s) for the ticket(s) in this listing.
+boolean or null
+boolean or null
+Shipment of the ticket to the buyer cannot be guaranteed before the event. To increase the deliverability of electronic type tickets, preupload them (e.g. pre-upload barcodes or PDF files.) To increase deliverability of paper
+tickets, opt your tickets into our LMS program.
+(Money (object or null))
+The purchase price paid by the seller for each ticket in the listing.
+(Money (object or null))
+id
+created_at
+number_of_tickets
+seating
+display_seating
+ticket_price
+updated_at
+external_id
+expires_at
+display_number_of_tickets
+face_value
+ticket_proceeds
+in_hand_at
+is_ticket_concierge
+is_auto_po
+barcodes
+instant_delivery
+undeliverable
+purchase_price_per_ticket
+total_purchase_price
+The total purchase price paid by the seller.
+boolean or null
+True if the seller already paid sales tax for the ticket(s); otherwise, false.
+(SellerListingLinks (object or null))
+(SellerListingEmbeddedResources (object or null))
+sales_tax_paid
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"created_at": "2019-08-24T14:15:22Z"
+,
+"number_of_tickets": 0
+,
+"seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"display_seating": -
+{
+"section": "string"
+,
+"row": "string"
+,
+"seat_from": "string"
+,
+"seat_to": "string"
+,
+"state":  … +
+{
+}
+}
+,
+"ticket_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"updated_at": "2019-08-24T14:15:22Z"
+,
+"external_id": "string"
+,
+"expires_at": "2019-08-24T14:15:22Z"
+,
+"display_number_of_tickets": 0
+,
+"face_value": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"ticket_proceeds": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"in_hand_at": "2019-08-24T14:15:22Z"
+,
+"is_ticket_concierge": true
+,
+"is_auto_po": true
+,
+"barcodes": -
+[
+ … +
+{
+}
+]
+,
+"instant_delivery": true
+,
+"undeliverable": true
+,
+"purchase_price_per_ticket": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+SellerListings
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+"total_purchase_price": -
+{
+"amount": 0
+,
+"currency_code": "string"
+,
+"display": "string"
+}
+,
+"sales_tax_paid": true
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"event:createsellerlisting":  … +
+{
+}
+,
+"sellerlisting:constraints":  … +
+{
+}
+,
+"sellerlisting:contactuswebpage":  … +
+{
+}
+,
+"sellerlisting:delete":  … +
+{
+}
+,
+"sellerlisting:etickets":  … +
+{
+}
+,
+"sellerlisting:eticketuploads":  … +
+{
+}
+,
+"sellerlisting:lmsoptin":  … +
+{
+}
+,
+"sellerlisting:lmsoptout":  … +
+{
+}
+,
+"sellerlisting:lmspickup":  … +
+{
+}
+,
+"sellerlisting:optionalverificationrequests":  … +
+{
+}
+,
+"sellerlisting:pricing":  … +
+{
+}
+,
+"sellerlisting:publish":  … +
+{
+}
+,
+"sellerlisting:saveetickets":  … +
+{
+}
+,
+"sellerlisting:shipments":  … +
+{
+}
+,
+"sellerlisting:ticketlocation":  … +
+{
+}
+,
+"sellerlisting:unpublish":  … +
+{
+}
+,
+"sellerlisting:updatedisplaynumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatefacevalue":  … +
+{
+}
+,
+"sellerlisting:updateinhandat":  … +
+{
+}
+,
+"sellerlisting:updatenotes":  … +
+{
+}
+,
+"sellerlisting:updatenumberoftickets":  … +
+{
+}
+,
+"sellerlisting:updatepreview":  … +
+{
+}
+,
+"sellerlisting:updateseating":  … +
+{
+}
+,
+"sellerlisting:updatesplittype":  … +
+{
+}
+,
+"sellerlisting:updateticketlocation":  … +
+{
+}
+,
+"sellerlisting:updateticketprice":  … +
+{
+}
+,
+"sellerlisting:updatetickettype":  … +
+{
+}
+,
+"sellerlisting:uploadeticket":  … +
+{
+}
+,
+"sellerlisting:verificationrequests":  … +
+{
+}
+,
+"sellerlisting:webpage":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"constraints":  … +
+{
+}
+,
+"event":  … +
+{
+}
+,
+"listing_notes":  … +
+[
+]
+,
+"relist_transaction":  … +
+{
+}
+,
+"split_type":  … +
+{
+}
+,
+"ticket_type":  … +
+{
+}
+,
+"venue":  … +
+{
+}
+}
+}
+total_items
+page
+page_size
+(SellerListingsLinks (object or null))
+(SellerListingsEmbeddedResources (object or null))
+Shipment
+A shipment of one or more tickets by a seller.
+integer <int32>
+The shipment identifier.
+string or null
+The identifier used to track the shipment of the ticket(s).
+(Address (object or null))
+The address that the seller must ship the tickets to.
+(ShipmentLinks (object or null))
+(ShipmentEmbeddedResources (object or null))
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}
+id
+tracking_number
+delivery_address
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"id": 0
+,
+"tracking_number": "string"
+,
+Shipments
+The Shipments resource is a collection resource that contains zero or more references to a set of shipments, and links that guide you on ways to interact with the shipments. The collection offers a paginated view of shipments.
+integer or null <int32>
+integer or null <int32>
+integer or null <int32>
+(ShipmentsLinks (object or null))
+(ShipmentsEmbeddedResources (object or null))
+"delivery_address": -
+{
+"full_name": "string"
+,
+"address_1": "string"
+,
+"address_2": "string"
+,
+"address_3": "string"
+,
+"city": "string"
+,
+"state_province": "string"
+,
+"postal_code": "string"
+,
+"country_code": "string"
+,
+"country": "string"
+}
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"shipment:entertrackingnumber":  … +
+{
+}
+,
+"shipment:label":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"delivery_method":  … +
+{
+}
+,
+"pickup_addresses":  … +
+[
+]
+,
+"pickups":  … +
+[
+]
+,
+"shipment_state":  … +
+{
+}
+}
+}
+total_items
+page
+page_size
+_links
+_embedded
+Expand all Collapse allCopy
+{
+"total_items": 0
+,
+"page": 0
+,
+"page_size": 0
+,
+"_links": -
+{
+"self":  … +
+{
+}
+,
+"first":  … +
+{
+}
+,
+"last":  … +
+{
+}
+,
+"next":  … +
+{
+}
+,
+"prev":  … +
+{
+}
+,
+"shipment:create":  … +
+{
+}
+}
+,
+"_embedded": -
+{
+"items":  … +
+[
+]
+}
+}

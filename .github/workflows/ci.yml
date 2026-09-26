@@ -108,3 +108,20 @@ jobs:
 
       - name: Exos P0 suite (full checkout chain + vouchers/holds/quota mints)
         run: bash tests/exos/run_p0.sh exos_p0_test
+
+      - name: RLS security (barcode_secret least-privilege)
+        # Moved from Terminal-2's supabase-rls workflow with the migrations
+        # (2026-09-26). Builds the exos_tickets secret-visibility model, applies
+        # the least-privilege migration, then asserts per org role that only
+        # owner/buyer/scanner can read the secret.
+        run: |
+          psql -q -c "DROP DATABASE IF EXISTS exos_rls_test;" -c "CREATE DATABASE exos_rls_test;"
+          psql -d exos_rls_test -v ON_ERROR_STOP=1 -f tests/exos/test_barcode_secret_rls.sql
+
+      - name: Migration filenames carry "exos"
+        # The DB is shared with Terminal-2: its prod drift check recognises
+        # Exos-owned migrations by "exos" in the name, and both repos write the
+        # same schema_migrations history. Keep every file here recognisable.
+        run: |
+          bad=$(ls supabase/migrations/*.sql | xargs -n1 basename | grep -vi exos || true)
+          if [ -n "$bad" ]; then echo "::error::migration names must contain 'exos': $bad"; exit 1; fi
