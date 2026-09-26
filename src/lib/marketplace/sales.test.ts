@@ -10,7 +10,7 @@ import {
 // A channel that can't take ticket links through its API.
 const NO_LINKS: MarketplaceChannel = {
   id: 'vivid', label: 'Vivid Seats',
-  capabilities: { findEvents: false, createEvent: false, listings: false, fulfilByUrls: false },
+  capabilities: { findEvents: false, createEvent: false, listings: false, fulfilByUrls: false, displayQuantityCap: false },
 };
 
 const T1 = '00000000-0000-4000-8000-000000000001';

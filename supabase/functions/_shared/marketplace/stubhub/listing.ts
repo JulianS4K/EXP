@@ -166,6 +166,27 @@ export interface ListingDetails {
   /** Default false: create unpublished, publish after a human looks at it. */
   published?: boolean;
   notes?: string;
+  /**
+   * The event's max tickets per order (exos_events.purchase_limits.maxPerOrder).
+   * StubHub shows buyers at most this many of the listing at a time
+   * (display_number_of_tickets), so one order can't take the whole
+   * allocation; the rest shows as tickets sell. Marketplaces without such a
+   * field would need the listing split into groups instead (not built).
+   */
+  maxPerOrder?: number | null;
+}
+
+/** min(maxPerOrder, quantity), or undefined when there's no cap below the quantity. */
+export function displayCap(maxPerOrder: number | null | undefined, quantity: number): number | undefined {
+  if (maxPerOrder == null || !Number.isInteger(maxPerOrder) || maxPerOrder <= 0) return undefined;
+  return maxPerOrder < quantity ? maxPerOrder : undefined;
+}
+
+/** maxPerOrder from exos_events.purchase_limits ({ maxPerOrder, maxPerAccount }). */
+export function maxPerOrderFromLimits(limits: unknown): number | null {
+  const v = (limits as { maxPerOrder?: unknown } | null)?.maxPerOrder;
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number.parseInt(v, 10) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 const money = (amount: number, currency_code: string): MoneyInput => ({
@@ -206,6 +227,8 @@ export function buildCreateListingRequest(row: ExosDistributionRow, d: ListingDe
     [d.priceAs ?? 'ticket_price']: money(price, d.currency),
     published: d.published ?? false,
   };
+  const cap = displayCap(d.maxPerOrder, qty);
+  if (cap != null) req.display_number_of_tickets = cap;
   if (d.faceValue != null) req.face_value = money(d.faceValue, d.currency);
   if (d.inHandAt != null) req.in_hand_at = d.inHandAt instanceof Date ? d.inHandAt.toISOString() : d.inHandAt;
   if (d.instantDelivery != null) req.instant_delivery = d.instantDelivery;

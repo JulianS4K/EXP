@@ -67,3 +67,66 @@ export async function getMarketplaceOrders(eventId: string): Promise<Marketplace
   if (error) throw error;
   return (data ?? []) as MarketplaceOrder[];
 }
+
+// Exos accounts holding more of an event's tickets than its max per account
+// (exos_account_limit_flags, mig 20260926194000): flagged, never blocked.
+// The org reviews them in its "Limit flags" tab.
+export interface AccountLimitFlag {
+  id: string;
+  event_id: string;
+  email: string | null;
+  held: number;
+  max_per_account: number;
+  peak: number;
+  promoter_codes: string[];
+  first_flagged_at: string;
+  reviewed_at: string | null;
+  review_note: string | null;
+  promoter_note: string | null;
+  promoter_noted_by: string | null;
+  exos_events: { name: string | null; starts_at: string | null } | null;
+}
+
+export async function getOrgLimitFlags(orgId: string): Promise<AccountLimitFlag[]> {
+  const { data, error } = await supabase
+    .from('exos_account_limit_flags')
+    .select('id, event_id, email, held, max_per_account, peak, promoter_codes, first_flagged_at, reviewed_at, review_note, promoter_note, promoter_noted_by, exos_events(name, starts_at)')
+    .eq('org_id', orgId)
+    .order('reviewed_at', { ascending: true, nullsFirst: true })
+    .order('last_seen_at', { ascending: false })
+    .limit(500);
+  if (error) throw error;
+  return (data ?? []) as unknown as AccountLimitFlag[];
+}
+
+export async function reviewAccountLimitFlag(flagId: string, note: string | null): Promise<void> {
+  const { error } = await supabase.rpc('exos_review_account_limit_flag', { p_flag_id: flagId, p_note: note });
+  if (error) throw error;
+}
+
+// The promoter's view, by kit token (the portal has no login): flags for
+// accounts that bought through their links, email masked.
+export interface PromoterLimitFlag {
+  id: string;
+  event_id: string;
+  event_name: string | null;
+  starts_at: string | null;
+  buyer: string | null;
+  held: number;
+  max_per_account: number;
+  peak: number;
+  from_you: number;
+  reviewed: boolean;
+  promoter_note: string | null;
+}
+
+export async function getPromoterLimitFlags(token: string): Promise<PromoterLimitFlag[]> {
+  const { data, error } = await supabase.rpc('exos_promoter_limit_flags', { p_token: token });
+  if (error) throw error;
+  return (data ?? []) as PromoterLimitFlag[];
+}
+
+export async function notePromoterLimitFlag(token: string, flagId: string, note: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_promoter_note_limit_flag', { p_token: token, p_flag_id: flagId, p_note: note });
+  if (error) throw error;
+}

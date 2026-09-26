@@ -4,6 +4,9 @@
 
 export interface StubHubDistributionRow {
   status: string;
+  /** Seats allocated to StubHub (mig 20260926193000): Exos can't sell these. */
+  tier_id?: string | null;
+  requested_qty?: number | null;
   error: string | null;
   external_event_id: string | null;
   planned_request: {

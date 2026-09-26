@@ -31,6 +31,15 @@ describe('planStubHubEventRequest', () => {
     });
   });
 
+  it('sends the venue-local start with its offset when it matches starts_at', () => {
+    const local = planStubHubEventRequest({ ...ROW, occurs_at_local: '2026-11-06T21:00:00-05:00' });
+    expect(local.body.event.start_date).toBe('2026-11-06T21:00:00-05:00');
+    // A local time for a different instant (stale after a reschedule) is ignored.
+    const stale = planStubHubEventRequest({ ...ROW, occurs_at_local: '2026-11-06T20:00:00-05:00' });
+    expect(stale.body.event.start_date).toBe('2026-11-07T02:00:00.000Z');
+    expect(planStubHubEventRequest({ ...ROW, occurs_at_local: 'garbage' }).body.event.start_date).toBe('2026-11-07T02:00:00.000Z');
+  });
+
   it('plans the same call the writer would make', () => {
     const plan = planStubHubEventRequest(ROW);
     const ep = STUBHUB_ENDPOINTS[plan.endpoint];

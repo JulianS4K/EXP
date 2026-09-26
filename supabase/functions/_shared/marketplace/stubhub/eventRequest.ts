@@ -20,6 +20,14 @@ export class ListingMappingError extends Error {
 export interface ExosEventForListing {
   name: string;
   startsAt: Date | string;
+  /**
+   * The same instant as venue-local time with its offset
+   * (exos_events.occurs_at_local, "YYYY-MM-DDTHH:MM:SS±HH:MM"). Sent when it
+   * agrees with startsAt: StubHub shows event times in the venue's zone, and
+   * a UTC "Z" time for a 9pm show reads as the next morning to anyone who
+   * takes the wall clock at face value.
+   */
+  startsLocal?: string | null;
   venueName: string;
   venueCity: string;
   venueStateProvince?: string;
@@ -40,6 +48,8 @@ export interface RequestedEvent {
   country?: { code: string };
 }
 
+const LOCAL_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{2}:\d{2}$/;
+
 export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
   const start = ev.startsAt instanceof Date ? ev.startsAt : new Date(ev.startsAt);
   if (Number.isNaN(start.getTime())) throw new ListingMappingError("event start is not a date");
@@ -48,8 +58,11 @@ export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
   if (ev.countryCode != null && !/^[A-Z]{2}$/.test(ev.countryCode)) {
     throw new ListingMappingError(`country must be ISO 3166 alpha-2, got "${ev.countryCode}"`);
   }
+  const local = ev.startsLocal && LOCAL_RE.test(ev.startsLocal) && Date.parse(ev.startsLocal) === start.getTime()
+    ? ev.startsLocal
+    : null;
   const req: RequestedEvent = {
-    event: { name: ev.name.trim(), start_date: start.toISOString(), date_confirmed: ev.dateConfirmed ?? true },
+    event: { name: ev.name.trim(), start_date: local ?? start.toISOString(), date_confirmed: ev.dateConfirmed ?? true },
     venue: { name: ev.venueName.trim(), city: ev.venueCity.trim() },
   };
   if (ev.venueStateProvince) req.venue.state_province = ev.venueStateProvince;
@@ -63,6 +76,7 @@ export function buildRequestedEvent(ev: ExosEventForListing): RequestedEvent {
 export interface ExosEventRow {
   name: string | null;
   starts_at: string | null;
+  occurs_at_local?: string | null;
   venue_name: string | null;
   venue_location?: string | null;
   /** CreateEvent/EditEvent shape: { street, city, region, country, postal }, all free text. */
@@ -108,6 +122,7 @@ export function exosEventForListing(row: ExosEventRow): ExosEventForListing {
   if (!venueName) throw new ListingMappingError("venue name is required");
   if (!venueCity) throw new ListingMappingError("venue city is required: add the venue address to the event");
   const out: ExosEventForListing = { name: text(row.name), startsAt: row.starts_at, venueName, venueCity };
+  if (row.occurs_at_local) out.startsLocal = row.occurs_at_local;
   const region = text(addr.region);
   if (region) out.venueStateProvince = region;
   const cc = countryCode(addr.country);

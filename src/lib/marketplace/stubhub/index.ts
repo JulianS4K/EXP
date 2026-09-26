@@ -9,3 +9,4 @@ export * from '../../../../supabase/functions/_shared/marketplace/stubhub/transp
 export * from '../../../../supabase/functions/_shared/marketplace/stubhub/types.ts';
 export * from '../../../../supabase/functions/_shared/marketplace/stubhub/webhook.ts';
 export * from '../../../../supabase/functions/_shared/marketplace/stubhub/writer.ts';
+export * from '../../../../supabase/functions/_shared/marketplace/stubhub/listingPlan.ts';

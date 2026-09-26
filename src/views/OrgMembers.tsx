@@ -223,6 +223,12 @@ export default function OrgMembers() {
             General
           </button>
           <button className="pb-3 text-sm font-bold text-slate-900 border-b-2 border-tm-blue -mb-px">Members</button>
+          <button
+            onClick={() => navigate(`/orgs/${orgId}/flags`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Limit flags
+          </button>
           <span className="pb-3 text-sm font-bold text-slate-300 cursor-default">Billing</span>
         </div>
 

@@ -118,7 +118,7 @@ describe('StubHub channel', () => {
 
   it('plans event creation and URL fulfilment without a client', () => {
     const ch = stubHubChannel();
-    expect(ch.capabilities).toEqual({ findEvents: false, createEvent: true, listings: true, fulfilByUrls: true });
+    expect(ch.capabilities).toEqual({ findEvents: false, createEvent: true, listings: true, fulfilByUrls: true, displayQuantityCap: true });
     expect(ch.findEvents).toBeUndefined();
     const create = ch.planCreateEvent!(EV);
     expect(create).toMatchObject({ channel: 'stubhub', endpoint: 'createSellerEvent', method: 'PUT', path: '/sellerevents' });
