@@ -38,10 +38,16 @@ The flow, end to end:
 2. **Linked** (`exos-distribute` pass 0, `exos_channel_event_links`).
    StubHub's catalog is searched read-only. The scorer (`match.ts`) needs the
    same venue-local day, then weighs start time, name, venue and city.
-   - A clear winner is linked.
+   - A clear winner is linked. It also needs evidence it's the same place:
+     overlapping venue names, or the same city when a venue name is missing.
    - A close call goes to staff as `review`; the event editor shows the
-     candidates with "This is it" and "None of these".
+     candidates with "This is it" and "None of these". Organizers can only
+     pick a candidate the search found; admins can enter any id.
    - Two Exos events can't claim the same StubHub event.
+   - Changing the event's name, start or venue drops its automatic links,
+     so they're searched again. Staff decisions are kept.
+   - An event with no link row yet waits for the search before any creation
+     is planned.
 3. **Created where needed** (pass 1):
    - linked: nothing to create;
    - `review`: waits on staff;
@@ -52,8 +58,9 @@ The flow, end to end:
      id, because the seller account also carries broker inventory.
    - `exos_fulfil_marketplace_order` mints the tickets and claims the seat
      like every other mint, so Exos's own storefront can't sell it again.
-   - Oversold orders, a missing buyer email or a missing ticket type go to a
-     human.
+   - Oversold orders, a missing buyer email, a missing ticket type or a
+     table ticket type go to a human. A parked order retries when StubHub
+     reports the sale again.
 5. **Issued to the buyer as a transfer, and as links on StubHub.** Each
    ticket gets a pending Exos transfer to the buyer's email:
    - it shows under their tickets when they sign in with that email;

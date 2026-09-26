@@ -8,6 +8,8 @@
 --      decremented; idempotent
 --   M4 oversold / no email / no tier -> needs_attention, nothing minted
 --   M5 cancellations: before tickets -> cancelled; after -> needs a human
+--   M7 a parked order retries when the sale is reported again; table tiers
+--      are flagged, not fatal; a bad marketplace date doesn't block the sale
 --   M6 service_role only
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_marketplace_orders.sql
 -- ============================================================================
@@ -162,6 +164,49 @@ BEGIN
     RAISE EXCEPTION 'M5 FAIL: reason missing';
   END IF;
   RAISE NOTICE 'M5 ok: cancellations handled';
+END $$;
+
+-- M7 ---------------------------------------------------------------------------
+DO $$
+DECLARE o record;
+BEGIN
+  -- 556 was parked for no buyer email; StubHub reports it again with one.
+  IF pg_temp.rec('{"channel":"stubhub","external_order_id":"556","external_listing_id":"SH-L-1","quantity":1,"sale_status":"confirmed","buyer_email":"late@x.com","confirm_by":"not a date"}') <> 'received' THEN
+    RAISE EXCEPTION 'M7 FAIL: parked order not re-opened';
+  END IF;
+  -- 557 was cancelled: a late report doesn't revive it.
+  IF pg_temp.rec('{"channel":"stubhub","external_order_id":"557","external_listing_id":"SH-L-1","quantity":1,"sale_status":"confirmed"}') <> 'cancelled' THEN
+    RAISE EXCEPTION 'M7 FAIL: cancelled order revived';
+  END IF;
+END $$;
+-- The listing got its ticket type back meanwhile (it was cleared in M4).
+UPDATE public.exos_distribution_listings SET tier_id = '3d000000-0000-0000-0000-0000000000d1'
+ WHERE id = '3d000000-0000-0000-0000-0000000000b1';
+DO $$
+DECLARE o record;
+BEGIN
+  PERFORM pg_temp.rec('{"channel":"stubhub","external_order_id":"556","external_listing_id":"SH-L-1","quantity":1,"sale_status":"confirmed"}');
+  PERFORM pg_temp.ful('556');
+  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = '556';
+  IF o.status <> 'fulfilled' OR o.buyer_email <> 'late@x.com' OR o.confirm_by IS NOT NULL THEN
+    RAISE EXCEPTION 'M7 FAIL: retry did not fulfil: %', row_to_json(o);
+  END IF;
+  -- Table tiers raise in the ticket guard; they must be flagged instead.
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'exos_ticket_tiers' AND column_name = 'kind') THEN
+    INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES
+      ('3d000000-0000-0000-0000-0000000000e3','3d000000-0000-0000-0000-000000000001','Tables','published','2027-01-03T02:00:00Z','Hall',0,0);
+    EXECUTE $q$INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,kind,party_size)
+      VALUES ('3d000000-0000-0000-0000-0000000000d3','3d000000-0000-0000-0000-0000000000e3','Table for 4',400,5,0,'table',4)$q$;
+    INSERT INTO public.exos_distribution_listings(id,event_id,org_id,channel,status,tier_id,requested_qty,external_listing_id) VALUES
+      ('3d000000-0000-0000-0000-0000000000b3','3d000000-0000-0000-0000-0000000000e3','3d000000-0000-0000-0000-000000000001','stubhub','listed','3d000000-0000-0000-0000-0000000000d3',1,'SH-L-3');
+    PERFORM pg_temp.rec('{"channel":"stubhub","external_order_id":"SH-T","external_listing_id":"SH-L-3","quantity":1,"sale_status":"confirmed","buyer_email":"t@x.com"}');
+    PERFORM pg_temp.ful('SH-T');
+    SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'SH-T';
+    IF o.status <> 'needs_attention' OR o.attention_reason NOT LIKE 'table ticket types%' THEN
+      RAISE EXCEPTION 'M7 FAIL: table tier: %', row_to_json(o);
+    END IF;
+  END IF;
+  RAISE NOTICE 'M7 ok: parked orders retry; table tiers flagged; bad dates dropped';
 END $$;
 
 -- M6 ---------------------------------------------------------------------------

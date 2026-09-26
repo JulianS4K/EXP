@@ -6,6 +6,7 @@
 --              exos_distribution_listings (W: a manual decision re-queues the
 --                event's StubHub request)
 --              FUNCTION exos_link_channel_event (new)
+--              FUNCTION exos_relink_on_event_change + TRIGGER exos_events_relink (new)
 -- Pre-reqs: 20260926190000 (StubHub event requests)
 --
 -- One row per (Exos event, marketplace): which of the marketplace's events it
@@ -27,8 +28,14 @@
 -- those channels.
 --
 -- Staff decide review rows with exos_link_channel_event(event, channel, id)
--- (id NULL = reject all candidates). Deciding a StubHub row re-queues the
--- event's StubHub request so exos-distribute acts on the decision.
+-- (id NULL = reject all candidates). Organizers can only pick an id the
+-- search found; platform admins can enter any. Deciding a StubHub row
+-- re-queues the event's StubHub request so exos-distribute acts on it.
+--
+-- Changing the event's name, start or venue drops its automatic links
+-- (linked / review / unmatched by auto_match), so they're searched again:
+-- a rescheduled show may be a different marketplace event. Staff decisions
+-- and events created from Exos are kept.
 --
 -- Re-run safe. D4 authors; applying to prod is operator-gated.
 -- ============================================================================
@@ -97,6 +104,18 @@ BEGIN
   IF v_ext IS NOT NULL AND (length(v_ext) > 64 OR v_ext !~ '^[A-Za-z0-9._:-]+$') THEN
     RAISE EXCEPTION 'exos_link_channel_event: that is not a % event id', p_channel;
   END IF;
+  -- Organizers pick from what the catalog search found; any other id could
+  -- squat on a marketplace event that belongs to someone else's show.
+  -- Platform admins can link any id.
+  IF v_ext IS NOT NULL AND NOT exos_is_admin() AND NOT EXISTS (
+    SELECT 1 FROM public.exos_channel_event_links l,
+                  jsonb_array_elements(coalesce(l.candidates, '[]'::jsonb)) c
+     WHERE l.event_id = p_event_id AND l.channel = p_channel
+       AND c ->> 'external_event_id' = v_ext
+  ) THEN
+    RAISE EXCEPTION 'exos_link_channel_event: pick one of the % events found for this event', p_channel
+      USING ERRCODE = '42501';
+  END IF;
   IF v_ext IS NOT NULL THEN
     SELECT event_id INTO v_other FROM public.exos_channel_event_links
      WHERE channel = p_channel AND external_event_id = v_ext AND event_id <> p_event_id;
@@ -130,3 +149,30 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_link_channel_event(uuid, text, text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.exos_link_channel_event(uuid, text, text) TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Re-check automatic links when what they matched on changes.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.exos_relink_on_event_change()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NEW.name IS DISTINCT FROM OLD.name
+     OR NEW.starts_at IS DISTINCT FROM OLD.starts_at
+     OR NEW.venue_name IS DISTINCT FROM OLD.venue_name
+     OR NEW.venue_address IS DISTINCT FROM OLD.venue_address THEN
+    DELETE FROM public.exos_channel_event_links
+     WHERE event_id = NEW.id
+       AND method = 'auto_match'
+       AND status IN ('linked','review','unmatched');
+  END IF;
+  RETURN NULL;
+END $$;
+REVOKE EXECUTE ON FUNCTION public.exos_relink_on_event_change() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS exos_events_relink ON public.exos_events;
+CREATE TRIGGER exos_events_relink
+  AFTER UPDATE OF name, starts_at, venue_name, venue_address ON public.exos_events
+  FOR EACH ROW EXECUTE FUNCTION public.exos_relink_on_event_change();

@@ -225,8 +225,8 @@ export class StubHubClient {
     return this.json<Page<Sale>>('listSales', { query: { ...query } });
   }
 
-  listSaleUpdates(updatedSince: Date | string) {
-    return this.json<Page<Sale>>('listSaleUpdates', { query: { updated_since: updatedSince } });
+  listSaleUpdates(updatedSince: Date | string, page: Pick<SaleQuery, 'page' | 'page_size'> = {}) {
+    return this.json<Page<Sale>>('listSaleUpdates', { query: { updated_since: updatedSince, ...page } });
   }
 
   getSale(saleId: number) {

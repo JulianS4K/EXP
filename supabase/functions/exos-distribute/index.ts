@@ -10,8 +10,9 @@
 //
 // 1. StubHub event requests (mig 20260926190000). Publishing an event with
 //    StubHub ticked queues a 'stubhub' row. If the event is already linked
-//    to a StubHub event, the row just takes that id: nothing to create. If a
-//    possible match waits on staff, the row says so. Otherwise this pass
+//    to a StubHub event, the plan just records that: nothing to create. If a
+//    possible match waits on staff, the row says so; if the catalog hasn't
+//    been searched yet, it waits for pass 0. Otherwise this pass
 //    builds the PUT /sellerevents body (_shared/marketplace/stubhub) and
 //    records it as planned_request, status 'planned'. DRY-RUN ONLY: nothing
 //    is sent to StubHub. Sending needs an operator WriteAuthorization (Hard
@@ -65,8 +66,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   );
 
   try {
-    const links = await linkEvents(sb, channelsFromEnv((k) => Deno.env.get(k)));
-    const stubhub = await planStubHubEvents(sb);
+    const channels = channelsFromEnv((k) => Deno.env.get(k));
+    const links = await linkEvents(sb, channels);
+    const stubhub = await planStubHubEvents(sb, !!channels.get("stubhub")?.findEvents);
     const automatiq = await pushAutomatiq(sb);
     return json({ links, stubhub, automatiq });
   } catch (e) {
@@ -84,7 +86,10 @@ interface StubHubRow {
   exos_events: ExosEventRow | null;
 }
 
-async function planStubHubEvents(sb: SupabaseClient) {
+// canSearch: StubHub catalog search is configured, so an event with no link
+// row yet hasn't been searched: it waits for pass 0 instead of risking a
+// duplicate StubHub event.
+async function planStubHubEvents(sb: SupabaseClient, canSearch: boolean) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
     .select("id, event_id, updated_at, exos_events(name, starts_at, venue_name, venue_location, venue_address)")
@@ -112,8 +117,10 @@ async function planStubHubEvents(sb: SupabaseClient) {
     const link = linkBy.get(row.event_id);
     let patch: Record<string, unknown>;
     if (link && (link.status === "linked" || link.status === "created") && link.external_event_id) {
-      // StubHub already has this event: nothing to create.
-      patch = { status: "planned", external_event_id: link.external_event_id, planned_request: null, error: null };
+      // StubHub already has this event: nothing to create. The id stays in the
+      // plan, not in external_event_id (that column means StubHub has
+      // something of ours), so the row still follows edits and unpublishing.
+      patch = { status: "planned", planned_request: { linked: true, external_event_id: link.external_event_id }, error: null };
       linked++;
     } else if (link?.status === "review") {
       patch = {
@@ -122,10 +129,13 @@ async function planStubHubEvents(sb: SupabaseClient) {
         error: "StubHub may already have this event: confirm the match or reject it before a new one is requested",
       };
       waiting++;
+    } else if (!link && canSearch) {
+      waiting++;
+      continue; // not searched yet: leave it pending for the next run's pass 0
     } else {
       try {
         if (!row.exos_events) throw new ListingMappingError("event not found");
-        // catalog_checked: whether a StubHub search found no match (vs never ran).
+        // catalog_checked: a StubHub search found nothing (vs search not configured).
         const plan = planStubHubEventRequest(row.exos_events);
         patch = { status: "planned", planned_request: { ...plan, catalog_checked: !!link }, error: null };
         planned++;

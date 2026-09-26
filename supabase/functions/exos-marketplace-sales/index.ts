@@ -71,8 +71,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const sh = stubhubClient(sb);
     if (sh) {
-      const page = await sh.listSaleUpdates(since);
-      result.stubhub = await ingest(sb, channels.get("stubhub")!, page._embedded?.items ?? [], sh);
+      result.stubhub = await ingest(sb, channels.get("stubhub")!, await allSaleUpdates(sh, since), sh);
     } else {
       result.stubhub = { skipped: "no StubHub seller credentials" };
     }
@@ -106,6 +105,23 @@ function stubhubClient(sb: SupabaseClient): StubHubClient | undefined {
       },
     }),
   });
+}
+
+// Every page: the seller account also carries broker sales, so Exos's can be
+// anywhere in the list.
+const PAGE_SIZE = 100;
+const MAX_PAGES = 50;
+async function allSaleUpdates(sh: StubHubClient, since: Date): Promise<Sale[]> {
+  const out: Sale[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await sh.listSaleUpdates(since, { page, page_size: PAGE_SIZE });
+    const items = res._embedded?.items ?? [];
+    out.push(...items);
+    const total = res.total_items ?? null;
+    if (items.length < PAGE_SIZE || (total != null && out.length >= total)) return out;
+  }
+  console.error(`exos-marketplace-sales: stopped after ${MAX_PAGES} pages of StubHub sale updates`);
+  return out;
 }
 
 async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unknown[], sh: StubHubClient | undefined) {

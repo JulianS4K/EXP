@@ -1,8 +1,10 @@
 // Scoring an Exos event against a marketplace's catalog events. Conservative
 // on purpose: a wrong link routes a buyer to someone else's show, a missed
 // one only means a human links it. So an automatic link needs the same local
-// day, a close start time, and a strong name match, and a clear lead over the
-// runner-up; anything weaker is a "review" for a human.
+// day, a strong name match, evidence it's the same place (overlapping venue
+// names, or the same city when a venue name is missing), and a clear lead over
+// the runner-up; anything weaker is a "review" for a human. "Comedy Night" at
+// two clubs in one city is a review.
 
 import { localDate, type EventCandidate, type ExosEventRef } from './channel.ts';
 
@@ -10,6 +12,11 @@ export interface ScoredCandidate {
   candidate: EventCandidate;
   score: number;
   reasons: string[];
+  /**
+   * Evidence it's the same place, required for an automatic link: overlapping
+   * venue names when both sides name one, else the same city.
+   */
+  samePlace: boolean;
 }
 
 export type MatchDecision =
@@ -56,7 +63,7 @@ export function scoreMatch(ev: ExosEventRef, c: EventCandidate): ScoredCandidate
   const evDay = localDate(ev);
   const cDay = candidateLocalDate(c) ?? (c.startsAt ? new Date(c.startsAt).toISOString().slice(0, 10) : null);
   if (!cDay || cDay !== evDay) {
-    return { candidate: c, score: 0, reasons: [`different day (${cDay ?? 'unknown'} vs ${evDay})`] };
+    return { candidate: c, score: 0, reasons: [`different day (${cDay ?? 'unknown'} vs ${evDay})`], samePlace: false };
   }
   let score = 0.3;
   reasons.push('same day');
@@ -72,20 +79,30 @@ export function scoreMatch(ev: ExosEventRef, c: EventCandidate): ScoredCandidate
   score += 0.4 * name;
   reasons.push(`name ${Math.round(name * 100)}%`);
 
-  const venue = overlap(tokens(ev.venueName), tokens(c.venueName));
+  const evVenue = tokens(ev.venueName);
+  const cVenue = tokens(c.venueName);
+  const venue = overlap(evVenue, cVenue);
   score += 0.1 * venue;
   if (venue > 0) reasons.push(`venue ${Math.round(venue * 100)}%`);
 
+  let sameCity = false;
   if (ev.venueCity && c.venueCity) {
     if (ev.venueCity.trim().toLowerCase() === c.venueCity.trim().toLowerCase()) {
       score += 0.05;
+      sameCity = true;
       reasons.push('same city');
     } else {
       score -= 0.2;
       reasons.push('different city');
     }
   }
-  return { candidate: c, score: Math.max(0, Math.min(1, Math.round(score * 1000) / 1000)), reasons };
+  return {
+    candidate: c,
+    score: Math.max(0, Math.min(1, Math.round(score * 1000) / 1000)),
+    reasons,
+    // Both name a venue: the names must overlap. Otherwise the city decides.
+    samePlace: evVenue.size && cVenue.size ? venue > 0 : sameCity,
+  };
 }
 
 export function decideMatch(ev: ExosEventRef, candidates: EventCandidate[]): MatchDecision {
@@ -93,6 +110,6 @@ export function decideMatch(ev: ExosEventRef, candidates: EventCandidate[]): Mat
   const [best, second] = scored;
   if (!best || best.score < REVIEW_SCORE) return { decision: 'none', best: null, candidates: scored };
   const clear = !second || best.score - second.score >= AUTO_LINK_MARGIN;
-  if (best.score >= AUTO_LINK_SCORE && clear) return { decision: 'link', best, candidates: scored };
+  if (best.score >= AUTO_LINK_SCORE && clear && best.samePlace) return { decision: 'link', best, candidates: scored };
   return { decision: 'review', best, candidates: scored };
 }

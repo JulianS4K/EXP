@@ -6,7 +6,12 @@ export interface StubHubDistributionRow {
   status: string;
   error: string | null;
   external_event_id: string | null;
-  planned_request: { body?: { event?: { name?: string }; venue?: { name?: string; city?: string } } } | null;
+  planned_request: {
+    /** Linked to an event StubHub already has: nothing to create. */
+    linked?: boolean;
+    external_event_id?: string;
+    body?: { event?: { name?: string }; venue?: { name?: string; city?: string } };
+  } | null;
   last_synced_at: string | null;
 }
 
@@ -33,6 +38,9 @@ export function stubHubStatus(
     case 'pending':
       return { tone: 'info', text: 'Queued: Exos is preparing the StubHub event request.' };
     case 'planned': {
+      if (row.planned_request?.linked) {
+        return { tone: 'ok', text: `Already on StubHub (event ${row.planned_request.external_event_id}): no new event needed.` };
+      }
       const b = row.planned_request?.body;
       const what = [b?.event?.name, [b?.venue?.name, b?.venue?.city].filter(Boolean).join(', ')].filter(Boolean).join(' at ');
       return {

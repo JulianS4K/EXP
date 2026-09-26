@@ -32,6 +32,11 @@ describe('stubHubStatus', () => {
     expect(failed?.text).toMatch(/venue city is required/);
   });
 
+  it('says when the event is already on StubHub (linked, nothing to create)', () => {
+    const s = stubHubStatus(row({ status: 'planned', planned_request: { linked: true, external_event_id: '104857' } }), EV);
+    expect(s).toEqual({ tone: 'ok', text: 'Already on StubHub (event 104857): no new event needed.' });
+  });
+
   it('shows the StubHub event once it exists, even if StubHub was unticked since', () => {
     const s = stubHubStatus(row({ status: 'listed', external_event_id: '104857' }), { ...EV, stubhubTicked: false });
     expect(s).toEqual({ tone: 'ok', text: 'On StubHub (event 104857).' });

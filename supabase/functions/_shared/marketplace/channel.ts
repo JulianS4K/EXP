@@ -36,6 +36,8 @@ export interface ExosEventRef {
   startsAt: string;
   /** Venue-local wall clock, TEvo format "YYYY-MM-DDTHH:MM:SS±HH:MM", when known. */
   occursAtLocal?: string | null;
+  /** IANA zone (exos_events.timezone), for the local date when occursAtLocal is missing. */
+  timezone?: string | null;
   venueName: string;
   venueCity?: string | null;
   venueRegion?: string | null;
@@ -117,6 +119,7 @@ export interface ExosEventRowForChannels {
   name: string | null;
   starts_at: string | null;
   occurs_at_local?: string | null;
+  timezone?: string | null;
   venue_name: string | null;
   venue_location?: string | null;
   venue_address?: Record<string, unknown> | null;
@@ -134,6 +137,7 @@ export function exosEventRef(row: ExosEventRowForChannels): ExosEventRef | null 
     name,
     startsAt: row.starts_at,
     occursAtLocal: row.occurs_at_local ?? null,
+    timezone: row.timezone ?? null,
     venueName,
     venueCity: txt(addr.city) || null,
     venueRegion: txt(addr.region) || null,
@@ -141,8 +145,21 @@ export function exosEventRef(row: ExosEventRowForChannels): ExosEventRef | null 
   };
 }
 
-/** The event's venue-local date, "YYYY-MM-DD" (UTC date when the local one is unknown). */
-export function localDate(ev: Pick<ExosEventRef, 'startsAt' | 'occursAtLocal'>): string {
+/**
+ * The event's venue-local date, "YYYY-MM-DD": from occurs_at_local, else
+ * starts_at in the event's timezone, else (no usable zone) the UTC date.
+ */
+export function localDate(ev: Pick<ExosEventRef, 'startsAt' | 'occursAtLocal' | 'timezone'>): string {
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(ev.occursAtLocal ?? '');
-  return m ? m[1] : new Date(ev.startsAt).toISOString().slice(0, 10);
+  if (m) return m[1];
+  const at = new Date(ev.startsAt);
+  if (ev.timezone) {
+    try {
+      // en-CA formats dates as YYYY-MM-DD.
+      return new Intl.DateTimeFormat('en-CA', { timeZone: ev.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+    } catch {
+      // unknown zone: fall through
+    }
+  }
+  return at.toISOString().slice(0, 10);
 }

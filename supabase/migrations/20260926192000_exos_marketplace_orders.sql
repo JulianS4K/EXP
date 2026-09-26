@@ -9,9 +9,10 @@
 --                exos_mail ('transfer-initiated' to the buyer) (via exos_fulfil_marketplace_order)
 --              exos_marketplace_credentials (new, service_role only)
 --              FUNCTION exos_record_marketplace_order, exos_fulfil_marketplace_order (new,
---                service_role only)
+--                service_role only), exos_try_timestamptz (new)
 --           R: exos_orgs.owner_uid, exos_seats_available (quotas / holds / offers)
 -- Pre-reqs: 20260926191000 (links), 20260924210103 (exos_seats_available),
+--           20260926050000 (exos_tier_is_table),
 --           20260523190000 (exos_distribution_listings)
 --
 -- A StubHub sale (webhook / recent updates) comes in through
@@ -34,7 +35,9 @@
 --      then tier + exos_seats_available), so a marketplace sale takes the seat
 --      from Exos's own storefront and every other channel. If the seat isn't
 --      there (oversold), or there's no buyer email / tier / owner, the order
---      goes to 'needs_attention' with the reason instead. Idempotent.
+--      goes to 'needs_attention' with the reason instead. Idempotent. A
+--      needs_attention order with nothing minted goes back to 'received'
+--      each time the marketplace reports the sale again (the retry).
 --   3. The edge function plans the marketplace's delivery call with those
 --      links (StubHub PATCH /sales/{id}), dry-run.
 --
@@ -99,6 +102,18 @@ CREATE TABLE IF NOT EXISTS public.exos_marketplace_credentials (
 ALTER TABLE public.exos_marketplace_credentials ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_marketplace_credentials FROM anon, authenticated;
 
+-- A marketplace timestamp that doesn't parse is dropped, not fatal: one bad
+-- field must not stop the sale being recorded on every poll.
+CREATE OR REPLACE FUNCTION public.exos_try_timestamptz(p text)
+RETURNS timestamptz LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RETURN p::timestamptz;
+EXCEPTION WHEN others THEN
+  RETURN NULL;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 1. Record (service_role). Returns nothing when the sale isn't on an Exos listing.
 -- ---------------------------------------------------------------------------
@@ -153,19 +168,29 @@ BEGIN
     d.event_id, d.org_id, d.tier_id, v_qty, v_email,
     CASE WHEN (p_sale ->> 'proceeds') ~ '^[0-9]+(\.[0-9]+)?$' THEN (p_sale ->> 'proceeds')::numeric END,
     upper(nullif(p_sale ->> 'currency', '')), v_sale,
-    CASE WHEN p_sale ? 'confirm_by' THEN (p_sale ->> 'confirm_by')::timestamptz END,
-    CASE WHEN p_sale ? 'ship_by'    THEN (p_sale ->> 'ship_by')::timestamptz END,
-    CASE WHEN p_sale ? 'sold_at'    THEN (p_sale ->> 'sold_at')::timestamptz END,
+    public.exos_try_timestamptz(p_sale ->> 'confirm_by'),
+    public.exos_try_timestamptz(p_sale ->> 'ship_by'),
+    public.exos_try_timestamptz(p_sale ->> 'sold_at'),
     p_sale -> 'raw'
   )
   ON CONFLICT (channel, external_order_id) DO UPDATE
     SET sale_status = EXCLUDED.sale_status,
         buyer_email = coalesce(m.buyer_email, EXCLUDED.buyer_email),
+        -- Until tickets exist, follow the listing's current ticket type.
+        tier_id     = CASE WHEN cardinality(m.ticket_ids) = 0 THEN EXCLUDED.tier_id ELSE m.tier_id END,
         confirm_by  = coalesce(EXCLUDED.confirm_by, m.confirm_by),
         ship_by     = coalesce(EXCLUDED.ship_by, m.ship_by),
         raw         = coalesce(EXCLUDED.raw, m.raw),
         updated_at  = now()
   RETURNING * INTO o;
+
+  -- Parked before anything was minted (no email yet, no ticket type, oversold,
+  -- unknown status): each new report of the sale is a retry.
+  IF v_sale <> 'cancelled' AND o.status = 'needs_attention' AND cardinality(o.ticket_ids) = 0 THEN
+    UPDATE public.exos_marketplace_orders
+       SET status = 'received', attention_reason = NULL, updated_at = now()
+     WHERE id = o.id RETURNING * INTO o;
+  END IF;
 
   -- The marketplace cancelled it.
   IF v_sale = 'cancelled' THEN
@@ -239,6 +264,7 @@ BEGIN
     WHEN o.sale_status NOT IN ('pending','confirmed') THEN 'marketplace status is ' || o.sale_status || ': check the sale'
     WHEN v_ev.status IS DISTINCT FROM 'published' THEN 'event is ' || coalesce(v_ev.status, 'missing')
     WHEN o.tier_id IS NULL OR v_tier_ev IS DISTINCT FROM o.event_id THEN 'the listing has no ticket type: set one, then retry'
+    WHEN public.exos_tier_is_table(o.tier_id) THEN 'table ticket types can''t be sold on a marketplace: issue it by hand'
     WHEN o.buyer_email IS NULL THEN 'no buyer email from the marketplace: deliver by hand'
     WHEN v_owner IS NULL THEN 'the organization has no owner to hold the tickets'
   END;

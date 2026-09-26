@@ -2,8 +2,10 @@
 -- Marketplace event links (mig 20260926191000). Self-contained (1c prefix),
 -- rolled back at the end.
 --   L1 a marketplace event links to at most one Exos event; status/id agree
---   L2 staff link or reject by hand; the StubHub request is re-queued
+--   L2 staff pick a candidate or reject them all; the StubHub request is
+--      re-queued; an id the search didn't find is refused
 --   L3 organizers can't write links directly; strangers can't use the RPC
+--   L4 changing the event drops automatic links, keeps staff decisions
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_channel_event_links.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -42,7 +44,11 @@ BEGIN
 END $$;
 
 -- L2 ---------------------------------------------------------------------------
--- e1 is published with StubHub, so it has a queued request; say it failed on review.
+-- e1 is published with StubHub, so it has a queued request; the search found
+-- two possible events and it waits on staff.
+INSERT INTO public.exos_channel_event_links(event_id,org_id,channel,status,method,confidence,candidates)
+VALUES ('1c000000-0000-0000-0000-0000000000e1','1c000000-0000-0000-0000-000000000001','stubhub','review','auto_match',0.7,
+  '[{"external_event_id":"222333","name":"One","score":0.7},{"external_event_id":"104857","name":"One","score":0.65}]');
 UPDATE public.exos_distribution_listings SET status = 'failed', error = 'possible StubHub matches need a decision'
  WHERE event_id = '1c000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
 SELECT set_config('app.uid','1c000000-0000-0000-0000-0000000000a0',true);
@@ -55,6 +61,11 @@ BEGIN
     PERFORM public.exos_link_channel_event('1c000000-0000-0000-0000-0000000000e1','stubhub','104857');
     RAISE EXCEPTION 'L2 FAIL: linked an id held by another event';
   EXCEPTION WHEN unique_violation THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.exos_link_channel_event('1c000000-0000-0000-0000-0000000000e1','stubhub','777777');
+    RAISE EXCEPTION 'L2 FAIL: linked an id the search did not find';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   BEGIN
     PERFORM public.exos_link_channel_event('1c000000-0000-0000-0000-0000000000e1','stubhub','1; drop table x');
@@ -109,4 +120,23 @@ BEGIN
   RAISE NOTICE 'L3 ok: no direct writes; strangers refused';
 END $$;
 RESET ROLE;
+
+-- L4 ---------------------------------------------------------------------------
+-- e2's StubHub link was automatic: a reschedule drops it (searched again).
+-- e1's was set by staff: kept.
+UPDATE public.exos_events SET starts_at = starts_at + interval '1 day'
+ WHERE id IN ('1c000000-0000-0000-0000-0000000000e1','1c000000-0000-0000-0000-0000000000e2');
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.exos_channel_event_links WHERE event_id = '1c000000-0000-0000-0000-0000000000e2') THEN
+    RAISE EXCEPTION 'L4 FAIL: automatic link kept after the event moved';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.exos_channel_event_links
+                  WHERE event_id = '1c000000-0000-0000-0000-0000000000e1' AND method = 'manual') THEN
+    RAISE EXCEPTION 'L4 FAIL: staff decision dropped';
+  END IF;
+  -- A description-only edit changes nothing.
+  UPDATE public.exos_events SET description = 'x' WHERE id = '1c000000-0000-0000-0000-0000000000e1';
+  RAISE NOTICE 'L4 ok: event changes re-check automatic links only';
+END $$;
 ROLLBACK;

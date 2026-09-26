@@ -37,6 +37,9 @@ describe('exosEventRef / localDate', () => {
     expect(ref).toMatchObject({ name: 'Show', venueName: 'Blue Room', venueCity: 'Brooklyn', venueRegion: 'NY', countryCode: null });
     expect(localDate(ref!)).toBe('2026-11-06');
     expect(localDate({ startsAt: '2026-11-07T02:00:00Z', occursAtLocal: null })).toBe('2026-11-07');
+    // No occurs_at_local: the event's own zone, not UTC (9pm in New York is the 6th).
+    expect(localDate({ startsAt: '2026-11-07T02:00:00Z', occursAtLocal: null, timezone: 'America/New_York' })).toBe('2026-11-06');
+    expect(localDate({ startsAt: '2026-11-07T02:00:00Z', occursAtLocal: null, timezone: 'Not/AZone' })).toBe('2026-11-07');
   });
 
   it('returns null for an event it cannot describe', () => {
@@ -73,6 +76,17 @@ describe('event matching', () => {
     const other = scoreMatch(EV, cand({ venueCity: 'Chicago' }));
     expect(other.reasons).toContain('different city');
     expect(other.score).toBeLessThan(scoreMatch(EV, cand({})).score);
+  });
+
+  it('never auto-links a same-named show at another venue, even in the same city', () => {
+    const other = cand({ venueName: 'Comedy Cellar', venueCity: 'Brooklyn' });
+    const s = scoreMatch(EV, other);
+    expect(s.score).toBeGreaterThanOrEqual(0.8);
+    expect(s.samePlace).toBe(false);
+    expect(decideMatch(EV, [other]).decision).toBe('review');
+    // No venue name on the marketplace side: the same city is the evidence.
+    expect(decideMatch(EV, [cand({ venueName: null })]).decision).toBe('link');
+    expect(decideMatch(EV, [cand({ venueName: null, venueCity: null })]).decision).toBe('review');
   });
 
   it('finds nothing in an unrelated catalog', () => {
