@@ -25,7 +25,10 @@ import { useT } from '../context/LanguageContext';
 //
 // The claim itself doesn't need a ticket fetch either: we already have
 // `transfer.ticketId` and the rules verify the caller's email against the
-// transfer doc's receiverEmail.
+// transfer doc's receiverEmail, except for marketplace (claimMode 'link')
+// transfers, which any verified account holding the link can claim. RLS hides
+// those rows from a different email, so getTransfer falls back to a preview
+// RPC that returns their display fields without any emails.
 
 export default function ClaimTicket() {
   const { transferId } = useParams();
@@ -70,10 +73,14 @@ export default function ClaimTicket() {
     fetchData();
   }, [transferId, toast]);
 
+  // Marketplace tickets are claimed by link into whichever Exos account the
+  // buyer has; their order email is often a marketplace relay address.
+  const isLinkClaim = transfer?.claimMode === 'link';
+
   const handleClaim = async () => {
     if (!user || !transfer) return;
 
-    if (user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase()) {
+    if (!isLinkClaim && user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase()) {
       toast({
         kind: 'error',
         title: t('claim.wrongAccountTitle'),
@@ -88,13 +95,14 @@ export default function ClaimTicket() {
       // 'completed', reassigns ownership to the caller, ROTATES the per-ticket
       // barcode secret (so the sender's old screenshot is dead), echoes the
       // transferId, and clears the pending-transfer lock. It re-verifies the
-      // caller's confirmed email matches the transfer and refuses if the
-      // ticket was used/voided in the meantime.
+      // caller's confirmed email matches the transfer (link transfers: any
+      // verified account) and refuses if the ticket was used/voided since.
       const claimedTicketId = await claimTransfer(transfer.id);
 
       // Notify the sender that their transfer was claimed. Recipient + body
       // are server-derived by the exos_queue_mail RPC (mig 20260520160000).
-      void queueEmail({ template: 'transfer-claimed', refId: transfer.id });
+      // A marketplace sale's sender is the organizer: no mail per claim.
+      if (!isLinkClaim) void queueEmail({ template: 'transfer-claimed', refId: transfer.id });
       // Confirm to the new owner that the ticket is now in their wallet
       // (server-derived recipient; mig 20260523210000).
       void queueTicketIssued(claimedTicketId);
@@ -145,7 +153,7 @@ export default function ClaimTicket() {
   const displayTier = transfer.tierName || 'General Entry';
 
   const isWrongUser =
-    user && user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase();
+    !isLinkClaim && user && user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase();
 
   return (
     <div className="wall min-h-screen">
@@ -185,7 +193,7 @@ export default function ClaimTicket() {
             {!user ? (
               <div className="text-center">
                 <p className="type text-white/50 text-sm mb-8">
-                  {t('claim.signInPrompt')}
+                  {t(isLinkClaim ? 'claim.signInPromptLink' : 'claim.signInPrompt')}
                 </p>
                 <button
                   onClick={() => openAuthModal()}

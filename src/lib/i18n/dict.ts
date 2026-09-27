@@ -128,6 +128,7 @@ export const en = {
   'claim.wrongEmail': 'This ticket was sent to {email}, but you are signed in as {you}. Sign in with that email, or ask the sender to resend it to you.',
   'claim.switchAccount': 'Sign in with another email',
   'claim.signInPrompt': 'Sign in with the email the ticket was sent to.',
+  'claim.signInPromptLink': 'Sign in with any Exos account, or create one, to claim it. It doesn\'t have to be the email you ordered with.',
   'claim.signInButton': 'SIGN IN TO CLAIM',
 
   'common.cancel': 'Cancel',
@@ -251,6 +252,7 @@ export const es: Record<DictKey, string> = {
   'claim.wrongEmail': 'Esta entrada se envió a {email}, pero iniciaste sesión como {you}. Inicia sesión con ese correo o pide que te la reenvíen.',
   'claim.switchAccount': 'Iniciar sesión con otro correo',
   'claim.signInPrompt': 'Inicia sesión con el correo al que se envió la entrada.',
+  'claim.signInPromptLink': 'Inicia sesión con cualquier cuenta de Exos, o crea una, para reclamarla. No tiene que ser el correo con el que compraste.',
   'claim.signInButton': 'INICIA SESIÓN PARA RECLAMAR',
 
   'common.cancel': 'Cancelar',

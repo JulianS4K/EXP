@@ -55,7 +55,7 @@ q "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
    -- The harness's stub tables carry no RLS; prod lets org staff write their
    -- events and tiers through RLS policies (phase-1 schema). Grant the same here.
    GRANT SELECT, INSERT, UPDATE ON public.exos_events, public.exos_ticket_tiers TO authenticated;"
-ok "carol has no Exos account yet; she'll sign up to claim"
+ok "carol has no Exos account yet; she'll sign up to claim (with a different email than her StubHub order)"
 
 step "1. Organizer creates the event (draft), StubHub ticked, max 4 per order and per account"
 as $OWNER owner@e2e.test "INSERT INTO public.exos_events(id,org_id,name,status,starts_at,occurs_at_local,timezone,currency,
@@ -145,15 +145,23 @@ need "$(q "SELECT count(*) FROM exos_tickets WHERE order_ref='stubhub:SH-9001' A
 need "$(scan $BT "$OLD")" barcode-rejected "the pre-claim barcode"
 ok "bob owns both; the barcode from before the claim no longer works (secret rotated)"
 
-step "10. Carol (no account) buys 3 on StubHub, signs up, claims"
-q "SELECT exos_record_marketplace_order('{\"channel\":\"stubhub\",\"external_order_id\":\"SH-9002\",\"external_listing_id\":\"SH-L-1\",\"quantity\":3,\"sale_status\":\"confirmed\",\"buyer_email\":\"carol@e2e.test\",\"proceeds\":\"135.00\",\"currency\":\"USD\"}');
+step "10. Carol (no account) buys 3 on StubHub under a relay email, signs up with her own, claims"
+RELAY=c4r0l-7x2@relay.stubhub.example
+q "SELECT exos_record_marketplace_order('{\"channel\":\"stubhub\",\"external_order_id\":\"SH-9002\",\"external_listing_id\":\"SH-L-1\",\"quantity\":3,\"sale_status\":\"confirmed\",\"buyer_email\":\"$RELAY\",\"proceeds\":\"135.00\",\"currency\":\"USD\"}');
    SELECT exos_fulfil_marketplace_order((SELECT id FROM exos_marketplace_orders WHERE external_order_id='SH-9002'),'$APP');
    INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$CAROL','carol@e2e.test',now());" >/dev/null
-for t in $(q "SELECT id FROM exos_transfers WHERE receiver_email='carol@e2e.test' AND status='pending'"); do
+need "$(q "SELECT count(*) FROM exos_mail WHERE to_email='$RELAY' AND html LIKE '%any Exos account%'")" 1 "the claim mail goes to the relay and says any account"
+FIRST=$(q "SELECT id FROM exos_transfers WHERE receiver_email='$RELAY' AND status='pending' ORDER BY id LIMIT 1")
+need "$(as $ALICE alice@e2e.test "SELECT event_title FROM public.exos_transfer_claim_preview('$FIRST')")" "Late Night Jazz" "claim page preview for someone RLS hides the row from"
+for t in $(q "SELECT id FROM exos_transfers WHERE receiver_email='$RELAY' AND status='pending'"); do
   as $CAROL carol@e2e.test "SELECT public.exos_claim_transfer('$t')" >/dev/null
 done
 need "$(q "SELECT count(*) FROM exos_tickets WHERE owner_id='$CAROL'")" 3 "carol owns 3"
-ok "carol signed up with the order email and claimed 3"
+if as $ALICE alice@e2e.test "SELECT public.exos_claim_transfer('$FIRST')" >/dev/null 2>&1; then
+  echo "   FAIL: a claimed link was claimed again"; exit 1
+fi
+need "$(q "SELECT count(*) FROM exos_tickets WHERE owner_id='$CAROL'")" 3 "carol keeps all 3"
+ok "carol claimed 3 into carol@e2e.test (order email was a StubHub relay); a second claim on her link is refused"
 
 step "11. Dave buys 3 + 3 on StubHub (each order within max per order), then claims all 6"
 for o in SH-9003 SH-9004; do

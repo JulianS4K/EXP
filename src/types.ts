@@ -470,4 +470,7 @@ export interface Transfer {
   // Denormalised sender email so the receiver can send a "claimed"
   // notification back without reading the sender's user doc.
   senderEmail?: string;
+  // 'link': a marketplace sale, claimable by any verified Exos account that
+  // opens the link (first claim wins). 'email': only the addressed account.
+  claimMode?: 'email' | 'link';
 }
