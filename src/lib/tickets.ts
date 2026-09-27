@@ -71,6 +71,7 @@ export function mapTransfer(row: any): Transfer {
     senderId: row.sender_id,
     senderEmail: row.sender_email ?? undefined,
     receiverEmail: row.receiver_email,
+    receiverName: row.receiver_name ?? undefined,
     status: row.status,
     createdAt: toTs(row.created_at),
     updatedAt: row.updated_at ? toTs(row.updated_at) : undefined,
@@ -236,7 +237,16 @@ export async function getTransfer(transferId: string): Promise<Transfer | null> 
     .eq('id', transferId)
     .maybeSingle();
   if (error) throw error;
-  return data ? mapTransfer(data) : null;
+  if (data) return mapTransfer(data);
+  // Any Exos account can claim a transfer, but RLS only shows the row to the
+  // sender, the addressed email and org staff. The preview RPC returns the
+  // claim page's display fields (no emails) to whoever holds the link.
+  const { data: preview, error: pErr } = await supabase.rpc('exos_transfer_claim_preview', {
+    p_transfer_id: transferId,
+  });
+  if (pErr) throw pErr;
+  const row = Array.isArray(preview) ? preview[0] : preview;
+  return row ? mapTransfer({ ...row, receiver_email: '' }) : null;
 }
 
 // --- Organizer / staff reads (RLS: org-staff only) -------------------------
@@ -497,10 +507,13 @@ export async function recordScanReject(input: {
 }
 
 /** Create a pending transfer + lock the ticket. Returns the transfer id. */
-export async function createTransfer(ticketId: string, receiverEmail: string): Promise<string> {
+export async function createTransfer(ticketId: string, receiverEmail: string, receiverName?: string): Promise<string> {
+  // The server mails the sender a receipt (recipient email + this name).
+  const name = receiverName?.trim();
   const { data, error } = await supabase.rpc('exos_create_transfer', {
     p_ticket_id: ticketId,
     p_receiver_email: receiverEmail,
+    ...(name ? { p_receiver_name: name } : {}),
   });
   if (error) throw error;
   return data as string;

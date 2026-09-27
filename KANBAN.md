@@ -170,6 +170,23 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
   (sign-in now returns to the page the buyer started on, not the site root).
 - [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
 
+## Claim into any account 2026-09-27
+
+EXP#12 + mig `20260927010000` (tested: `test_claim_any_account.sql` L1–L7, e2e dry run).
+- ✅ Any verified Exos account holding the claim link claims a ticket, whatever email it was sent to;
+  first claim wins. Marketplace (relay emails), friend transfers, box office and comps.
+- ✅ Every "you've been sent a ticket" mail carries its claim links and says any account works.
+- ✅ Sender paper trail: "transfer sent" (recipient email + typed name) and "transfer accepted"
+  (who claimed it, when) receipts, sent by the database.
+- [ ] Prod rollout, in order: redeploy `exos-mail-drain` with `EXOS_APP_URL` set (deployed v1
+  doesn't fill `{{app_url}}`), apply the migration, deploy the SPA. Operator-gated.
+- ✅ Org staff invites and reserved voucher codes: first come, first served (operator,
+  2026-09-27). Any verified account with the invite link joins; the invite mail carries the link
+  and the inviter gets a receipt naming who joined (remove under Members if wrong). A voucher's
+  reserved email only records who it was for; single-use codes still work once.
+- [ ] Revisit later: whether invites (staff access) should go back to an email match, or add an
+  owner "approve new member" step, if first come proves too loose.
+
 ## Accessible tickets 2026-09-26
 
 `claude/exos-p0` + mig `20260926090000` (tested: `test_accessible_tickets.sql` on the P0 chain and on the real-schema clone).

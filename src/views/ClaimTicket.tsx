@@ -24,12 +24,14 @@ import { useT } from '../context/LanguageContext';
 // reason we fall back to the denormalised values.
 //
 // The claim itself doesn't need a ticket fetch either: we already have
-// `transfer.ticketId` and the rules verify the caller's email against the
-// transfer doc's receiverEmail.
+// `transfer.ticketId`. Any verified Exos account holding the link can claim,
+// whatever email the transfer was sent to (first claim wins). RLS hides the
+// row from a different email, so getTransfer falls back to a preview RPC that
+// returns the display fields without any emails.
 
 export default function ClaimTicket() {
   const { transferId } = useParams();
-  const { user, logout, openAuthModal } = useAuth();
+  const { user, openAuthModal } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const t = useT();
@@ -73,27 +75,21 @@ export default function ClaimTicket() {
   const handleClaim = async () => {
     if (!user || !transfer) return;
 
-    if (user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase()) {
-      toast({
-        kind: 'error',
-        title: t('claim.wrongAccountTitle'),
-        message: t('claim.wrongAccount'),
-      });
-      return;
-    }
-
     setClaiming(true);
     try {
       // One RPC does the whole claim atomically: flips the transfer to
       // 'completed', reassigns ownership to the caller, ROTATES the per-ticket
       // barcode secret (so the sender's old screenshot is dead), echoes the
       // transferId, and clears the pending-transfer lock. It re-verifies the
-      // caller's confirmed email matches the transfer and refuses if the
-      // ticket was used/voided in the meantime.
+      // caller has a confirmed email (any account) and refuses if the ticket
+      // was used/voided in the meantime.
       const claimedTicketId = await claimTransfer(transfer.id);
 
       // Notify the sender that their transfer was claimed. Recipient + body
       // are server-derived by the exos_queue_mail RPC (mig 20260520160000).
+      // Exos-to-Exos transfers are mailed by exos_claim_transfer itself (with
+      // who claimed it) and marketplace sales not at all; the RPC refuses
+      // those, so this only covers the rest (comps, box office).
       void queueEmail({ template: 'transfer-claimed', refId: transfer.id });
       // Confirm to the new owner that the ticket is now in their wallet
       // (server-derived recipient; mig 20260523210000).
@@ -144,9 +140,6 @@ export default function ClaimTicket() {
   const displayImage = event?.image || transfer.eventImage || '';
   const displayTier = transfer.tierName || 'General Entry';
 
-  const isWrongUser =
-    user && user.email?.toLowerCase() !== transfer.receiverEmail.toLowerCase();
-
   return (
     <div className="wall min-h-screen">
       <div className="max-w-2xl mx-auto px-4 py-16 relative z-10">
@@ -194,23 +187,6 @@ export default function ClaimTicket() {
                   {t('claim.signInButton')}
                 </button>
               </div>
-            ) : isWrongUser ? (
-              <div className="bg-brand-accent/10 p-8 border border-brand-accent/30 text-center">
-                <XCircle className="w-12 h-12 text-brand-accent mx-auto mb-4" aria-hidden="true" />
-                <p className="disp text-xl tracking-tight text-white mb-2">{t('claim.conflict')}</p>
-                <p className="type text-white/60 text-sm mb-6">
-                  {t('claim.wrongEmail', { email: maskEmail(transfer.receiverEmail), you: user.email ?? '' })}
-                </p>
-                <button
-                  className="type text-brand-accent text-xs uppercase tracking-widest hover:underline"
-                  onClick={async () => {
-                    await logout();
-                    openAuthModal();
-                  }}
-                >
-                  {t('claim.switchAccount')}
-                </button>
-              </div>
             ) : (
               <div className="space-y-8">
                 <div className="bg-white/5 border border-white/10 p-7">
@@ -231,6 +207,7 @@ export default function ClaimTicket() {
                       </p>
                     </div>
                   </div>
+                  <p className="type text-[11px] text-white/35 text-center mb-5">{t('claim.senderNotified')}</p>
                   <div className="pt-5 border-t border-white/5 flex items-center justify-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-brand-primary" aria-hidden="true" />
                     <span className="type text-[10px] text-white/40 uppercase tracking-widest">
@@ -254,13 +231,4 @@ export default function ClaimTicket() {
       </div>
     </div>
   );
-}
-
-// "jo@gmail.com" -> "j•••@gmail.com": enough for the buyer to recognise which
-// of their addresses the ticket went to, without handing it to whoever has
-// the link.
-function maskEmail(email: string): string {
-  const at = email.indexOf('@');
-  if (at <= 0) return email;
-  return `${email[0]}•••${email.slice(at)}`;
 }

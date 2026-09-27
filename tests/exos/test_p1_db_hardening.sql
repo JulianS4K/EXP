@@ -76,6 +76,8 @@ END $$;
 -- P2. Fulfillment re-validates the voucher (all-or-nothing on a miss).
 DO $$
 DECLARE e1 uuid := 'f7000000-0000-0000-0000-0000000000e1'; org uuid := 'f7000000-0000-0000-0000-000000000001';
+  -- mig 20260927010000: a reserved email no longer limits who redeems.
+  fcfs boolean := position('first redeemer wins' in pg_get_functiondef('public.exos_fulfill_checkout(text)'::regprocedure)) > 0;
 BEGIN
   INSERT INTO public.exos_vouchers(id,event_id,code,tier_id,max_uses,used_count,bypass_capacity,reserved_email,valid_until) VALUES
     ('f7000000-0000-0000-0000-0000000000f1',e1,'P1RES',NULL,5,0,false,'p1hold@x.com',NULL),
@@ -91,17 +93,23 @@ BEGIN
   -- Checkout started 10 minutes ago, while the voucher was still valid: honoured.
   INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,status,voucher_id,created_at) VALUES
     ('p1-cs5',e1,'f7000000-0000-0000-0000-0000000000d1',org,'f7000000-0000-0000-0000-0000000000a4','p1hold@x.com',1,2500,'pending','f7000000-0000-0000-0000-0000000000f5',now() - interval '10 minutes');
-  ASSERT public.exos_fulfill_checkout('p1-cs1') = '{}'::uuid[], 'P2: reserved for another email';
+  IF fcfs THEN
+    ASSERT array_length(public.exos_fulfill_checkout('p1-cs1'), 1) = 1, 'P2: reserved code redeemed by another email (first come)';
+  ELSE
+    ASSERT public.exos_fulfill_checkout('p1-cs1') = '{}'::uuid[], 'P2: reserved for another email';
+  END IF;
   ASSERT public.exos_fulfill_checkout('p1-cs2') = '{}'::uuid[], 'P2: expired';
   ASSERT public.exos_fulfill_checkout('p1-cs3') = '{}'::uuid[], 'P2: other tier';
   ASSERT array_length(public.exos_fulfill_checkout('p1-cs4'), 1) = 1, 'P2: valid voucher fulfills';
   ASSERT array_length(public.exos_fulfill_checkout('p1-cs5'), 1) = 1, 'P2: voucher that expired mid-payment is honoured';
   ASSERT (SELECT count(*) FROM public.exos_checkout_sessions WHERE session_id IN ('p1-cs1','p1-cs2','p1-cs3')
-           AND status = 'failed' AND failure_reason LIKE 'voucher%') = 3, 'P2: failed with the voucher reason';
-  ASSERT (SELECT sum(used_count) FROM public.exos_vouchers WHERE id IN ('f7000000-0000-0000-0000-0000000000f1',
-           'f7000000-0000-0000-0000-0000000000f2','f7000000-0000-0000-0000-0000000000f3')) = 0, 'P2: nothing consumed on a miss';
-  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'order-failed' AND to_email = 'other@x.com'
-           AND html LIKE '%access code you used%') = 1, 'P2: failure mail names the access code';
+           AND status = 'failed' AND failure_reason LIKE 'voucher%') = CASE WHEN fcfs THEN 2 ELSE 3 END, 'P2: failed with the voucher reason';
+  ASSERT (SELECT sum(used_count) FROM public.exos_vouchers WHERE id IN ('f7000000-0000-0000-0000-0000000000f2','f7000000-0000-0000-0000-0000000000f3')) = 0
+     AND (SELECT used_count FROM public.exos_vouchers WHERE id = 'f7000000-0000-0000-0000-0000000000f1') = CASE WHEN fcfs THEN 1 ELSE 0 END,
+         'P2: nothing consumed on a miss';
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'order-failed'
+           AND to_email = CASE WHEN fcfs THEN 'p1hold@x.com' ELSE 'other@x.com' END
+           AND html LIKE '%access code you used%') >= 1, 'P2: failure mail names the access code';
   RAISE NOTICE 'OK  P2 voucher re-validated at fulfillment';
 END $$;
 

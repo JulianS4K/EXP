@@ -62,11 +62,31 @@ The flow, end to end:
      table ticket type go to a human. A parked order retries when StubHub
      reports the sale again.
 5. **Issued to the buyer as a transfer, and as links on StubHub.** Each
-   ticket gets a pending Exos transfer to the buyer's email:
-   - it shows under their tickets when they sign in with that email;
-   - Exos emails them (`transfer-initiated`) with one claim link per ticket,
-     `<EXOS_APP_BASE_URL>/claim/<transfer>`;
-   - StubHub gets the same links through a planned `PATCH /sales/{id}`.
+   ticket gets a pending Exos transfer, addressed to the order's buyer email:
+   - Exos emails that address (`transfer-initiated`) with one claim link per
+     ticket, `<EXOS_APP_BASE_URL>/claim/<transfer>`;
+   - StubHub gets the same links through a planned `PATCH /sales/{id}`;
+   - it also shows under their tickets if they sign in with that email.
+
+   **Claimed into any Exos account** (mig `20260927010000`). A marketplace
+   buyer email is often a relay address the marketplace forwards from, and
+   people sign in with whichever account they want. So the email only
+   decides where the claim link is sent: any verified Exos account that opens
+   the link can claim, and the first claim wins (the row locks; a second
+   claim is refused). The same holds for Exos-to-Exos transfers between
+   friends and to box-office and comp tickets, whose mails now carry the
+   claim links too (`{{app_url}}/claim/<id>`, filled by `exos-mail-drain`
+   from `EXOS_APP_URL`; redeploy the drain with it set before applying the
+   migration). The claim page reads the transfer through
+   `exos_transfer_claim_preview`, which returns display fields only, with no
+   emails.
+
+   **Sender paper trail.** For an Exos-to-Exos transfer the database mails
+   the sender twice: a `transfer-sent` receipt (recipient email, the name
+   they typed, the claim link, "cancel until claimed") and, on claim, a
+   `transfer-claimed` receipt naming who accepted it (Exos display name and
+   email) and when. Comps, box office and marketplace sales don't mail the
+   organizer per ticket.
 
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
@@ -147,7 +167,8 @@ real TypeScript planners. What it covers:
 2. Allocate seats to StubHub, and plan the StubHub event and listing.
 3. An Exos paid checkout through a promoter.
 4. StubHub sales and their buyer transfers.
-5. Claims.
+5. Claims, including a buyer whose StubHub email is a relay claiming into
+   an account with a different email, and a second claim on the same link.
 6. Account flags, with the promoter note and the org review.
 7. Exos selling out while StubHub still sells its own seats.
 8. StubHub overselling its allocation, and a StubHub cancellation.

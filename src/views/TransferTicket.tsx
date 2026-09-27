@@ -18,6 +18,7 @@ export default function TransferTicket() {
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
   const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientName, setRecipientName] = useState('');
   const [sending, setSending] = useState(false);
   // After a successful transfer, switch the page into a "share link"
   // success state so the sender can copy the claim URL and pass it
@@ -73,7 +74,7 @@ export default function TransferTicket() {
       // the ticket isn't active, already has a pending transfer, the receiver
       // is the sender, or the event is still a draft — so the previous
       // separate "lock" write (and its failure-handling) is gone.
-      const transferId = await createTransfer(ticket.id, normalisedEmail);
+      const transferId = await createTransfer(ticket.id, normalisedEmail, recipientName);
 
       // Best-effort: notify the receiver. Recipient + body are server-derived
       // by the exos_queue_mail RPC (mig 20260520160000). queueEmail never throws.
@@ -88,7 +89,7 @@ export default function TransferTicket() {
       toast({
         kind: 'success',
         title: 'Transfer sent',
-        message: `${normalisedEmail} can claim — copy the link to send via SMS or anywhere else.`,
+        message: `Sent to ${normalisedEmail}. We emailed you a receipt; copy the link to send via SMS or anywhere else.`,
       });
     } catch (error: any) {
       console.error('Transfer failed:', error);
@@ -155,7 +156,7 @@ export default function TransferTicket() {
               </button>
             </div>
             <p className="type text-[12px] text-white/45 leading-relaxed">
-              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app — the receiver signs in with the email above to claim.
+              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them.
             </p>
           </div>
 
@@ -210,6 +211,20 @@ export default function TransferTicket() {
                   onChange={(e) => setRecipientEmail(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="type text-[10px] text-white/30 uppercase tracking-widest ml-1">recipient name (optional)</label>
+              <input
+                type="text"
+                maxLength={100}
+                autoComplete="off"
+                placeholder="who you're sending it to, for your receipt"
+                className="type w-full bg-white/5 border border-white/10 py-5 px-6 text-white placeholder-white/35 focus:outline-none focus:border-brand-primary transition-all text-base tracking-wide"
+                value={recipientName}
+                onChange={(e) => setRecipientName(e.target.value)}
+              />
+              <p className="type text-[11px] text-white/35 ml-1">You'll get an email receipt now, and another when it's accepted, saying who claimed it.</p>
             </div>
 
             <div className="p-6 bg-black border border-white/5 flex items-start gap-4">

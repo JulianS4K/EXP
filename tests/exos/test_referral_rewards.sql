@@ -183,7 +183,10 @@ BEGIN
      AND v.price_override = 0 AND v.max_uses = 1 AND v.event_id = 'a7000000-0000-0000-0000-0000000000e1',
      'RR4: voucher shape ' || row_to_json(v)::text;
   ASSERT (SELECT is_valid FROM public.exos_check_voucher(v.event_id, v.code, 'fana@x.com')), 'RR4: A can use it';
-  ASSERT NOT (SELECT is_valid FROM public.exos_check_voucher(v.event_id, v.code, 'friend1@y.com')), 'RR4: bound to A';
+  -- mig 20260927010000: reserved_email records who it's for; first redeemer wins.
+  IF position('first redeemer wins' in pg_get_functiondef('public.exos_check_voucher(uuid,text,text)'::regprocedure)) = 0 THEN
+    ASSERT NOT (SELECT is_valid FROM public.exos_check_voucher(v.event_id, v.code, 'friend1@y.com')), 'RR4: bound to A';
+  END IF;
   PERFORM set_config('app.uid','a7000000-0000-0000-0000-0000000000a1',false);
   p := public.exos_my_referral_progress('a7000000-0000-0000-0000-0000000000e1');
   ASSERT (p->>'counted')::int = 2 AND (p->>'nextThreshold')::int = 4

@@ -8,7 +8,8 @@
 //   2. Status == 'pending'.
 //   3. expiresAt is in the future.
 //   4. User is signed in with email_verified == true.
-//   5. The signed-in user's email (lowercased) matches the invite email.
+//   Any account can accept, first come first served (mig 20260927010000);
+//   the inviter is mailed which account joined.
 //
 // We surface specific failure messaging at each step so the recipient
 // understands why an invite isn't accepting (vs. a generic "couldn't
@@ -86,16 +87,7 @@ export default function ClaimInvite() {
         const org = await getPublicOrg(inv.orgId).catch(() => null);
         setState({ kind: 'ready', invite: inv as InviteDoc, org });
       } catch (err) {
-        // Most likely cause: rule rejection because the signed-in
-        // user's email doesn't match the invite. Surface helpfully.
-        const msg = err instanceof Error ? err.message : '';
-        setState({
-          kind: 'invalid',
-          reason:
-            /permission|denied/i.test(msg)
-              ? 'You must sign in with the email this invite was sent to.'
-              : 'Could not load this invite. Try again later.',
-        });
+        setState({ kind: 'invalid', reason: 'Could not load this invite. Try again later.' });
       }
     }
     load();
@@ -117,20 +109,12 @@ export default function ClaimInvite() {
       });
       return;
     }
-    const inviteEmail = state.invite.email.toLowerCase();
-    const callerEmail = (user.email || '').toLowerCase();
-    if (inviteEmail !== callerEmail) {
-      toast({
-        kind: 'error',
-        message: `This invite is for ${state.invite.email}. Sign out and sign in with that email.`,
-      });
-      return;
-    }
     setState({ kind: 'claiming' });
     try {
       // Supabase Auth keeps the session JWT fresh on its own; the old Firebase
       // getIdToken(true) force-refresh is gone. The claim RPC derives
-      // auth.uid()/email + the email_confirmed gate from the current session.
+      // auth.uid() + the email_confirmed gate from the current session. Any
+      // account can accept (first come, first served); the inviter is mailed.
       await claimOrgInvite({
         token: state.invite.token,
         orgId: state.invite.orgId,
@@ -217,9 +201,6 @@ export default function ClaimInvite() {
 
   // 'ready' — show accept screen.
   const { invite, org } = state;
-  const signedInWithRightEmail =
-    user && (user.email || '').toLowerCase() === invite.email.toLowerCase();
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -244,18 +225,16 @@ export default function ClaimInvite() {
               <span className="type text-xs uppercase tracking-widest text-white/40">Invited as</span>
               <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest bg-white/10 border border-white/15">{invite.role}</span>
             </div>
-            <div className="flex items-center justify-between py-3 gap-4">
-              <span className="type text-xs uppercase tracking-widest text-white/40 shrink-0">Your email</span>
-              <span className="text-sm font-semibold break-all text-right">{invite.email}</span>
-            </div>
+            {user ? (
+              <div className="flex items-center justify-between py-3 gap-4">
+                <span className="type text-xs uppercase tracking-widest text-white/40 shrink-0">Joining as</span>
+                <span className="text-sm font-semibold break-all text-right">{user.email}</span>
+              </div>
+            ) : null}
 
             {!user ? (
               <div className="mt-6 bg-yellow-500/10 border border-yellow-500/30 p-4 text-xs text-yellow-400 font-bold uppercase tracking-widest">
-                Sign in with {invite.email} to accept.
-              </div>
-            ) : !signedInWithRightEmail ? (
-              <div className="mt-6 bg-red-500/10 border border-red-500/30 p-4 text-xs text-red-400 font-bold uppercase tracking-widest">
-                You're signed in as {user.email}. Sign out and sign in with {invite.email} to accept.
+                Sign in with any Exos account, or create one, to accept.
               </div>
             ) : !user.emailVerified ? (
               <div className="mt-6 bg-yellow-500/10 border border-yellow-500/30 p-4 text-xs text-yellow-400 font-bold uppercase tracking-widest">
@@ -265,14 +244,14 @@ export default function ClaimInvite() {
 
             <button
               onClick={handleAccept}
-              disabled={!user || !signedInWithRightEmail || !user.emailVerified}
+              disabled={!!user && !user.emailVerified}
               className="mt-8 block w-full text-center bg-brand-primary text-black disp uppercase tracking-wide text-xl py-4 hover:scale-[1.01] active:scale-[0.99] transition-transform disabled:opacity-50"
             >
               Accept Invitation
             </button>
 
             <p className="type text-[11px] text-white/30 text-center mt-4">
-              By accepting you'll be added to the org with the {invite.role} role.
+              By accepting you'll be added to the org with the {invite.role} role. Whoever invited you gets an email saying which account joined.
             </p>
           </div>
         </div>

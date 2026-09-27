@@ -94,7 +94,7 @@ export default function CompIssuancePanel({
       </div>
       <p className="text-xs text-slate-400 mb-4">
         Paste emails (one per line, or comma-separated). People with an account get their tickets
-        straight away; everyone else receives an invite and claims by signing in with that email.
+        straight away; everyone else gets an email with a claim link and can claim into any Exos account.
         Comps count against your organization's comp budget.
       </p>
 

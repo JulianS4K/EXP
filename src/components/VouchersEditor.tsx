@@ -2,8 +2,9 @@
 //
 // Self-contained CRUD embedded in EditEvent (light theme). Mints access codes
 // that can unlock one ticket type (how a hidden presale tier is sold), bypass
-// sold-out capacity, pin a price, and/or be reserved to one email. The code can
-// be chosen ("PRESALE") and matches in any case. Distinct from discount codes.
+// sold-out capacity, pin a price, and/or note who it's for. The code can be
+// chosen ("PRESALE") and matches in any case; whoever redeems it first gets it
+// (the "for" email no longer restricts redemption). Distinct from discount codes.
 
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Ticket, Copy } from 'lucide-react';
@@ -119,7 +120,7 @@ export default function VouchersEditor({ eventId, tiers = [] }: { eventId: strin
           <input type="checkbox" checked={bypass} onChange={(e) => setBypass(e.target.checked)} />
           Holders can buy even when sold out
         </label>
-        <input value={reservedEmail} onChange={(e) => setReservedEmail(e.target.value)} placeholder="Reserve to email (optional)" className={`col-span-2 ${inputCls}`} />
+        <input value={reservedEmail} onChange={(e) => setReservedEmail(e.target.value)} placeholder="For (email, optional; anyone with the code can redeem it)" className={`col-span-2 ${inputCls}`} />
         <input value={priceOverride} onChange={(e) => setPriceOverride(e.target.value)} type="number" min={0} step="0.01" placeholder="Price override $ (optional)" className={inputCls} />
         <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Note (optional)" className={inputCls} />
       </div>

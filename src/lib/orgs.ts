@@ -405,13 +405,30 @@ export async function getOrgInvite(token: string) {
     .eq('token', token)
     .maybeSingle();
   if (error) throw error;
-  if (!data) return null;
-  return { token: data.token, ...data };
+  let row: any = data;
+  if (!row) {
+    // Any verified account with the link can accept (first come, first
+    // served), but RLS only shows the row to the addressed email and org
+    // owners. The preview returns it without the email.
+    const { data: preview, error: pErr } = await supabase.rpc('exos_invite_preview', { p_token: token });
+    if (pErr) throw pErr;
+    row = Array.isArray(preview) ? preview[0] : preview;
+  }
+  if (!row) return null;
+  return {
+    token: row.token as string,
+    orgId: row.org_id as string,
+    email: (row.email ?? '') as string,
+    role: row.role as OrgRole,
+    status: row.status as 'pending' | 'completed' | 'cancelled' | 'expired',
+    expiresAt: row.expires_at ? toTs(row.expires_at) : undefined,
+  };
 }
 
 /**
  * Claim a pending invite. Routed through the SECURITY DEFINER `exos_claim_invite`
- * RPC, which verifies the caller's confirmed email matches the invite, inserts
+ * RPC, which checks the caller's email is confirmed (any account: first come,
+ * first served; the inviter is mailed who joined), inserts
  * the membership, and marks the invite completed — atomically. (The other args
  * are retained for signature compat; the RPC derives everything from the token
  * + auth.uid().)
