@@ -470,4 +470,6 @@ export interface Transfer {
   // Denormalised sender email so the receiver can send a "claimed"
   // notification back without reading the sender's user doc.
   senderEmail?: string;
+  // Name the sender typed for the recipient (their receipts only).
+  receiverName?: string;
 }

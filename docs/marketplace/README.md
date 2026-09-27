@@ -81,6 +81,13 @@ The flow, end to end:
    `exos_transfer_claim_preview`, which returns display fields only, with no
    emails.
 
+   **Sender paper trail.** For an Exos-to-Exos transfer the database mails
+   the sender twice: a `transfer-sent` receipt (recipient email, the name
+   they typed, the claim link, "cancel until claimed") and, on claim, a
+   `transfer-claimed` receipt naming who accepted it (Exos display name and
+   email) and when. Comps, box office and marketplace sales don't mail the
+   organizer per ticket.
+
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
 

@@ -71,6 +71,7 @@ export function mapTransfer(row: any): Transfer {
     senderId: row.sender_id,
     senderEmail: row.sender_email ?? undefined,
     receiverEmail: row.receiver_email,
+    receiverName: row.receiver_name ?? undefined,
     status: row.status,
     createdAt: toTs(row.created_at),
     updatedAt: row.updated_at ? toTs(row.updated_at) : undefined,
@@ -506,10 +507,13 @@ export async function recordScanReject(input: {
 }
 
 /** Create a pending transfer + lock the ticket. Returns the transfer id. */
-export async function createTransfer(ticketId: string, receiverEmail: string): Promise<string> {
+export async function createTransfer(ticketId: string, receiverEmail: string, receiverName?: string): Promise<string> {
+  // The server mails the sender a receipt (recipient email + this name).
+  const name = receiverName?.trim();
   const { data, error } = await supabase.rpc('exos_create_transfer', {
     p_ticket_id: ticketId,
     p_receiver_email: receiverEmail,
+    ...(name ? { p_receiver_name: name } : {}),
   });
   if (error) throw error;
   return data as string;

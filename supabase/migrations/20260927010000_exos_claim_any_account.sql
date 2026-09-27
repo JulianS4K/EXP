@@ -3,7 +3,11 @@
 --                            link, into any Exos account
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
--- Touches:  W: FUNCTION exos_claim_transfer, exos_queue_mail,
+-- Touches:  W: TABLE exos_transfers (+receiver_name, +notify_sender),
+--              exos_mail (template 'transfer-sent')
+--              FUNCTION exos_create_transfer (+p_receiver_name; replaced),
+--                exos_mail_escape (new)
+--              FUNCTION exos_claim_transfer, exos_queue_mail,
 --                exos_fulfil_marketplace_order, exos_issue_ticket_to_email,
 --                exos_issue_comp_batch (patched in place)
 --              FUNCTION exos_transfer_claim_preview (new)
@@ -41,12 +45,34 @@
 --    email and org staff read a transfer, so the claim page reads its display
 --    fields through this function instead: no emails, no ticket id.
 --
+-- 5. A paper trail for the sender of an Exos-to-Exos transfer, sent by the
+--    database so no client can skip it:
+--    - 'transfer-sent' when they send it: the recipient's email and the
+--      name the sender typed (optional; Exos doesn't look it up, so an
+--      email can't be probed for whose account it is), the claim link, and
+--      that they can cancel until it's claimed;
+--    - 'transfer-claimed' when it's accepted: who claimed it (their Exos
+--      display name and email, since any account may claim) and when.
+--    Only transfers made with exos_create_transfer (notify_sender) mail the
+--    sender; comps, box office and marketplace sales don't mail the
+--    organizer per ticket. exos_queue_mail's client-called 'transfer-claimed'
+--    is refused for those transfers so an older SPA can't double-send.
+--
 -- The transfer id (a random UUID, only in the claim link) is the bearer
 -- secret, as it already was for whoever the link reached.
 --
 -- Every patch asserts one match and is skipped once applied (re-run safe).
 -- D4 authors; applying to prod is operator-gated.
 -- ============================================================================
+
+ALTER TABLE public.exos_transfers
+  ADD COLUMN IF NOT EXISTS receiver_name text,
+  -- NULL (jsonb_populate_record inserts) counts as false.
+  ADD COLUMN IF NOT EXISTS notify_sender boolean DEFAULT false;
+COMMENT ON COLUMN public.exos_transfers.receiver_name IS
+  'Name the sender typed for the recipient (optional; shown in the sender''s receipts only).';
+COMMENT ON COLUMN public.exos_transfers.notify_sender IS
+  'true for Exos-to-Exos transfers (exos_create_transfer): the sender is mailed when it is sent and when it is claimed.';
 
 -- Patch helper: replace exactly one occurrence of p_old in a function body.
 CREATE OR REPLACE FUNCTION pg_temp.exos_patch(p_sig text, p_marker text, p_old text, p_new text)
@@ -86,7 +112,9 @@ SELECT pg_temp.exos_patch('public.exos_queue_mail(text, uuid)',
       -- claim; mig 20260927010000). Marketplace sales: no per-ticket mail.
       AND EXISTS (SELECT 1 FROM public.exos_tickets tk
                    WHERE tk.id = t.ticket_id AND tk.transfer_id = t.id AND tk.owner_id = caller.id)
-      AND NOT EXISTS (SELECT 1 FROM public.exos_marketplace_orders mo WHERE t.id = ANY (mo.transfer_ids))');
+      AND NOT EXISTS (SELECT 1 FROM public.exos_marketplace_orders mo WHERE t.id = ANY (mo.transfer_ids))
+      -- exos_claim_transfer mails these itself (section 5)
+      AND NOT coalesce(t.notify_sender, false)');
 
 -- 2b. the friend-transfer mail carries the claim link ------------------------
 SELECT pg_temp.exos_patch('public.exos_queue_mail(text, uuid)',
@@ -129,6 +157,162 @@ SELECT pg_temp.exos_patch('public.exos_fulfil_marketplace_order(uuid, text)',
           CASE WHEN o.quantity > 1 THEN ''them'' ELSE ''it'' END ||
           '' and get your entry QR code.</p>'' || v_links ||
           ''<p>Whoever claims a link first gets that ticket, so keep this email to yourself.</p>'',');
+
+-- ---------------------------------------------------------------------------
+-- 5. Sender paper trail
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE c record; v_def text;
+BEGIN
+  SELECT conname, pg_get_constraintdef(oid) AS def INTO c
+    FROM pg_constraint
+   WHERE conrelid = 'public.exos_mail'::regclass AND contype = 'c'
+     AND pg_get_constraintdef(oid) LIKE '%transfer-initiated%';
+  IF c.def IS NULL OR position('transfer-sent' in c.def) > 0 THEN RETURN; END IF;
+  v_def := replace(c.def, 'ARRAY[', 'ARRAY[''transfer-sent''::text, ');
+  EXECUTE format('ALTER TABLE public.exos_mail DROP CONSTRAINT %I', c.conname);
+  EXECUTE format('ALTER TABLE public.exos_mail ADD CONSTRAINT %I %s', c.conname, v_def);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.exos_mail_escape(p text)
+RETURNS text LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT replace(replace(replace(replace(coalesce(p, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '"', '&quot;');
+$$;
+REVOKE ALL ON FUNCTION public.exos_mail_escape(text) FROM PUBLIC, anon, authenticated;
+
+-- exos_create_transfer gains an optional recipient name and mails the sender.
+-- Replaced whole (prod definition from 20260924200848) because the signature
+-- changes; a two-argument call still resolves to it through the default.
+DROP FUNCTION IF EXISTS public.exos_create_transfer(uuid, text);
+CREATE OR REPLACE FUNCTION public.exos_create_transfer(
+  p_ticket_id      uuid,
+  p_receiver_email text,
+  p_receiver_name  text DEFAULT NULL
+) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_uid         uuid := auth.uid();
+  v_email       text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_recv        text := lower(btrim(coalesce(p_receiver_email, '')));
+  v_name        text := nullif(left(btrim(regexp_replace(coalesce(p_receiver_name, ''), '\s+', ' ', 'g')), 100), '');
+  t             public.exos_tickets%ROWTYPE;
+  v_evt         public.exos_events%ROWTYPE;
+  v_transfer_id uuid;
+  v_event       text;
+  v_who         text;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'exos_create_transfer: not authenticated' USING ERRCODE = '42501';
+  END IF;
+  IF v_recv = '' OR position('@' in v_recv) = 0 THEN
+    RAISE EXCEPTION 'exos_create_transfer: invalid receiver email';
+  END IF;
+
+  SELECT * INTO t FROM public.exos_tickets WHERE id = p_ticket_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'exos_create_transfer: ticket not found';
+  END IF;
+  IF t.owner_id <> v_uid THEN
+    RAISE EXCEPTION 'exos_create_transfer: not the ticket owner' USING ERRCODE = '42501';
+  END IF;
+  IF t.status <> 'active' THEN
+    RAISE EXCEPTION 'exos_create_transfer: ticket is % (only active is transferable)', t.status;
+  END IF;
+  IF t.pending_transfer_id IS NOT NULL THEN
+    RAISE EXCEPTION 'exos_create_transfer: ticket already has a pending transfer';
+  END IF;
+  IF v_recv = v_email THEN
+    RAISE EXCEPTION 'exos_create_transfer: cannot transfer a ticket to your own account';
+  END IF;
+
+  SELECT * INTO v_evt FROM public.exos_events WHERE id = t.event_id;
+  IF v_evt.status = 'draft' THEN
+    RAISE EXCEPTION 'exos_create_transfer: cannot transfer — event is still a draft';
+  END IF;
+
+  INSERT INTO public.exos_transfers (
+    ticket_id, org_id, sender_id, sender_email, receiver_email, receiver_name, notify_sender, status,
+    event_id, event_title, event_image, tier_name, organizer_id
+  ) VALUES (
+    p_ticket_id, t.org_id, v_uid, v_email, v_recv, v_name, true, 'pending',
+    t.event_id, v_evt.name, v_evt.image_url, t.tier_name, v_evt.created_by
+  ) RETURNING id INTO v_transfer_id;
+
+  UPDATE public.exos_tickets
+     SET pending_transfer_id = v_transfer_id, last_reissue_at = now()
+   WHERE id = p_ticket_id AND pending_transfer_id IS NULL;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'exos_create_transfer: ticket already has a pending transfer';
+  END IF;
+
+  -- The sender's receipt: to whom, what, when, and the link they can forward.
+  IF v_email <> '' THEN
+    v_event := public.exos_mail_escape(coalesce(v_evt.name, 'your event'));
+    v_who := CASE WHEN v_name IS NOT NULL
+                  THEN '<strong>' || public.exos_mail_escape(v_name) || '</strong> (' || public.exos_mail_escape(v_recv) || ')'
+                  ELSE '<strong>' || public.exos_mail_escape(v_recv) || '</strong>' END;
+    INSERT INTO public.exos_mail (template, to_email, subject, html, created_by, status)
+    VALUES ('transfer-sent', v_email,
+            left('You sent your ticket for ' || coalesce(v_evt.name, 'your event') || ' to ' || coalesce(v_name, v_recv), 200),
+            '<p>You sent your ' || public.exos_mail_escape(coalesce(t.tier_name, 'General')) ||
+            ' ticket for <strong>' || v_event || '</strong> to ' || v_who ||
+            ' on ' || to_char(now() AT TIME ZONE 'UTC', 'Mon FMDD, YYYY "at" HH24:MI "UTC"') || '.</p>' ||
+            '<p>It stays in transfer until they claim it, and you can cancel it until then. ' ||
+            'They were emailed this claim link; you can forward it too: ' ||
+            '<a href="{{app_url}}/claim/' || v_transfer_id || '">{{app_url}}/claim/' || v_transfer_id || '</a></p>' ||
+            '<p>Transfer reference: ' || v_transfer_id || '</p>',
+            v_uid, 'pending');
+  END IF;
+
+  RETURN v_transfer_id;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_create_transfer(uuid, text, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.exos_create_transfer(uuid, text, text) TO authenticated;
+
+-- exos_claim_transfer mails the sender who accepted it.
+SELECT pg_temp.exos_patch('public.exos_claim_transfer(uuid)',
+  'transfer accepted receipt',
+  '  RETURN tr.ticket_id;',
+  '  -- transfer accepted receipt (mig 20260927010000): Exos-to-Exos transfers
+  -- tell the sender who claimed it, since any account can.
+  IF coalesce(tr.notify_sender, false) THEN
+    DECLARE
+      v_claimer text;
+      v_to      text;
+    BEGIN
+      IF to_regclass(''public.exos_profiles'') IS NOT NULL THEN
+        EXECUTE ''SELECT nullif(btrim(display_name), '''''''') FROM public.exos_profiles WHERE id = $1''
+           INTO v_claimer USING v_uid;
+      END IF;
+      SELECT lower(coalesce(nullif(tr.sender_email, ''''), u.email)) INTO v_to
+        FROM auth.users u WHERE u.id = tr.sender_id;
+      IF coalesce(v_to, '''') <> '''' THEN
+        INSERT INTO public.exos_mail (template, to_email, subject, html, created_by, status)
+        VALUES (''transfer-claimed'', v_to,
+                left(''Your ticket for '' || coalesce(tr.event_title, ''your event'') || '' was accepted'', 200),
+                ''<p>Your '' || public.exos_mail_escape(coalesce(tr.tier_name, ''General'')) ||
+                '' ticket for <strong>'' || public.exos_mail_escape(coalesce(tr.event_title, ''your event'')) ||
+                ''</strong>, sent to '' ||
+                CASE WHEN tr.receiver_name IS NOT NULL
+                     THEN public.exos_mail_escape(tr.receiver_name) || '' ('' || public.exos_mail_escape(tr.receiver_email) || '')''
+                     ELSE public.exos_mail_escape(tr.receiver_email) END ||
+                '' on '' || to_char(tr.created_at AT TIME ZONE ''UTC'', ''Mon FMDD, YYYY'') ||
+                '', was accepted on '' || to_char(now() AT TIME ZONE ''UTC'', ''Mon FMDD, YYYY "at" HH24:MI "UTC"'') ||
+                '' by <strong>'' ||
+                CASE WHEN v_claimer IS NOT NULL
+                     THEN public.exos_mail_escape(v_claimer) || ''</strong> ('' || public.exos_mail_escape(v_email) || '')''
+                     ELSE public.exos_mail_escape(v_email) || ''</strong>'' END ||
+                ''.</p><p>The ticket and its entry QR code are theirs now. Transfer reference: '' || tr.id || ''</p>'',
+                v_uid, ''pending'');
+      END IF;
+    END;
+  END IF;
+
+  RETURN tr.ticket_id;');
 
 -- 4. claim page preview -------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.exos_transfer_claim_preview(p_transfer_id uuid)

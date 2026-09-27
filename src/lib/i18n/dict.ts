@@ -123,6 +123,7 @@ export const en = {
   'claim.signInHint': 'Sign in from the navbar to claim this ticket.',
   'claim.sender': 'A friend',
   'claim.signInPrompt': 'Sign in with any Exos account, or create one, to claim it. It doesn\'t have to be the email it was sent to.',
+  'claim.senderNotified': 'The sender gets a receipt saying this account (your name and email) accepted it.',
   'claim.signInButton': 'SIGN IN TO CLAIM',
 
   'common.cancel': 'Cancel',
@@ -241,6 +242,7 @@ export const es: Record<DictKey, string> = {
   'claim.signInHint': 'Inicia sesión desde la barra para reclamar esta entrada.',
   'claim.sender': 'Un amigo',
   'claim.signInPrompt': 'Inicia sesión con cualquier cuenta de Exos, o crea una, para reclamarla. No tiene que ser el correo al que se envió.',
+  'claim.senderNotified': 'Quien la envió recibe un comprobante indicando que esta cuenta (tu nombre y correo) la aceptó.',
   'claim.signInButton': 'INICIA SESIÓN PARA RECLAMAR',
 
   'common.cancel': 'Cancelar',

@@ -87,7 +87,9 @@ export default function ClaimTicket() {
 
       // Notify the sender that their transfer was claimed. Recipient + body
       // are server-derived by the exos_queue_mail RPC (mig 20260520160000).
-      // (The server skips marketplace sales, whose sender is the organizer.)
+      // Exos-to-Exos transfers are mailed by exos_claim_transfer itself (with
+      // who claimed it) and marketplace sales not at all; the RPC refuses
+      // those, so this only covers the rest (comps, box office).
       void queueEmail({ template: 'transfer-claimed', refId: transfer.id });
       // Confirm to the new owner that the ticket is now in their wallet
       // (server-derived recipient; mig 20260523210000).
@@ -205,6 +207,7 @@ export default function ClaimTicket() {
                       </p>
                     </div>
                   </div>
+                  <p className="type text-[11px] text-white/35 text-center mb-5">{t('claim.senderNotified')}</p>
                   <div className="pt-5 border-t border-white/5 flex items-center justify-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-brand-primary" aria-hidden="true" />
                     <span className="type text-[10px] text-white/40 uppercase tracking-widest">

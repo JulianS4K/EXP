@@ -12,6 +12,10 @@
 --   L6 box-office and comp tickets for someone without an account: the mail
 --      says any account and carries one claim link per ticket, each only
 --      to that recipient's own transfers
+--   L7 sender paper trail: exos_create_transfer mails the sender a receipt
+--      (recipient email + typed name, escaped, claim link); the claim mails
+--      them who accepted it; a two-argument call still works; comps and
+--      marketplace sales don't mail the organizer per ticket
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_claim_any_account.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -175,6 +179,42 @@ BEGIN
     RAISE EXCEPTION 'L6 FAIL: 2 comps should carry 2 links';
   END IF;
   RAISE NOTICE 'L6 ok: box-office / comp mail says any account, links only to the recipient''s own tickets';
+END $$;
+
+-- L7 ---------------------------------------------------------------------------
+DO $$
+DECLARE tk uuid; tr uuid; tr2 uuid; m text; n int;
+BEGIN
+  SELECT id INTO tk FROM public.exos_tickets WHERE owner_id = '7a000000-0000-0000-0000-0000000000b5';
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b5', 'friends-other@x.com');
+  tr := public.exos_create_transfer(tk, '  Pal@X.com ', '  <b>Pal</b>   O''Neil ');
+  SELECT html INTO m FROM public.exos_mail WHERE template = 'transfer-sent' AND to_email = 'friends-other@x.com';
+  IF m IS NULL OR m NOT LIKE '%&lt;b&gt;Pal&lt;/b&gt; O''Neil%' OR m NOT LIKE '%(pal@x.com)%'
+     OR m NOT LIKE '%href="{{app_url}}/claim/' || tr || '"%' OR m NOT LIKE '%Link Show%' OR m LIKE '%<b>Pal%' THEN
+    RAISE EXCEPTION 'L7 FAIL: sent receipt %', m;
+  END IF;
+  IF (SELECT notify_sender AND receiver_name = '<b>Pal</b> O''Neil' FROM public.exos_transfers WHERE id = tr) IS NOT TRUE THEN
+    RAISE EXCEPTION 'L7 FAIL: transfer row';
+  END IF;
+
+  -- someone-else claims it from their own account
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b2', 'someone-else@x.com');
+  PERFORM public.exos_claim_transfer(tr);
+  SELECT html INTO m FROM public.exos_mail WHERE template = 'transfer-claimed' AND to_email = 'friends-other@x.com';
+  IF m IS NULL OR m NOT LIKE '%accepted on%' OR m NOT LIKE '%<strong>someone-else@x.com</strong>%'
+     OR m NOT LIKE '%sent to &lt;b&gt;Pal&lt;/b&gt; O''Neil (pal@x.com)%' OR m NOT LIKE '%' || tr || '%' THEN
+    RAISE EXCEPTION 'L7 FAIL: accepted receipt %', m;
+  END IF;
+
+  -- a two-argument call (an older SPA) still works; the receipt has no name
+  tr2 := public.exos_create_transfer(tk, 'next@x.com');
+  SELECT html INTO m FROM public.exos_mail WHERE template = 'transfer-sent' AND to_email = 'someone-else@x.com';
+  IF m IS NULL OR m NOT LIKE '%<strong>next@x.com</strong>%' THEN RAISE EXCEPTION 'L7 FAIL: 2-arg receipt %', m; END IF;
+
+  -- the organizer isn't mailed per claimed marketplace / comp ticket
+  SELECT count(*) INTO n FROM public.exos_mail WHERE template = 'transfer-claimed' AND to_email = '7a-owner@x.com';
+  IF n <> 0 THEN RAISE EXCEPTION 'L7 FAIL: organizer got % claimed mails', n; END IF;
+  RAISE NOTICE 'L7 ok: sender receipts on send (name + email) and on accept (who claimed it)';
 END $$;
 
 ROLLBACK;
