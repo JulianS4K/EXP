@@ -204,6 +204,24 @@ Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_sea
   external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
 - [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
 
+## Gametime 2026-09-27
+
+API v3 + onboarding guide + CSV columns (docs/marketplace/gametime). Mig `20260927040000`
+(tested: `test_gametime_orders.sql` T1–T3, `gametime.test.ts`). All dry-run.
+- ✅ Endpoint table; read client (API key in `?source=`, never logged); dry-run writer that refuses
+  non-Exos listing ids.
+- ✅ Gametime column in the Marketplaces grid; publish / pull back like StubHub and SeatGeek.
+- ✅ Listings planned as max-per-order blocks with internal seats (SeatFrom / SeatThru), and the whole
+  inventory CSV planned every run (the 6-hour heartbeat).
+- ✅ Sales: webhook (`?channel=gametime`, checked against the purchase status) + polling open purchases
+  + a recheck; recipient email from the purchase; tickets take the listing's seats; delivery planned
+  as confirm + confirm_transfer with the claim links.
+- [ ] Operator: dedicated Exos Gametime account or the broker's? The file replaces the account's
+  inventory, so the upload is refused without `dedicatedAccount`.
+- [ ] Confirm with Gametime: non-numeric TicketIDs, purchase `price` per ticket or total, the claim link as
+  a `generic` transfer URL; staging test orders.
+- [ ] Build the FTP upload (plain FTP, port 21: check it runs from edge functions) and the heartbeat cron.
+
 ## Claim into any account 2026-09-27
 
 EXP#12 + mig `20260927010000` (tested: `test_claim_any_account.sql` L1–L7, e2e dry run).

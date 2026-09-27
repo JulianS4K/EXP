@@ -1,0 +1,6 @@
+Edit,Event,Venue,EventDate,EventTime,Quantity,Section,Row,SeatFrom,SeatThru,Notes,Cost,TicketID,edelivery_ind,InHandDate,Instant,Splittype,Splitvalue,FaceValue,Stock,Discount,ZonePrice
+y,Dance Gavin Dance,Coca-Cola Roxy Theatre,9/16/2023,7:30:00 PM,2,201,AA,,,xfer,123,1732272492,N,2023-09-15,N,NEVERLEAVEONE,,91.15,mobile_transfer,10,123
+y,Chevelle and Three Days Grace,Coca-Cola Roxy Theatre,10/11/2023,7:00:00 PM,2,201,AA-VIP,,,xfer VIP Club Acces w/ private entrance & restrooms.,89,271410198,N,2023-10-10,N,NEVERLEAVEONE,,79.15,eticket,0.9,
+y,New Orleans Saints at Atlanta Falcons,Mercedes-Benz Stadium,11/26/2023,1:00:00 PM,2,221,7,3,4,xfer,240,1299115545,N,2024-03-01,N,NEVERLEAVEONE,,200,mobile_transfer,10,240
+y,New Orleans Saints at Atlanta Falcons,Mercedes-Benz Stadium,11/26/2023,1:00:00 PM,2,122,25,22,23,xfer,278,1146090668,N,2024-03-01,N,NEVERLEAVEONE,,200,mobile_screencap,5,278
+y,Atlanta Braves Parking,Truist Park Parking,9/19/2023,7:21:00 PM,1,LOT 29,BRAVES,10,10,xfer,78,1125163273,N,2023-09-17,N,,,50,,1,

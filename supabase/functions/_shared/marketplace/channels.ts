@@ -1,5 +1,5 @@
 // The channel registry: which marketplaces are wired, built from secrets.
-// StubHub and SeatGeek; the rest plug in here later. A channel without
+// StubHub, SeatGeek and Gametime; the rest plug in here later. A channel without
 // credentials still exists (it can plan requests); it just can't search its
 // catalog.
 //
@@ -14,6 +14,7 @@ import { STUBHUB_ENVIRONMENTS, type StubHubEnvironment } from './stubhub/transpo
 import { stubHubChannel } from './stubhub/channel.ts';
 import { seatGeekChannel } from './seatgeek/channel.ts';
 import { SeatGeekPlatformClient } from './seatgeek/platform.ts';
+import { gametimeChannel } from './gametime/channel.ts';
 
 export type Env = (key: string) => string | undefined;
 
@@ -39,6 +40,9 @@ export function channelsFromEnv(env: Env, fetchImpl?: typeof fetch): Map<Channel
 
   const sgClientId = env('SEATGEEK_CLIENT_ID')?.trim();
   out.set('seatgeek', seatGeekChannel(sgClientId ? new SeatGeekPlatformClient(sgClientId, fetchImpl ? { fetch: fetchImpl } : {}) : undefined));
+
+  // No event search on Gametime: listings carry the event as text.
+  out.set('gametime', gametimeChannel());
 
   return out;
 }

@@ -7,17 +7,17 @@
 import { supabase } from '../supabase';
 import type { MarketplaceRow, StubHubDistributionRow } from './stubhubStatus';
 
-export type AllocationChannel = 'stubhub' | 'seatgeek';
+export type AllocationChannel = 'stubhub' | 'seatgeek' | 'gametime';
 
 const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats';
 
-/** Every StubHub / SeatGeek row of the event. */
+/** Every StubHub / SeatGeek / Gametime row of the event. */
 export async function getMarketplaceRows(eventId: string): Promise<MarketplaceRow[]> {
   const { data, error } = await supabase
     .from('exos_distribution_listings')
     .select(COLS)
     .eq('event_id', eventId)
-    .in('channel', ['stubhub', 'seatgeek']);
+    .in('channel', ['stubhub', 'seatgeek', 'gametime']);
   if (error) throw error;
   return (data ?? []) as MarketplaceRow[];
 }

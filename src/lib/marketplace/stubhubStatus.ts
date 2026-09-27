@@ -67,8 +67,27 @@ export function stubHubStatus(
   }
 }
 
-export type MarketplaceChannelId = 'stubhub' | 'seatgeek';
-export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = { stubhub: 'StubHub', seatgeek: 'SeatGeek' };
+export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime';
+export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = { stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime' };
+
+/** The event line for Gametime: no event search or creation, and listings go up as a file. */
+export function gametimeStatus(
+  row: StubHubDistributionRow | null,
+  ev: { ticked: boolean; published: boolean; primaryMarketOnly: boolean },
+): StubHubStatus | null {
+  if (!ev.ticked) return null;
+  if (ev.primaryMarketOnly) return { tone: 'muted', text: 'Primary market only is on, so nothing goes to Gametime.' };
+  if (!row) {
+    return ev.published
+      ? { tone: 'muted', text: 'Save to queue Gametime.' }
+      : { tone: 'muted', text: 'Gametime listings are planned when you publish.' };
+  }
+  if (row.status === 'failed') return { tone: 'warn', text: row.error || 'Gametime: something needs a look.' };
+  return {
+    tone: 'info',
+    text: "Gametime matches listings on the event name, venue and date. They go up in Gametime's inventory file; not sent yet: Gametime selling isn't switched on.",
+  };
+}
 
 /** The event line for SeatGeek, which has no event creation: which event the listings attach to. */
 export function seatGeekStatus(
@@ -119,7 +138,7 @@ export function allocationCellStatus(row: StubHubDistributionRow | null, channel
     return { tone: 'ok', text: plan?.action === 'update' ? `On ${label}; ${n || 'some'} change${n === 1 ? '' : 's'} to send.` : `On ${label}.` };
   }
   if (!plan) return { tone: 'muted', text: `Held for ${label}; listed once the event is published.` };
-  const listings = channel === 'seatgeek' ? plan.listings?.length ?? 0 : 1;
+  const listings = channel === 'stubhub' ? 1 : plan.listings?.length ?? 0;
   return {
     tone: 'info',
     text: `${listings} listing${listings === 1 ? '' : 's'} ready. Not sent yet: ${label} selling isn't switched on.`,
