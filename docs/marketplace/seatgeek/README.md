@@ -128,12 +128,17 @@ GA entry doesn't check them.
 
 Nothing is sent to SeatGeek: listing creation and fulfilment are dry-run.
 
-## Still open (confirm with SeatGeek before going live)
+## Answered (operator, 2026-09-27)
+
+- The Exos claim link works on SeatGeek as the `mobile` transfer URL.
+- GA orders go straight to `fulfilled`: no `confirmed` step first (the
+  fulfilment plan already does this).
+- GA seat numbers: internal seat numbers (above).
+
+## Still open
 
 | Question | Where it matters |
 |---|---|
-| Is Exos's claim link acceptable as a `mobile` transfer URL (it isn't a Ticketmaster/AXS link)? | fulfilment |
-| Should a `submitted` order be `confirmed` before it's fulfilled, or can it go straight to `fulfilled`? | fulfilment |
 | Rate limits (not documented). Reads retry 429/502/503/504; writes retry 429 only, never 409. | client, writer |
 
 ## Write roadmap

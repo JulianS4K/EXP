@@ -181,8 +181,8 @@ Seller Direct API (docs/marketplace/seatgeek). Same marketplace layer as StubHub
   /orders/customer, fulfilled as Exos link transfers; delivery planned as PATCH /order transfer_url.
 - ✅ Webhooks: order.created / order.broken into the same record + fulfil path; listing.visibility and
   listing.event.inactive shown on the allocation.
-- [ ] Confirm with SeatGeek: the Exos claim link as a mobile transfer URL, confirm-before-fulfil for
-  submitted orders (see "Still open"). GA seat numbers: answered by internal seat numbers (below).
+- ✅ Answered: the Exos claim link works as SeatGeek's mobile transfer URL; GA orders go straight to
+  fulfilled (no confirm first); GA seat numbers are internal seat numbers (below).
 - [ ] Operator: SEATGEEK_API_TOKEN, SEATGEEK_CLIENT_ID, SEATGEEK_WEBHOOK_TOKEN (+ webhook setup via SeatGeek
   support), then a WriteAuthorization to go live.
 
