@@ -21,7 +21,7 @@
 //
 // No imports beyond sibling .ts files: loaded by Deno and by vitest.
 
-export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
+export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
 export function isChannelId(v: unknown): v is ChannelId {

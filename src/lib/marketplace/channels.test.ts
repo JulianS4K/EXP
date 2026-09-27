@@ -155,9 +155,9 @@ describe('StubHub catalog search', () => {
 });
 
 describe('channelsFromEnv', () => {
-  it('wires StubHub and SeatGeek; catalog search only with credentials', () => {
+  it('wires StubHub, SeatGeek and Gametime; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek']);
+    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime']);
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
     expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
     const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c' };

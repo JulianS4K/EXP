@@ -8,8 +8,8 @@
 //    search (_shared/marketplace; StubHub today). Close calls go to staff as
 //    'review'. Writes exos_channel_event_links only.
 //
-// 1. Marketplace event rows (migs 20260926190000 / 20260927030000).
-//    Publishing an event with StubHub / SeatGeek ticked queues an event row
+// 1. Marketplace event rows (migs 20260926190000 / 20260927030000 / 040000).
+//    Publishing an event with StubHub / SeatGeek / Gametime ticked queues an event row
 //    (no ticket type) per marketplace.
 //    StubHub: if the event is already linked to a StubHub event, the plan just
 //    records that: nothing to create. If a possible match waits on staff, the
@@ -20,18 +20,24 @@
 //    with the reason, which the event editor shows the organizer.
 //    SeatGeek has no event creation: the row records which SeatGeek event the
 //    listings attach to (the link), or that they carry the event name and
-//    venue for SeatGeek to match.
+//    venue for SeatGeek to match. Gametime has neither creation nor search:
+//    its listings always carry the event name, venue and date.
 //
 // 1b. Listings, per allocation (a ticket type's seats set aside for a
 //    marketplace with exos_set_channel_allocation). For published events,
 //    each allocation's listing(s) are planned (StubHub: one listing showing
-//    buyers at most maxPerOrder at a time; SeatGeek: listings of at most
-//    maxPerOrder, each a block of the allocation's internal seat numbers)
+//    buyers at most maxPerOrder at a time; SeatGeek and Gametime: listings
+//    of at most maxPerOrder, each a block of the allocation's internal seat
+//    numbers)
 //    and diffed against what the marketplace has (listed_snapshot):
 //    create / update / delete (_shared/marketplace/sync.ts). Re-planned
 //    every run, so listings follow price / limit / allocation / sale changes.
 //    An allocation being pulled back ('delisting') gets a delist plan; one
 //    with nothing on the marketplace is released at once.
+//
+// 1c. The Gametime inventory file: Gametime takes listings only as a CSV of
+//    the account's whole inventory (FTP), re-sent at least every six hours.
+//    Every run plans the complete file; it is never sent (see below).
 //
 //    DRY-RUN ONLY: plans go in planned_request / planned_listing and nothing
 //    is sent to a marketplace. Sending needs an operator WriteAuthorization
@@ -63,10 +69,16 @@ import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from 
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
 import { planSeatGeekListings } from "../_shared/marketplace/seatgeek/listingPlan.ts";
-import { seatGeekDelist, seatGeekListingBodies, seatGeekSync, stubHubDelist, stubHubSync } from "../_shared/marketplace/sync.ts";
+import { gametimeDelist, gametimeSync, listingBodies, seatGeekDelist, seatGeekSync, stubHubDelist, stubHubSync } from "../_shared/marketplace/sync.ts";
+import { csvRowOf, planGametimeListings, type GametimeListingBody } from "../_shared/marketplace/gametime/inventory.ts";
+import { GametimeWriter } from "../_shared/marketplace/gametime/writer.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
+
+type MarketChannel = "stubhub" | "seatgeek" | "gametime";
+const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime"];
+const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime" };
 
 interface DistRow {
   id: string;
@@ -92,11 +104,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const events = await planEventRows(sb, {
       stubhub: !!channels.get("stubhub")?.findEvents,
       seatgeek: !!channels.get("seatgeek")?.findEvents,
+      gametime: false,
     });
     const stubhub = await syncListings(sb, "stubhub");
     const seatgeek = await syncListings(sb, "seatgeek");
+    const gametime = await syncListings(sb, "gametime");
+    const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, listings: { stubhub, seatgeek }, automatiq });
+    return json({ links, events, listings: { stubhub, seatgeek, gametime }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -108,7 +123,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 interface EventRow {
   id: string;
   event_id: string;
-  channel: "stubhub" | "seatgeek";
+  channel: MarketChannel;
   updated_at: string;
   exos_events: ExosEventRow | null;
 }
@@ -122,7 +137,7 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
   const { data, error } = await sb
     .from("exos_distribution_listings")
     .select("id, event_id, channel, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
-    .in("channel", ["stubhub", "seatgeek"])
+    .in("channel", MARKET_CHANNELS)
     .is("tier_id", null)
     .eq("status", "pending")
     .order("updated_at", { ascending: true })
@@ -132,7 +147,7 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
 
   const { data: links, error: lErr } = rows.length
     ? await sb.from("exos_channel_event_links").select("event_id, channel, status, external_event_id")
-      .in("channel", ["stubhub", "seatgeek"]).in("event_id", rows.map((r) => r.event_id))
+      .in("channel", MARKET_CHANNELS).in("event_id", rows.map((r) => r.event_id))
     : { data: [], error: null };
   if (lErr) throw new Error(`read marketplace links: ${lErr.message}`);
   const linkBy = new Map(((links ?? []) as Link[]).map((l) => [`${l.channel}:${l.event_id}`, l]));
@@ -140,7 +155,7 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
   const counts = { mode: "dry-run", pending: rows.length, planned: 0, linked: 0, waiting: 0, failed: 0 };
   for (const row of rows) {
     const now = new Date().toISOString();
-    const label = row.channel === "stubhub" ? "StubHub" : "SeatGeek";
+    const label = LABEL[row.channel];
     const link = linkBy.get(`${row.channel}:${row.event_id}`);
     let patch: Record<string, unknown>;
     if (link && (link.status === "linked" || link.status === "created") && link.external_event_id) {
@@ -161,9 +176,13 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
     } else if (!link && canSearch[row.channel]) {
       counts.waiting++;
       continue; // not searched yet: leave it pending for the next run's pass 0
-    } else if (row.channel === "seatgeek") {
-      // No event creation on SeatGeek: listings carry the event as text.
-      patch = { status: "planned", planned_request: { linked: false, catalog_checked: !!link, matched_on: "event name + venue" }, error: null };
+    } else if (row.channel !== "stubhub") {
+      // No event creation on SeatGeek or Gametime: listings carry the event as text.
+      patch = {
+        status: "planned",
+        planned_request: { linked: false, catalog_checked: !!link, matched_on: row.channel === "gametime" ? "event name + venue + date" : "event name + venue" },
+        error: null,
+      };
       counts.planned++;
     } else {
       try {
@@ -209,7 +228,7 @@ interface AllocationRow {
 
 const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
 
-async function syncListings(sb: SupabaseClient, channel: "stubhub" | "seatgeek") {
+async function syncListings(sb: SupabaseClient, channel: MarketChannel) {
   const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };
 
   // Live and to-be-listed allocations of published events.
@@ -241,14 +260,22 @@ async function syncListings(sb: SupabaseClient, channel: "stubhub" | "seatgeek")
             tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
           });
           plan = stubHubSync(p, r.listed_snapshot, r.id);
-        } else {
+        } else if (channel === "seatgeek") {
           const p = planSeatGeekListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
             internal_seats: r.internal_seats,
-            previous: seatGeekListingBodies(r.listed_snapshot ?? r.planned_listing),
+            previous: listingBodies(r.listed_snapshot ?? r.planned_listing),
           });
           plan = seatGeekSync(p, r.listed_snapshot);
+        } else {
+          const p = planGametimeListings({
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events,
+            internal_seats: r.internal_seats,
+            previous: listingBodies(r.listed_snapshot ?? r.planned_listing),
+          });
+          plan = gametimeSync(p, r.listed_snapshot);
         }
         const action = (plan as { action: string }).action;
         if (action === "create") counts.create++;
@@ -276,7 +303,7 @@ async function syncListings(sb: SupabaseClient, channel: "stubhub" | "seatgeek")
   for (const r of (pulled ?? []) as Array<Pick<AllocationRow, "id" | "external_listing_id" | "listed_snapshot" | "planned_listing">>) {
     const plan = channel === "stubhub"
       ? (r.external_listing_id || r.listed_snapshot ? stubHubDelist(r.id) : null)
-      : seatGeekDelist(r.listed_snapshot);
+      : channel === "seatgeek" ? seatGeekDelist(r.listed_snapshot) : gametimeDelist(r.listed_snapshot);
     if (!plan) {
       // Nothing on the marketplace after all: release now.
       const { error: relErr } = await sb.from("exos_distribution_listings")
@@ -294,6 +321,33 @@ async function syncListings(sb: SupabaseClient, channel: "stubhub" | "seatgeek")
   return counts;
 }
 
+// ── 1c. The Gametime inventory file (dry-run) ─────────────────────
+//
+// Gametime takes listings only as a CSV of the account's whole inventory on
+// its FTP server, re-sent at least every six hours or every listing on the
+// account is switched off. So every run builds the complete file from every
+// planned Gametime listing of a published event. GametimeWriter plans the
+// upload and refuses to send it unless the account is confirmed to hold Exos
+// listings only (dedicatedAccount), and the FTP upload itself isn't built.
+
+async function planGametimeInventory(sb: SupabaseClient) {
+  const { data, error } = await sb
+    .from("exos_distribution_listings")
+    .select("planned_listing, exos_events!inner(status)")
+    .eq("channel", "gametime")
+    .not("tier_id", "is", null)
+    .gt("requested_qty", 0)
+    .in("status", ["pending", "planned", "listing", "listed"])
+    .eq("exos_events.status", "published")
+    .limit(5000);
+  if (error) throw new Error(`read gametime inventory: ${error.message}`);
+  const rows = ((data ?? []) as Array<{ planned_listing: { listings?: Array<{ body: GametimeListingBody }> } | null }>)
+    .flatMap((r) => r.planned_listing?.listings ?? [])
+    .map((l) => csvRowOf(l.body));
+  const planned = new GametimeWriter().uploadInventory(rows).planned;
+  return { mode: "dry-run", listings: rows.length, bytes: planned.csv?.length ?? 0, target: planned.url, sent: false };
+}
+
 // ── 2. Automatiq listings (gated scaffold) ───────────────────────────
 
 async function pushAutomatiq(sb: SupabaseClient) {
@@ -307,8 +361,8 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .from("exos_distribution_listings")
     .select("id, event_id, org_id, channel, requested_qty, unit_price")
     .eq("status", "pending")
-    // StubHub and SeatGeek are listed directly (passes 1b / 1c), not via Automatiq.
-    .not("channel", "in", "(stubhub,seatgeek)")
+    // StubHub, SeatGeek and Gametime are listed directly (passes 1b / 1c), not via Automatiq.
+    .not("channel", "in", "(stubhub,seatgeek,gametime)")
     .is("tier_id", null)
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);

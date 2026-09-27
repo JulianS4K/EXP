@@ -1,0 +1,2642 @@
+{
+	"info": {
+		"_postman_id": "6da628a1-c0c9-47a7-916d-b9a2ef4469d6",
+		"name": "Gametime API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "28586206"
+	},
+	"item": [
+		{
+			"name": "V3",
+			"item": [
+				{
+					"name": "Get purchases",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&per_page=50&page=1",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v3",
+								"purchases"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}",
+									"description": "API Key"
+								},
+								{
+									"key": "per_page",
+									"value": "50",
+									"description": "(Optional) Number of results to display per page"
+								},
+								{
+									"key": "page",
+									"value": "1",
+									"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Get ALL purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&per_page=50&page=1",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										},
+										{
+											"key": "per_page",
+											"value": "50",
+											"description": "(Optional) Number of results to display per page"
+										},
+										{
+											"key": "page",
+											"value": "1",
+											"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get SINGLE purchase",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&order_number=1234567890",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										},
+										{
+											"key": "order_number",
+											"value": "1234567890",
+											"description": "The order number of a single purchase."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNCONFIRMED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&status=unconfirmed&per_page=50&page=1",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unconfirmed"
+										},
+										{
+											"key": "per_page",
+											"value": "50",
+											"description": "(Optional) Number of results to display per page"
+										},
+										{
+											"key": "page",
+											"value": "1",
+											"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNFULFILLED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&status=unfulfilled&per_page=50&page=1",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unfulfilled"
+										},
+										{
+											"key": "per_page",
+											"value": "50",
+											"description": "(Optional) Number of results to display per page"
+										},
+										{
+											"key": "page",
+											"value": "1",
+											"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get COMPLETED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&status=completed&per_page=50&page=1",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "completed"
+										},
+										{
+											"key": "per_page",
+											"value": "50",
+											"description": "(Optional) Number of results to display per page"
+										},
+										{
+											"key": "page",
+											"value": "1",
+											"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get REJECTED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v3/purchases?source={{api_key}}&status=rejected&per_page=50&page=1",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v3",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "rejected"
+										},
+										{
+											"key": "per_page",
+											"value": "50",
+											"description": "(Optional) Number of results to display per page"
+										},
+										{
+											"key": "page",
+											"value": "1",
+											"description": "(Optional) Page number (of API response) to display. Ex: 1 (for page 1), 2 (for page 2), etc."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "V2",
+			"item": [
+				{
+					"name": "Get purchases",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}",
+									"description": "API Key"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Get ALL purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get SINGLE purchase",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}&order_number=1234567890",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										},
+										{
+											"key": "order_number",
+											"value": "1234567890",
+											"description": "The order number of a single purchase."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNCONFIRMED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}&status=unconfirmed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unconfirmed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNFULFILLED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}&status=unfulfilled",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unfulfilled"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get COMPLETED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases?source={{api_key}}&status=completed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "completed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases/:id/confirm?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases",
+								":id",
+								"confirm"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm a Purchase w/ seats specification",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\"seats\": [\"1\",\"2\",\"3\"]}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Reject a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases/:id/reject?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases",
+								":id",
+								"reject"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Reject a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Upload Barcode for a given purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases/:id/barcode_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases",
+								":id",
+								"barcode_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Upload Barcode for a given purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/barcode_upload?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"barcode_upload"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm Mobile Transfer",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": []
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases/:id/confirm_transfer?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases",
+								":id",
+								"confirm_transfer"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm Mobile Transfer",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm Mobile Transfer with Transfer URLs and/or Screenshots",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "formdata",
+									"formdata": [
+										{
+											"key": "transaction_id",
+											"value": "",
+											"description": "(Optional) The ID you generated when the purchase was made.",
+											"type": "text"
+										},
+										{
+											"key": "transfer_url[]",
+											"value": "mytix.co/transfer?to=me_again",
+											"description": "(Optional) String containing a transfer URL. This field can be repeated to submit multiple transfer URLs.",
+											"type": "text"
+										},
+										{
+											"key": "transfer_url[]",
+											"value": "someTransferURL.com",
+											"description": "(Optional) String containing a transfer URL. This field can be repeated to submit multiple transfer URLs.",
+											"type": "text"
+										},
+										{
+											"key": "screenshot[]",
+											"description": "(Optional) File containing a screenshot. This field can be repeated to upload multiple files.",
+											"type": "file",
+											"src": "/Users/adesolaharrison/Desktop/SampleScreenshot.png"
+										},
+										{
+											"key": "screenshot[]",
+											"description": "(Optional) File containing a screenshot. This field can be repeated to upload multiple files.",
+											"type": "file",
+											"src": "/Users/adesolaharrison/Desktop/SampleScreenshot2.png"
+										}
+									]
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Fulfill a purchase with a PDF",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v2/purchases/:id/pdf_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v2",
+								"purchases",
+								":id",
+								"pdf_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Fulfill a purchase with a PDF",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v2/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v2",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order ID"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "V1",
+			"item": [
+				{
+					"name": "Get purchases",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}",
+									"description": "API Key"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Get ALL purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get SINGLE purchase",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}&order_number=1234567890",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										},
+										{
+											"key": "order_number",
+											"value": "1234567890",
+											"description": "The order number of a single purchase."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNCONFIRMED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}&status=unconfirmed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unconfirmed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNFULFILLED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}&status=unfulfilled",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unfulfilled"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get COMPLETED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases?source={{api_key}}&status=completed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "completed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases/:id/confirm?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases",
+								":id",
+								"confirm"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm a Purchase w/ seats specification",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\"seats\": [\"1\",\"2\",\"3\"]}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Reject a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases/:id/reject?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases",
+								":id",
+								"reject"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Reject a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Upload Barcode for a given purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases/:id/barcode_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases",
+								":id",
+								"barcode_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Upload Barcode for a given purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/barcode_upload?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"barcode_upload"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm Mobile Transfer",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": []
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases/:id/confirm_transfer?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases",
+								":id",
+								"confirm_transfer"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm Mobile Transfer",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm Mobile Transfer with a single Transfer URL and/or a single Screenshot",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "formdata",
+									"formdata": [
+										{
+											"key": "transaction_id",
+											"value": "",
+											"description": "(Optional) The ID you generated when the purchase was made.",
+											"type": "text"
+										},
+										{
+											"key": "transfer_url",
+											"value": "mytix.co/transfer?to=me_again",
+											"description": "(Optional) String containing the transfer URL.",
+											"type": "text"
+										},
+										{
+											"key": "screenshot",
+											"description": "(Optional) File containing a screenshot.",
+											"type": "file",
+											"src": "/Users/adesolaharrison/Desktop/SampleScreenshot.png"
+										}
+									]
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "3EZXEZ3ABC",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Fulfill a purchase with a PDF",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v1/purchases/:id/pdf_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"purchases",
+								":id",
+								"pdf_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Fulfill a purchase with a PDF",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order ID"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Modify a single Listing",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 2,\n  \"lots\": [\n    1,\n    2\n  ]\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/v1/listings/:id?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"v1",
+								"listings",
+								":id"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234566",
+									"description": "Lisiting ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Modify a single Listing",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"quantity\": 2,\n  \"lots\": [\n    1,\n    2\n  ]\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/v1/listings/:id?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"v1",
+										"listings",
+										":id"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234566",
+											"description": "Lisiting ID"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "0.1",
+			"item": [
+				{
+					"name": "Get purchases",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}",
+									"description": "API Key"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Get ALL purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get SINGLE purchase",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}&order_number=1234567890",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}",
+											"description": "API Key"
+										},
+										{
+											"key": "order_number",
+											"value": "1234567890",
+											"description": "The order number of a single purchase."
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNCONFIRMED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}&status=unconfirmed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unconfirmed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get UNFULFILLED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}&status=unfulfilled",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "unfulfilled"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Get COMPLETED purchases",
+							"originalRequest": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases?source={{api_key}}&status=completed",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										},
+										{
+											"key": "status",
+											"value": "completed"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases/:id/confirm?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases",
+								":id",
+								"confirm"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm a Purchase w/ seats specification",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\"seats\": [\"1\",\"2\",\"3\"]}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Reject a Purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases/:id/reject?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases",
+								":id",
+								"reject"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Reject a Purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Upload Barcode for a given purchase",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases/:id/barcode_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases",
+								":id",
+								"barcode_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Upload Barcode for a given purchase",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": {\n    \"1\": {\n      \"barcode\": \"fake-barcode-string-1\"\n    },\n    \"2\": {\n      \"barcode\": \"fake-barcode-string-2\"\n    },\n    \"3\": {\n      \"barcode\": \"fake-barcode-string-3\"\n    }\n  }\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/barcode_upload?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"barcode_upload"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Confirm Mobile Transfer",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": []
+						},
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases/:id/confirm_transfer?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases",
+								":id",
+								"confirm_transfer"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order Number"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Confirm Mobile Transfer",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						},
+						{
+							"name": "Confirm Mobile Transfer with a single Transfer URL and/or a single Screenshot",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "formdata",
+									"formdata": [
+										{
+											"key": "transaction_id",
+											"value": "",
+											"description": "(Optional) The ID you generated when the purchase was made.",
+											"type": "text"
+										},
+										{
+											"key": "transfer_url",
+											"value": "mytix.co/transfer?to=me_again",
+											"description": "(Optional) String containing the transfer URL.",
+											"type": "text"
+										},
+										{
+											"key": "screenshot",
+											"description": "(Optional) File containing a screenshot.",
+											"type": "file",
+											"src": "/Users/adesolaharrison/Desktop/SampleScreenshot.png"
+										}
+									]
+								},
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order Number"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Fulfill a purchase with a PDF",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/0.1/purchases/:id/pdf_upload?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"purchases",
+								":id",
+								"pdf_upload"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234567890",
+									"description": "Order ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Fulfill a purchase with a PDF",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"seats\": [\n    \"string\"\n  ],\n  \"pdf\": \"Base64 encoded string\"\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/0.1/purchases/:id/confirm_transfer?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"purchases",
+										":id",
+										"confirm_transfer"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234567890",
+											"description": "Order ID"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				},
+				{
+					"name": "Modify a single Listing",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 2,\n  \"lots\": [\n    1,\n    2\n  ]\n}"
+						},
+						"url": {
+							"raw": "https://api.gametime.co/0.1/listings/:id?source={{api_key}}",
+							"protocol": "https",
+							"host": [
+								"api",
+								"gametime",
+								"co"
+							],
+							"path": [
+								"0.1",
+								"listings",
+								":id"
+							],
+							"query": [
+								{
+									"key": "source",
+									"value": "{{api_key}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1234566",
+									"description": "Lisiting ID"
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Modify a single Listing",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"quantity\": 2,\n  \"lots\": [\n    1,\n    2\n  ]\n}"
+								},
+								"url": {
+									"raw": "https://api.gametime.co/0.1/listings/:id?source={{api_key}}",
+									"protocol": "https",
+									"host": [
+										"api",
+										"gametime",
+										"co"
+									],
+									"path": [
+										"0.1",
+										"listings",
+										":id"
+									],
+									"query": [
+										{
+											"key": "source",
+											"value": "{{api_key}}"
+										}
+									],
+									"variable": [
+										{
+											"key": "id",
+											"value": "1234566",
+											"description": "Lisiting ID"
+										}
+									]
+								}
+							},
+							"_postman_previewlanguage": null,
+							"header": null,
+							"cookie": [],
+							"body": null
+						}
+					]
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

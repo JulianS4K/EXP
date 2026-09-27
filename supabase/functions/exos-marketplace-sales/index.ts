@@ -1,9 +1,9 @@
 // exos-marketplace-sales — marketplace sales become Exos tickets
 // (mig 20260926192000; the marketplace layer is _shared/marketplace).
 //
-// StubHub and SeatGeek. Ways in:
-//   * POST with x-cron-secret (pg_cron): poll StubHub GET /sales/recentupdates
-//     and SeatGeek GET /orders (seller tokens, read-only)
+// StubHub, SeatGeek and Gametime. Ways in:
+//   * POST with x-cron-secret (pg_cron): poll StubHub GET /sales/recentupdates,
+//     SeatGeek GET /orders and Gametime GET /purchases (read-only)
 //   * POST from StubHub's Sales webhook: Authorization must equal
 //     STUBHUB_WEBHOOK_AUTHORIZATION (the value registered with the webhook).
 //   * POST from SeatGeek's Seller Direct webhook (X-Sellerdirect-* headers):
@@ -13,6 +13,11 @@
 //     noted on the allocation row for the organizer. SeatGeek wants a 2xx
 //     within 10 seconds and retries only 3 times, so polling stays on as the
 //     safety net.
+//   * POST from Gametime's sales notification webhook, registered as this
+//     function's URL + `?channel=gametime`: Authorization must equal
+//     GAMETIME_WEBHOOK_AUTHORIZATION (the whole header, Basic or Bearer, as
+//     set up with Gametime). The body has no status or buyer email, so the
+//     purchase is read (GET /purchases?order_number=) before it's recorded.
 //
 // For each sale: exos_record_marketplace_order keeps it only if it sold from
 // an Exos listing (the seller accounts also carry broker inventory);
@@ -31,6 +36,8 @@
 // STUBHUB_REFRESH_TOKEN (seller login, read:sales + read:ticketholders),
 // STUBHUB_WEBHOOK_AUTHORIZATION. SeatGeek (optional): SEATGEEK_API_TOKEN
 // (Seller Direct seller token; orders + customer reads), SEATGEEK_WEBHOOK_TOKEN.
+// Gametime (optional): GAMETIME_API_KEY (the `source` key), GAMETIME_ENV
+// ('staging' | production), GAMETIME_WEBHOOK_AUTHORIZATION.
 // Deploy with --no-verify-jwt (the webhook
 // and cron carry their own auth). Deploying is operator-gated.
 
@@ -52,6 +59,9 @@ import {
   routeSeatGeekNotification,
   verifySeatGeekWebhook,
 } from "../_shared/marketplace/seatgeek/webhook.ts";
+import { GametimeClient } from "../_shared/marketplace/gametime/client.ts";
+import type { GametimePurchase } from "../_shared/marketplace/gametime/types.ts";
+import { parseGametimeSaleNotification, verifyGametimeWebhook } from "../_shared/marketplace/gametime/webhook.ts";
 
 const LOOKBACK_HOURS = 6;
 const env = (k: string) => Deno.env.get(k);
@@ -60,6 +70,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!);
   const channels = channelsFromEnv(env);
+
+  // Gametime sales notification (?channel=gametime; its own Authorization value).
+  if (!req.headers.get("x-cron-secret") && new URL(req.url).searchParams.get("channel") === "gametime") {
+    if (!verifyGametimeWebhook(req.headers.get("authorization"), env("GAMETIME_WEBHOOK_AUTHORIZATION") ?? "")) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    try {
+      const n = parseGametimeSaleNotification(await req.json());
+      const gt = gametimeClient();
+      // Gametime's guide: check the purchase status before acting on a sale.
+      const p = gt ? await gt.getPurchase(n.id) : null;
+      console.log("exos-marketplace-sales: Gametime sale", n.id, n.quantity, p?.status ?? "(not read)");
+      return json(await ingest(sb, channels.get("gametime")!, [{ ...n, ...(p ?? {}) }], undefined));
+    } catch (e) {
+      console.error("exos-marketplace-sales: Gametime webhook failed", e);
+      return json({ error: String(e) }, 500);
+    }
+  }
 
   // SeatGeek webhook (its own bearer token, no cron secret).
   if (!req.headers.get("x-cron-secret") && req.headers.get("x-sellerdirect-notification-type")) {
@@ -128,6 +156,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else {
       result.seatgeek = { skipped: "no SeatGeek seller token" };
     }
+
+    const gt = gametimeClient();
+    if (gt) {
+      const purchases = await openGametimePurchases(gt);
+      const seen = new Set(purchases.map((p) => String(p.id)));
+      purchases.push(...await recheckGametimePurchases(sb, gt, seen));
+      result.gametime = await ingest(sb, channels.get("gametime")!, purchases, undefined);
+    } else {
+      result.gametime = { skipped: "no GAMETIME_API_KEY" };
+    }
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
@@ -163,6 +201,53 @@ function stubhubClient(sb: SupabaseClient): StubHubClient | undefined {
 function seatgeekClient(): SeatGeekClient | undefined {
   const token = env("SEATGEEK_API_TOKEN")?.trim();
   return token ? new SeatGeekClient({ token: () => token }) : undefined;
+}
+
+function gametimeClient(): GametimeClient | undefined {
+  const key = env("GAMETIME_API_KEY")?.trim();
+  return key ? new GametimeClient({ apiKey: () => key, environment: env("GAMETIME_ENV") === "staging" ? "staging" : "production" }) : undefined;
+}
+
+// Every open (actionable) Gametime purchase, every page (the account may
+// carry broker sales too). The recipient's email is on the purchase.
+const GT_PER_PAGE = 100;
+async function openGametimePurchases(gt: GametimeClient): Promise<GametimePurchase[]> {
+  const out: GametimePurchase[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await gt.listPurchases({ completed: false, page, per_page: GT_PER_PAGE, sort_by_created_at: "asc" });
+    const items = res.results ?? [];
+    out.push(...items);
+    if (items.length < GT_PER_PAGE) return out;
+  }
+  console.error(`exos-marketplace-sales: stopped after ${MAX_PAGES} pages of Gametime purchases`);
+  return out;
+}
+
+// Purchases Exos already has, re-read by order number, so a later rejection
+// (by Gametime or the buyer's side) still reaches Exos. A few per run.
+async function recheckGametimePurchases(sb: SupabaseClient, gt: GametimeClient, skip: Set<string>): Promise<GametimePurchase[]> {
+  const { data, error } = await sb.from("exos_marketplace_orders")
+    .select("external_order_id")
+    .eq("channel", "gametime")
+    .in("status", ["received", "fulfilled", "needs_attention"])
+    .gt("created_at", new Date(Date.now() - 60 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(SG_RECHECK_PER_RUN);
+  if (error) {
+    console.error("exos-marketplace-sales: Gametime recheck list failed", error.message);
+    return [];
+  }
+  const out: GametimePurchase[] = [];
+  for (const r of (data ?? []) as Array<{ external_order_id: string }>) {
+    if (skip.has(r.external_order_id)) continue;
+    try {
+      const p = await gt.getPurchase(r.external_order_id);
+      if (p) out.push(p);
+    } catch (e) {
+      console.error("exos-marketplace-sales: Gametime purchase recheck failed", r.external_order_id, String(e));
+    }
+  }
+  return out;
 }
 
 // The buyer's email costs a call, so it's fetched only for sales on Exos
@@ -268,7 +353,8 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
         sale.buyerEmail = await lookupEmail(sale);
       }
       const { data: rec, error: rErr } = await sb.rpc("exos_record_marketplace_order", {
-        p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale) : raw),
+        p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale)
+          : channel.id === "gametime" ? stripGametimePurchase(raw as GametimePurchase) : raw),
       });
       if (rErr) throw new Error(`record: ${rErr.message}`);
       const row = (rec as Array<{ order_id: string; status: string }> | null)?.[0];
@@ -316,6 +402,12 @@ async function isExosListing(sb: SupabaseClient, channel: string, listingId: str
 function stripStubHubSale(s: Sale): unknown {
   const { barcodes: _b, _embedded, ...rest } = s ?? ({} as Sale);
   return { ...rest, event_id: _embedded?.event?.id ?? null };
+}
+
+/** The purchase minus the recipient's contact details and barcodes (the email has its own column). */
+function stripGametimePurchase(p: GametimePurchase): unknown {
+  const { email: _e, phone: _p, first_name: _f, last_name: _l, seats: _s, ...rest } = p ?? ({} as GametimePurchase);
+  return rest;
 }
 
 function json(body: unknown, status = 200): Response {

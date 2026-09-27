@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -69,5 +69,17 @@ describe('allocationCellStatus', () => {
     expect(allocationCellStatus(alloc({ status: 'delisting' }), 'stubhub')?.text).toMatch(/Coming off StubHub/);
     expect(allocationCellStatus(alloc({ status: 'listed', planned_listing: { action: 'update', ops: { update: [{}], delete: [{}] } } }), 'seatgeek')?.text)
       .toBe('On SeatGeek; 2 changes to send.');
+  });
+});
+
+describe('gametimeStatus', () => {
+  const ev = { ticked: true, published: true, primaryMarketOnly: false };
+  it('explains Gametime', () => {
+    expect(gametimeStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(gametimeStatus(null, { ...ev, published: false })?.text).toMatch(/when you publish/);
+    expect(gametimeStatus(row({ status: 'planned' }), ev)?.text).toMatch(/event name, venue and date/);
+    expect(gametimeStatus(row({ status: 'failed', error: 'x' }), ev)).toEqual({ tone: 'warn', text: 'x' });
+    expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gametime')?.text)
+      .toBe("1 listing ready. Not sent yet: Gametime selling isn't switched on.");
   });
 });

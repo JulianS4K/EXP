@@ -13,3 +13,4 @@ export * from '../../../supabase/functions/_shared/marketplace/sales.ts';
 // Internal GA seat numbers and the create / update / delist sync plans.
 export * from '../../../supabase/functions/_shared/marketplace/seats.ts';
 export * from '../../../supabase/functions/_shared/marketplace/sync.ts';
+export * from '../../../supabase/functions/_shared/marketplace/listingIds.ts';

@@ -7,6 +7,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 |---|---|---|
 | StubHub | [`stubhub/`](stubhub/README.md) | PDFs 2026-09-14 (API v2.249.0.0, Catalog v1.0.0.75) + OpenAPI specs from viagogo/stubhub-api-docs |
 | SeatGeek | [`seatgeek/`](seatgeek/README.md) | Seller Direct API 1.0.0 (OAS3), 2026-09-27; event search via the public Platform API |
+| Gametime | [`gametime/`](gametime/README.md) | API v3 (Swagger 2.0), onboarding guide, CSV columns, example CSV, Postman collection, 2026-09-27 |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
@@ -20,8 +21,12 @@ charter's §6.1 carve-out process.
 
 ## How StubHub ties into Exos
 
-StubHub and SeatGeek are wired; the rest come later, as adapters in the
-same layer. SeatGeek differs in three ways (details in
+StubHub, SeatGeek and Gametime are wired; the rest come later, as adapters
+in the same layer. Gametime ([`gametime/README.md`](gametime/README.md)) has
+no event search or creation, and takes listings only as a CSV of the whole
+account's inventory on its FTP server, re-sent at least every six hours: so
+Exos only ever uploads it to a Gametime account that holds Exos listings
+alone (not confirmed yet). SeatGeek differs in three ways (details in
 [`seatgeek/README.md`](seatgeek/README.md)): no event creation, so events
 are linked by search (Platform API) or by an admin; no display cap, so an
 allocation becomes several listings of at most the max per order, each a

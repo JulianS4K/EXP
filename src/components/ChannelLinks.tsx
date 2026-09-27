@@ -15,7 +15,7 @@ import { allocationCellStatus, type MarketplaceRow } from '../lib/marketplace/st
 import { formatSeatRanges, parseSeatRanges } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
-  stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
+  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
 };
 
 function when(iso: string | null): string {
