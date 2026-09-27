@@ -1,15 +1,15 @@
 -- ============================================================================
--- Marketplace tickets claimed by link (mig 20260927010000). Self-contained
--- (7a prefix), rolled back at the end.
---   L1 a fulfilled marketplace sale issues LINK transfers, and the mail says
---      any Exos account can claim (it doesn't name the order email)
+-- Transfers are claimed into any Exos account (mig 20260927010000).
+-- Self-contained (7a prefix), rolled back at the end.
+--   L1 a marketplace sale's mail says any Exos account can claim (it doesn't
+--      name the order email, which may be a relay)
 --   L2 a verified account with a different email claims one; the ticket and
 --      its rotated barcode are theirs; a second account can't claim it again
---   L3 an unverified account, or no account, can't claim a link transfer
---   L4 an Exos-to-Exos (email) transfer still needs the addressed email
---   L5 the preview shows a link transfer's display fields, no emails, and
---      nothing for an email transfer
---   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_marketplace_link_claims.sql
+--   L3 an unverified account, or no account, can't claim
+--   L4 an Exos-to-Exos transfer is claimed by an account other than the one
+--      it was sent to, and then the addressed account can't
+--   L5 the preview shows a transfer's display fields, with no emails
+--   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_claim_any_account.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -18,7 +18,8 @@ INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('7a000000-0000-0000-0000-0000000000b1','real-me@x.com',now()),
   ('7a000000-0000-0000-0000-0000000000b2','someone-else@x.com',now()),
   ('7a000000-0000-0000-0000-0000000000b3','unverified@x.com',NULL),
-  ('7a000000-0000-0000-0000-0000000000b4','friend@x.com',now());
+  ('7a000000-0000-0000-0000-0000000000b4','friend@x.com',now()),
+  ('7a000000-0000-0000-0000-0000000000b5','friends-other@x.com',now());
 INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
   ('7a000000-0000-0000-0000-000000000001','7A Org','7a-org','7a000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
@@ -49,17 +50,14 @@ DO $$
 DECLARE n int; m text;
 BEGIN
   SELECT count(*) INTO n FROM public.exos_transfers
-   WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND claim_mode = 'link' AND status = 'pending'
+   WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND status = 'pending'
      AND receiver_email = 'x9f2k@relay.stubhub.example';
-  IF n <> 2 THEN RAISE EXCEPTION 'L1 FAIL: expected 2 pending link transfers, got %', n; END IF;
+  IF n <> 2 THEN RAISE EXCEPTION 'L1 FAIL: expected 2 pending transfers, got %', n; END IF;
   SELECT html INTO m FROM public.exos_mail WHERE to_email = 'x9f2k@relay.stubhub.example' AND template = 'transfer-initiated';
   IF m NOT LIKE '%any Exos account%' OR m LIKE '%Sign in with x9f2k%' OR m NOT LIKE '%/claim/%' THEN
     RAISE EXCEPTION 'L1 FAIL: mail text %', m;
   END IF;
-  IF (SELECT count(*) FROM public.exos_transfers WHERE claim_mode IS DISTINCT FROM 'link' AND event_id = '7a000000-0000-0000-0000-0000000000e1') <> 0 THEN
-    RAISE EXCEPTION 'L1 FAIL: a marketplace transfer defaulted to email mode';
-  END IF;
-  RAISE NOTICE 'L1 ok: marketplace sale issued as link transfers; mail says any Exos account';
+  RAISE NOTICE 'L1 ok: marketplace mail says any Exos account';
 END $$;
 
 -- L2 ---------------------------------------------------------------------------
@@ -96,10 +94,12 @@ BEGIN
    WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND status = 'pending' LIMIT 1;
   PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b3', 'unverified@x.com');
   IF NOT pg_temp.claim_fails(tr) THEN RAISE EXCEPTION 'L3 FAIL: unverified account claimed'; END IF;
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b3', 'x9f2k@relay.stubhub.example');
+  IF NOT pg_temp.claim_fails(tr) THEN RAISE EXCEPTION 'L3 FAIL: unverified account claimed with the order email'; END IF;
   PERFORM pg_temp.as_user(NULL, NULL);
   IF NOT pg_temp.claim_fails(tr) THEN RAISE EXCEPTION 'L3 FAIL: anonymous claim'; END IF;
   IF (SELECT status FROM public.exos_transfers WHERE id = tr) <> 'pending' THEN RAISE EXCEPTION 'L3 FAIL: transfer moved'; END IF;
-  RAISE NOTICE 'L3 ok: unverified / anonymous callers cannot claim a link';
+  RAISE NOTICE 'L3 ok: unverified / anonymous callers cannot claim';
 END $$;
 
 -- L4 ---------------------------------------------------------------------------
@@ -107,44 +107,42 @@ DO $$
 DECLARE tk uuid; tr uuid;
 BEGIN
   SELECT id INTO tk FROM public.exos_tickets WHERE owner_id = '7a000000-0000-0000-0000-0000000000b1';
-  -- What exos_create_transfer writes, with claim_mode left NULL the way a
-  -- jsonb_populate_record insert leaves it: NULL must behave as 'email'.
-  INSERT INTO public.exos_transfers (ticket_id, org_id, sender_id, receiver_email, status, claim_mode, event_id)
+  -- What exos_create_transfer writes: a friend transfer to friend@x.com.
+  INSERT INTO public.exos_transfers (ticket_id, org_id, sender_id, receiver_email, status, event_id)
     VALUES (tk, '7a000000-0000-0000-0000-000000000001', '7a000000-0000-0000-0000-0000000000b1',
-            'friend@x.com', 'pending', NULL, '7a000000-0000-0000-0000-0000000000e1')
+            'friend@x.com', 'pending', '7a000000-0000-0000-0000-0000000000e1')
     RETURNING id INTO tr;
   UPDATE public.exos_tickets SET pending_transfer_id = tr WHERE id = tk;
-  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b2', 'someone-else@x.com');
-  IF NOT pg_temp.claim_fails(tr) THEN RAISE EXCEPTION 'L4 FAIL: wrong email claimed an email transfer'; END IF;
-  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b4', 'friend@x.com');
+  -- The friend signs in with a different account of theirs.
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b5', 'friends-other@x.com');
   PERFORM public.exos_claim_transfer(tr);
-  IF (SELECT owner_id FROM public.exos_tickets WHERE id = tk) <> '7a000000-0000-0000-0000-0000000000b4' THEN
-    RAISE EXCEPTION 'L4 FAIL: addressed friend could not claim';
+  IF (SELECT owner_id FROM public.exos_tickets WHERE id = tk) <> '7a000000-0000-0000-0000-0000000000b5' THEN
+    RAISE EXCEPTION 'L4 FAIL: a different account could not claim a friend transfer';
   END IF;
-  RAISE NOTICE 'L4 ok: Exos-to-Exos transfers still need the addressed email';
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b4', 'friend@x.com');
+  IF NOT pg_temp.claim_fails(tr) THEN RAISE EXCEPTION 'L4 FAIL: the addressed email claimed after it was claimed'; END IF;
+  RAISE NOTICE 'L4 ok: a friend transfer is claimed into any account; first claim wins';
 END $$;
 
 -- L5 ---------------------------------------------------------------------------
 DO $$
-DECLARE tr_link uuid; tr_mail uuid; p jsonb;
+DECLARE tr uuid; p jsonb;
 BEGIN
-  SELECT id INTO tr_link FROM public.exos_transfers
-   WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND claim_mode = 'link' AND status = 'pending' LIMIT 1;
-  SELECT id INTO tr_mail FROM public.exos_transfers
-   WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND claim_mode IS DISTINCT FROM 'link' LIMIT 1;
+  SELECT id INTO tr FROM public.exos_transfers
+   WHERE event_id = '7a000000-0000-0000-0000-0000000000e1' AND status = 'pending' LIMIT 1;
   PERFORM pg_temp.as_user(NULL, NULL);
-  SELECT to_jsonb(x) INTO p FROM public.exos_transfer_claim_preview(tr_link) x;
-  IF p IS NULL OR p->>'status' <> 'pending' OR p->>'claim_mode' <> 'link' OR p->>'event_title' <> 'Link Show'
+  SELECT to_jsonb(x) INTO p FROM public.exos_transfer_claim_preview(tr) x;
+  IF p IS NULL OR p->>'status' <> 'pending' OR p->>'event_title' <> 'Link Show'
      OR p->>'tier_name' <> 'GA' OR p::text LIKE '%@%' OR p ? 'ticket_id' THEN
     RAISE EXCEPTION 'L5 FAIL: preview %', p;
   END IF;
-  IF EXISTS (SELECT 1 FROM public.exos_transfer_claim_preview(tr_mail)) THEN
-    RAISE EXCEPTION 'L5 FAIL: preview exposed an email transfer';
+  IF EXISTS (SELECT 1 FROM public.exos_transfer_claim_preview(gen_random_uuid())) THEN
+    RAISE EXCEPTION 'L5 FAIL: preview for an unknown id';
   END IF;
   IF NOT has_function_privilege('anon', 'public.exos_transfer_claim_preview(uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'L5 FAIL: anon cannot preview (claim page before sign-in)';
   END IF;
-  RAISE NOTICE 'L5 ok: preview shows link transfers only, without emails';
+  RAISE NOTICE 'L5 ok: preview shows display fields, no emails';
 END $$;
 
 ROLLBACK;

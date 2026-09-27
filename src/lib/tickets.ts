@@ -80,7 +80,6 @@ export function mapTransfer(row: any): Transfer {
     tierName: row.tier_name ?? undefined,
     organizerId: row.organizer_id ?? undefined,
     orgId: row.org_id ?? undefined,
-    claimMode: row.claim_mode === 'link' ? 'link' : 'email',
   };
 }
 
@@ -238,9 +237,9 @@ export async function getTransfer(transferId: string): Promise<Transfer | null> 
     .maybeSingle();
   if (error) throw error;
   if (data) return mapTransfer(data);
-  // A marketplace (link) transfer can be claimed by any Exos account, so RLS
-  // may hide the row from the person holding the link. The preview RPC
-  // returns its display fields (no emails) for link transfers only.
+  // Any Exos account can claim a transfer, but RLS only shows the row to the
+  // sender, the addressed email and org staff. The preview RPC returns the
+  // claim page's display fields (no emails) to whoever holds the link.
   const { data: preview, error: pErr } = await supabase.rpc('exos_transfer_claim_preview', {
     p_transfer_id: transferId,
   });

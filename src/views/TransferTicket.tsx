@@ -88,7 +88,7 @@ export default function TransferTicket() {
       toast({
         kind: 'success',
         title: 'Transfer sent',
-        message: `${normalisedEmail} can claim — copy the link to send via SMS or anywhere else.`,
+        message: `Sent to ${normalisedEmail}. Copy the link to send via SMS or anywhere else.`,
       });
     } catch (error: any) {
       console.error('Transfer failed:', error);
@@ -155,7 +155,7 @@ export default function TransferTicket() {
               </button>
             </div>
             <p className="type text-[12px] text-white/45 leading-relaxed">
-              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app — the receiver signs in with the email above to claim.
+              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them.
             </p>
           </div>
 

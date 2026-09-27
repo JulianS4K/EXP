@@ -68,15 +68,15 @@ The flow, end to end:
    - StubHub gets the same links through a planned `PATCH /sales/{id}`;
    - it also shows under their tickets if they sign in with that email.
 
-   **Claimed by link, into any Exos account** (mig `20260927010000`). A
-   marketplace buyer email is often a relay address the marketplace forwards
-   from, not the buyer's own. So marketplace transfers are `claim_mode =
-   'link'`: any verified Exos account that opens the link can claim, whatever
-   its email, and the first claim wins (the row locks; a second claim is
-   refused). The claim page reads the transfer through
-   `exos_transfer_claim_preview`, which returns link transfers' display
-   fields only, with no emails. Exos-to-Exos transfers between friends are
-   unchanged: only the addressed email can claim them.
+   **Claimed into any Exos account** (mig `20260927010000`). A marketplace
+   buyer email is often a relay address the marketplace forwards from, and
+   people sign in with whichever account they want. So the email only
+   decides where the claim link is sent: any verified Exos account that opens
+   the link can claim, and the first claim wins (the row locks; a second
+   claim is refused). The same holds for Exos-to-Exos transfers between
+   friends. The claim page reads the transfer through
+   `exos_transfer_claim_preview`, which returns display fields only, with no
+   emails.
 
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
