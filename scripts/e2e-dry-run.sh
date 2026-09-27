@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end dry run: one event from creation to the door, through Exos's own
-# checkout AND StubHub, on a throwaway Postgres built from every migration.
+# checkout, StubHub AND SeatGeek, on a throwaway Postgres built from every
+# migration.
 #
 #   bash scripts/e2e-dry-run.sh            # needs PGHOST/PGPORT (default /tmp/pgrun:5433)
 #
@@ -8,8 +9,8 @@
 # the scanner call) and the real TypeScript planners exos-distribute /
 # exos-marketplace-sales use. What it simulates, because it can't be real
 # here: Stripe (a paid checkout session is inserted as exos-checkout would),
-# StubHub (sales arrive as the webhook would deliver them; plans are printed,
-# never sent), the clock (doors "open" by moving the event start), email
+# StubHub / SeatGeek (sales arrive as the webhook would deliver them; plans
+# are printed, never sent), the clock (doors "open" by moving the event start), email
 # delivery (exos_mail rows are checked, not sent). Every step asserts; the
 # script stops at the first surprise.
 set -euo pipefail
@@ -57,7 +58,7 @@ q "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
    GRANT SELECT, INSERT, UPDATE ON public.exos_events, public.exos_ticket_tiers TO authenticated;"
 ok "carol has no Exos account yet; she'll sign up to claim (with a different email than her StubHub order)"
 
-step "1. Organizer creates the event (draft), StubHub ticked, max 4 per order and per account"
+step "1. Organizer creates the event (draft), StubHub + SeatGeek ticked, max 4 per order and per account"
 as $OWNER owner@e2e.test "INSERT INTO public.exos_events(id,org_id,name,status,starts_at,occurs_at_local,timezone,currency,
       venue_name,venue_location,venue_address,distribution_networks,exclusivity,purchase_limits,total_tickets,created_by)
     VALUES ('$EV','$ORG','Late Night Jazz','draft',date_trunc('minute', now()+interval '30 days'),
@@ -65,41 +66,58 @@ as $OWNER owner@e2e.test "INSERT INTO public.exos_events(id,org_id,name,status,s
         ||CASE WHEN (now()+interval '30 days') AT TIME ZONE 'America/New_York' - (now()+interval '30 days') AT TIME ZONE 'UTC' = interval '-4 hours' THEN '-04:00' ELSE '-05:00' END,
       'America/New_York','USD',
       'Blue Room','Blue Room','{\"street\":\"1 Main St\",\"city\":\"Brooklyn\",\"region\":\"NY\",\"country\":\"United States\"}',
-      ARRAY['stubhub'],'{\"primaryMarketOnly\":false}','{\"maxPerOrder\":4,\"maxPerAccount\":4}',110,'$OWNER');
+      ARRAY['stubhub','seatgeek'],'{\"primaryMarketOnly\":false}','{\"maxPerOrder\":4,\"maxPerAccount\":4}',110,'$OWNER');
   INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES ('$GA','$EV','GA',40,100,0),('$VIP','$EV','VIP',120,10,0)" >/dev/null
 need "$(q "SELECT count(*) FROM exos_distribution_listings WHERE event_id='$EV'")" 0 "draft queues nothing"
-ok "draft saved: 2 ticket types, nothing queued for StubHub"
+ok "draft saved: 2 ticket types, nothing queued for the marketplaces"
 
-step "2. Organizer publishes"
+step "2. Organizer fills the Marketplaces grid before publishing: GA 20 on StubHub, VIP 6 on SeatGeek"
+as $OWNER owner@e2e.test "SELECT public.exos_set_channel_allocation('$EV','stubhub','$GA',20);
+  SELECT public.exos_set_channel_allocation('$EV','seatgeek','$VIP',6)" >/dev/null
+need "$(q "SELECT exos_tier_available('$GA')||'/'||exos_tier_available('$VIP')")" "80/4" "Exos keeps 80 GA, 4 VIP"
+need "$(q "SELECT string_agg(channel||' '||internal_seats::text, ', ' ORDER BY channel) FROM exos_distribution_listings WHERE event_id='$EV'")" \
+  "seatgeek {[1,7)}, stubhub {[1,21)}" "internal seat numbers"
+ok "Exos can sell 80 GA + 4 VIP; StubHub holds GA 20 (internal seats 1-20), SeatGeek VIP 6 (internal seats 1-6)"
+
+step "3. Organizer publishes"
 as $OWNER owner@e2e.test "UPDATE public.exos_events SET status='published' WHERE id='$EV'" >/dev/null
-need "$(q "SELECT status FROM exos_distribution_listings WHERE event_id='$EV' AND channel='stubhub'")" pending "publish queues the StubHub request"
-ok "StubHub event request queued (pending)"
+need "$(q "SELECT string_agg(channel||' '||status, ', ' ORDER BY channel) FROM exos_distribution_listings WHERE event_id='$EV' AND tier_id IS NULL")" \
+  "seatgeek pending, stubhub pending" "publish queues an event row per marketplace"
+need "$(q "SELECT exos_channel_allocated('$GA')||'/'||exos_channel_allocated('$VIP')")" "20/6" "the grid survives publishing"
+ok "StubHub event request + SeatGeek event row queued; the grid's seats stay set aside"
 
-step "3. Organizer sets 20 GA seats aside for StubHub"
-as $OWNER owner@e2e.test "SELECT public.exos_set_channel_allocation('$EV','stubhub','$GA',20)" >/dev/null
-need "$(q "SELECT exos_tier_available('$GA')")" 80 "Exos keeps 80 of 100 GA"
-ok "Exos can now sell 80 GA; StubHub holds 20"
-
-step "4. exos-distribute (dry-run): StubHub event plan + listing plan"
+step "4. exos-distribute (dry-run): StubHub event plan + listing plan, SeatGeek listing plans"
 ROW=$(q "SELECT row_to_json(x) FROM (SELECT e.id,e.name,e.status,e.starts_at,e.occurs_at_local,e.timezone,e.venue_name,e.venue_location,e.venue_address,e.currency,e.purchase_limits,
-          d.id AS dist_id, d.requested_qty, t.name AS tier_name, t.price AS tier_price
-          FROM exos_events e JOIN exos_distribution_listings d ON d.event_id=e.id AND d.channel='stubhub' JOIN exos_ticket_tiers t ON t.id=d.tier_id WHERE e.id='$EV') x")
+          d.id AS dist_id, d.requested_qty, t.name AS tier_name, t.price AS tier_price,
+          g.id AS sg_id, g.requested_qty AS sg_qty, g.internal_seats::text AS sg_seats, v.name AS sg_tier, v.price AS sg_price
+          FROM exos_events e
+          JOIN exos_distribution_listings d ON d.event_id=e.id AND d.channel='stubhub' AND d.tier_id IS NOT NULL JOIN exos_ticket_tiers t ON t.id=d.tier_id
+          JOIN exos_distribution_listings g ON g.event_id=e.id AND g.channel='seatgeek' AND g.tier_id IS NOT NULL JOIN exos_ticket_tiers v ON v.id=g.tier_id
+          WHERE e.id='$EV') x")
 PLANS=$(ROW="$ROW" npx tsx -e "
 import { planStubHubEventRequest, planStubHubListing } from './src/lib/marketplace/stubhub';
+import { planSeatGeekListings } from './src/lib/marketplace/seatgeek';
+import { seatGeekSync, stubHubSync } from './src/lib/marketplace';
 const r = JSON.parse(process.env.ROW!);
 const ev = planStubHubEventRequest(r);
-const li = planStubHubListing({ id: r.dist_id, requested_qty: r.requested_qty, unit_price: null, tier: { name: r.tier_name, price: r.tier_price }, event: r });
-console.log(JSON.stringify({ ev, li }));")
-q "UPDATE exos_distribution_listings SET status='planned', planned_request='$(echo "$PLANS" | node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(0)).ev))')',
-     planned_listing='$(echo "$PLANS" | node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(0)).li))')' WHERE event_id='$EV' AND channel='stubhub'"
+const li = stubHubSync(planStubHubListing({ id: r.dist_id, requested_qty: r.requested_qty, unit_price: null, tier: { name: r.tier_name, price: r.tier_price }, event: r }), null, r.dist_id);
+const sg = seatGeekSync(planSeatGeekListings({ id: r.sg_id, requested_qty: r.sg_qty, unit_price: null, internal_seats: r.sg_seats, tier: { name: r.sg_tier, price: r.sg_price }, event: r }), null);
+console.log(JSON.stringify({ ev, li, sg }));")
+field() { echo "$PLANS" | node -e "process.stdout.write(JSON.stringify(JSON.parse(require('fs').readFileSync(0)).$1))"; }
+q "UPDATE exos_distribution_listings SET status='planned', planned_request='$(field ev)' WHERE event_id='$EV' AND channel='stubhub' AND tier_id IS NULL;
+   UPDATE exos_distribution_listings SET planned_listing='$(field li)' WHERE event_id='$EV' AND channel='stubhub' AND tier_id='$GA';
+   UPDATE exos_distribution_listings SET planned_listing='$(field sg)' WHERE event_id='$EV' AND channel='seatgeek' AND tier_id='$VIP'"
 echo "$PLANS" | node -e '
 const p = JSON.parse(require("fs").readFileSync(0));
 console.log(`   plan  ${p.ev.method} ${p.ev.path}: "${p.ev.body.event.name}" ${p.ev.body.event.start_date} at ${p.ev.body.venue.name}, ${p.ev.body.venue.city} ${p.ev.body.country.code}`);
-console.log(`   plan  ${p.li.method} ${p.li.path}: ${p.li.body.number_of_tickets} x ${p.li.body.seating.section} @ $${p.li.body.ticket_price.amount}, buyers see ${p.li.body.display_number_of_tickets} at a time, split ${p.li.body.split_type}, unpublished`);'
-ok "both plans stored; nothing sent to StubHub"
+console.log(`   plan  ${p.li.method} ${p.li.path}: ${p.li.body.number_of_tickets} x ${p.li.body.seating.section} @ $${p.li.body.ticket_price.amount}, buyers see ${p.li.body.display_number_of_tickets} at a time, split ${p.li.body.split_type}, unpublished`);
+for (const l of p.sg.listings) console.log(`   plan  ${p.sg.method} ${l.path.replace(/ex[a-z2-7]{26}/, "ex<alloc>")}: ${l.body.quantity} x ${l.body.section} row ${l.body.row} seats ${l.body.seat_from}-${l.body.seat_thru} @ $${l.body.cost}, ${l.body.stock_type}`);'
+need "$(q "SELECT jsonb_array_length(planned_listing->'listings')||' '||(planned_listing->>'action') FROM exos_distribution_listings WHERE channel='seatgeek' AND tier_id='$VIP'")" "2 create" "seatgeek: 2 listings of at most 4"
+ok "plans stored; nothing sent to StubHub or SeatGeek (SeatGeek VIP: listings of 4 + 2, internal seats 1-4 and 5-6)"
 
 step "5. (operator-authorized send, simulated) StubHub accepts: listing SH-L-1 live on StubHub event 104857"
-q "UPDATE exos_distribution_listings SET status='listed', external_listing_id='SH-L-1', external_event_id='104857' WHERE event_id='$EV' AND channel='stubhub';
+q "UPDATE exos_distribution_listings SET status='listed', external_listing_id='SH-L-1', listed_snapshot=planned_listing WHERE event_id='$EV' AND channel='stubhub' AND tier_id='$GA';
+   UPDATE exos_distribution_listings SET external_event_id='104857' WHERE event_id='$EV' AND channel='stubhub' AND tier_id IS NULL;
    INSERT INTO exos_channel_event_links(event_id,org_id,channel,status,external_event_id,method) VALUES ('$EV','$ORG','stubhub','created','104857','created')"
 ok "listing live; the 20 seats stay allocated"
 
@@ -207,6 +225,34 @@ need "$(q "SELECT count(*) FROM exos_marketplace_orders WHERE external_order_id 
 need "$(q "SELECT exos_channel_allocated('$GA')")" 7 "allocation untouched by the refused sale"
 ok "both go to a human; nothing oversold, nothing silently undone"
 
+step "14b. SeatGeek sells 2 VIP on its second listing; then the organizer takes SeatGeek off"
+SGA=$(q "SELECT id FROM exos_distribution_listings WHERE channel='seatgeek' AND tier_id='$VIP'")
+SGL=$(q "SELECT planned_listing->'listings'->1->'body'->>'seller_listing_id' FROM exos_distribution_listings WHERE id='$SGA'")
+q "SELECT exos_record_marketplace_order(jsonb_build_object('channel','seatgeek','external_order_id','SG-5001','external_listing_id','$SGA',
+     'quantity',2,'sale_status','confirmed','buyer_email','gina@e2e.test','proceeds','200.00','currency','USD',
+     'raw',jsonb_build_object('id','SG-5001','listing',jsonb_build_object('id','$SGL','quantity',2))));
+   SELECT exos_fulfil_marketplace_order((SELECT id FROM exos_marketplace_orders WHERE external_order_id='SG-5001'),'$APP')" >/dev/null
+need "$(q "SELECT string_agg(internal_seat::text, ',' ORDER BY internal_seat) FROM exos_tickets WHERE order_ref='seatgeek:SG-5001'")" "5,6" "the listing's own seats"
+need "$(q "SELECT internal_seats::text||' '||requested_qty FROM exos_distribution_listings WHERE id='$SGA'")" "{[1,5)} 4" "seatgeek keeps 1-4"
+need "$(q "SELECT count(*) FROM exos_mail WHERE to_email='gina@e2e.test' AND subject LIKE '%SeatGeek%'")" 1 "gina emailed"
+ok "gina's 2 VIP carry internal seats 5 and 6 (staff only, never shown to her); SeatGeek keeps VIP 1-4"
+as $OWNER owner@e2e.test "UPDATE public.exos_events SET distribution_networks=ARRAY['stubhub'] WHERE id='$EV'" >/dev/null
+need "$(q "SELECT status||' '||requested_qty FROM exos_distribution_listings WHERE id='$SGA'")" "delisted 0" "nothing was live: released at once"
+need "$(q "SELECT exos_tier_available('$VIP')")" 8 "VIP back to Exos (10 - 2 sold)"
+need "$(q "SELECT status FROM exos_distribution_listings WHERE channel='stubhub' AND tier_id='$GA'")" listed "stubhub untouched"
+ok "SeatGeek unticked: its 4 unsold VIP seats come straight back to Exos (nothing was live there)"
+as $OWNER owner@e2e.test "SELECT public.exos_set_channel_allocation('$EV','stubhub','$GA',0)" >/dev/null
+need "$(q "SELECT status||' '||exos_channel_allocated('$GA') FROM exos_distribution_listings WHERE channel='stubhub' AND tier_id='$GA'")" "delisting 7" "live: delist first"
+PLAN=$(q "SELECT row_to_json(x) FROM (SELECT id FROM exos_distribution_listings WHERE channel='stubhub' AND tier_id='$GA') x" | npx tsx -e "
+import { stubHubDelist } from './src/lib/marketplace';
+const r = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const p = stubHubDelist(r.id);
+console.log(p.method + ' ' + p.path.replace(/[0-9a-f-]{36}$/, '<alloc>'));")
+echo "   plan  $PLAN"
+q "UPDATE exos_distribution_listings SET status='delisted', requested_qty=0, internal_seats='{}', listed_snapshot=NULL WHERE channel='stubhub' AND tier_id='$GA'"
+need "$(q "SELECT exos_channel_allocated('$GA')")" 0 "released after the delist"
+ok "StubHub GA set to 0 while live: delist planned, the 7 seats stay held until StubHub confirms, then return to Exos"
+
 step "15. Doors: the scanner at work"
 AT=$(q "SELECT id FROM exos_tickets WHERE owner_id='$ALICE' AND order_ref='cs_e2e_alice' ORDER BY id LIMIT 1")
 need "$(scan $AT "$(barcode $AT)")" checked-in "alice valid"
@@ -230,9 +276,9 @@ need "$(scan $EVE "$(barcode $EVE)")" in-transfer "eve never claimed"
 ok "eve (cancelled StubHub order, never claimed): refused, in-transfer"
 
 step "16. Where it ended"
-q "SELECT '   GA sold '||sold||'/'||capacity||', StubHub still holds '||exos_channel_allocated(id)||', Exos can sell '||coalesce(exos_tier_available(id),0) FROM exos_ticket_tiers WHERE id='$GA'"
+q "SELECT '   '||name||' sold '||sold||'/'||capacity||', marketplaces hold '||exos_channel_allocated(id)||', Exos can sell '||coalesce(exos_tier_available(id),0) FROM exos_ticket_tiers WHERE event_id='$EV' ORDER BY name"
 q "SELECT '   checked in: '||count(*) FILTER (WHERE status='used')||', voided: '||count(*) FILTER (WHERE status='voided') FROM exos_tickets WHERE event_id='$EV'"
-q "SELECT '   StubHub orders: '||string_agg(status||' '||n, ', ') FROM (SELECT status, count(*) n FROM exos_marketplace_orders WHERE org_id='$ORG' GROUP BY 1 ORDER BY 1) x"
+q "SELECT '   marketplace orders: '||string_agg(channel||' '||status||' '||n, ', ') FROM (SELECT channel, status, count(*) n FROM exos_marketplace_orders WHERE org_id='$ORG' GROUP BY 1, 2 ORDER BY 1, 2) x"
 q "SELECT '   limit flags: '||count(*) FILTER (WHERE reviewed_at IS NULL)||' open, '||count(*) FILTER (WHERE reviewed_at IS NOT NULL)||' reviewed' FROM exos_account_limit_flags WHERE org_id='$ORG'"
 q "SELECT '   emails queued: '||count(*) FROM exos_mail WHERE to_email LIKE '%@e2e.test'"
 echo; echo "== dry run passed"

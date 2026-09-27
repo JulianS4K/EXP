@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -40,5 +40,34 @@ describe('stubHubStatus', () => {
   it('shows the StubHub event once it exists, even if StubHub was unticked since', () => {
     const s = stubHubStatus(row({ status: 'listed', external_event_id: '104857' }), { ...EV, stubhubTicked: false });
     expect(s).toEqual({ tone: 'ok', text: 'On StubHub (event 104857).' });
+  });
+});
+
+describe('seatGeekStatus', () => {
+  const ev = { ticked: true, published: true, primaryMarketOnly: false };
+  it('says which SeatGeek event the listings attach to', () => {
+    expect(seatGeekStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(seatGeekStatus(null, { ...ev, published: false })?.text).toMatch(/when you publish/);
+    expect(seatGeekStatus(row({ status: 'planned', planned_request: { linked: true, external_event_id: '6123456' } }), ev))
+      .toEqual({ tone: 'ok', text: 'SeatGeek listings attach to SeatGeek event 6123456.' });
+    expect(seatGeekStatus(row({ status: 'planned', planned_request: { linked: false } }), ev)?.text).toMatch(/event name and venue/);
+    expect(seatGeekStatus(row({ status: 'failed', error: 'SeatGeek may already have this event' }), ev)?.tone).toBe('warn');
+  });
+});
+
+describe('allocationCellStatus', () => {
+  const alloc = (p: Partial<StubHubDistributionRow>) => row({ tier_id: 't1', requested_qty: 10, ...p });
+  it('describes a cell of the grid', () => {
+    expect(allocationCellStatus(null, 'seatgeek')).toBeNull();
+    expect(allocationCellStatus(alloc({ status: 'delisted', requested_qty: 0 }), 'seatgeek')).toBeNull();
+    expect(allocationCellStatus(alloc({}), 'seatgeek')?.text).toMatch(/listed once the event is published/);
+    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create', listings: [{}, {}, {}] } }), 'seatgeek')?.text)
+      .toBe("3 listings ready. Not sent yet: SeatGeek selling isn't switched on.");
+    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create' } }), 'stubhub')?.text).toMatch(/^1 listing ready/);
+    expect(allocationCellStatus(alloc({ planned_listing: { error: 'the ticket type has no price' } }), 'stubhub'))
+      .toEqual({ tone: 'warn', text: 'the ticket type has no price' });
+    expect(allocationCellStatus(alloc({ status: 'delisting' }), 'stubhub')?.text).toMatch(/Coming off StubHub/);
+    expect(allocationCellStatus(alloc({ status: 'listed', planned_listing: { action: 'update', ops: { update: [{}], delete: [{}] } } }), 'seatgeek')?.text)
+      .toBe('On SeatGeek; 2 changes to send.');
   });
 });

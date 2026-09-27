@@ -11,7 +11,8 @@ import {
 } from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
 import { setChannelAllocation, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
-import type { StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
+import { allocationCellStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { formatSeatRanges, parseSeatRanges } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
@@ -127,85 +128,124 @@ export function MarketplaceOrders({ eventId }: { eventId: string }) {
 }
 
 /**
- * Seats set aside for one marketplace. Exos can't sell them, so a marketplace
- * buyer and an Exos buyer can never get the same seat; the marketplace
- * listing(s) carry exactly this many.
+ * The Marketplaces grid: a row per ticket type, a column per ticked
+ * marketplace, each cell the seats set aside for it. Exos can't sell those
+ * seats, so a marketplace buyer and an Exos buyer never get the same one, and
+ * the marketplace listings carry exactly that many. Setting 0 takes the
+ * listing down, then gives the seats back. The seat numbers shown are
+ * internal (general admission has none; SeatGeek needs them): buyers never
+ * see them.
  */
-export function ChannelAllocation({
-  eventId, channel, tiers, row, maxPerOrder, onSaved,
+export function MarketplaceGrid({
+  eventId, channels, tiers, rows, maxPerOrder, onSaved,
 }: {
   eventId: string;
-  channel: AllocationChannel;
+  channels: AllocationChannel[];
   tiers: Array<{ id: string; name: string; capacity: number }>;
-  row: StubHubDistributionRow | null;
+  rows: MarketplaceRow[];
   /** The event's max per order: what one marketplace order can take. */
   maxPerOrder: number | null;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
-  const label = LABEL[channel] ?? channel;
-  const [tierId, setTierId] = useState(row?.tier_id ?? tiers[0]?.id ?? '');
-  const [qty, setQty] = useState(String(row?.requested_qty ?? 0));
+  const rowFor = (ch: string, tierId: string) => rows.find((r) => r.channel === ch && r.tier_id === tierId) ?? null;
+  const current = (ch: string, tierId: string) => {
+    const r = rowFor(ch, tierId);
+    return r && r.status !== 'delisted' && r.status !== 'failed' ? r.requested_qty ?? 0 : 0;
+  };
+  const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  if (!tiers.length) return null;
+  if (!tiers.length || !channels.length) return null;
+  const key = (ch: string, tierId: string) => `${ch}:${tierId}`;
+  const value = (ch: AllocationChannel, tierId: string) => draft[key(ch, tierId)] ?? String(current(ch, tierId));
+
   const save = async () => {
-    const n = Number.parseInt(qty, 10);
-    if (!Number.isInteger(n) || n < 0) {
-      toast({ kind: 'error', message: 'Enter a whole number of seats (0 to stop).' });
+    const changes: Array<{ ch: AllocationChannel; tierId: string; n: number }> = [];
+    for (const ch of channels) {
+      for (const t of tiers) {
+        const raw = draft[key(ch, t.id)];
+        if (raw === undefined) continue;
+        const n = Number.parseInt(raw, 10);
+        if (!Number.isInteger(n) || n < 0 || String(n) !== raw.trim()) {
+          toast({ kind: 'error', message: `${t.name} on ${LABEL[ch]}: enter a whole number of seats (0 to stop).` });
+          return;
+        }
+        if (n !== current(ch, t.id)) changes.push({ ch, tierId: t.id, n });
+      }
+    }
+    if (!changes.length) {
+      toast({ kind: 'info', message: 'Nothing changed.' });
       return;
     }
     setBusy(true);
-    try {
-      await setChannelAllocation(eventId, channel, tierId, n);
-      toast({ kind: 'success', message: n ? `${n} seat${n === 1 ? '' : 's'} set aside for ${label}.` : `${label} seats given back to Exos.` });
-      onSaved();
-    } catch (err) {
-      toast({ kind: 'error', message: err instanceof Error ? err.message.replace(/^exos_set_channel_allocation: /, '') : 'Could not save that.' });
-    } finally {
-      setBusy(false);
+    const failed: string[] = [];
+    for (const c of changes) {
+      try {
+        await setChannelAllocation(eventId, c.ch, c.tierId, c.n);
+      } catch (err) {
+        const tier = tiers.find((t) => t.id === c.tierId)?.name ?? 'ticket type';
+        failed.push(`${tier} on ${LABEL[c.ch]}: ${err instanceof Error ? err.message.replace(/^exos_set_channel_allocation: /, '') : 'not saved'}`);
+      }
     }
+    setBusy(false);
+    setDraft({});
+    onSaved();
+    if (failed.length) toast({ kind: 'error', message: failed.join(' · ') });
+    else toast({ kind: 'success', message: `Marketplace seats saved (${changes.length} change${changes.length === 1 ? '' : 's'}).` });
   };
-  const cap = channel === 'seatgeek'
-    ? (maxPerOrder
-      ? ` They're listed on SeatGeek in batches of at most ${maxPerOrder} (your max per order), so one order can't take them all.`
-      : ' Set a max per order to stop one SeatGeek order taking them all.')
-    : (maxPerOrder
-      ? ` ${label} buyers see at most ${maxPerOrder} at a time (your max per order), so one order can't take them all.`
-      : ` Set a max per order to stop one ${label} order taking them all.`);
-  // A plan that can't be built, or (SeatGeek) a listing the marketplace reported hidden.
-  const planError = (row?.planned_listing as { error?: string } | null | undefined)?.error
-    ?? (channel === 'seatgeek' ? row?.error ?? undefined : undefined);
+
+  const tone = { muted: 'text-white/40', info: 'text-white/60', ok: 'text-brand-primary', warn: 'text-amber-400' } as const;
   return (
-    <div className="space-y-2">
-      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Seats for {label}</h3>
+    <div className="space-y-3">
+      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Marketplaces</h3>
       <p className="type text-xs text-white/50">
-        Exos stops selling these seats, so nobody can buy the same seat on both. Set 0 to give them back.
-        {cap}
+        Seats per ticket type for each marketplace. Exos stops selling them, so nobody can buy the same seat twice; 0 takes the
+        listing down and gives them back.
+        {maxPerOrder
+          ? ` One marketplace order can take at most ${maxPerOrder} (your max per order).`
+          : ' Set a max per order to stop one marketplace order taking them all.'}
       </p>
-      {planError && <p role="status" className="type text-xs text-amber-400">{label}: {planError}</p>}
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="type text-xs text-white/70">
-          <span className="block mb-1">Ticket type</span>
-          <select value={tierId} onChange={(e) => setTierId(e.target.value)} className="bg-black border border-white/20 px-3 py-2 text-white">
-            {tiers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
-        <label className="type text-xs text-white/70">
-          <span className="block mb-1">Seats</span>
-          <input type="number" min={0} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)}
-            className="w-24 bg-black border border-white/20 px-3 py-2 text-white" />
-        </label>
-        <button type="button" onClick={save} disabled={busy || !tierId}
-          className="px-4 py-2 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+      <div className="overflow-x-auto">
+        <table className="w-full type text-xs text-white/80">
+          <thead>
+            <tr className="text-left text-white/50">
+              <th className="py-2 pr-3 font-normal">Ticket type</th>
+              {channels.map((ch) => <th key={ch} className="py-2 pr-3 font-normal">{LABEL[ch]}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {tiers.map((t) => (
+              <tr key={t.id} className="border-t border-white/10 align-top">
+                <td className="py-2 pr-3">
+                  <span className="text-white">{t.name}</span>
+                  <span className="block text-white/40">{t.capacity} total</span>
+                </td>
+                {channels.map((ch) => {
+                  const r = rowFor(ch, t.id);
+                  const st = allocationCellStatus(r, ch);
+                  const seats = r && (r.requested_qty ?? 0) > 0 ? formatSeatRanges(parseSeatRanges(r.internal_seats ?? null)) : '';
+                  return (
+                    <td key={ch} className="py-2 pr-3">
+                      <input
+                        type="number" min={0} inputMode="numeric" aria-label={`${t.name} seats on ${LABEL[ch]}`}
+                        value={value(ch, t.id)} disabled={busy || r?.status === 'delisting'}
+                        onChange={(e) => setDraft({ ...draft, [key(ch, t.id)]: e.target.value })}
+                        className="w-20 bg-black border border-white/20 px-2 py-1 text-white disabled:opacity-50"
+                      />
+                      {st && <span role="status" className={`block mt-1 ${tone[st.tone]}`}>{st.text}</span>}
+                      {seats && <span className="block mt-1 text-white/30">Internal seats {seats}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <button type="button" onClick={save} disabled={busy}
+        className="px-4 py-2 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
+        {busy ? 'Saving…' : 'Save marketplace seats'}
+      </button>
     </div>
   );
 }
-
-/** Seats set aside for StubHub. */
-export function StubHubAllocation(props: Omit<Parameters<typeof ChannelAllocation>[0], 'channel'>) {
-  return <ChannelAllocation {...props} channel="stubhub" />;
-}
-

@@ -121,12 +121,13 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
       }
       counts[row.status as "linked" | "review" | "unmatched"]++;
 
-      // A new StubHub link changes what its event request should be (nothing
-      // to create, or wait on staff): re-queue a request StubHub doesn't have.
-      if (net === "stubhub") {
+      // A new link changes what the marketplace's event row should say
+      // (nothing to create, attach to this event, or wait on staff): re-queue
+      // the event row (never the allocations) while the marketplace has nothing.
+      if (net === "stubhub" || net === "seatgeek") {
         const { error: qErr } = await sb.from("exos_distribution_listings")
           .update({ status: "pending", planned_request: null, error: null, updated_at: now.toISOString() })
-          .eq("event_id", ev.id).eq("channel", "stubhub")
+          .eq("event_id", ev.id).eq("channel", net).is("tier_id", null)
           .is("external_event_id", null).is("external_listing_id", null)
           .in("status", ["planned", "failed"]);
         if (qErr) console.error("exos-distribute: re-queue after link failed", ev.id, qErr.message);

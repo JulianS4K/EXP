@@ -4,6 +4,7 @@
 --   G1 seats allocated to SeatGeek are held back from Exos's own sale
 --   G2 a SeatGeek order on an Exos listing (normalized to the allocation id)
 --      is recorded and fulfilled: tickets, link transfers, mail says SeatGeek
+--      and each ticket gets an internal seat number (20260927030000)
 --   G3 a broker listing's order is ignored; an unknown status goes to a human
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_seatgeek_orders.sql
 -- ============================================================================
@@ -15,8 +16,8 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
   ('7d000000-0000-0000-0000-000000000001','7D Org','7d-org','7d000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('7d000000-0000-0000-0000-000000000001','7d000000-0000-0000-0000-0000000000a0','owner');
-INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES
-  ('7d000000-0000-0000-0000-0000000000e1','7d000000-0000-0000-0000-000000000001','SG Show','published','2027-01-01T02:00:00Z','Hall',100,0);
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
+  ('7d000000-0000-0000-0000-0000000000e1','7d000000-0000-0000-0000-000000000001','SG Show','published','2027-01-01T02:00:00Z','Hall',100,0,ARRAY['seatgeek']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('7d000000-0000-0000-0000-0000000000d1','7d000000-0000-0000-0000-0000000000e1','GA',50,10,0);
 
@@ -40,7 +41,7 @@ DECLARE alloc uuid; r record; f record; m text;
 BEGIN
   PERFORM set_config('app.uid','',true);
   SELECT id INTO alloc FROM public.exos_distribution_listings
-   WHERE event_id = '7d000000-0000-0000-0000-0000000000e1' AND channel = 'seatgeek';
+   WHERE event_id = '7d000000-0000-0000-0000-0000000000e1' AND channel = 'seatgeek' AND tier_id IS NOT NULL;
   -- What normalizeSeatGeekOrder hands exos-marketplace-sales for listing exos_<alloc>_1.
   SELECT * INTO r FROM public.exos_record_marketplace_order(jsonb_build_object(
     'channel','seatgeek','external_order_id','SG-7D-1','external_event_id','6123456',
@@ -54,6 +55,12 @@ BEGIN
   IF (SELECT requested_qty FROM public.exos_distribution_listings WHERE id = alloc) <> 4 THEN
     RAISE EXCEPTION 'G2 FAIL: allocation not consumed';
   END IF;
+  -- GA seat numbers are internal: each ticket has one, the allocation keeps the rest.
+  IF (SELECT array_agg(internal_seat ORDER BY internal_seat) FROM public.exos_tickets
+       WHERE order_ref = 'seatgeek:SG-7D-1') <> ARRAY[5,6]
+     OR (SELECT internal_seats FROM public.exos_distribution_listings WHERE id = alloc) <> '{[1,5)}' THEN
+    RAISE EXCEPTION 'G2 FAIL: internal seats';
+  END IF;
   RAISE NOTICE 'G2 ok: SeatGeek order fulfilled with 2 link transfers; mail says SeatGeek';
 END $$;
 
@@ -62,7 +69,7 @@ DO $$
 DECLARE alloc uuid; r record; f record;
 BEGIN
   SELECT id INTO alloc FROM public.exos_distribution_listings
-   WHERE event_id = '7d000000-0000-0000-0000-0000000000e1' AND channel = 'seatgeek';
+   WHERE event_id = '7d000000-0000-0000-0000-0000000000e1' AND channel = 'seatgeek' AND tier_id IS NOT NULL;
   IF EXISTS (SELECT 1 FROM public.exos_record_marketplace_order(jsonb_build_object(
       'channel','seatgeek','external_order_id','SG-BROKER','external_listing_id','abc1234','quantity',1,'sale_status','confirmed'))) THEN
     RAISE EXCEPTION 'G3 FAIL: broker order recorded';

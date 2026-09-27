@@ -20,10 +20,19 @@
 // the event is linked). stock_type "mobile" (the buyer accepts a transfer
 // link: Exos's claim link), is_edelivery true. row is required: Exos
 // general-admission tiers use "GA". seat_from / seat_thru are required when a
-// row is given, and GA has no seat numbers: left unresolved for SeatGeek to
-// confirm rather than invented.
+// row is given: they are the allocation's internal seat numbers (mig
+// 20260927030000, ../seats.ts), so a listing is one contiguous block of them,
+// and every ticket sold on it gets one of its numbers. Buyers never see them
+// on Exos.
+//
+// Listing numbers stay put across re-plans: a block keeps the number of the
+// earlier listing (listed_snapshot, else the last plan) whose seats it
+// overlaps; new blocks get numbers never used before. So a sale or a resize
+// updates listings rather than renaming them, and a listing that sold out or
+// was dropped is deleted, not reused.
 
 import { exosEventRef, localDate, type ExosEventRowForChannels } from '../channel.ts';
+import { parseSeatRanges, seatBlocks, seatCount, type SeatRun } from '../seats.ts';
 import type { SeatGeekListing } from './types.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -88,6 +97,10 @@ export interface SeatGeekAllocation {
   event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
   /** The linked SeatGeek event id (exos_channel_event_links), if any. */
   seatgeekEventId?: string | null;
+  /** exos_distribution_listings.internal_seats: one number per allocated seat. */
+  internal_seats: string | SeatRun[] | null;
+  /** The listings SeatGeek has (listed_snapshot) or were last planned, for stable numbers. */
+  previous?: ReadonlyArray<{ seller_listing_id?: string; seat_from?: number; seat_thru?: number }> | null;
 }
 
 export interface PlannedSeatGeekListings {
@@ -134,17 +147,25 @@ export function planSeatGeekListings(a: SeatGeekAllocation): PlannedSeatGeekList
 
   const eventId = a.seatgeekEventId?.trim();
   if (eventId && !/^\d+$/.test(eventId)) throw new Error(`"${eventId}" is not a SeatGeek event id`);
-  const sizes = groupSizes(qty, maxPerOrder(a.event.purchase_limits));
-  if (sizes.length > MAX_SEATGEEK_LISTINGS_PER_ALLOCATION) {
-    throw new Error(`that would be ${sizes.length} SeatGeek listings; raise the max per order`);
+  const runs = parseSeatRanges(a.internal_seats);
+  if (seatCount(runs) !== qty) {
+    throw new Error(`the allocation has ${seatCount(runs)} internal seat numbers for ${qty} seats: save it again`);
+  }
+  const blocks = seatBlocks(runs, maxPerOrder(a.event.purchase_limits));
+  const numbers = listingNumbers(a.id, blocks, a.previous ?? []);
+  if (blocks.length > MAX_SEATGEEK_LISTINGS_PER_ALLOCATION || Math.max(...numbers) > MAX_SEATGEEK_LISTINGS_PER_ALLOCATION) {
+    throw new Error(`that would be ${blocks.length} SeatGeek listings; raise the max per order`);
   }
   const date = localDate(ref);
   const time = localTime(ref) ?? 'TBD';
-  const unresolved = ['seat_from/seat_thru (required with a row; GA has no seat numbers)'];
+  const unresolved: string[] = [];
   if (!eventId) unresolved.push('event_id (not linked: SeatGeek matches on the event title and venue)');
 
-  const listings = sizes.map((size, i) => {
-    const id = exosSellerListingId(a.id, i + 1);
+  const order = blocks.map((b, i) => ({ b, n: numbers[i] })).sort((x, y) => x.n - y.n);
+  const sizes = order.map(({ b }) => b.thru - b.from + 1);
+  const listings = order.map(({ b, n }) => {
+    const size = b.thru - b.from + 1;
+    const id = exosSellerListingId(a.id, n);
     const body: SeatGeekListing & { seller_listing_id: string } = {
       seller_listing_id: id,
       event: ref.name.slice(0, 255),
@@ -156,6 +177,8 @@ export function planSeatGeekListings(a: SeatGeekAllocation): PlannedSeatGeekList
       cost: Math.round(price * 100) / 100,
       section,
       row: 'GA',
+      seat_from: b.from,
+      seat_thru: b.thru,
       stock_type: 'mobile',
       is_edelivery: true,
       split_type: 'ANY',
@@ -165,4 +188,28 @@ export function planSeatGeekListings(a: SeatGeekAllocation): PlannedSeatGeekList
     return { path: `/listings/single/${encodeURIComponent(id)}`, body };
   });
   return { endpoint: 'createListing', method: 'PUT', listings, per_order_cap: Math.max(...sizes), unresolved };
+}
+
+/**
+ * A number per block: the earlier listing's whose seats it overlaps, else a
+ * new one above every number used before (so a deleted listing's id isn't
+ * handed to different seats).
+ */
+function listingNumbers(
+  allocationId: string,
+  blocks: SeatRun[],
+  previous: ReadonlyArray<{ seller_listing_id?: string; seat_from?: number; seat_thru?: number }>,
+): number[] {
+  const prev = previous
+    .filter((p) => allocationIdFromSellerListingId(p.seller_listing_id) === allocationId)
+    .map((p) => ({ n: Number(EXOS_ID.exec(p.seller_listing_id!)![2]), from: Number(p.seat_from), thru: Number(p.seat_thru) }));
+  const used = new Set<number>();
+  const out = blocks.map((b) => {
+    const hit = prev.find((p) => !used.has(p.n) && Number.isInteger(p.from) && Number.isInteger(p.thru) && p.from <= b.thru && b.from <= p.thru);
+    if (!hit) return 0;
+    used.add(hit.n);
+    return hit.n;
+  });
+  let next = Math.max(0, ...prev.map((p) => p.n)) + 1;
+  return out.map((n) => n || next++);
 }

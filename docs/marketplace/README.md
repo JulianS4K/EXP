@@ -24,8 +24,37 @@ StubHub and SeatGeek are wired; the rest come later, as adapters in the
 same layer. SeatGeek differs in three ways (details in
 [`seatgeek/README.md`](seatgeek/README.md)): no event creation, so events
 are linked by search (Platform API) or by an admin; no display cap, so an
-allocation becomes several listings of at most the max per order; and sales
-are polled (`GET /orders`), with no webhook.
+allocation becomes several listings of at most the max per order, each a
+block of internal seat numbers; and sales come by webhook and by polling
+`GET /orders`.
+
+### One sync for both marketplaces (mig `20260927030000`)
+
+- **Rows.** Per event and marketplace: one **event row** (`tier_id` NULL: the
+  StubHub event request, or which SeatGeek event the listings attach to) and
+  one **allocation row per ticket type**. Unique on (event, channel) for event
+  rows and (event, channel, tier) for allocations.
+- **The grid.** The event editor's Marketplaces section is a table: a row per
+  ticket type, a column per ticked marketplace, each cell the seats set
+  aside there (`exos_set_channel_allocation`). It can be filled before
+  publishing; listings are planned once the event is published. A
+  marketplace must be ticked to get seats.
+- **Publish.** Queues the event row for each ticked marketplace.
+- **Keep in step.** Every `exos-distribute` run re-plans each allocation's
+  listings and diffs them against what the marketplace has
+  (`listed_snapshot`, NULL while dry-run): create, update, delete
+  (`_shared/marketplace/sync.ts`).
+- **Pull back: delist, then release.** Unticking a marketplace, turning on
+  primary-market-only, unpublishing, cancelling, or setting a cell to 0:
+  seats with nothing on the marketplace go back to Exos at once; a live
+  listing goes to `delisting` (a delete is planned) and keeps its seats until
+  the marketplace has taken it down. While writes are dry-run nothing is
+  live, so seats always come back at once.
+- **Internal seat numbers.** Every allocated seat has a number, per ticket
+  type and never shared between marketplaces, and every marketplace ticket
+  records its own (`exos_tickets.internal_seat`). SeatGeek needs them as
+  `seat_from`/`seat_thru`; they also let staff tell tickets apart. Buyers
+  never see them.
 
 The layer is `supabase/functions/_shared/marketplace/`, and it is shared by
 the edge functions (Deno) and the app (`src/lib/marketplace`). Each
@@ -103,8 +132,8 @@ sale reaches Exos minutes later (webhook or poll). So "sync the quantity after
 each sale" can only narrow the window where both sides sell the last seat.
 Exos closes it instead with disjoint pools (mig `20260926193000`):
 
-- **Allocate.** The event editor's "Seats for StubHub" control, or
-  `exos_set_channel_allocation`, sets N seats of one ticket type aside for
+- **Allocate.** The event editor's Marketplaces grid, or
+  `exos_set_channel_allocation`, sets N seats of a ticket type aside for
   StubHub (`exos_distribution_listings.requested_qty`). Exos's availability
   (`exos_tier_available`, `exos_quota_available`) leaves them out. Every Exos
   path that sells or reserves a seat reads that availability: checkout
@@ -115,8 +144,9 @@ Exos closes it instead with disjoint pools (mig `20260926193000`):
 - **A StubHub sale uses its own seats.** It takes them out of the allocation
   in the same transaction that mints them, so it never competes with Exos
   buyers. StubHub selling more than was allocated goes to a human.
-- **Give seats back.** Lowering the allocation, or delisting, releases the
-  seats to Exos straight away.
+- **Give seats back.** Lowering the allocation releases the seats to Exos
+  straight away; taking a live listing down releases them once it's down
+  (delist, then release).
 - **Keep the StubHub listing quantity equal to the allocation.** StubHub
   stops at its quantity, and Exos stops at capacity minus the allocation.
 
@@ -140,9 +170,8 @@ seat in three orders, and never sells it twice.
   rest shows as tickets sell. `split_type` is `AvoidOne` so nobody strands a
   single seat.
   - A marketplace without a display cap (`capabilities.displayQuantityCap =
-    false`) would instead need the allocation split into several listings of
-    at most maxPerOrder each. That's reserved until such a marketplace is
-    wired.
+    false`: SeatGeek) gets the allocation split into several listings of at
+    most maxPerOrder each.
   - The docs don't say whether StubHub enforces `display_number_of_tickets`
     per purchase or only for display. Check on the first sandbox listing.
 - **Per person: the account is flagged, the sale is not.** No marketplace
@@ -166,10 +195,12 @@ seat in three orders, and never sells it twice.
 
 **End to end:** `bash scripts/e2e-dry-run.sh` builds a throwaway Postgres
 from every migration. It takes one event from creation to the door, through
-Exos's own checkout and StubHub, using the real database functions and the
-real TypeScript planners. What it covers:
-1. Create a draft, then publish.
-2. Allocate seats to StubHub, and plan the StubHub event and listing.
+Exos's own checkout, StubHub and SeatGeek, using the real database functions
+and the real TypeScript planners. What it covers:
+1. Create a draft, fill the Marketplaces grid (GA on StubHub, VIP on
+   SeatGeek), then publish.
+2. Plan the StubHub event and listing, and the SeatGeek listings with their
+   internal seat numbers.
 3. An Exos paid checkout through a promoter.
 4. StubHub sales and their buyer transfers.
 5. Claims, including a buyer whose StubHub email is a relay claiming into
@@ -177,10 +208,13 @@ real TypeScript planners. What it covers:
 6. Account flags, with the promoter note and the org review.
 7. Exos selling out while StubHub still sells its own seats.
 8. StubHub overselling its allocation, and a StubHub cancellation.
+   A SeatGeek sale on its second listing (tickets get that listing's
+   internal seats), then pulling back: SeatGeek unticked (released at once)
+   and a live StubHub listing set to 0 (delist, then release).
 9. The door: valid, used, expired screenshot, wrong event, voided, and
    unclaimed tickets.
 
-Stripe, StubHub, the clock and email delivery are simulated. Every step
+Stripe, StubHub, SeatGeek, the clock and email delivery are simulated. Every step
 asserts.
 
 **One event only:**
@@ -205,7 +239,8 @@ is not a StubHub write, so it goes out as soon as `exos-marketplace-sales`
 runs.
 
 Going live needs:
-- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`, `194000`);
+- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`, `194000`,
+  `20260927010000`, `020000`, `030000`);
 - `exos-distribute` and `exos-marketplace-sales` deployed with crons
   (`exos-marketplace-sales` with `--no-verify-jwt`);
 - the secrets set: `EXOS_APP_BASE_URL`, `STUBHUB_*`, and
@@ -217,9 +252,9 @@ Going live needs:
 All of these are operator-gated.
 
 Not built yet:
-- **Sending listings:** creating them from `planned_listing`, repricing, and
-  keeping the StubHub quantity equal to the allocation. The seats are already
-  reserved and the listing is already planned.
-  The listing table allows one StubHub row per event, so one ticket type per
-  event on StubHub for now.
-- **Other marketplaces** (SeatGeek next).
+- **Sending listings:** sending the planned create / update / delete ops
+  from `planned_listing`, recording `listed_snapshot` and
+  `external_listing_id`, and marking a `delisting` row `delisted` once the
+  marketplace confirms. The seats are already reserved and every op is
+  already planned.
+- **Other marketplaces** (Vivid, TickPick, ...).

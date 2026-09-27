@@ -21,7 +21,7 @@ result() { $P -c "SELECT '  -> sold='||sold||'/'||capacity||' allocated='||exos_
 cleanup
 $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','race-owner@x.com',now());
        INSERT INTO exos_orgs(id,name,slug,owner_uid) VALUES ('$O','Race','race-org','$A');
-       INSERT INTO exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES ('$E','$O','Race','published','2027-01-01T00:00:00Z','Hall',1,0);
+       INSERT INTO exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES ('$E','$O','Race','published','2027-01-01T00:00:00Z','Hall',1,0,ARRAY['stubhub']);
        INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES ('$T','$E','GA',10,1,0);"
 
 echo "race 1: StubHub allocation holds the last seat while an Exos mint tries it"
@@ -37,7 +37,7 @@ wait; result
 echo "race 3: an Exos checkout (1 free seat) and a StubHub sale (1 allocated seat) at once"
 $P -c "UPDATE exos_ticket_tiers SET capacity=2, sold=0 WHERE id='$T'; UPDATE exos_events SET total_tickets=2, tickets_sold=0 WHERE id='$E';" >/dev/null
 $P -c "SELECT exos_set_channel_allocation('$E','stubhub','$T',1);
-       UPDATE exos_distribution_listings SET status='listed', external_listing_id='SH-RACE' WHERE event_id='$E';
+       UPDATE exos_distribution_listings SET status='listed', external_listing_id='SH-RACE' WHERE event_id='$E' AND tier_id IS NOT NULL;
        SELECT exos_record_marketplace_order('{\"channel\":\"stubhub\",\"external_order_id\":\"RACE-3\",\"external_listing_id\":\"SH-RACE\",\"quantity\":1,\"sale_status\":\"confirmed\",\"buyer_email\":\"race@x.com\"}');" >/dev/null
 ( $P -c "BEGIN; UPDATE exos_events SET tickets_sold = tickets_sold + 1 WHERE id='$E' AND tickets_sold + 1 <= total_tickets; $MINT; SELECT pg_sleep(2); COMMIT;" | sed 's/^/  /' ) &
 sleep 0.5

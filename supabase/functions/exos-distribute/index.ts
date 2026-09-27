@@ -8,30 +8,34 @@
 //    search (_shared/marketplace; StubHub today). Close calls go to staff as
 //    'review'. Writes exos_channel_event_links only.
 //
-// 1. StubHub event requests (mig 20260926190000). Publishing an event with
-//    StubHub ticked queues a 'stubhub' row. If the event is already linked
-//    to a StubHub event, the plan just records that: nothing to create. If a
-//    possible match waits on staff, the row says so; if the catalog hasn't
-//    been searched yet, it waits for pass 0. Otherwise this pass
-//    builds the PUT /sellerevents body (_shared/marketplace/stubhub) and
-//    records it as planned_request, status 'planned'. DRY-RUN ONLY: nothing
-//    is sent to StubHub. Sending needs an operator WriteAuthorization (Hard
-//    Rule #2) and seller credentials; see EXP docs/marketplace/stubhub/README.md.
-//    A mapping problem (no venue city, ...) marks the row 'failed' with the
-//    reason, which the event editor shows the organizer.
+// 1. Marketplace event rows (migs 20260926190000 / 20260927030000).
+//    Publishing an event with StubHub / SeatGeek ticked queues an event row
+//    (no ticket type) per marketplace.
+//    StubHub: if the event is already linked to a StubHub event, the plan just
+//    records that: nothing to create. If a possible match waits on staff, the
+//    row says so; if the catalog hasn't been searched yet, it waits for pass
+//    0. Otherwise this pass builds the PUT /sellerevents body
+//    (_shared/marketplace/stubhub) and records it as planned_request, status
+//    'planned'. A mapping problem (no venue city, ...) marks the row 'failed'
+//    with the reason, which the event editor shows the organizer.
+//    SeatGeek has no event creation: the row records which SeatGeek event the
+//    listings attach to (the link), or that they carry the event name and
+//    venue for SeatGeek to match.
 //
-// 1b. StubHub listings. For each StubHub allocation (seats set aside with
-//    exos_set_channel_allocation, mig 20260926193000) not yet on StubHub,
-//    plan the listing (_shared/marketplace/stubhub/listingPlan.ts) into
-//    planned_listing: one listing, showing buyers at most the event's
-//    maxPerOrder at a time. DRY-RUN; re-planned every run so it follows
-//    price / limit / allocation changes.
+// 1b. Listings, per allocation (a ticket type's seats set aside for a
+//    marketplace with exos_set_channel_allocation). For published events,
+//    each allocation's listing(s) are planned (StubHub: one listing showing
+//    buyers at most maxPerOrder at a time; SeatGeek: listings of at most
+//    maxPerOrder, each a block of the allocation's internal seat numbers)
+//    and diffed against what the marketplace has (listed_snapshot):
+//    create / update / delete (_shared/marketplace/sync.ts). Re-planned
+//    every run, so listings follow price / limit / allocation / sale changes.
+//    An allocation being pulled back ('delisting') gets a delist plan; one
+//    with nothing on the marketplace is released at once.
 //
-// 1c. SeatGeek listings. Same for SeatGeek allocations
-//    (_shared/marketplace/seatgeek/listingPlan.ts): SeatGeek can't show
-//    buyers part of a listing, so the allocation is planned as several
-//    listings of at most maxPerOrder each. Uses the SeatGeek event id when
-//    the event is linked. DRY-RUN.
+//    DRY-RUN ONLY: plans go in planned_request / planned_listing and nothing
+//    is sent to a marketplace. Sending needs an operator WriteAuthorization
+//    (Hard Rule #2) and seller credentials; see EXP docs/marketplace/.
 //
 // 2. Automatiq listings. Why this is the "it's both" path: D1's storefront
 //    reads TEvo/EVO "owned" inventory, and Automatiq distributes INTO EVO, so
@@ -59,6 +63,7 @@ import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from 
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
 import { planSeatGeekListings } from "../_shared/marketplace/seatgeek/listingPlan.ts";
+import { seatGeekDelist, seatGeekListingBodies, seatGeekSync, stubHubDelist, stubHubSync } from "../_shared/marketplace/sync.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
@@ -84,83 +89,93 @@ Deno.serve(async (req: Request): Promise<Response> => {
   try {
     const channels = channelsFromEnv((k) => Deno.env.get(k));
     const links = await linkEvents(sb, channels);
-    const stubhub = await planStubHubEvents(sb, !!channels.get("stubhub")?.findEvents);
-    const listings = await planStubHubListings(sb);
-    const seatgeek = await planSeatGeekAllocations(sb);
+    const events = await planEventRows(sb, {
+      stubhub: !!channels.get("stubhub")?.findEvents,
+      seatgeek: !!channels.get("seatgeek")?.findEvents,
+    });
+    const stubhub = await syncListings(sb, "stubhub");
+    const seatgeek = await syncListings(sb, "seatgeek");
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, stubhub, listings, seatgeek, automatiq });
+    return json({ links, events, listings: { stubhub, seatgeek }, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
   }
 });
 
-// ── 1. StubHub event requests (dry-run) ──────────────────────────────
+// ── 1. Marketplace event rows (dry-run) ──────────────────────────────
 
-interface StubHubRow {
+interface EventRow {
   id: string;
   event_id: string;
+  channel: "stubhub" | "seatgeek";
   updated_at: string;
   exos_events: ExosEventRow | null;
 }
 
-// canSearch: StubHub catalog search is configured, so an event with no link
-// row yet hasn't been searched: it waits for pass 0 instead of risking a
-// duplicate StubHub event.
-async function planStubHubEvents(sb: SupabaseClient, canSearch: boolean) {
+type Link = { event_id: string; channel: string; status: string; external_event_id: string | null };
+
+// canSearch: the marketplace's event search is configured, so an event with
+// no link row yet hasn't been searched: it waits for pass 0 instead of
+// risking a duplicate StubHub event (or listings on the wrong SeatGeek event).
+async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boolean>) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
-    .eq("channel", "stubhub")
+    .select("id, event_id, channel, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
+    .in("channel", ["stubhub", "seatgeek"])
+    .is("tier_id", null)
     .eq("status", "pending")
     .order("updated_at", { ascending: true })
     .limit(BATCH);
-  if (error) throw new Error(`read pending stubhub rows: ${error.message}`);
-  const rows = (data ?? []) as unknown as StubHubRow[];
+  if (error) throw new Error(`read pending event rows: ${error.message}`);
+  const rows = (data ?? []) as unknown as EventRow[];
 
   const { data: links, error: lErr } = rows.length
-    ? await sb.from("exos_channel_event_links").select("event_id, status, external_event_id")
-      .eq("channel", "stubhub").in("event_id", rows.map((r) => r.event_id))
+    ? await sb.from("exos_channel_event_links").select("event_id, channel, status, external_event_id")
+      .in("channel", ["stubhub", "seatgeek"]).in("event_id", rows.map((r) => r.event_id))
     : { data: [], error: null };
-  if (lErr) throw new Error(`read stubhub links: ${lErr.message}`);
-  const linkBy = new Map(((links ?? []) as Array<{ event_id: string; status: string; external_event_id: string | null }>)
-    .map((l) => [l.event_id, l]));
+  if (lErr) throw new Error(`read marketplace links: ${lErr.message}`);
+  const linkBy = new Map(((links ?? []) as Link[]).map((l) => [`${l.channel}:${l.event_id}`, l]));
 
-  let planned = 0;
-  let linked = 0;
-  let waiting = 0;
-  let failed = 0;
+  const counts = { mode: "dry-run", pending: rows.length, planned: 0, linked: 0, waiting: 0, failed: 0 };
   for (const row of rows) {
     const now = new Date().toISOString();
-    const link = linkBy.get(row.event_id);
+    const label = row.channel === "stubhub" ? "StubHub" : "SeatGeek";
+    const link = linkBy.get(`${row.channel}:${row.event_id}`);
     let patch: Record<string, unknown>;
     if (link && (link.status === "linked" || link.status === "created") && link.external_event_id) {
-      // StubHub already has this event: nothing to create. The id stays in the
-      // plan, not in external_event_id (that column means StubHub has
-      // something of ours), so the row still follows edits and unpublishing.
+      // The marketplace already has this event: nothing to create. The id
+      // stays in the plan, not in external_event_id (that column means the
+      // marketplace has something of ours), so the row still follows edits.
       patch = { status: "planned", planned_request: { linked: true, external_event_id: link.external_event_id }, error: null };
-      linked++;
+      counts.linked++;
     } else if (link?.status === "review") {
       patch = {
         status: "failed",
         planned_request: null,
-        error: "StubHub may already have this event: confirm the match or reject it before a new one is requested",
+        error: row.channel === "stubhub"
+          ? "StubHub may already have this event: confirm the match or reject it before a new one is requested"
+          : "SeatGeek may already have this event: confirm the match or reject it so the listings attach to the right event",
       };
-      waiting++;
-    } else if (!link && canSearch) {
-      waiting++;
+      counts.waiting++;
+    } else if (!link && canSearch[row.channel]) {
+      counts.waiting++;
       continue; // not searched yet: leave it pending for the next run's pass 0
+    } else if (row.channel === "seatgeek") {
+      // No event creation on SeatGeek: listings carry the event as text.
+      patch = { status: "planned", planned_request: { linked: false, catalog_checked: !!link, matched_on: "event name + venue" }, error: null };
+      counts.planned++;
     } else {
       try {
         if (!row.exos_events) throw new ListingMappingError("event not found");
         // catalog_checked: a StubHub search found nothing (vs search not configured).
         const plan = planStubHubEventRequest(row.exos_events);
         patch = { status: "planned", planned_request: { ...plan, catalog_checked: !!link }, error: null };
-        planned++;
+        counts.planned++;
       } catch (e) {
         const reason = e instanceof ListingMappingError ? e.message : `unexpected: ${String(e)}`;
-        patch = { status: "failed", planned_request: null, error: reason.slice(0, 500) };
-        failed++;
+        patch = { status: "failed", planned_request: null, error: `${label}: ${reason}`.slice(0, 500) };
+        counts.failed++;
       }
     }
     // Only if the row hasn't been re-queued meanwhile: an organizer edit
@@ -171,105 +186,112 @@ async function planStubHubEvents(sb: SupabaseClient, canSearch: boolean) {
       .eq("id", row.id)
       .eq("status", "pending")
       .eq("updated_at", row.updated_at);
-    if (upErr) console.error("exos-distribute: stubhub row update failed", row.id, upErr);
+    if (upErr) console.error("exos-distribute: event row update failed", row.id, upErr);
   }
-  return { mode: "dry-run", pending: rows.length, planned, linked, waiting, failed };
+  return counts;
 }
 
-// ── 1b. StubHub listings (dry-run) ───────────────────────────────────
+// ── 1b. Listings per allocation: create / update / delist (dry-run) ──
 
 interface AllocationRow {
   id: string;
   event_id: string;
+  status: string;
   requested_qty: number | null;
   unit_price: number | string | null;
+  external_listing_id: string | null;
+  internal_seats: string | null;
+  listed_snapshot: unknown;
   planned_listing: unknown;
-  exos_events: AllocationForListing["event"];
+  exos_events: AllocationForListing["event"] & { timezone?: string | null; status?: string };
   exos_ticket_tiers: AllocationForListing["tier"];
 }
 
-async function planStubHubListings(sb: SupabaseClient) {
+const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
+
+async function syncListings(sb: SupabaseClient, channel: "stubhub" | "seatgeek") {
+  const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };
+
+  // Live and to-be-listed allocations of published events.
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, requested_qty, unit_price, planned_listing, " +
-      "exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address, currency, purchase_limits), " +
-      "exos_ticket_tiers(name, price, section_label)")
-    .eq("channel", "stubhub")
-    .gt("requested_qty", 0)
+    .select("id, event_id, status, requested_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, " +
+      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label)`)
+    .eq("channel", channel)
     .not("tier_id", "is", null)
-    .is("external_listing_id", null)
-    .in("status", ["pending", "planned", "failed"])
+    .gt("requested_qty", 0)
+    .in("status", ["pending", "planned", "failed", "listing", "listed"])
+    .eq("exos_events.status", "published")
     .limit(200);
-  if (error) throw new Error(`read stubhub allocations: ${error.message}`);
+  if (error) throw new Error(`read ${channel} allocations: ${error.message}`);
   const rows = (data ?? []) as unknown as AllocationRow[];
-  if (!rows.length) return { allocations: 0, planned: 0, failed: 0 };
+  counts.allocations = rows.length;
 
-  const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
-    .eq("channel", "stubhub").in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
-  const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
+  if (rows.length) {
+    const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
+      .eq("channel", channel).in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
+    const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
 
-  let planned = 0;
-  let failed = 0;
-  for (const r of rows) {
-    let plan: unknown;
-    try {
-      plan = planStubHubListing({
-        id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
-        tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
-      });
-      planned++;
-    } catch (e) {
-      plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
-      failed++;
+    for (const r of rows) {
+      let plan: unknown;
+      try {
+        if (channel === "stubhub") {
+          const p = planStubHubListing({
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
+          });
+          plan = stubHubSync(p, r.listed_snapshot, r.id);
+        } else {
+          const p = planSeatGeekListings({
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
+            internal_seats: r.internal_seats,
+            previous: seatGeekListingBodies(r.listed_snapshot ?? r.planned_listing),
+          });
+          plan = seatGeekSync(p, r.listed_snapshot);
+        }
+        const action = (plan as { action: string }).action;
+        if (action === "create") counts.create++;
+        else if (action === "update") counts.update++;
+        else counts.unchanged++;
+      } catch (e) {
+        plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
+        counts.failed++;
+      }
+      if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
+      const { error: upErr } = await sb.from("exos_distribution_listings").update({ planned_listing: plan }).eq("id", r.id);
+      if (upErr) console.error(`exos-distribute: ${channel} planned_listing not stored`, r.id, upErr.message);
     }
-    if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
-    const { error: upErr } = await sb.from("exos_distribution_listings").update({ planned_listing: plan }).eq("id", r.id);
-    if (upErr) console.error("exos-distribute: planned_listing not stored", r.id, upErr.message);
   }
-  return { mode: "dry-run", allocations: rows.length, planned, failed };
-}
 
-// ── 1c. SeatGeek listings (dry-run) ──────────────────────────────────
-
-async function planSeatGeekAllocations(sb: SupabaseClient) {
-  const { data, error } = await sb
+  // Pulled back: delist what the marketplace has, then the seats come back.
+  const { data: pulled, error: pErr } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, requested_qty, unit_price, planned_listing, " +
-      "exos_events(name, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits), " +
-      "exos_ticket_tiers(name, price, section_label)")
-    .eq("channel", "seatgeek")
-    .gt("requested_qty", 0)
+    .select("id, external_listing_id, listed_snapshot, planned_listing")
+    .eq("channel", channel)
     .not("tier_id", "is", null)
-    .is("external_listing_id", null)
-    .in("status", ["pending", "planned", "failed"])
+    .eq("status", "delisting")
     .limit(200);
-  if (error) throw new Error(`read seatgeek allocations: ${error.message}`);
-  const rows = (data ?? []) as unknown as AllocationRow[];
-  if (!rows.length) return { allocations: 0, planned: 0, failed: 0 };
-
-  const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
-    .eq("channel", "seatgeek").in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
-  const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
-
-  let planned = 0;
-  let failed = 0;
-  for (const r of rows) {
-    let plan: unknown;
-    try {
-      plan = planSeatGeekListings({
-        id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
-        tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
-      });
-      planned++;
-    } catch (e) {
-      plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
-      failed++;
+  if (pErr) throw new Error(`read ${channel} delistings: ${pErr.message}`);
+  for (const r of (pulled ?? []) as Array<Pick<AllocationRow, "id" | "external_listing_id" | "listed_snapshot" | "planned_listing">>) {
+    const plan = channel === "stubhub"
+      ? (r.external_listing_id || r.listed_snapshot ? stubHubDelist(r.id) : null)
+      : seatGeekDelist(r.listed_snapshot);
+    if (!plan) {
+      // Nothing on the marketplace after all: release now.
+      const { error: relErr } = await sb.from("exos_distribution_listings")
+        .update({ status: "delisted", requested_qty: 0, internal_seats: "{}", planned_listing: null, updated_at: new Date().toISOString() })
+        .eq("id", r.id).eq("status", "delisting");
+      if (relErr) console.error(`exos-distribute: ${channel} release failed`, r.id, relErr.message);
+      else counts.released++;
+      continue;
     }
+    counts.delist++;
     if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
     const { error: upErr } = await sb.from("exos_distribution_listings").update({ planned_listing: plan }).eq("id", r.id);
-    if (upErr) console.error("exos-distribute: seatgeek planned_listing not stored", r.id, upErr.message);
+    if (upErr) console.error(`exos-distribute: ${channel} delist plan not stored`, r.id, upErr.message);
   }
-  return { mode: "dry-run", allocations: rows.length, planned, failed };
+  return counts;
 }
 
 // ── 2. Automatiq listings (gated scaffold) ───────────────────────────
@@ -287,6 +309,7 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .eq("status", "pending")
     // StubHub and SeatGeek are listed directly (passes 1b / 1c), not via Automatiq.
     .not("channel", "in", "(stubhub,seatgeek)")
+    .is("tier_id", null)
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);
 

@@ -62,7 +62,7 @@ the writer, dry-run, and needs an operator `WriteAuthorization` to send
 | Topic | What SeatGeek says |
 |---|---|
 | `seller_listing_id` | Max **32 chars**, unique per account. Exos: `ex` + allocation id in 26-char base32 + group number (≤ 32). |
-| Required listing fields | `event`, `venue`, `event_date`, `quantity`, `cost`, `section`, **`row`**; `seat_from`/`seat_thru` when a row is given. `event_time` HH:MM:SS or TBA/TBD. `event_id` optional; events are matched on title + venue, so use SeatGeek's names. |
+| Required listing fields | `event`, `venue`, `event_date`, `quantity`, `cost`, `section`, **`row`**; `seat_from`/`seat_thru` when a row is given (Exos: internal seat numbers, below). `event_time` HH:MM:SS or TBA/TBD. `event_id` optional; events are matched on title + venue, so use SeatGeek's names. |
 | `cost` | The broadcast price per ticket; the seller is paid this less fees. |
 | `split_type` / `splits` | `ANY`, `DONTLEAVEONE`, `CUSTOM` (with `splits`), `DEFAULT`. A CUSTOM list must end at the listing quantity, else DEFAULT applies: **splits can't cap an order below the quantity**. |
 | `stock_type` (listing) | `mobile` (transfer), `pdf`, `shipped`, `local pick-up`, `walk-in`, `gift card`. Unset or unknown: inferred from notes. **Integrated events** (e.g. Paciolan; `integrated` on Platform `GET /2/events/{id}`) are forced to `barcode`, and a listing without barcodes is hidden (`no_barcodes`). |
@@ -83,14 +83,19 @@ Same marketplace layer as StubHub (`docs/marketplace/README.md`):
    the Platform API (event name + venue-local date) and links a confident
    match; a close call goes to staff. No event creation: SeatGeek doesn't
    offer it. Unlinked listings carry the event as text for SeatGeek to match.
-2. **Allocate.** The organizer sets aside seats for SeatGeek in the event
-   editor (`exos_set_channel_allocation`, channel `seatgeek`). Exos stops
-   selling them, so nobody can buy the same seat on both.
-3. **List (planned).** `exos-distribute` pass 1c plans the listings into
+2. **Allocate.** The organizer fills the event editor's Marketplaces grid
+   (a row per ticket type, a column per ticked marketplace;
+   `exos_set_channel_allocation`, channel `seatgeek`). Exos stops selling
+   those seats, so nobody can buy the same seat on both.
+3. **List (planned).** `exos-distribute` pass 1b plans the listings into
    `planned_listing`: because splits can't cap an order, the allocation is
    split into listings of **at most the event's max per order** each
    (10 seats, max 4 → 4 + 4 + 2), `stock_type` `mobile`, `row` `GA`,
-   `split_type` `ANY`.
+   `split_type` `ANY`, and each listing is a block of **internal seat
+   numbers** (`seat_from`/`seat_thru`, below). The plan is diffed against
+   what SeatGeek has (`listed_snapshot`): create, update (`PATCH`) or
+   delete (`POST /listings/bulk-delete`). Listing numbers stay stable across
+   re-plans.
 4. **Sell.** Orders arrive by webhook (`order.created`) and by polling
    `GET /orders` (placed in the last 6 hours) plus a rolling `GET /order`
    recheck of up to 50 open orders per run, so a later `void`/`denied`
@@ -103,6 +108,23 @@ Same marketplace layer as StubHub (`docs/marketplace/README.md`):
    comma-separated in `transfer_url`.
 6. **Listing problems.** `listing.visibility` and `listing.event.inactive`
    are written on the allocation row; the event editor shows them.
+7. **Pull back.** Unticking SeatGeek, primary-market-only, unpublishing,
+   cancelling, or setting the grid cell to 0: delist, then release. Seats
+   with nothing on SeatGeek return to Exos at once; a live listing is
+   deleted first and its seats stay set aside until then.
+
+### Internal seat numbers (general admission)
+
+SeatGeek requires `seat_from`/`seat_thru` with a row, and GA has no seats.
+Every allocated seat gets an internal number instead (mig
+`20260927030000`): per ticket type, from a counter that never repeats, so
+StubHub and SeatGeek never share one. `exos_distribution_listings.internal_seats`
+holds the unsold numbers (growing adds new ones, shrinking drops the
+highest). A sale gives each ticket one (`exos_tickets.internal_seat`): the
+highest left on the SeatGeek listing the order was placed on, so the
+listing's `seat_from` stays put. They're for staff and SeatGeek only: the
+event editor's grid shows them to the organizer, buyers never see them, and
+GA entry doesn't check them.
 
 Nothing is sent to SeatGeek: listing creation and fulfilment are dry-run.
 
@@ -110,7 +132,6 @@ Nothing is sent to SeatGeek: listing creation and fulfilment are dry-run.
 
 | Question | Where it matters |
 |---|---|
-| General admission has no seat numbers, but `seat_from`/`seat_thru` are required with a row. What should a GA listing send? | listing plan (`unresolved`) |
 | Is Exos's claim link acceptable as a `mobile` transfer URL (it isn't a Ticketmaster/AXS link)? | fulfilment |
 | Should a `submitted` order be `confirmed` before it's fulfilled, or can it go straight to `fulfilled`? | fulfilment |
 | Rate limits (not documented). Reads retry 429/502/503/504; writes retry 429 only, never 409. | client, writer |
@@ -122,7 +143,7 @@ Nothing is sent to SeatGeek: listing creation and fulfilment are dry-run.
 | # | Phase | Endpoints |
 |---|---|---|
 | 1 | Listing creation (one listing per max-per-order group) | `createListing` |
-| 2 | Listing management (price/qty sync, delist) | `updateListing`, `bulkDeleteListings` |
+| 2 | Listing management (price/qty sync, delist): planned as `ops` in `planned_listing` | `updateListing`, `bulkDeleteListings` |
 | 3 | Order confirm + fulfil (transfer URLs) | `updateOrder` |
 
 Going live needs: `SEATGEEK_API_TOKEN` (+ `SEATGEEK_CLIENT_ID` for linking,

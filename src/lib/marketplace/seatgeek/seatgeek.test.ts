@@ -91,6 +91,7 @@ describe('planSeatGeekListings', () => {
     id: ALLOC,
     requested_qty: 10,
     unit_price: 45,
+    internal_seats: '{[1,11)}',
     tier: { name: 'GA', price: 40 },
     event: {
       name: 'Late Night Jazz',
@@ -122,8 +123,35 @@ describe('planSeatGeekListings', () => {
       venue: 'Blue Room',
     });
     expect(p.listings[0].body.event_id).toBeUndefined();
-    expect(p.unresolved.some((u) => u.startsWith('seat_from'))).toBe(true);
     expect(p.unresolved.some((u) => u.startsWith('event_id'))).toBe(true);
+  });
+
+  it('gives each listing a block of internal seat numbers (seat_from / seat_thru)', () => {
+    const p = planSeatGeekListings(base);
+    expect(p.listings.map((l) => [l.body.seat_from, l.body.seat_thru])).toEqual([[1, 4], [5, 8], [9, 10]]);
+    expect(p.unresolved.some((u) => u.startsWith('seat'))).toBe(false);
+    // Blocks never span a gap in the numbers (another marketplace has 5-6).
+    const q = planSeatGeekListings({ ...base, requested_qty: 6, internal_seats: '{[1,5),[7,9)}' });
+    expect(q.listings.map((l) => [l.body.seat_from, l.body.seat_thru, l.body.quantity])).toEqual([[1, 4, 4], [7, 8, 2]]);
+  });
+
+  it('keeps listing numbers across re-plans; new blocks get unused numbers', () => {
+    const first = planSeatGeekListings(base);
+    const prev = first.listings.map((l) => l.body);
+    // Listing 1 sold out (seats 1-4 are on tickets now); 2 lost seat 8.
+    const next = planSeatGeekListings({ ...base, requested_qty: 5, internal_seats: '{[5,8),[9,11)}', previous: prev });
+    expect(next.listings.map((l) => [l.body.seller_listing_id, l.body.seat_from, l.body.seat_thru])).toEqual([
+      [exosSellerListingId(ALLOC, 2), 5, 7],
+      [exosSellerListingId(ALLOC, 3), 9, 10],
+    ]);
+    // Grown by 3 new numbers (21-23): a new listing 4, not a reused 1.
+    const grown = planSeatGeekListings({ ...base, requested_qty: 8, internal_seats: '{[5,8),[9,11),[21,24)}', previous: next.listings.map((l) => l.body) });
+    expect(grown.listings.map((l) => l.body.seller_listing_id)).toEqual([2, 3, 4].map((n) => exosSellerListingId(ALLOC, n)));
+  });
+
+  it('refuses seat numbers that do not match the allocation', () => {
+    expect(() => planSeatGeekListings({ ...base, internal_seats: '{[1,5)}' })).toThrow(/4 internal seat numbers for 10/);
+    expect(() => planSeatGeekListings({ ...base, internal_seats: null })).toThrow(/internal seat numbers/);
   });
 
   it('uses the linked SeatGeek event id instead of the text', () => {

@@ -16,8 +16,15 @@ export interface StubHubDistributionRow {
     body?: { event?: { name?: string }; venue?: { name?: string; city?: string } };
   } | null;
   last_synced_at: string | null;
-  /** The listing(s) exos-distribute would create (mig 20260926194000), or { error }. */
+  /** The listing(s) exos-distribute would create / update / delist (migs 20260926194000, 20260927030000), or { error }. */
   planned_listing?: unknown;
+  /** Internal seat numbers of the unsold allocated seats ("{[1,11)}"); staff only. */
+  internal_seats?: string | null;
+}
+
+/** An event's rows on one marketplace: the event row, and an allocation per ticket type. */
+export interface MarketplaceRow extends StubHubDistributionRow {
+  channel: string;
 }
 
 export type StubHubStatusTone = 'muted' | 'info' | 'ok' | 'warn';
@@ -58,4 +65,63 @@ export function stubHubStatus(
     default:
       return { tone: 'muted', text: `StubHub: ${row.status}.` };
   }
+}
+
+export type MarketplaceChannelId = 'stubhub' | 'seatgeek';
+export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = { stubhub: 'StubHub', seatgeek: 'SeatGeek' };
+
+/** The event line for SeatGeek, which has no event creation: which event the listings attach to. */
+export function seatGeekStatus(
+  row: StubHubDistributionRow | null,
+  ev: { ticked: boolean; published: boolean; primaryMarketOnly: boolean },
+): StubHubStatus | null {
+  if (!ev.ticked) return null;
+  if (ev.primaryMarketOnly) return { tone: 'muted', text: 'Primary market only is on, so nothing goes to SeatGeek.' };
+  if (!row) {
+    return ev.published
+      ? { tone: 'muted', text: 'Save to queue SeatGeek.' }
+      : { tone: 'muted', text: 'SeatGeek listings are planned when you publish.' };
+  }
+  switch (row.status) {
+    case 'pending':
+      return { tone: 'info', text: 'Queued: Exos is looking for this event on SeatGeek.' };
+    case 'planned':
+      return row.planned_request?.linked
+        ? { tone: 'ok', text: `SeatGeek listings attach to SeatGeek event ${row.planned_request.external_event_id}.` }
+        : { tone: 'info', text: "Not matched to a SeatGeek event: listings carry the event name and venue for SeatGeek to match. SeatGeek can't create events." };
+    case 'failed':
+      return { tone: 'warn', text: row.error || 'SeatGeek: something needs a look.' };
+    default:
+      return { tone: 'muted', text: `SeatGeek: ${row.status}.` };
+  }
+}
+
+interface PlanShape {
+  error?: string;
+  action?: string;
+  listings?: unknown[];
+  ops?: { create?: unknown[]; update?: unknown[]; delete?: unknown[] };
+  unresolved?: string[];
+}
+
+/** One cell of the Marketplaces grid: what's happening with this ticket type there. */
+export function allocationCellStatus(row: StubHubDistributionRow | null, channel: MarketplaceChannelId): StubHubStatus | null {
+  if (!row) return null;
+  const label = MARKETPLACE_LABEL[channel];
+  const plan = (row.planned_listing ?? null) as PlanShape | null;
+  const qty = row.requested_qty ?? 0;
+  if (row.status === 'delisting') return { tone: 'warn', text: `Coming off ${label}; the seats return to Exos once it's down.` };
+  if (row.status === 'delisted' || qty <= 0) return null;
+  if (plan?.error) return { tone: 'warn', text: plan.error };
+  if (row.error) return { tone: 'warn', text: row.error };
+  if (row.status === 'listed' || row.status === 'listing') {
+    const n = (plan?.ops?.create?.length ?? 0) + (plan?.ops?.update?.length ?? 0) + (plan?.ops?.delete?.length ?? 0);
+    return { tone: 'ok', text: plan?.action === 'update' ? `On ${label}; ${n || 'some'} change${n === 1 ? '' : 's'} to send.` : `On ${label}.` };
+  }
+  if (!plan) return { tone: 'muted', text: `Held for ${label}; listed once the event is published.` };
+  const listings = channel === 'seatgeek' ? plan.listings?.length ?? 0 : 1;
+  return {
+    tone: 'info',
+    text: `${listings} listing${listings === 1 ? '' : 's'} ready. Not sent yet: ${label} selling isn't switched on.`,
+  };
 }

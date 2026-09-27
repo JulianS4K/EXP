@@ -10,3 +10,6 @@ export {
   stubHubChannel,
 } from '../../../supabase/functions/_shared/marketplace/stubhub/channel.ts';
 export * from '../../../supabase/functions/_shared/marketplace/sales.ts';
+// Internal GA seat numbers and the create / update / delist sync plans.
+export * from '../../../supabase/functions/_shared/marketplace/seats.ts';
+export * from '../../../supabase/functions/_shared/marketplace/sync.ts';
