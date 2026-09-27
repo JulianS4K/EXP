@@ -204,6 +204,18 @@ Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_sea
   external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
 - [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
 
+## One Exos listing standard 2026-09-27
+
+Mig `20260927050000` (tested: `test_channel_allocations.sql` A13, `sync.test.ts`, StubHub / SeatGeek /
+Gametime plan tests, e2e). Comparison table: docs/marketplace/README.md.
+- ✅ One Exos listing model (`exosListing.ts`) mapped to StubHub, SeatGeek and Gametime: blocks of at most
+  max per order, internal seats, stable `ex…` ids, split any, claim-link delivery.
+- ✅ StubHub moved from one display-capped listing per allocation to the same blocks.
+- ✅ One stored plan shape, one sync (create / update / delete) and one delist planner for all three.
+- ✅ Sales record their listing (`listing_ref`); tickets take seats from that listing's block on every
+  marketplace.
+- ✅ Delivery plans share one shape: claim links, internal seats, the marketplace's steps in order.
+
 ## Gametime 2026-09-27
 
 API v3 + onboarding guide + CSV columns (docs/marketplace/gametime). Mig `20260927040000`

@@ -9,7 +9,7 @@
 import type { MarketplaceChannel, MarketplaceSale, PlannedRequest, SaleStatus } from '../channel.ts';
 import { allocationIdFromListingId } from '../listingIds.ts';
 import { gametimeDate, purchaseEmail } from './client.ts';
-import { transferConfirmationForm } from './fulfilment.ts';
+import { confirmBody, transferConfirmationForm } from './fulfilment.ts';
 import type { GametimePurchase, GametimeSaleNotification } from './types.ts';
 
 const STATUS: Record<string, SaleStatus> = {
@@ -37,6 +37,7 @@ export function normalizeGametimeSale(raw: unknown): MarketplaceSale {
     externalOrderId: String(p.id),
     externalEventId: p.event_id != null ? String(p.event_id) : null,
     externalListingId: allocationIdFromListingId(listing) ?? listing,
+    listingRef: listing,
     quantity: Number(p.quantity) || 0,
     status,
     buyerEmail: purchaseEmail(p),
@@ -55,19 +56,14 @@ export function gametimeChannel(): MarketplaceChannel {
     label: 'Gametime',
     capabilities: { findEvents: false, createEvent: false, listings: true, fulfilByUrls: true, displayQuantityCap: false },
     normalizeSale: normalizeGametimeSale,
-    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest {
+    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[], seats?: number[]): PlannedRequest[] {
       const n = encodeURIComponent(sale.externalOrderId);
-      return {
-        channel: 'gametime',
-        endpoint: 'confirmTransfer',
-        method: 'POST',
-        path: `/purchases/${n}/confirm_transfer`,
-        body: {
-          // An unconfirmed purchase is confirmed first ("only if delivery is guaranteed": it is, the tickets exist).
-          confirm_first: { endpoint: 'confirmPurchase', method: 'POST', path: `/purchases/${n}/confirm` },
-          form: transferConfirmationForm({ orderNumber: sale.externalOrderId, urls: claimUrls, quantity: sale.quantity }),
-        },
-      };
+      const form = transferConfirmationForm({ orderNumber: sale.externalOrderId, urls: claimUrls, quantity: sale.quantity });
+      return [
+        // Confirm first ("only if delivery is guaranteed": it is, the tickets exist), with the internal seats.
+        { channel: 'gametime', endpoint: 'confirmPurchase', method: 'POST', path: `/purchases/${n}/confirm`, body: confirmBody(seats) },
+        { channel: 'gametime', endpoint: 'confirmTransfer', method: 'POST', path: `/purchases/${n}/confirm_transfer`, body: { form } },
+      ];
     },
   };
 }

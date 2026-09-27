@@ -17,6 +17,7 @@ import type { StubHubClient } from './client.ts';
 import { planStubHubEventRequest } from './eventRequest.ts';
 import { eticketUrlsRequest } from './fulfilment.ts';
 import type { CatalogEvent, Sale } from './types.ts';
+import { allocationIdFromListingId } from '../listingIds.ts';
 
 export function catalogEventToCandidate(e: CatalogEvent): EventCandidate {
   const venue = e._embedded?.venue;
@@ -57,7 +58,8 @@ export function normalizeStubHubSale(raw: unknown): MarketplaceSale {
     channel: 'stubhub',
     externalOrderId: String(s.id),
     externalEventId: eventId != null ? String(eventId) : null,
-    externalListingId: s.external_listing_id ?? null,
+    externalListingId: allocationIdFromListingId(s.external_listing_id) ?? s.external_listing_id ?? null,
+    listingRef: s.external_listing_id ?? null,
     quantity: Number(s.number_of_tickets) || 0,
     status,
     // Not on the sale itself: GET /sales/{id}/ticketholders -> buyerEmail().
@@ -100,14 +102,14 @@ export function stubHubChannel(client?: StubHubClient): MarketplaceChannel {
 
     normalizeSale: normalizeStubHubSale,
 
-    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest {
-      return {
+    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest[] {
+      return [{
         channel: 'stubhub',
         endpoint: 'updateSale',
         method: 'PATCH',
         path: `/sales/${encodeURIComponent(sale.externalOrderId)}`,
         body: eticketUrlsRequest(claimUrls, sale.quantity),
-      };
+      }];
     },
   };
 }

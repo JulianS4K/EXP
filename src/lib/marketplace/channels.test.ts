@@ -126,7 +126,8 @@ describe('StubHub channel', () => {
     expect(() => ch.planCreateEvent!({ ...EV, venueCity: null })).toThrow(/venue city is required/);
     const sale = normalizeStubHubSale({ id: 555, number_of_tickets: 1, status: 'Confirmed' });
     const fulfil = ch.planFulfilByUrls!(sale, ['https://x.test/bridge/claim/00000000-0000-4000-8000-000000000001']);
-    expect(fulfil).toMatchObject({ endpoint: 'updateSale', method: 'PATCH', path: '/sales/555' });
+    expect(fulfil).toHaveLength(1);
+    expect(fulfil[0]).toMatchObject({ endpoint: 'updateSale', method: 'PATCH', path: '/sales/555' });
     expect(() => ch.planFulfilByUrls!(sale, [])).toThrow();
   });
 });

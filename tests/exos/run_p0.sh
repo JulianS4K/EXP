@@ -50,7 +50,7 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260926193000_exos_channel_allocations 20260926194000_exos_listing_plan_account_flags \
          20260927010000_exos_claim_any_account \
          20260927020000_exos_seatgeek_channel_label 20260927030000_exos_marketplace_sync \
-         20260927040000_exos_gametime_channel; do
+         20260927040000_exos_gametime_channel 20260927050000_exos_marketplace_standard; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -101,7 +101,7 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
   20260926192000_exos_marketplace_orders 20260926193000_exos_channel_allocations \
   20260926194000_exos_listing_plan_account_flags 20260927010000_exos_claim_any_account \
          20260927020000_exos_seatgeek_channel_label 20260927030000_exos_marketplace_sync \
-         20260927040000_exos_gametime_channel; do
+         20260927040000_exos_gametime_channel 20260927050000_exos_marketplace_standard; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

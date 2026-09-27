@@ -25,10 +25,10 @@
 //
 // 1b. Listings, per allocation (a ticket type's seats set aside for a
 //    marketplace with exos_set_channel_allocation). For published events,
-//    each allocation's listing(s) are planned (StubHub: one listing showing
-//    buyers at most maxPerOrder at a time; SeatGeek and Gametime: listings
-//    of at most maxPerOrder, each a block of the allocation's internal seat
-//    numbers)
+//    each allocation's listings are planned: the same Exos listings on every
+//    marketplace (_shared/marketplace/exosListing.ts: blocks of at most
+//    maxPerOrder, each a run of the allocation's internal seat numbers, with
+//    a stable "ex…" listing id), in that marketplace's fields,
 //    and diffed against what the marketplace has (listed_snapshot):
 //    create / update / delete (_shared/marketplace/sync.ts). Re-planned
 //    every run, so listings follow price / limit / allocation / sale changes.
@@ -69,8 +69,8 @@ import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from 
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
 import { planSeatGeekListings } from "../_shared/marketplace/seatgeek/listingPlan.ts";
-import { gametimeDelist, gametimeSync, listingBodies, seatGeekDelist, seatGeekSync, stubHubDelist, stubHubSync } from "../_shared/marketplace/sync.ts";
-import { csvRowOf, planGametimeListings, type GametimeListingBody } from "../_shared/marketplace/gametime/inventory.ts";
+import { planDelist, syncListings } from "../_shared/marketplace/sync.ts";
+import { planGametimeListings, type GametimeCsvRow } from "../_shared/marketplace/gametime/inventory.ts";
 import { GametimeWriter } from "../_shared/marketplace/gametime/writer.ts";
 import { linkEvents } from "./link.ts";
 
@@ -106,9 +106,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seatgeek: !!channels.get("seatgeek")?.findEvents,
       gametime: false,
     });
-    const stubhub = await syncListings(sb, "stubhub");
-    const seatgeek = await syncListings(sb, "seatgeek");
-    const gametime = await syncListings(sb, "gametime");
+    const stubhub = await syncChannel(sb, "stubhub");
+    const seatgeek = await syncChannel(sb, "seatgeek");
+    const gametime = await syncChannel(sb, "gametime");
     const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
     return json({ links, events, listings: { stubhub, seatgeek, gametime }, gametime_file: gametimeFile, automatiq });
@@ -228,7 +228,7 @@ interface AllocationRow {
 
 const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
 
-async function syncListings(sb: SupabaseClient, channel: MarketChannel) {
+async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };
 
   // Live and to-be-listed allocations of published events.
@@ -258,24 +258,26 @@ async function syncListings(sb: SupabaseClient, channel: MarketChannel) {
           const p = planStubHubListing({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
+            internal_seats: r.internal_seats,
+            previous: r.listed_snapshot ?? r.planned_listing,
           });
-          plan = stubHubSync(p, r.listed_snapshot, r.id);
+          plan = syncListings(p, r.listed_snapshot);
         } else if (channel === "seatgeek") {
           const p = planSeatGeekListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
             internal_seats: r.internal_seats,
-            previous: listingBodies(r.listed_snapshot ?? r.planned_listing),
+            previous: r.listed_snapshot ?? r.planned_listing,
           });
-          plan = seatGeekSync(p, r.listed_snapshot);
+          plan = syncListings(p, r.listed_snapshot);
         } else {
           const p = planGametimeListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events,
             internal_seats: r.internal_seats,
-            previous: listingBodies(r.listed_snapshot ?? r.planned_listing),
+            previous: r.listed_snapshot ?? r.planned_listing,
           });
-          plan = gametimeSync(p, r.listed_snapshot);
+          plan = syncListings(p, r.listed_snapshot);
         }
         const action = (plan as { action: string }).action;
         if (action === "create") counts.create++;
@@ -301,9 +303,9 @@ async function syncListings(sb: SupabaseClient, channel: MarketChannel) {
     .limit(200);
   if (pErr) throw new Error(`read ${channel} delistings: ${pErr.message}`);
   for (const r of (pulled ?? []) as Array<Pick<AllocationRow, "id" | "external_listing_id" | "listed_snapshot" | "planned_listing">>) {
-    const plan = channel === "stubhub"
-      ? (r.external_listing_id || r.listed_snapshot ? stubHubDelist(r.id) : null)
-      : channel === "seatgeek" ? seatGeekDelist(r.listed_snapshot) : gametimeDelist(r.listed_snapshot);
+    const plan = planDelist(channel, r.listed_snapshot)
+      // Live by its marketplace id but no record of the listings: a person takes it down.
+      ?? (r.external_listing_id ? { action: "delist", error: `live on ${LABEL[channel]} with no snapshot of its listings: take it down by hand` } : null);
     if (!plan) {
       // Nothing on the marketplace after all: release now.
       const { error: relErr } = await sb.from("exos_distribution_listings")
@@ -341,9 +343,9 @@ async function planGametimeInventory(sb: SupabaseClient) {
     .eq("exos_events.status", "published")
     .limit(5000);
   if (error) throw new Error(`read gametime inventory: ${error.message}`);
-  const rows = ((data ?? []) as Array<{ planned_listing: { listings?: Array<{ body: GametimeListingBody }> } | null }>)
+  const rows = ((data ?? []) as Array<{ planned_listing: { listings?: Array<{ request: { body: GametimeCsvRow } }> } | null }>)
     .flatMap((r) => r.planned_listing?.listings ?? [])
-    .map((l) => csvRowOf(l.body));
+    .map((l) => l.request.body);
   const planned = new GametimeWriter().uploadInventory(rows).planned;
   return { mode: "dry-run", listings: rows.length, bytes: planned.csv?.length ?? 0, target: planned.url, sent: false };
 }

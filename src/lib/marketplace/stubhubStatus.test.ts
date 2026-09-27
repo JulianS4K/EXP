@@ -63,7 +63,7 @@ describe('allocationCellStatus', () => {
     expect(allocationCellStatus(alloc({}), 'seatgeek')?.text).toMatch(/listed once the event is published/);
     expect(allocationCellStatus(alloc({ planned_listing: { action: 'create', listings: [{}, {}, {}] } }), 'seatgeek')?.text)
       .toBe("3 listings ready. Not sent yet: SeatGeek selling isn't switched on.");
-    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create' } }), 'stubhub')?.text).toMatch(/^1 listing ready/);
+    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create', listings: [{}, {}] } }), 'stubhub')?.text).toMatch(/^2 listings ready/);
     expect(allocationCellStatus(alloc({ planned_listing: { error: 'the ticket type has no price' } }), 'stubhub'))
       .toEqual({ tone: 'warn', text: 'the ticket type has no price' });
     expect(allocationCellStatus(alloc({ status: 'delisting' }), 'stubhub')?.text).toMatch(/Coming off StubHub/);

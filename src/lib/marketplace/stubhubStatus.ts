@@ -138,7 +138,7 @@ export function allocationCellStatus(row: StubHubDistributionRow | null, channel
     return { tone: 'ok', text: plan?.action === 'update' ? `On ${label}; ${n || 'some'} change${n === 1 ? '' : 's'} to send.` : `On ${label}.` };
   }
   if (!plan) return { tone: 'muted', text: `Held for ${label}; listed once the event is published.` };
-  const listings = channel === 'stubhub' ? 1 : plan.listings?.length ?? 0;
+  const listings = plan.listings?.length ?? 0;
   return {
     tone: 'info',
     text: `${listings} listing${listings === 1 ? '' : 's'} ready. Not sent yet: ${label} selling isn't switched on.`,

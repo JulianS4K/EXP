@@ -372,7 +372,12 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
       const f = (ful as Array<{ status: string; transfer_ids: string[]; reason: string | null }>)[0];
       if (f.status === "fulfilled") {
         counts.fulfilled++;
-        const plan = planDelivery(channel, { external_order_id: sale.externalOrderId, quantity: sale.quantity, transfer_ids: f.transfer_ids }, env("EXOS_APP_BASE_URL"));
+        // The tickets' internal seats, in transfer order (Gametime takes them on confirm).
+        const { data: seatRows } = await sb.from("exos_tickets").select("pending_transfer_id, internal_seat").in("pending_transfer_id", f.transfer_ids);
+        const seatBy = new Map(((seatRows ?? []) as Array<{ pending_transfer_id: string; internal_seat: number | null }>)
+          .map((t) => [t.pending_transfer_id, t.internal_seat]));
+        const seats = f.transfer_ids.map((t) => seatBy.get(t)).filter((n): n is number => typeof n === "number");
+        const plan = planDelivery(channel, { external_order_id: sale.externalOrderId, quantity: sale.quantity, transfer_ids: f.transfer_ids, seats }, env("EXOS_APP_BASE_URL"));
         const { error: pErr } = await sb.from("exos_marketplace_orders")
           .update({ delivery_plan: plan, updated_at: new Date().toISOString() }).eq("id", row.order_id);
         if (pErr) console.error("exos-marketplace-sales: delivery plan not stored", row.order_id, pErr.message);

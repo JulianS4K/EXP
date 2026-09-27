@@ -47,6 +47,7 @@ export function normalizeSeatGeekOrder(raw: unknown): MarketplaceSale {
     externalEventId: eventId != null ? String(eventId) : null,
     // "ex<base32 allocation id><n>" -> the allocation row the sale came from.
     externalListingId: allocationIdFromSellerListingId(listingId) ?? listingId,
+    listingRef: listingId,
     quantity: Number(o.listing?.quantity ?? legacy.quantity) || 0,
     status,
     // Not on the order: GET /orders/customer -> customerEmail().
@@ -73,14 +74,15 @@ export function seatGeekChannel(platform?: SeatGeekPlatformClient): MarketplaceC
 
     normalizeSale: normalizeSeatGeekOrder,
 
-    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest {
-      return {
+    planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest[] {
+      // GA orders go straight to fulfilled, no confirm first (operator, 2026-09-27).
+      return [{
         channel: 'seatgeek',
         endpoint: 'updateOrder',
         method: 'PATCH',
         path: '/order',
         body: transferFulfilmentForm({ orderId: sale.externalOrderId, urls: claimUrls, quantity: sale.quantity }),
-      };
+      }];
     },
   };
 }

@@ -21,6 +21,9 @@
 --   A11 setting 0 on a live listing = delist then release; can't change it
 --      while it's being delisted
 --   A12 drafts keep their allocations (fill the grid before publishing)
+--   (20260927050000)
+--   A13 one standard on every marketplace: a StubHub sale records its listing
+--       (listing_ref) and gets that block's seats, like SeatGeek and Gametime
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_channel_allocations.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -336,4 +339,33 @@ BEGIN
   END;
   RAISE NOTICE 'A11 ok: setting 0 on a live listing delists first; no changes mid-delist';
 END $$;
+-- A13 --------------------------------------------------------------------------
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
+  ('4e000000-0000-0000-0000-0000000000e5','4e000000-0000-0000-0000-000000000001','Std','published','2027-03-01T02:00:00Z','Hall',10,0,ARRAY['stubhub']);
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
+  ('4e000000-0000-0000-0000-0000000000d7','4e000000-0000-0000-0000-0000000000e5','GA',40,10,0);
+DO $$
+DECLARE alloc uuid; o record;
+BEGIN
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e5','stubhub','4e000000-0000-0000-0000-0000000000d7',6);
+  SELECT id INTO alloc FROM public.exos_distribution_listings WHERE tier_id = '4e000000-0000-0000-0000-0000000000d7';
+  -- exos-distribute's StubHub plan in the shared shape: blocks 1-4 and 5-6.
+  UPDATE public.exos_distribution_listings
+     SET planned_listing = jsonb_build_object('channel','stubhub','listings', jsonb_build_array(
+           jsonb_build_object('listing_id','excccccccccccccccccccccccccc1','seat_from',1,'seat_thru',4,'quantity',4),
+           jsonb_build_object('listing_id','excccccccccccccccccccccccccc2','seat_from',5,'seat_thru',6,'quantity',2)))
+   WHERE id = alloc;
+  PERFORM public.exos_record_marketplace_order(jsonb_build_object(
+    'channel','stubhub','external_order_id','A13','external_listing_id', alloc::text, 'listing_ref','excccccccccccccccccccccccccc1',
+    'quantity',2,'sale_status','confirmed','buyer_email','std@x.com'));
+  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'A13';
+  IF o.listing_ref IS DISTINCT FROM 'excccccccccccccccccccccccccc1' THEN RAISE EXCEPTION 'A13 FAIL: listing_ref not recorded'; END IF;
+  PERFORM public.exos_fulfil_marketplace_order(o.id);
+  IF (SELECT array_agg(internal_seat ORDER BY internal_seat) FROM public.exos_tickets WHERE order_ref = 'stubhub:A13') <> ARRAY[3,4]
+     OR (SELECT internal_seats FROM public.exos_distribution_listings WHERE id = alloc) <> '{[1,3),[5,7)}' THEN
+    RAISE EXCEPTION 'A13 FAIL: StubHub sale did not take listing 1''s seats';
+  END IF;
+  RAISE NOTICE 'A13 ok: StubHub records its listing and takes that block''s seats (3, 4), like SeatGeek and Gametime';
+END $$;
 ROLLBACK;
+
