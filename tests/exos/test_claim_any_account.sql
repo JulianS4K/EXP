@@ -9,6 +9,9 @@
 --   L4 an Exos-to-Exos transfer is claimed by an account other than the one
 --      it was sent to, and then the addressed account can't
 --   L5 the preview shows a transfer's display fields, with no emails
+--   L6 box-office and comp tickets for someone without an account: the mail
+--      says any account and carries one claim link per ticket, each only
+--      to that recipient's own transfers
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_claim_any_account.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -143,6 +146,35 @@ BEGIN
     RAISE EXCEPTION 'L5 FAIL: anon cannot preview (claim page before sign-in)';
   END IF;
   RAISE NOTICE 'L5 ok: preview shows display fields, no emails';
+END $$;
+
+-- L6 ---------------------------------------------------------------------------
+DO $$
+DECLARE m text; n int;
+BEGIN
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000a0', '7a-owner@x.com');
+  PERFORM public.exos_issue_comp_batch('7a000000-0000-0000-0000-0000000000e1', '7a000000-0000-0000-0000-0000000000d1',
+                                       ARRAY['guest-a@x.com','guest-b@x.com'], 2, NULL);
+  PERFORM public.exos_issue_ticket_to_email('7a000000-0000-0000-0000-0000000000e1', '7a000000-0000-0000-0000-0000000000d1',
+                                            'door@x.com', 1, NULL);
+  FOR m, n IN
+    SELECT ml.html, (SELECT count(*) FROM public.exos_transfers tr
+                      WHERE tr.receiver_email = ml.to_email AND tr.status = 'pending'
+                        AND ml.html LIKE '%href="{{app_url}}/claim/' || tr.id || '"%')
+      FROM public.exos_mail ml
+     WHERE ml.to_email IN ('guest-a@x.com','guest-b@x.com','door@x.com') AND ml.template = 'transfer-initiated'
+  LOOP
+    IF m NOT LIKE '%any Exos account%' OR m LIKE '%with this email address%' THEN RAISE EXCEPTION 'L6 FAIL: copy %', m; END IF;
+    IF n <> (length(m) - length(replace(m, '/claim/', ''))) / 7 OR n = 0 THEN
+      RAISE EXCEPTION 'L6 FAIL: links % vs own pending transfers in %', n, m;
+    END IF;
+  END LOOP;
+  SELECT count(*) INTO n FROM public.exos_mail WHERE to_email IN ('guest-a@x.com','guest-b@x.com','door@x.com') AND template = 'transfer-initiated';
+  IF n <> 3 THEN RAISE EXCEPTION 'L6 FAIL: expected 3 mails, got %', n; END IF;
+  IF (SELECT html FROM public.exos_mail WHERE to_email = 'guest-a@x.com') NOT LIKE '%/claim/%/claim/%' THEN
+    RAISE EXCEPTION 'L6 FAIL: 2 comps should carry 2 links';
+  END IF;
+  RAISE NOTICE 'L6 ok: box-office / comp mail says any account, links only to the recipient''s own tickets';
 END $$;
 
 ROLLBACK;

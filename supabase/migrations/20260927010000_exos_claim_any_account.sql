@@ -4,7 +4,8 @@
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: FUNCTION exos_claim_transfer, exos_queue_mail,
---                exos_fulfil_marketplace_order (patched in place)
+--                exos_fulfil_marketplace_order, exos_issue_ticket_to_email,
+--                exos_issue_comp_batch (patched in place)
 --              FUNCTION exos_transfer_claim_preview (new)
 --           R: exos_transfers, exos_tickets, exos_marketplace_orders
 -- Pre-reqs: 20260926193000 (fulfil_marketplace_order), 20260925010000
@@ -25,7 +26,17 @@
 --    this transfer. A marketplace sale's sender is the organizer, who isn't
 --    mailed once per claimed ticket.
 -- 3. exos_fulfil_marketplace_order: the mail says "sign in with any Exos
---    account" instead of naming the order email.
+--    account" instead of naming the order email. The friend-transfer mail
+--    (exos_queue_mail 'transfer-initiated') now carries the claim link too;
+--    it only said "open the app", which only works when signed in with the
+--    addressed email. The link is {{app_url}}/claim/<id>, filled by
+--    exos-mail-drain from EXOS_APP_URL.
+--    Box-office and comp tickets sent to someone without an account
+--    (exos_issue_ticket_to_email, exos_issue_comp_batch) said "sign in with
+--    this email address"; they now say any account, with one link per ticket.
+--    DEPLOY ORDER: the live exos-mail-drain (v1) predates {{app_url}}
+--    filling. Redeploy it with EXOS_APP_URL set BEFORE applying this, or
+--    friend-transfer mail goes out with an unfilled link.
 -- 4. exos_transfer_claim_preview: RLS only lets the sender, the addressed
 --    email and org staff read a transfer, so the claim page reads its display
 --    fields through this function instead: no emails, no ticket id.
@@ -76,6 +87,36 @@ SELECT pg_temp.exos_patch('public.exos_queue_mail(text, uuid)',
       AND EXISTS (SELECT 1 FROM public.exos_tickets tk
                    WHERE tk.id = t.ticket_id AND tk.transfer_id = t.id AND tk.owner_id = caller.id)
       AND NOT EXISTS (SELECT 1 FROM public.exos_marketplace_orders mo WHERE t.id = ANY (mo.transfer_ids))');
+
+-- 2b. the friend-transfer mail carries the claim link ------------------------
+SELECT pg_temp.exos_patch('public.exos_queue_mail(text, uuid)',
+  '{{app_url}}/claim/',
+  '''<p>You have a pending ticket transfer waiting for you in Exos. Open the app to claim it.</p>''',
+  '''<p>Someone sent you a ticket on Exos.</p><p><a href="{{app_url}}/claim/'' || t.id ||
+           ''">Claim your ticket</a> and sign in with any Exos account, or create one.</p>''
+           || ''<p>Whoever claims the link first gets the ticket, so keep this email to yourself.</p>''');
+
+-- 2c. box office + comps: any account, with claim links -----------------------
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT * FROM (VALUES
+      ('public.exos_issue_ticket_to_email(uuid, uuid, text, integer, text)', 'v_email'),
+      ('public.exos_issue_comp_batch(uuid, uuid, text[], integer, text)',   'v_e')) AS t(sig, rcpt)
+  LOOP
+    PERFORM pg_temp.exos_patch(r.sig, 'with any Exos account',
+      '''. Sign in to Exos with this email address to claim '' ||',
+      '''. Sign in to Exos with any Exos account, or create one, to claim '' ||');
+    PERFORM pg_temp.exos_patch(r.sig, '/claim/',
+      'ELSE ''it'' END || ''.</p>'', v_uid, ''pending'');',
+      'ELSE ''it'' END || ''.</p>'' ||
+            coalesce((SELECT ''<ul>'' || string_agg(''<li><a href="{{app_url}}/claim/'' || tr.id || ''">Claim ticket</a></li>'', '''' ORDER BY tr.id) || ''</ul>''
+                        FROM public.exos_transfers tr
+                       WHERE tr.ticket_id = ANY (v_ids) AND tr.status = ''pending''
+                         AND lower(tr.receiver_email) = ' || r.rcpt || '), ''''),
+            v_uid, ''pending'');');
+  END LOOP;
+END $$;
 
 -- 3. marketplace mail copy ----------------------------------------------------
 SELECT pg_temp.exos_patch('public.exos_fulfil_marketplace_order(uuid, text)',

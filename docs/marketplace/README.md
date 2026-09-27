@@ -74,7 +74,10 @@ The flow, end to end:
    decides where the claim link is sent: any verified Exos account that opens
    the link can claim, and the first claim wins (the row locks; a second
    claim is refused). The same holds for Exos-to-Exos transfers between
-   friends. The claim page reads the transfer through
+   friends and to box-office and comp tickets, whose mails now carry the
+   claim links too (`{{app_url}}/claim/<id>`, filled by `exos-mail-drain`
+   from `EXOS_APP_URL`; redeploy the drain with it set before applying the
+   migration). The claim page reads the transfer through
    `exos_transfer_claim_preview`, which returns display fields only, with no
    emails.
 
