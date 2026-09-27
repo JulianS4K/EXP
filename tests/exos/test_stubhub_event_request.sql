@@ -1,7 +1,8 @@
 -- ============================================================================
--- StubHub event request queue (mig 20260926190000). Self-contained (5b
--- prefix), rolled back at the end.
---   S1 publishing with StubHub queues one 'stubhub' row, as the organizer
+-- Marketplace event rows (mig 20260926190000, both marketplaces since
+-- 20260927030000). Self-contained (5b prefix), rolled back at the end.
+--   S1 publishing with StubHub + SeatGeek queues one event row each (no
+--      ticket type), as the organizer
 --      (who can't write the table directly)
 --   S2 drafts, other networks and primary-market-only queue nothing
 --   S3 editing re-queues a planned/failed row, and never touches one that
@@ -57,16 +58,21 @@ RESET ROLE;
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.exos_distribution_listings WHERE event_id = '5b000000-0000-0000-0000-0000000000e1';
-  IF r IS NULL OR r.channel <> 'stubhub' OR r.status <> 'pending' OR r.org_id <> '5b000000-0000-0000-0000-000000000001'
+  SELECT * INTO r FROM public.exos_distribution_listings WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
+  IF r IS NULL OR r.tier_id IS NOT NULL OR r.status <> 'pending' OR r.org_id <> '5b000000-0000-0000-0000-000000000001'
      OR r.requested_qty IS NOT NULL OR r.external_event_id IS NOT NULL THEN
     RAISE EXCEPTION 'S1 FAIL: expected one pending stubhub row, got %', row_to_json(r);
   END IF;
-  -- seatgeek is ticked too, but only StubHub has an event request today.
-  IF (SELECT count(*) FROM public.exos_distribution_listings WHERE event_id = '5b000000-0000-0000-0000-0000000000e1') <> 1 THEN
-    RAISE EXCEPTION 'S1 FAIL: rows for channels other than stubhub';
+  -- SeatGeek is ticked too: its event row (which SeatGeek event the listings attach to).
+  IF (SELECT array_agg(channel ORDER BY channel) FROM public.exos_distribution_listings
+       WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND tier_id IS NULL AND status = 'pending') <> ARRAY['seatgeek','stubhub'] THEN
+    RAISE EXCEPTION 'S1 FAIL: expected one pending event row for stubhub and seatgeek';
   END IF;
-  RAISE NOTICE 'S1 ok: publish with StubHub queues one row, as the organizer';
+  -- vivid is ticked on e3 but isn't synced this way.
+  IF EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE channel = 'vivid') THEN
+    RAISE EXCEPTION 'S1 FAIL: a row for vivid';
+  END IF;
+  RAISE NOTICE 'S1 ok: publish queues an event row per ticked marketplace, as the organizer';
 END $$;
 
 -- S2 ---------------------------------------------------------------------------
@@ -97,7 +103,7 @@ UPDATE public.exos_events SET name = 'Live (late show)' WHERE id = '5b000000-000
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.exos_distribution_listings WHERE event_id = '5b000000-0000-0000-0000-0000000000e1';
+  SELECT * INTO r FROM public.exos_distribution_listings WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
   IF r.status <> 'pending' OR r.planned_request IS NOT NULL THEN
     RAISE EXCEPTION 'S3 FAIL: edit did not re-queue the planned row: %', row_to_json(r);
   END IF;
@@ -116,7 +122,7 @@ BEGIN
 END $$;
 -- Once StubHub has the event, edits leave the row alone.
 UPDATE public.exos_distribution_listings SET status = 'listed', external_event_id = 'sh-123'
- WHERE event_id = '5b000000-0000-0000-0000-0000000000e1';
+ WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
 UPDATE public.exos_events SET starts_at = '2027-01-02T02:00:00Z' WHERE id = '5b000000-0000-0000-0000-0000000000e1';
 DO $$
 BEGIN
@@ -154,7 +160,7 @@ DO $$
 BEGIN
   BEGIN
     UPDATE public.exos_distribution_listings SET status = 'sent-maybe'
-     WHERE event_id = '5b000000-0000-0000-0000-0000000000e1';
+     WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
     RAISE EXCEPTION 'S5 FAIL: unknown status accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;

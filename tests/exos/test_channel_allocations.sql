@@ -9,6 +9,18 @@
 --      has sold everything else, and Exos still can't sell those seats
 --   A5 StubHub selling more than allocated goes to a human, nothing changes
 --   A6 delisting releases the seats
+--   (20260927030000)
+--   A7 per ticket type: several tiers per marketplace, both marketplaces; a
+--      marketplace that isn't ticked is refused
+--   A8 internal seat numbers: one per allocated seat, never shared across
+--      marketplaces, grow with new numbers, shrink from the top
+--   A9 a marketplace sale gives each ticket an internal seat (the SeatGeek
+--      listing's own seats when the order says which)
+--   A10 pulling back: unticking / unpublishing releases unsent allocations at
+--      once; a live one goes to 'delisting' and keeps its seats until it's down
+--   A11 setting 0 on a live listing = delist then release; can't change it
+--      while it's being delisted
+--   A12 drafts keep their allocations (fill the grid before publishing)
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_channel_allocations.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -20,9 +32,9 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
   ('4e000000-0000-0000-0000-000000000001','4E Org','4e-org','4e000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('4e000000-0000-0000-0000-000000000001','4e000000-0000-0000-0000-0000000000a0','owner');
-INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES
-  ('4e000000-0000-0000-0000-0000000000e1','4e000000-0000-0000-0000-000000000001','Show','published','2027-01-01T02:00:00Z','Hall',15,0),
-  ('4e000000-0000-0000-0000-0000000000e2','4e000000-0000-0000-0000-000000000001','Tight cap','published','2027-01-02T02:00:00Z','Hall',5,0);
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
+  ('4e000000-0000-0000-0000-0000000000e1','4e000000-0000-0000-0000-000000000001','Show','published','2027-01-01T02:00:00Z','Hall',15,0,ARRAY['stubhub','seatgeek']),
+  ('4e000000-0000-0000-0000-0000000000e2','4e000000-0000-0000-0000-000000000001','Tight cap','published','2027-01-02T02:00:00Z','Hall',5,0,ARRAY['stubhub']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('4e000000-0000-0000-0000-0000000000d1','4e000000-0000-0000-0000-0000000000e1','GA',50,10,0),
   ('4e000000-0000-0000-0000-0000000000d2','4e000000-0000-0000-0000-0000000000e1','VIP',150,5,0),
@@ -91,11 +103,6 @@ BEGIN
     RAISE EXCEPTION 'A3 FAIL: tier from another event';
   EXCEPTION WHEN raise_exception THEN NULL;
   END;
-  BEGIN
-    PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e1','stubhub','4e000000-0000-0000-0000-0000000000d2',1);
-    RAISE EXCEPTION 'A3 FAIL: switched the listing to another ticket type while it holds seats';
-  EXCEPTION WHEN raise_exception THEN NULL;
-  END;
 END $$;
 SELECT set_config('app.uid','4e000000-0000-0000-0000-0000000000a9',true);
 SET LOCAL ROLE authenticated;
@@ -122,7 +129,8 @@ RESET ROLE;
 UPDATE public.exos_ticket_tiers SET sold = 7 WHERE id = '4e000000-0000-0000-0000-0000000000d1';
 UPDATE public.exos_events SET tickets_sold = 7 WHERE id = '4e000000-0000-0000-0000-0000000000e1';
 UPDATE public.exos_distribution_listings SET status = 'listed', external_listing_id = 'SH-A'
- WHERE event_id = '4e000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub';
+ WHERE event_id = '4e000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub'
+   AND tier_id = '4e000000-0000-0000-0000-0000000000d1';
 DO $$
 DECLARE o record;
 BEGIN
@@ -166,5 +174,166 @@ BEGIN
     RAISE EXCEPTION 'A6 FAIL: delisting did not release the seat';
   END IF;
   RAISE NOTICE 'A6 ok: delisting gives the seats back to Exos';
+END $$;
+-- A7-A12: a fresh event with two ticket types on both marketplaces ----------------
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
+  ('4e000000-0000-0000-0000-0000000000e3','4e000000-0000-0000-0000-000000000001','Grid','published','2027-02-01T02:00:00Z','Hall',30,0,ARRAY['stubhub','seatgeek']),
+  ('4e000000-0000-0000-0000-0000000000e4','4e000000-0000-0000-0000-000000000001','Draft grid','draft','2027-02-02T02:00:00Z','Hall',10,0,ARRAY['seatgeek']);
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
+  ('4e000000-0000-0000-0000-0000000000d4','4e000000-0000-0000-0000-0000000000e3','GA',40,20,0),
+  ('4e000000-0000-0000-0000-0000000000d5','4e000000-0000-0000-0000-0000000000e3','VIP',120,10,0),
+  ('4e000000-0000-0000-0000-0000000000d6','4e000000-0000-0000-0000-0000000000e4','GA',40,10,0);
+CREATE OR REPLACE FUNCTION pg_temp.alloc(p_ch text, p_tier text) RETURNS public.exos_distribution_listings LANGUAGE sql AS $$
+  SELECT * FROM public.exos_distribution_listings
+   WHERE channel = p_ch AND tier_id = ('4e000000-0000-0000-0000-0000000000' || p_tier)::uuid
+$$;
+
+-- A7 ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d4',4);
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d5',2);
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','seatgeek','4e000000-0000-0000-0000-0000000000d4',6);
+  IF (SELECT count(*) FROM public.exos_distribution_listings WHERE event_id = '4e000000-0000-0000-0000-0000000000e3' AND tier_id IS NOT NULL) <> 3
+     OR (SELECT count(*) FROM public.exos_distribution_listings WHERE event_id = '4e000000-0000-0000-0000-0000000000e3' AND tier_id IS NULL) <> 2 THEN
+    RAISE EXCEPTION 'A7 FAIL: want 3 allocation rows + 2 event rows';
+  END IF;
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4') <> 10
+     OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d5') <> 8 THEN
+    RAISE EXCEPTION 'A7 FAIL: availability GA % VIP %', public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4'),
+      public.exos_tier_available('4e000000-0000-0000-0000-0000000000d5');
+  END IF;
+  BEGIN
+    PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e2','seatgeek','4e000000-0000-0000-0000-0000000000d3',1);
+    RAISE EXCEPTION 'A7 FAIL: allocated to a marketplace that is not ticked';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE '%tick SeatGeek%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'A7 ok: a row per ticket type per marketplace; unticked marketplaces refused';
+END $$;
+
+-- A8 ---------------------------------------------------------------------------
+DO $$
+DECLARE sh int4multirange; sg int4multirange;
+BEGIN
+  sh := (pg_temp.alloc('stubhub','d4')).internal_seats;
+  sg := (pg_temp.alloc('seatgeek','d4')).internal_seats;
+  IF sh <> '{[1,5)}' OR sg <> '{[5,11)}' THEN RAISE EXCEPTION 'A8 FAIL: first blocks % %', sh, sg; END IF;
+  IF (pg_temp.alloc('stubhub','d5')).internal_seats <> '{[1,3)}' THEN RAISE EXCEPTION 'A8 FAIL: VIP numbers are per ticket type'; END IF;
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d4',6);
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','seatgeek','4e000000-0000-0000-0000-0000000000d4',4);
+  sh := (pg_temp.alloc('stubhub','d4')).internal_seats;
+  sg := (pg_temp.alloc('seatgeek','d4')).internal_seats;
+  IF sh <> '{[1,5),[11,13)}' OR sg <> '{[5,9)}' THEN RAISE EXCEPTION 'A8 FAIL: after grow/shrink % %', sh, sg; END IF;
+  IF NOT isempty(sh * sg) THEN RAISE EXCEPTION 'A8 FAIL: marketplaces share a seat'; END IF;
+  IF public.exos_seat_count(sh) <> (pg_temp.alloc('stubhub','d4')).requested_qty THEN RAISE EXCEPTION 'A8 FAIL: count'; END IF;
+  RAISE NOTICE 'A8 ok: internal seats per allocated seat, unique across marketplaces';
+END $$;
+
+-- A9 ---------------------------------------------------------------------------
+-- exos-distribute planned SeatGeek listing 2 as seats 7-8.
+UPDATE public.exos_distribution_listings
+   SET planned_listing = jsonb_build_object('listings', jsonb_build_array(
+         jsonb_build_object('body', jsonb_build_object('seller_listing_id','exaaaaaaaaaaaaaaaaaaaaaaaaaa1','seat_from','5','seat_thru','6')),
+         jsonb_build_object('body', jsonb_build_object('seller_listing_id','exaaaaaaaaaaaaaaaaaaaaaaaaaa2','seat_from','7','seat_thru','8'))))
+ WHERE id = (pg_temp.alloc('seatgeek','d4')).id;
+DO $$
+DECLARE o record; v_seats int[];
+BEGIN
+  PERFORM public.exos_record_marketplace_order(jsonb_build_object(
+    'channel','seatgeek','external_order_id','A9-SG','external_listing_id',(pg_temp.alloc('seatgeek','d4')).id::text,
+    'quantity',2,'sale_status','confirmed','buyer_email','sg@x.com',
+    'raw', jsonb_build_object('id','A9-SG','listing', jsonb_build_object('id','exaaaaaaaaaaaaaaaaaaaaaaaaaa2','quantity',2))));
+  PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A9-SG'));
+  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'A9-SG';
+  IF o.status <> 'fulfilled' THEN RAISE EXCEPTION 'A9 FAIL: %', o.attention_reason; END IF;
+  SELECT array_agg(internal_seat ORDER BY internal_seat) INTO v_seats FROM public.exos_tickets WHERE id = ANY (o.ticket_ids);
+  IF v_seats <> ARRAY[7,8] THEN RAISE EXCEPTION 'A9 FAIL: SeatGeek tickets got seats %', v_seats; END IF;
+  IF (pg_temp.alloc('seatgeek','d4')).internal_seats <> '{[5,7)}' OR (pg_temp.alloc('seatgeek','d4')).requested_qty <> 2 THEN
+    RAISE EXCEPTION 'A9 FAIL: allocation after the sale %', row_to_json(pg_temp.alloc('seatgeek','d4'));
+  END IF;
+  -- StubHub (no seats on its listing): a seat from the top.
+  PERFORM public.exos_record_marketplace_order(jsonb_build_object(
+    'channel','stubhub','external_order_id','A9-SH','external_listing_id',(pg_temp.alloc('stubhub','d4')).id::text,
+    'quantity',1,'sale_status','confirmed','buyer_email','sh3@x.com'));
+  PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A9-SH'));
+  SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'A9-SH';
+  IF (SELECT internal_seat FROM public.exos_tickets WHERE id = o.ticket_ids[1]) IS DISTINCT FROM 12 THEN
+    RAISE EXCEPTION 'A9 FAIL: StubHub ticket seat %', (SELECT internal_seat FROM public.exos_tickets WHERE id = o.ticket_ids[1]);
+  END IF;
+  IF (pg_temp.alloc('stubhub','d4')).internal_seats <> '{[1,5),[11,12)}' THEN RAISE EXCEPTION 'A9 FAIL: StubHub seats left'; END IF;
+  RAISE NOTICE 'A9 ok: marketplace tickets get internal seats (the SeatGeek listing''s own when known)';
+END $$;
+
+-- A12 --------------------------------------------------------------------------
+DO $$
+BEGIN
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e4','seatgeek','4e000000-0000-0000-0000-0000000000d6',3);
+  UPDATE public.exos_events SET name = 'Draft grid (edited)' WHERE id = '4e000000-0000-0000-0000-0000000000e4';
+  UPDATE public.exos_events SET status = 'published' WHERE id = '4e000000-0000-0000-0000-0000000000e4';
+  IF (pg_temp.alloc('seatgeek','d6')).requested_qty <> 3 OR (pg_temp.alloc('seatgeek','d6')).status <> 'pending' THEN
+    RAISE EXCEPTION 'A12 FAIL: draft allocation lost: %', row_to_json(pg_temp.alloc('seatgeek','d6'));
+  END IF;
+  RAISE NOTICE 'A12 ok: the grid can be filled before publishing';
+END $$;
+
+-- A10 --------------------------------------------------------------------------
+-- StubHub GA went live; StubHub VIP didn't.
+UPDATE public.exos_distribution_listings SET status = 'listed', external_listing_id = 'SH-G'
+ WHERE id = (pg_temp.alloc('stubhub','d4')).id;
+UPDATE public.exos_events SET distribution_networks = ARRAY['seatgeek'] WHERE id = '4e000000-0000-0000-0000-0000000000e3';
+DO $$
+BEGIN
+  IF (pg_temp.alloc('stubhub','d5')).status <> 'delisted' OR (pg_temp.alloc('stubhub','d5')).requested_qty <> 0
+     OR NOT isempty((pg_temp.alloc('stubhub','d5')).internal_seats) THEN
+    RAISE EXCEPTION 'A10 FAIL: unsent allocation not released: %', row_to_json(pg_temp.alloc('stubhub','d5'));
+  END IF;
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d5') <> 10 THEN RAISE EXCEPTION 'A10 FAIL: VIP seats not back'; END IF;
+  IF (pg_temp.alloc('stubhub','d4')).status <> 'delisting' OR (pg_temp.alloc('stubhub','d4')).requested_qty <> 5 THEN
+    RAISE EXCEPTION 'A10 FAIL: live listing should be delisting with its seats: %', row_to_json(pg_temp.alloc('stubhub','d4'));
+  END IF;
+  -- GA: 20 - 3 sold - 5 (StubHub, delisting) - 2 (SeatGeek) = 10.
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4') <> 10 THEN
+    RAISE EXCEPTION 'A10 FAIL: GA available % (want 10)', public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4');
+  END IF;
+  IF (pg_temp.alloc('seatgeek','d4')).requested_qty <> 2 THEN RAISE EXCEPTION 'A10 FAIL: SeatGeek touched'; END IF;
+  IF EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = '4e000000-0000-0000-0000-0000000000e3'
+              AND channel = 'stubhub' AND tier_id IS NULL) THEN
+    RAISE EXCEPTION 'A10 FAIL: StubHub event row kept';
+  END IF;
+END $$;
+-- StubHub confirms the delist: the seats come back.
+UPDATE public.exos_distribution_listings SET status = 'delisted' WHERE id = (pg_temp.alloc('stubhub','d4')).id;
+-- Unpublishing pulls SeatGeek back too.
+UPDATE public.exos_events SET status = 'draft' WHERE id = '4e000000-0000-0000-0000-0000000000e3';
+DO $$
+BEGIN
+  IF (pg_temp.alloc('seatgeek','d4')).status <> 'delisted' THEN RAISE EXCEPTION 'A10 FAIL: unpublish kept SeatGeek seats'; END IF;
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4') <> 17 THEN
+    RAISE EXCEPTION 'A10 FAIL: GA available % (want 20 - 3 sold)', public.exos_tier_available('4e000000-0000-0000-0000-0000000000d4');
+  END IF;
+  RAISE NOTICE 'A10 ok: pull back = release unsent now, delist live first';
+END $$;
+
+-- A11 --------------------------------------------------------------------------
+UPDATE public.exos_events SET status = 'published', distribution_networks = ARRAY['stubhub'] WHERE id = '4e000000-0000-0000-0000-0000000000e3';
+DO $$
+BEGIN
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d5',3);
+  IF (pg_temp.alloc('stubhub','d5')).status <> 'pending' OR (pg_temp.alloc('stubhub','d5')).internal_seats <> '{[3,6)}' THEN
+    RAISE EXCEPTION 'A11 FAIL: revived allocation %', row_to_json(pg_temp.alloc('stubhub','d5'));
+  END IF;
+  UPDATE public.exos_distribution_listings SET status = 'listed', external_listing_id = 'SH-V' WHERE id = (pg_temp.alloc('stubhub','d5')).id;
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d5',0);
+  IF (pg_temp.alloc('stubhub','d5')).status <> 'delisting' OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d5') <> 7 THEN
+    RAISE EXCEPTION 'A11 FAIL: 0 on a live listing should delist first';
+  END IF;
+  BEGIN
+    PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e3','stubhub','4e000000-0000-0000-0000-0000000000d5',2);
+    RAISE EXCEPTION 'A11 FAIL: changed a listing being delisted';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE '%being taken off StubHub%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'A11 ok: setting 0 on a live listing delists first; no changes mid-delist';
 END $$;
 ROLLBACK;

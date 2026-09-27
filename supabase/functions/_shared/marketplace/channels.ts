@@ -1,16 +1,19 @@
 // The channel registry: which marketplaces are wired, built from secrets.
-// StubHub only for now; SeatGeek and the rest plug in here later. A channel
-// without credentials still exists (it can plan requests); it just can't
-// search its catalog.
+// StubHub and SeatGeek; the rest plug in here later. A channel without
+// credentials still exists (it can plan requests); it just can't search its
+// catalog.
 //
 // Secrets (all optional; operator-set):
 //   STUBHUB_ENV            'sandbox' | 'production' (default sandbox)
 //   STUBHUB_CLIENT_ID / STUBHUB_CLIENT_SECRET   catalog reads (client credentials)
+//   SEATGEEK_CLIENT_ID     SeatGeek Platform API event search (read-only)
 
 import type { ChannelId, MarketplaceChannel } from './channel.ts';
 import { StubHubClient, clientCredentialsToken } from './stubhub/client.ts';
 import { STUBHUB_ENVIRONMENTS, type StubHubEnvironment } from './stubhub/transport.ts';
 import { stubHubChannel } from './stubhub/channel.ts';
+import { seatGeekChannel } from './seatgeek/channel.ts';
+import { SeatGeekPlatformClient } from './seatgeek/platform.ts';
 
 export type Env = (key: string) => string | undefined;
 
@@ -33,6 +36,9 @@ export function channelsFromEnv(env: Env, fetchImpl?: typeof fetch): Map<Channel
       })
     : undefined;
   out.set('stubhub', stubHubChannel(shClient));
+
+  const sgClientId = env('SEATGEEK_CLIENT_ID')?.trim();
+  out.set('seatgeek', seatGeekChannel(sgClientId ? new SeatGeekPlatformClient(sgClientId, fetchImpl ? { fetch: fetchImpl } : {}) : undefined));
 
   return out;
 }

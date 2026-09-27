@@ -170,6 +170,40 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
   (sign-in now returns to the page the buyer started on, not the site root).
 - [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
 
+## SeatGeek 2026-09-27
+
+Seller Direct API (docs/marketplace/seatgeek). Same marketplace layer as StubHub, all dry-run.
+- ✅ Endpoint table (read / write / forbidden: CSV sync and purge would wipe broker inventory), read
+  client, dry-run writer that refuses non-Exos listing ids.
+- ✅ Event links via the public Platform API search (SEATGEEK_CLIENT_ID); no event creation on SeatGeek.
+- ✅ Seat allocation in the event editor; listings planned as batches of at most max per order.
+- ✅ Orders polled (GET /orders + a rolling GET /order recheck for cancellations), buyer email from
+  /orders/customer, fulfilled as Exos link transfers; delivery planned as PATCH /order transfer_url.
+- ✅ Webhooks: order.created / order.broken into the same record + fulfil path; listing.visibility and
+  listing.event.inactive shown on the allocation.
+- ✅ Answered: the Exos claim link works as SeatGeek's mobile transfer URL; GA orders go straight to
+  fulfilled (no confirm first); GA seat numbers are internal seat numbers (below).
+- [ ] Operator: SEATGEEK_API_TOKEN, SEATGEEK_CLIENT_ID, SEATGEEK_WEBHOOK_TOKEN (+ webhook setup via SeatGeek
+  support), then a WriteAuthorization to go live.
+
+## Marketplace sync: Exos, StubHub, SeatGeek 2026-09-27
+
+Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_seatgeek_orders.sql` G2,
+`test_stubhub_event_request.sql` S1, e2e dry run step 14b). All dry-run.
+- ✅ Marketplaces grid in the event editor: a row per ticket type, a column per ticked marketplace
+  (any number of ticket types per marketplace; was one). Can be filled before publishing.
+- ✅ Publishing queues an event row per ticked marketplace (StubHub event request; SeatGeek event link).
+- ✅ Pull back = delist, then release: unticking, primary-market-only, unpublishing, cancelling or setting 0
+  releases unsent seats at once; a live listing goes to 'delisting' and keeps its seats until it's down.
+- ✅ exos-distribute plans create / update / delete against what the marketplace has (listed_snapshot).
+  SeatGeek listing numbers stay stable across re-plans.
+- ✅ Internal GA seat numbers: every allocated seat has one (per ticket type, never shared across
+  marketplaces); SeatGeek listings send them as seat_from / seat_thru; each marketplace ticket records its
+  seat (exos_tickets.internal_seat). Staff only, never shown to buyers.
+- [ ] Live sends (operator WriteAuthorization): send the planned ops, write listed_snapshot and
+  external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
+- [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
+
 ## Claim into any account 2026-09-27
 
 EXP#12 + mig `20260927010000` (tested: `test_claim_any_account.sql` L1–L7, e2e dry run).
