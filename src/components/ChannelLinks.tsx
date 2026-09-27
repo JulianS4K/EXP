@@ -10,7 +10,7 @@ import {
   type MarketplaceOrder,
 } from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
-import { setStubHubAllocation } from '../lib/marketplace/stubhubStatusApi';
+import { setChannelAllocation, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import type { StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
 
 const LABEL: Record<string, string> = {
@@ -127,21 +127,23 @@ export function MarketplaceOrders({ eventId }: { eventId: string }) {
 }
 
 /**
- * Seats set aside for StubHub. Exos can't sell them, so a StubHub buyer and
- * an Exos buyer can never get the same seat; the StubHub listing should carry
- * exactly this many.
+ * Seats set aside for one marketplace. Exos can't sell them, so a marketplace
+ * buyer and an Exos buyer can never get the same seat; the marketplace
+ * listing(s) carry exactly this many.
  */
-export function StubHubAllocation({
-  eventId, tiers, row, maxPerOrder, onSaved,
+export function ChannelAllocation({
+  eventId, channel, tiers, row, maxPerOrder, onSaved,
 }: {
   eventId: string;
+  channel: AllocationChannel;
   tiers: Array<{ id: string; name: string; capacity: number }>;
   row: StubHubDistributionRow | null;
-  /** The event's max per order: StubHub buyers see at most this many at a time. */
+  /** The event's max per order: what one marketplace order can take. */
   maxPerOrder: number | null;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const label = LABEL[channel] ?? channel;
   const [tierId, setTierId] = useState(row?.tier_id ?? tiers[0]?.id ?? '');
   const [qty, setQty] = useState(String(row?.requested_qty ?? 0));
   const [busy, setBusy] = useState(false);
@@ -154,8 +156,8 @@ export function StubHubAllocation({
     }
     setBusy(true);
     try {
-      await setStubHubAllocation(eventId, tierId, n);
-      toast({ kind: 'success', message: n ? `${n} seat${n === 1 ? '' : 's'} set aside for StubHub.` : 'StubHub seats given back to Exos.' });
+      await setChannelAllocation(eventId, channel, tierId, n);
+      toast({ kind: 'success', message: n ? `${n} seat${n === 1 ? '' : 's'} set aside for ${label}.` : `${label} seats given back to Exos.` });
       onSaved();
     } catch (err) {
       toast({ kind: 'error', message: err instanceof Error ? err.message.replace(/^exos_set_channel_allocation: /, '') : 'Could not save that.' });
@@ -163,15 +165,24 @@ export function StubHubAllocation({
       setBusy(false);
     }
   };
+  const cap = channel === 'seatgeek'
+    ? (maxPerOrder
+      ? ` They're listed on SeatGeek in batches of at most ${maxPerOrder} (your max per order), so one order can't take them all.`
+      : ' Set a max per order to stop one SeatGeek order taking them all.')
+    : (maxPerOrder
+      ? ` ${label} buyers see at most ${maxPerOrder} at a time (your max per order), so one order can't take them all.`
+      : ` Set a max per order to stop one ${label} order taking them all.`);
+  // A plan that can't be built, or (SeatGeek) a listing the marketplace reported hidden.
+  const planError = (row?.planned_listing as { error?: string } | null | undefined)?.error
+    ?? (channel === 'seatgeek' ? row?.error ?? undefined : undefined);
   return (
     <div className="space-y-2">
-      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Seats for StubHub</h3>
+      <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Seats for {label}</h3>
       <p className="type text-xs text-white/50">
         Exos stops selling these seats, so nobody can buy the same seat on both. Set 0 to give them back.
-        {maxPerOrder
-          ? ` StubHub buyers see at most ${maxPerOrder} at a time (your max per order), so one order can't take them all.`
-          : ' Set a max per order to stop one StubHub order taking them all.'}
+        {cap}
       </p>
+      {planError && <p role="status" className="type text-xs text-amber-400">{label}: {planError}</p>}
       <div className="flex flex-wrap items-end gap-2">
         <label className="type text-xs text-white/70">
           <span className="block mb-1">Ticket type</span>
@@ -191,5 +202,10 @@ export function StubHubAllocation({
       </div>
     </div>
   );
+}
+
+/** Seats set aside for StubHub. */
+export function StubHubAllocation(props: Omit<Parameters<typeof ChannelAllocation>[0], 'channel'>) {
+  return <ChannelAllocation {...props} channel="stubhub" />;
 }
 

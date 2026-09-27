@@ -74,8 +74,8 @@ const SLUG_MAX = 80;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
 import { stubHubStatus, type StubHubDistributionRow } from '../lib/marketplace/stubhubStatus';
-import { getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
-import { ChannelLinks, MarketplaceOrders, StubHubAllocation } from '../components/ChannelLinks';
+import { getChannelDistribution, getStubHubDistribution } from '../lib/marketplace/stubhubStatusApi';
+import { ChannelAllocation, ChannelLinks, MarketplaceOrders, StubHubAllocation } from '../components/ChannelLinks';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
@@ -91,6 +91,7 @@ export default function EditEvent() {
   const [eventData, setEventData] = useState<Partial<Event>>({});
   // The event's StubHub request (queued by the exos_events trigger on publish).
   const [stubhubRow, setStubhubRow] = useState<StubHubDistributionRow | null>(null);
+  const [seatgeekRow, setSeatgeekRow] = useState<StubHubDistributionRow | null>(null);
   // Accessibility fields show (and save) only once the columns exist: the
   // loaded event carries `accessibility` then (mig 20260926090000).
   const accessSupported = eventData.accessibility !== undefined;
@@ -172,6 +173,7 @@ export default function EditEvent() {
       setOriginalSlug((data.branding?.customSlug || '').trim());
       if (SHOW_DISTRIBUTION) {
         getStubHubDistribution(eventId).then(setStubhubRow).catch((err) => console.warn('stubhub status unavailable:', err));
+        getChannelDistribution(eventId, 'seatgeek').then(setSeatgeekRow).catch((err) => console.warn('seatgeek status unavailable:', err));
       }
       setOriginalNotifiable({
         title: data.title,
@@ -1736,6 +1738,18 @@ export default function EditEvent() {
                row={stubhubRow}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
                onSaved={() => { getStubHubDistribution(eventId).then(setStubhubRow).catch(() => undefined); }}
+             />
+             </div>
+           )}
+           {eventId && (eventData.distributionNetworks || []).includes('seatgeek') && !eventData.exclusivity?.primaryMarketOnly && (
+             <div key={`sg:${seatgeekRow?.tier_id ?? ''}:${seatgeekRow?.requested_qty ?? 0}`}>
+             <ChannelAllocation
+               eventId={eventId}
+               channel="seatgeek"
+               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
+               row={seatgeekRow}
+               maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
+               onSaved={() => { getChannelDistribution(eventId, 'seatgeek').then(setSeatgeekRow).catch(() => undefined); }}
              />
              </div>
            )}

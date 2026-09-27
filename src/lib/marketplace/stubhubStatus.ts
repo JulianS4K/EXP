@@ -16,6 +16,8 @@ export interface StubHubDistributionRow {
     body?: { event?: { name?: string }; venue?: { name?: string; city?: string } };
   } | null;
   last_synced_at: string | null;
+  /** The listing(s) exos-distribute would create (mig 20260926194000), or { error }. */
+  planned_listing?: unknown;
 }
 
 export type StubHubStatusTone = 'muted' | 'info' | 'ok' | 'warn';

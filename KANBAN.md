@@ -170,6 +170,22 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
   (sign-in now returns to the page the buyer started on, not the site root).
 - [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
 
+## SeatGeek 2026-09-27
+
+Seller Direct API (docs/marketplace/seatgeek). Same marketplace layer as StubHub, all dry-run.
+- ✅ Endpoint table (read / write / forbidden: CSV sync and purge would wipe broker inventory), read
+  client, dry-run writer that refuses non-Exos listing ids.
+- ✅ Event links via the public Platform API search (SEATGEEK_CLIENT_ID); no event creation on SeatGeek.
+- ✅ Seat allocation in the event editor; listings planned as batches of at most max per order.
+- ✅ Orders polled (GET /orders + a rolling GET /order recheck for cancellations), buyer email from
+  /orders/customer, fulfilled as Exos link transfers; delivery planned as PATCH /order transfer_url.
+- ✅ Webhooks: order.created / order.broken into the same record + fulfil path; listing.visibility and
+  listing.event.inactive shown on the allocation.
+- [ ] Confirm with SeatGeek: GA listings without seat numbers, the Exos claim link as a mobile transfer
+  URL, confirm-before-fulfil for submitted orders (see "Still open").
+- [ ] Operator: SEATGEEK_API_TOKEN, SEATGEEK_CLIENT_ID, SEATGEEK_WEBHOOK_TOKEN (+ webhook setup via SeatGeek
+  support), then a WriteAuthorization to go live.
+
 ## Claim into any account 2026-09-27
 
 EXP#12 + mig `20260927010000` (tested: `test_claim_any_account.sql` L1–L7, e2e dry run).

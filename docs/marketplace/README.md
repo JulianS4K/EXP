@@ -6,6 +6,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | Marketplace | Folder | Snapshot |
 |---|---|---|
 | StubHub | [`stubhub/`](stubhub/README.md) | PDFs 2026-09-14 (API v2.249.0.0, Catalog v1.0.0.75) + OpenAPI specs from viagogo/stubhub-api-docs |
+| SeatGeek | [`seatgeek/`](seatgeek/README.md) | Seller Direct API 1.0.0 (OAS3), 2026-09-27; event search via the public Platform API |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
@@ -19,8 +20,12 @@ charter's §6.1 carve-out process.
 
 ## How StubHub ties into Exos
 
-StubHub is the only marketplace wired so far. SeatGeek and the rest come
-later, as adapters in the same layer.
+StubHub and SeatGeek are wired; the rest come later, as adapters in the
+same layer. SeatGeek differs in three ways (details in
+[`seatgeek/README.md`](seatgeek/README.md)): no event creation, so events
+are linked by search (Platform API) or by an admin; no display cap, so an
+allocation becomes several listings of at most the max per order; and sales
+are polled (`GET /orders`), with no webhook.
 
 The layer is `supabase/functions/_shared/marketplace/`, and it is shared by
 the edge functions (Deno) and the app (`src/lib/marketplace`). Each

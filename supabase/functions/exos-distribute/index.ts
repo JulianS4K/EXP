@@ -27,6 +27,12 @@
 //    maxPerOrder at a time. DRY-RUN; re-planned every run so it follows
 //    price / limit / allocation changes.
 //
+// 1c. SeatGeek listings. Same for SeatGeek allocations
+//    (_shared/marketplace/seatgeek/listingPlan.ts): SeatGeek can't show
+//    buyers part of a listing, so the allocation is planned as several
+//    listings of at most maxPerOrder each. Uses the SeatGeek event id when
+//    the event is linked. DRY-RUN.
+//
 // 2. Automatiq listings. Why this is the "it's both" path: D1's storefront
 //    reads TEvo/EVO "owned" inventory, and Automatiq distributes INTO EVO, so
 //    listing an org's primary inventory via Automatiq surfaces it in the D1
@@ -42,7 +48,8 @@
 //
 // Required secrets (operator, when activated): CRON_SECRET, SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY. Optional: STUBHUB_ENV / STUBHUB_CLIENT_ID /
-// STUBHUB_CLIENT_SECRET (catalog reads, pass 0),
+// STUBHUB_CLIENT_SECRET (catalog reads, pass 0), SEATGEEK_CLIENT_ID
+// (SeatGeek Platform event search, pass 0),
 // AUTOMATIQ_API_KEY (pass 2). Per-org distribution creds (e.g.
 // lystedSellerId) live in exos_org_secrets.distribution.
 
@@ -51,6 +58,7 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from "../_shared/marketplace/stubhub/eventRequest.ts";
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
+import { planSeatGeekListings } from "../_shared/marketplace/seatgeek/listingPlan.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
@@ -78,8 +86,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const links = await linkEvents(sb, channels);
     const stubhub = await planStubHubEvents(sb, !!channels.get("stubhub")?.findEvents);
     const listings = await planStubHubListings(sb);
+    const seatgeek = await planSeatGeekAllocations(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, stubhub, listings, automatiq });
+    return json({ links, stubhub, listings, seatgeek, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -220,6 +229,49 @@ async function planStubHubListings(sb: SupabaseClient) {
   return { mode: "dry-run", allocations: rows.length, planned, failed };
 }
 
+// ── 1c. SeatGeek listings (dry-run) ──────────────────────────────────
+
+async function planSeatGeekAllocations(sb: SupabaseClient) {
+  const { data, error } = await sb
+    .from("exos_distribution_listings")
+    .select("id, event_id, requested_qty, unit_price, planned_listing, " +
+      "exos_events(name, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits), " +
+      "exos_ticket_tiers(name, price, section_label)")
+    .eq("channel", "seatgeek")
+    .gt("requested_qty", 0)
+    .not("tier_id", "is", null)
+    .is("external_listing_id", null)
+    .in("status", ["pending", "planned", "failed"])
+    .limit(200);
+  if (error) throw new Error(`read seatgeek allocations: ${error.message}`);
+  const rows = (data ?? []) as unknown as AllocationRow[];
+  if (!rows.length) return { allocations: 0, planned: 0, failed: 0 };
+
+  const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
+    .eq("channel", "seatgeek").in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
+  const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
+
+  let planned = 0;
+  let failed = 0;
+  for (const r of rows) {
+    let plan: unknown;
+    try {
+      plan = planSeatGeekListings({
+        id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+        tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
+      });
+      planned++;
+    } catch (e) {
+      plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
+      failed++;
+    }
+    if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
+    const { error: upErr } = await sb.from("exos_distribution_listings").update({ planned_listing: plan }).eq("id", r.id);
+    if (upErr) console.error("exos-distribute: seatgeek planned_listing not stored", r.id, upErr.message);
+  }
+  return { mode: "dry-run", allocations: rows.length, planned, failed };
+}
+
 // ── 2. Automatiq listings (gated scaffold) ───────────────────────────
 
 async function pushAutomatiq(sb: SupabaseClient) {
@@ -233,7 +285,8 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .from("exos_distribution_listings")
     .select("id, event_id, org_id, channel, requested_qty, unit_price")
     .eq("status", "pending")
-    .neq("channel", "stubhub")
+    // StubHub and SeatGeek are listed directly (passes 1b / 1c), not via Automatiq.
+    .not("channel", "in", "(stubhub,seatgeek)")
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);
 

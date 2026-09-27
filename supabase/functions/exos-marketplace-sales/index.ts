@@ -1,11 +1,18 @@
 // exos-marketplace-sales — marketplace sales become Exos tickets
 // (mig 20260926192000; the marketplace layer is _shared/marketplace).
 //
-// StubHub only for now. Two ways in:
-//   * POST with x-cron-secret (pg_cron): poll GET /sales/recentupdates
-//     (seller token, read-only)
+// StubHub and SeatGeek. Ways in:
+//   * POST with x-cron-secret (pg_cron): poll StubHub GET /sales/recentupdates
+//     and SeatGeek GET /orders (seller tokens, read-only)
 //   * POST from StubHub's Sales webhook: Authorization must equal
 //     STUBHUB_WEBHOOK_AUTHORIZATION (the value registered with the webhook).
+//   * POST from SeatGeek's Seller Direct webhook (X-Sellerdirect-* headers):
+//     Authorization must be "Bearer SEATGEEK_WEBHOOK_TOKEN" (the token given
+//     to SeatGeek at setup). order.created / order.broken go through the same
+//     record + fulfil path; listing.visibility / listing.event.inactive are
+//     noted on the allocation row for the organizer. SeatGeek wants a 2xx
+//     within 10 seconds and retries only 3 times, so polling stays on as the
+//     safety net.
 //
 // For each sale: exos_record_marketplace_order keeps it only if it sold from
 // an Exos listing (the seller accounts also carry broker inventory);
@@ -22,7 +29,9 @@
 // EXOS_APP_BASE_URL (e.g. https://vibepass-storefront-test.onrender.com/bridge).
 // StubHub (optional): STUBHUB_ENV, STUBHUB_CLIENT_ID, STUBHUB_CLIENT_SECRET,
 // STUBHUB_REFRESH_TOKEN (seller login, read:sales + read:ticketholders),
-// STUBHUB_WEBHOOK_AUTHORIZATION. Deploy with --no-verify-jwt (the webhook
+// STUBHUB_WEBHOOK_AUTHORIZATION. SeatGeek (optional): SEATGEEK_API_TOKEN
+// (Seller Direct seller token; orders + customer reads), SEATGEEK_WEBHOOK_TOKEN.
+// Deploy with --no-verify-jwt (the webhook
 // and cron carry their own auth). Deploying is operator-gated.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -35,6 +44,14 @@ import { buyerEmail } from "../_shared/marketplace/stubhub/fulfilment.ts";
 import { STUBHUB_ENVIRONMENTS } from "../_shared/marketplace/stubhub/transport.ts";
 import { parseWebhookPayload, verifyWebhookAuthorization } from "../_shared/marketplace/stubhub/webhook.ts";
 import type { Sale } from "../_shared/marketplace/stubhub/types.ts";
+import { SeatGeekClient, customerEmail } from "../_shared/marketplace/seatgeek/client.ts";
+import type { SeatGeekOrder } from "../_shared/marketplace/seatgeek/types.ts";
+import { allocationIdFromSellerListingId } from "../_shared/marketplace/seatgeek/listingPlan.ts";
+import {
+  parseSeatGeekNotification,
+  routeSeatGeekNotification,
+  verifySeatGeekWebhook,
+} from "../_shared/marketplace/seatgeek/webhook.ts";
 
 const LOOKBACK_HOURS = 6;
 const env = (k: string) => Deno.env.get(k);
@@ -43,6 +60,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!);
   const channels = channelsFromEnv(env);
+
+  // SeatGeek webhook (its own bearer token, no cron secret).
+  if (!req.headers.get("x-cron-secret") && req.headers.get("x-sellerdirect-notification-type")) {
+    const token = env("SEATGEEK_WEBHOOK_TOKEN") ?? "";
+    if (!verifySeatGeekWebhook(req.headers.get("authorization"), token)) return json({ error: "unauthorized" }, 401);
+    try {
+      const n = parseSeatGeekNotification(await req.json());
+      if (!n) return json({ ignored: "schema version" });
+      const route = routeSeatGeekNotification(n);
+      console.log("exos-marketplace-sales: SeatGeek notification", n.metadata.notification_type, n.metadata.notification_id, n.data.length);
+      if (route.kind === "orders") {
+        const sg = seatgeekClient();
+        const out = await ingest(sb, channels.get("seatgeek")!, route.orders,
+          sg ? async (s) => customerEmail(await sg.getOrderCustomer(s.externalOrderId)) : undefined);
+        return json(out);
+      }
+      if (route.kind === "attention") return json({ noted: await noteSeatGeekListingIssues(sb, n.metadata.notification_type, route.items) });
+      return json({ ignored: n.metadata.notification_type });
+    } catch (e) {
+      console.error("exos-marketplace-sales: SeatGeek webhook failed", e);
+      // 500 so SeatGeek retries; ingest is idempotent per order.
+      return json({ error: String(e) }, 500);
+    }
+  }
 
   // StubHub webhook (its own auth header, no cron secret).
   const webhookAuth = env("STUBHUB_WEBHOOK_AUTHORIZATION");
@@ -54,7 +95,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const payload = parseWebhookPayload(await req.json());
       const sale = payload._embedded?.sale;
       if (payload.kind !== "Sales" || !sale) return json({ ignored: payload.kind });
-      const out = await ingest(sb, channels.get("stubhub")!, [sale], stubhubClient(sb));
+      const sh = stubhubClient(sb);
+      const out = await ingest(sb, channels.get("stubhub")!, [sale], stubhubBuyerEmail(sh));
       return json(out);
     } catch (e) {
       console.error("exos-marketplace-sales: webhook failed", e);
@@ -71,9 +113,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const sh = stubhubClient(sb);
     if (sh) {
-      result.stubhub = await ingest(sb, channels.get("stubhub")!, await allSaleUpdates(sh, since), sh);
+      result.stubhub = await ingest(sb, channels.get("stubhub")!, await allSaleUpdates(sh, since), stubhubBuyerEmail(sh));
     } else {
       result.stubhub = { skipped: "no StubHub seller credentials" };
+    }
+
+    const sg = seatgeekClient();
+    if (sg) {
+      const orders = await allSeatGeekOrders(sg, since);
+      const seen = new Set(orders.map((o) => String(o.id)));
+      orders.push(...await recheckSeatGeekOrders(sb, sg, seen));
+      result.seatgeek = await ingest(sb, channels.get("seatgeek")!, orders,
+        async (s) => customerEmail(await sg.getOrderCustomer(s.externalOrderId)));
+    } else {
+      result.seatgeek = { skipped: "no SeatGeek seller token" };
     }
     return json(result);
   } catch (e) {
@@ -107,6 +160,87 @@ function stubhubClient(sb: SupabaseClient): StubHubClient | undefined {
   });
 }
 
+function seatgeekClient(): SeatGeekClient | undefined {
+  const token = env("SEATGEEK_API_TOKEN")?.trim();
+  return token ? new SeatGeekClient({ token: () => token }) : undefined;
+}
+
+// The buyer's email costs a call, so it's fetched only for sales on Exos
+// listings (see ingest).
+type EmailLookup = ((sale: MarketplaceSale) => Promise<string | null>) | undefined;
+function stubhubBuyerEmail(sh: StubHubClient | undefined): EmailLookup {
+  return sh ? async (s) => buyerEmail(await sh.listSaleTicketHolders(Number(s.externalOrderId))) : undefined;
+}
+
+// SeatGeek orders placed since `since`, every page (the account carries
+// broker orders too). GET /orders filters on when an order was PLACED, so a
+// cancellation of an older order isn't seen here; that stays for a human.
+const SG_PER_PAGE = 200;
+async function allSeatGeekOrders(sg: SeatGeekClient, since: Date): Promise<SeatGeekOrder[]> {
+  const out: SeatGeekOrder[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await sg.listOrders({ start_date: since, page, per_page: SG_PER_PAGE });
+    const orders = res.orders ?? [];
+    out.push(...orders);
+    const total = res.meta?.total ?? null;
+    if (orders.length < SG_PER_PAGE || (total != null && out.length >= total)) return out;
+  }
+  console.error(`exos-marketplace-sales: stopped after ${MAX_PAGES} pages of SeatGeek orders`);
+  return out;
+}
+
+// listing.visibility / listing.event.inactive: say on the allocation row why
+// SeatGeek isn't showing it (the event editor shows planned_listing errors).
+// Other attention types (order.retransfer, order.fulfillment.error) are logged.
+async function noteSeatGeekListingIssues(sb: SupabaseClient, type: string, items: unknown[]): Promise<number> {
+  let noted = 0;
+  for (const raw of items) {
+    const it = raw as { seller_listing_id?: string; hidden_reason_code?: string; hidden_reason_description?: string; reason?: string; event_name?: string };
+    const alloc = allocationIdFromSellerListingId(it.seller_listing_id);
+    if (!alloc) {
+      console.warn("exos-marketplace-sales: SeatGeek", type, JSON.stringify(raw).slice(0, 500));
+      continue;
+    }
+    const why = type === "listing.visibility"
+      ? `SeatGeek is hiding listing ${it.seller_listing_id}: ${it.hidden_reason_description ?? it.hidden_reason_code ?? "no reason given"}`
+      : `SeatGeek event inactive for listing ${it.seller_listing_id}: ${it.reason ?? "unknown"}`;
+    const { error } = await sb.from("exos_distribution_listings")
+      .update({ error: why.slice(0, 500), updated_at: new Date().toISOString() })
+      .eq("id", alloc).eq("channel", "seatgeek");
+    if (error) console.error("exos-marketplace-sales: SeatGeek listing issue not stored", alloc, error.message);
+    else noted++;
+  }
+  return noted;
+}
+
+// Orders Exos already has, re-read one by one (GET /order), oldest check
+// first, so a later status change (a cancellation) still reaches
+// exos_record_marketplace_order. A few per run.
+const SG_RECHECK_PER_RUN = 50;
+async function recheckSeatGeekOrders(sb: SupabaseClient, sg: SeatGeekClient, skip: Set<string>): Promise<SeatGeekOrder[]> {
+  const { data, error } = await sb.from("exos_marketplace_orders")
+    .select("external_order_id")
+    .eq("channel", "seatgeek")
+    .in("status", ["received", "fulfilled", "needs_attention"])
+    .gt("created_at", new Date(Date.now() - 60 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(SG_RECHECK_PER_RUN);
+  if (error) {
+    console.error("exos-marketplace-sales: SeatGeek recheck list failed", error.message);
+    return [];
+  }
+  const out: SeatGeekOrder[] = [];
+  for (const r of (data ?? []) as Array<{ external_order_id: string }>) {
+    if (skip.has(r.external_order_id)) continue;
+    try {
+      out.push(await sg.getOrder(r.external_order_id));
+    } catch (e) {
+      console.error("exos-marketplace-sales: SeatGeek order recheck failed", r.external_order_id, String(e));
+    }
+  }
+  return out;
+}
+
 // Every page: the seller account also carries broker sales, so Exos's can be
 // anywhere in the list.
 const PAGE_SIZE = 100;
@@ -124,14 +258,14 @@ async function allSaleUpdates(sh: StubHubClient, since: Date): Promise<Sale[]> {
   return out;
 }
 
-async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unknown[], sh: StubHubClient | undefined) {
+async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unknown[], lookupEmail: EmailLookup) {
   const counts = { seen: raws.length, exos: 0, fulfilled: 0, needs_attention: 0, cancelled: 0, errors: 0 };
   for (const raw of raws) {
     try {
       const sale: MarketplaceSale = channel.normalizeSale!(raw);
       // The buyer's email costs a call: only for sales on Exos listings, once.
-      if (channel.id === "stubhub" && sh && !sale.buyerEmail && sale.externalListingId && await isExosListing(sb, "stubhub", sale.externalListingId)) {
-        sale.buyerEmail = buyerEmail(await sh.listSaleTicketHolders(Number(sale.externalOrderId)));
+      if (lookupEmail && !sale.buyerEmail && sale.externalListingId && await isExosListing(sb, channel.id, sale.externalListingId)) {
+        sale.buyerEmail = await lookupEmail(sale);
       }
       const { data: rec, error: rErr } = await sb.rpc("exos_record_marketplace_order", {
         p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale) : raw),

@@ -155,11 +155,14 @@ describe('StubHub catalog search', () => {
 });
 
 describe('channelsFromEnv', () => {
-  it('wires StubHub only; catalog search only with credentials', () => {
+  it('wires StubHub and SeatGeek; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub']);
+    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek']);
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
-    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b' };
-    expect(channelsFromEnv((k) => env[k]).get('stubhub')!.capabilities.findEvents).toBe(true);
+    expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
+    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c' };
+    const withCreds = channelsFromEnv((k) => env[k]);
+    expect(withCreds.get('stubhub')!.capabilities.findEvents).toBe(true);
+    expect(withCreds.get('seatgeek')!.capabilities.findEvents).toBe(true);
   });
 });
