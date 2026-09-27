@@ -269,7 +269,7 @@ export default function OrgMembers() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
-              Recipient signs in with this email; invite expires in 14 days. Ownership transfer requires admin tooling.
+              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
             </p>
           </div>
         )}

@@ -102,7 +102,7 @@ export function voucherErrorMessage(reason: string | null): string {
   switch (reason) {
     case 'expired': return 'That code has expired.';
     case 'already used': return 'That code has already been used.';
-    case 'reserved for another buyer': return 'That code is reserved for a different email. Sign in with the email it was sent to.';
+    case 'reserved for another buyer': return 'That code has already been claimed.';
     default: return "That code isn't valid for this event. Check the spelling and try again.";
   }
 }

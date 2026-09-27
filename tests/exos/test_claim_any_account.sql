@@ -16,6 +16,8 @@
 --      (recipient email + typed name, escaped, claim link); the claim mails
 --      them who accepted it; a two-argument call still works; comps and
 --      marketplace sales don't mail the organizer per ticket
+--   L8 a code reserved to one email is redeemed by whoever uses it first,
+--      and a single-use code still works once
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_claim_any_account.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -215,6 +217,23 @@ BEGIN
   SELECT count(*) INTO n FROM public.exos_mail WHERE template = 'transfer-claimed' AND to_email = '7a-owner@x.com';
   IF n <> 0 THEN RAISE EXCEPTION 'L7 FAIL: organizer got % claimed mails', n; END IF;
   RAISE NOTICE 'L7 ok: sender receipts on send (name + email) and on accept (who claimed it)';
+END $$;
+
+-- L8 ---------------------------------------------------------------------------
+DO $$
+DECLARE v_code text; r record;
+BEGIN
+  PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000a0', '7a-owner@x.com');
+  v_code := public.exos_issue_voucher('7a000000-0000-0000-0000-0000000000e1', NULL, 'vip@x.com', false, NULL, 1, NULL, 'for vip');
+  SELECT * INTO r FROM public.exos_check_voucher('7a000000-0000-0000-0000-0000000000e1', v_code, 'someone-else@x.com');
+  IF NOT r.is_valid THEN RAISE EXCEPTION 'L8 FAIL: reserved code refused another email (%)', r.reason; END IF;
+  IF NOT public.exos_consume_voucher(r.voucher_id) THEN RAISE EXCEPTION 'L8 FAIL: consume'; END IF;
+  SELECT * INTO r FROM public.exos_check_voucher('7a000000-0000-0000-0000-0000000000e1', v_code, 'vip@x.com');
+  IF r.is_valid OR r.reason <> 'already used' THEN RAISE EXCEPTION 'L8 FAIL: single-use code reused (%)', r.reason; END IF;
+  IF position('reserved_email IS NULL' in pg_get_functiondef('public.exos_fulfill_checkout(text)'::regprocedure)) > 0 THEN
+    RAISE EXCEPTION 'L8 FAIL: fulfillment still checks the reserved email';
+  END IF;
+  RAISE NOTICE 'L8 ok: reserved code, first redeemer wins; single use holds';
 END $$;
 
 ROLLBACK;

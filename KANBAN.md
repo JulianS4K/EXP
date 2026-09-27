@@ -180,11 +180,12 @@ EXP#12 + mig `20260927010000` (tested: `test_claim_any_account.sql` L1–L7, e2e
   (who claimed it, when) receipts, sent by the database.
 - [ ] Prod rollout, in order: redeploy `exos-mail-drain` with `EXOS_APP_URL` set (deployed v1
   doesn't fill `{{app_url}}`), apply the migration, deploy the SPA. Operator-gated.
-- [ ] **Decide: org staff invites and reserved voucher codes.** Both still require signing in
-  with the exact email (`ClaimInvite.tsx` / `exos_claim_invite`, voucher "reserved for another
-  buyer"). They grant staff access or a discount rather than a ticket, so they were left as is.
-  Options: keep the email match; or claim-by-link like tickets, with an owner/manager receipt
-  naming the account that joined (invites) and a first-redeemer-wins rule (vouchers).
+- ✅ Org staff invites and reserved voucher codes: first come, first served (operator,
+  2026-09-27). Any verified account with the invite link joins; the invite mail carries the link
+  and the inviter gets a receipt naming who joined (remove under Members if wrong). A voucher's
+  reserved email only records who it was for; single-use codes still work once.
+- [ ] Revisit later: whether invites (staff access) should go back to an email match, or add an
+  owner "approve new member" step, if first come proves too loose.
 
 ## Accessible tickets 2026-09-26
 

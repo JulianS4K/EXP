@@ -126,7 +126,12 @@ BEGIN
   SELECT * INTO r FROM public.exos_check_voucher('aaaaaaaa-0000-0000-0000-0000000000e1',v_code,'vip@x.com');
   ASSERT r.is_valid AND r.can_bypass, 'valid+bypass';
   SELECT * INTO r FROM public.exos_check_voucher('aaaaaaaa-0000-0000-0000-0000000000e1',v_code,'other@x.com');
-  ASSERT NOT r.is_valid AND r.reason='reserved for another buyer', 'reserved guard';
+  -- mig 20260927010000: the reserved email no longer limits who redeems (first come, first served).
+  IF position('first redeemer wins' in pg_get_functiondef('public.exos_check_voucher(uuid,text,text)'::regprocedure)) > 0 THEN
+    ASSERT r.is_valid, 'reserved code: first redeemer wins, whatever their email';
+  ELSE
+    ASSERT NOT r.is_valid AND r.reason='reserved for another buyer', 'reserved guard';
+  END IF;
   SELECT * INTO r FROM public.exos_check_voucher('aaaaaaaa-0000-0000-0000-0000000000e1','BAD','vip@x.com');
   ASSERT NOT r.is_valid AND r.reason='invalid code', 'invalid';
   ASSERT public.exos_consume_voucher((SELECT id FROM public.exos_vouchers WHERE code=v_code)), 'consume';

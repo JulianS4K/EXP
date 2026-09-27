@@ -4,8 +4,10 @@
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: TABLE exos_transfers (+receiver_name, +notify_sender),
---              exos_mail (template 'transfer-sent')
+--              exos_mail (templates 'transfer-sent', 'invite-accepted')
 --              FUNCTION exos_create_transfer (+p_receiver_name; replaced),
+--                exos_claim_invite, exos_check_voucher, exos_fulfill_checkout
+--                (patched), exos_invite_preview (new),
 --                exos_mail_escape (new)
 --              FUNCTION exos_claim_transfer, exos_queue_mail,
 --                exos_fulfil_marketplace_order, exos_issue_ticket_to_email,
@@ -57,6 +59,19 @@
 --    sender; comps, box office and marketplace sales don't mail the
 --    organizer per ticket. exos_queue_mail's client-called 'transfer-claimed'
 --    is refused for those transfers so an older SPA can't double-send.
+--
+-- 6. First come, first served for org invites and reserved voucher codes
+--    too (operator decision 2026-09-27):
+--    - exos_claim_invite: any verified account with the invite link joins;
+--      expiry, "never demote an owner" and "a stale invite never changes a
+--      membership edited after it was sent" stay. The invite mail carries the
+--      link ({{app_url}}/invite/<token>; it said "open the app"), and the
+--      person who sent the invite gets an 'invite-accepted' receipt naming the
+--      account that joined, so they can remove it. exos_invite_preview lets
+--      the invite page load for an account RLS doesn't show the row to.
+--    - Vouchers: reserved_email no longer restricts who redeems (it records
+--      who the code was for). exos_check_voucher and exos_fulfill_checkout
+--      drop the check; max_uses still makes a single-use code single-use.
 --
 -- The transfer id (a random UUID, only in the claim link) is the bearer
 -- secret, as it already was for whoever the link reached.
@@ -168,8 +183,12 @@ BEGIN
     FROM pg_constraint
    WHERE conrelid = 'public.exos_mail'::regclass AND contype = 'c'
      AND pg_get_constraintdef(oid) LIKE '%transfer-initiated%';
-  IF c.def IS NULL OR position('transfer-sent' in c.def) > 0 THEN RETURN; END IF;
-  v_def := replace(c.def, 'ARRAY[', 'ARRAY[''transfer-sent''::text, ');
+  IF c.def IS NULL OR position('invite-accepted' in c.def) > 0 THEN RETURN; END IF;
+  v_def := c.def;
+  IF position('transfer-sent' in v_def) = 0 THEN
+    v_def := replace(v_def, 'ARRAY[', 'ARRAY[''transfer-sent''::text, ');
+  END IF;
+  v_def := replace(v_def, 'ARRAY[', 'ARRAY[''invite-accepted''::text, ');
   EXECUTE format('ALTER TABLE public.exos_mail DROP CONSTRAINT %I', c.conname);
   EXECUTE format('ALTER TABLE public.exos_mail ADD CONSTRAINT %I %s', c.conname, v_def);
 END $$;
@@ -313,6 +332,100 @@ SELECT pg_temp.exos_patch('public.exos_claim_transfer(uuid)',
   END IF;
 
   RETURN tr.ticket_id;');
+
+-- ---------------------------------------------------------------------------
+-- 6. First come, first served: org invites and reserved voucher codes
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.exos_patch('public.exos_claim_invite(uuid)',
+  'any verified account with the link joins',
+  '  IF v_email = '''' OR lower(v_inv.email) <> v_email THEN
+    RAISE EXCEPTION ''exos_claim_invite: invite email does not match caller'';
+  END IF;',
+  '  -- any verified account with the link joins, first come first served
+  -- (mig 20260927010000); the inviter gets a receipt naming it.');
+
+SELECT pg_temp.exos_patch('public.exos_claim_invite(uuid)',
+  'invite accepted receipt',
+  '  RETURN v_inv.org_id;',
+  '  -- invite accepted receipt (mig 20260927010000)
+  DECLARE
+    v_joiner text;
+    v_to     text;
+    v_org    text;
+  BEGIN
+    IF to_regclass(''public.exos_profiles'') IS NOT NULL THEN
+      EXECUTE ''SELECT nullif(btrim(display_name), '''''''') FROM public.exos_profiles WHERE id = $1''
+         INTO v_joiner USING v_uid;
+    END IF;
+    SELECT lower(u.email) INTO v_to FROM auth.users u WHERE u.id = v_inv.created_by;
+    SELECT o.name INTO v_org FROM public.exos_orgs o WHERE o.id = v_inv.org_id;
+    IF coalesce(v_to, '''') <> '''' THEN
+      INSERT INTO public.exos_mail (template, to_email, subject, html, created_by, status)
+      VALUES (''invite-accepted'', v_to,
+              left(''Your invite to '' || coalesce(v_org, ''your organization'') || '' was accepted'', 200),
+              ''<p>Your invite to join <strong>'' || public.exos_mail_escape(coalesce(v_org, ''your organization'')) ||
+              ''</strong> as '' || public.exos_mail_escape(v_inv.role) || '', sent to '' || public.exos_mail_escape(v_inv.email) ||
+              '' on '' || to_char(v_inv.created_at AT TIME ZONE ''UTC'', ''Mon FMDD, YYYY'') ||
+              '', was accepted on '' || to_char(now() AT TIME ZONE ''UTC'', ''Mon FMDD, YYYY "at" HH24:MI "UTC"'') ||
+              '' by <strong>'' ||
+              CASE WHEN v_joiner IS NOT NULL
+                   THEN public.exos_mail_escape(v_joiner) || ''</strong> ('' || public.exos_mail_escape(v_email) || '')''
+                   ELSE public.exos_mail_escape(v_email) || ''</strong>'' END ||
+              ''.</p><p>If that isn''''t who you meant, remove them under Members.</p>'',
+              v_uid, ''pending'');
+    END IF;
+  END;
+
+  RETURN v_inv.org_id;');
+
+SELECT pg_temp.exos_patch('public.exos_queue_mail(text, uuid)',
+  '{{app_url}}/invite/',
+  '''<p>You have been invited to join an organization on Exos. Open the app to accept.</p>''',
+  '''<p>You have been invited to join an organization on Exos.</p><p><a href="{{app_url}}/invite/'' || i.token ||
+           ''">Accept the invite</a> and sign in with any Exos account, or create one.</p>''
+           || ''<p>Whoever accepts the link first joins, so keep this email to yourself.</p>''');
+
+-- The invite page, for an account RLS doesn't show the row to: no email.
+DO $$
+BEGIN
+  IF to_regclass('public.exos_org_invites') IS NULL THEN
+    RAISE NOTICE 'exos_org_invites: not present, exos_invite_preview skipped';
+    RETURN;
+  END IF;
+  EXECUTE $f$
+    CREATE OR REPLACE FUNCTION public.exos_invite_preview(p_token uuid)
+    RETURNS TABLE (token uuid, org_id uuid, role text, status text,
+                   expires_at timestamptz, created_at timestamptz)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path = public, pg_temp
+    AS $b$
+      SELECT i.token, i.org_id, i.role::text, i.status::text,
+             least(coalesce(i.expires_at, i.created_at + interval '14 days'),
+                   i.created_at + interval '30 days'),
+             i.created_at
+        FROM public.exos_org_invites i
+       WHERE i.token = p_token;
+    $b$;
+    REVOKE ALL ON FUNCTION public.exos_invite_preview(uuid) FROM PUBLIC;
+    GRANT  EXECUTE ON FUNCTION public.exos_invite_preview(uuid) TO anon, authenticated;
+  $f$;
+END $$;
+
+SELECT pg_temp.exos_patch('public.exos_check_voucher(uuid, text, text)',
+  'first redeemer wins',
+  '  IF v.reserved_email IS NOT NULL AND v.reserved_email <> v_email THEN
+    RETURN QUERY SELECT false, NULL::uuid, NULL::uuid, NULL::boolean, NULL::numeric, ''reserved for another buyer''; RETURN;
+  END IF;',
+  '  -- reserved_email records who the code was for; it no longer limits who
+  -- redeems it: first redeemer wins (mig 20260927010000).');
+
+SELECT pg_temp.exos_patch('public.exos_fulfill_checkout(text)',
+  'first redeemer wins',
+  '              AND (v.reserved_email IS NULL
+                   OR lower(btrim(v.reserved_email)) = lower(btrim(coalesce(s.buyer_email, ''''))))
+',
+  '              -- reserved_email no longer limits who redeems: first redeemer wins
+');
 
 -- 4. claim page preview -------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.exos_transfer_claim_preview(p_transfer_id uuid)
