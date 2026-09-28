@@ -27,7 +27,7 @@ export interface PlannedGoTicketsListings extends PlannedMarketplaceListings<GoT
 }
 
 export function planGoTicketsListings(a: GoTicketsAllocation): PlannedGoTicketsListings {
-  const set = planExosListings(a, 'GoTickets');
+  const set = planExosListings(a, 'GoTickets', 'gotickets');
   requireCurrency(set, 'USD', 'GoTickets');
   const sh = a.stubhubEventId?.trim();
   const sg = a.seatgeekEventId?.trim();

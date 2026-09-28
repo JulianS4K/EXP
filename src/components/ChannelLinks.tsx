@@ -15,7 +15,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { setChannelAllocation, setChannelPrice, setMarketSplit, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { allocationCellStatus, parseMarketplacePrice, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
-import { MARKET_SPLITS, MARKET_SPLIT_LABEL, formatSeatRanges, parseSeatRanges, type MarketSplit } from '../lib/marketplace';
+import { MARKET_SPLITS, MARKET_SPLIT_LABEL, formatSeatRanges, netEqualListPrice, parseSeatRanges, type MarketSplit } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
@@ -311,8 +311,9 @@ export function MarketplaceGrid({
         marketplace. "Same on all" copies the first column across. Each one holds only a few seats at a time (twice your max per order)
         and is topped up from the free seats as it sells, so the event is live everywhere while Exos sells the rest, and a
         seat is never on sale in two places. 0 takes the listing down and gives its seats back. The price under each
-        number is what that marketplace lists it at: leave it blank for the ticket price. It can be higher, never lower
-        than what Exos charges. "Split" says what a marketplace buyer can take from a listing: any number, any number
+        number is what that marketplace lists it at. Leave it blank and Exos lists it so you net the ticket price there
+        too: the marketplace's seller fee goes on top (TEvo 3%, SeatGeek 5%, the others as Exos learns them). It can be
+        higher, never lower than what Exos charges. "Split" says what a marketplace buyer can take from a listing: any number, any number
         that doesn't leave one seat behind, pairs only, or the whole listing, on every marketplace.
         {maxPerOrder
           ? ` One marketplace order can take at most ${maxPerOrder} (your max per order).`
@@ -369,7 +370,7 @@ export function MarketplaceGrid({
                       />
                       <input
                         type="text" inputMode="decimal" aria-label={`${t.name} price on ${LABEL[ch]}`}
-                        placeholder={t.price.toFixed(2)} title="Price on this marketplace; blank = the ticket price"
+                        placeholder={netEqualListPrice(ch, t.price).toFixed(2)} title="Price on this marketplace; blank = priced so you net the ticket price"
                         value={priceValue(ch, t.id)} disabled={busy || r?.status === 'delisting'}
                         onChange={(e) => setPriceDraft({ ...priceDraft, [key(ch, t.id)]: e.target.value })}
                         className="mt-1 block w-20 bg-black border border-white/10 px-2 py-1 text-white placeholder:text-white/30 disabled:opacity-50"

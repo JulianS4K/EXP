@@ -40,7 +40,7 @@ export interface PlannedListing extends PlannedMarketplaceListings<Record<string
 }
 
 export function planStubHubListing(a: AllocationForListing): PlannedListing {
-  const set = planExosListings(a, 'StubHub');
+  const set = planExosListings(a, 'StubHub', 'stubhub');
   const known = a.stubhubEventId?.trim();
   const requested = known ? null : exosEventForListing(a.event!);
   const listings = set.listings.map((l) => {

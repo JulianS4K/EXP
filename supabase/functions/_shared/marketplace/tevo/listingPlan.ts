@@ -47,7 +47,7 @@ const posInt = (v: unknown): number | undefined => {
 };
 
 export function planTevoListings(a: TevoAllocation): PlannedTevoListings {
-  const set = planExosListings(a, 'Ticket Evolution');
+  const set = planExosListings(a, 'Ticket Evolution', 'evo');
   requireCurrency(set, 'USD', 'Ticket Evolution');
   const eventId = posInt(a.tevoEventId);
   const officeId = posInt(a.officeId);

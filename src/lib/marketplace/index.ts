@@ -16,3 +16,4 @@ export * from '../../../supabase/functions/_shared/marketplace/sync.ts';
 export * from '../../../supabase/functions/_shared/marketplace/listingIds.ts';
 export * from '../../../supabase/functions/_shared/marketplace/exosListing.ts';
 export * from '../../../supabase/functions/_shared/marketplace/listingStandard.ts';
+export * from '../../../supabase/functions/_shared/marketplace/fees.ts';

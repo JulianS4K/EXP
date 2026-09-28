@@ -49,7 +49,7 @@ export interface PlannedSeatGeekListings extends PlannedMarketplaceListings<Seat
 export function planSeatGeekListings(a: SeatGeekAllocation): PlannedSeatGeekListings {
   const eventId = a.seatgeekEventId?.trim();
   if (eventId && !/^\d+$/.test(eventId)) throw new Error(`"${eventId}" is not a SeatGeek event id`);
-  const set = planExosListings(a, 'SeatGeek');
+  const set = planExosListings(a, 'SeatGeek', 'seatgeek');
   requireCurrency(set, 'USD', 'SeatGeek');
   const unresolved: string[] = [];
   if (!eventId) unresolved.push('event_id (not linked: SeatGeek matches on the event title and venue)');

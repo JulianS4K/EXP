@@ -25,6 +25,14 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Net-equal marketplace pricing 2026-09-29
+
+- 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
+  applied): each store lists grossed up for its seller fee so the organizer nets the Exos price everywhere
+  (TEvo 3%, SeatGeek 5%, both measured on real orders). Every sale records its listed price and the fee taken;
+  `exos_marketplace_fee_rates` gives the realized rate per store. Open: StubHub, Gametime, GoTickets and Vivid rates
+  (payout-only data), filled in from Exos's own sales.
+
 ## Events on Google (Search / Maps "Tickets") 2026-09-29
 
 - 🟡 **Google events feed** (`exos-google-feed`, `_shared/googleEvents/feed.ts`, authored, not deployed;

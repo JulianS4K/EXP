@@ -30,7 +30,7 @@ export interface PlannedVividListings extends PlannedMarketplaceListings<VividLi
 }
 
 export function planVividListings(a: VividAllocation): PlannedVividListings {
-  const set = planExosListings(a, 'Vivid Seats');
+  const set = planExosListings(a, 'Vivid Seats', 'vivid');
   requireCurrency(set, 'USD', 'Vivid Seats');
   const ref = exosEventRef({ ...a.event!, id: a.event!.id ?? a.id })!;
   const pid = a.vividProductionId?.trim();

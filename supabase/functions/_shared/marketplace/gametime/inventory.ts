@@ -50,7 +50,7 @@ function time12(t: string): string {
 const money = (n: number) => n.toFixed(2);
 
 export function planGametimeListings(a: GametimeAllocation): PlannedGametimeListings {
-  const set = planExosListings(a, 'Gametime');
+  const set = planExosListings(a, 'Gametime', 'gametime');
   requireCurrency(set, 'USD', 'Gametime');
   const notices = [...set.notices];
   const listings = set.listings.map((l) => {

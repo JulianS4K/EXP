@@ -37,7 +37,8 @@ import { effectiveTierPrice } from '../pricing.ts';
 import { exosEventRef, localDate, type ExosEventRowForChannels } from './channel.ts';
 import { ageLimit, marketSection } from './eventStandard.ts';
 import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, stableListingNumbers } from './listingIds.ts';
-import { parseMarketSplit, splitBlockMax, type MarketSplit } from './listingStandard.ts';
+import { parseMarketSplit, splitBlockMax, type MarketSplit, type SplitChannel } from './listingStandard.ts';
+import { netEqualListPrice } from './fees.ts';
 import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
 
 export const EXOS_LISTING_NOTES =
@@ -102,7 +103,10 @@ export interface ExosListing {
   quantity: number;
   section: string;
   row: 'GA';
+  /** The list price: net-equal to the Exos price (./fees.ts), or the organizer's higher marketplace price. */
   price: number;
+  /** What Exos charges for the ticket type now: what the organizer should net per ticket. */
+  exos_price: number;
   face_value: number | null;
   currency: string;
   event: { name: string; venue: string; starts_at: string; local_date: string; local_time: string | null };
@@ -127,6 +131,8 @@ export interface PlannedListingEntry<B = unknown> {
   seat_from: number;
   seat_thru: number;
   quantity: number;
+  /** The per-ticket price listed (mig 20260929062000 reads it onto the sale, to measure the fee). */
+  unit_price?: number;
   request: { endpoint: string; method: string; path: string; body: B };
 }
 
@@ -166,8 +172,12 @@ export function plannedEntries(v: unknown): Array<{ listing_id: string; seat_fro
   return ls.filter((l): l is { listing_id: string } => !!l && typeof (l as { listing_id?: unknown }).listing_id === 'string');
 }
 
-/** The allocation's listings, the same for every marketplace. `label` names the marketplace in errors. */
-export function planExosListings(a: ExosAllocation, label: string): ExosListingSet {
+/**
+ * The allocation's listings, the same for every marketplace. `label` names the
+ * marketplace in errors; `channel` sets its seller fee, which the list price
+ * grosses up for (./fees.ts) so the organizer nets the Exos price there too.
+ */
+export function planExosListings(a: ExosAllocation, label: string, channel?: SplitChannel): ExosListingSet {
   if (!a.tier) throw new Error('the allocation has no ticket type');
   if (!a.event) throw new Error('event not found');
   const ref = exosEventRef({ ...a.event, id: a.event.id ?? a.id });
@@ -176,12 +186,14 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
   const qty = a.list_qty ?? held;
   if (!Number.isInteger(qty) || qty <= 0) throw new Error(`nothing allocated to ${label}`);
   const face = Number(a.tier.price);
-  // The organizer's marketplace price (exos_set_channel_price), never below
-  // what Exos charges for the ticket type now (its scheduled price), even if
-  // that went up after the marketplace price was set. Blank = the Exos price.
+  // Net-equal: the price whose payout, after the marketplace's seller fee, is
+  // what Exos charges for the ticket type now (its scheduled price), so the
+  // organizer nets the same on every store. The organizer's marketplace price
+  // (exos_set_channel_price) wins when higher. Blank = net-equal.
   const exosNow = effectiveTierPrice(face, a.tier.price_schedule ?? []);
+  const floor = channel ? netEqualListPrice(channel, exosNow) : exosNow;
   const custom = a.unit_price === null || a.unit_price === undefined || a.unit_price === '' ? NaN : Number(a.unit_price);
-  const price = Number.isFinite(custom) && custom > exosNow ? custom : exosNow;
+  const price = Number.isFinite(custom) && custom > floor ? custom : floor;
   if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
   // The marketplace-standard section (./eventStandard.ts): price phases list as
   // General Admission, VIP as VIP, the organizer's section label wins.
@@ -223,6 +235,7 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
       section,
       row: 'GA',
       price: Math.round(price * 100) / 100,
+      exos_price: Math.round(exosNow * 100) / 100,
       face_value: Number.isFinite(face) && face > 0 ? Math.round(face * 100) / 100 : null,
       currency: (a.event!.currency || 'USD').toUpperCase(),
       event,
@@ -243,7 +256,7 @@ function evenRuns(runs: SeatRun[]): SeatRun[] {
 
 /** A shared entry for one listing and its marketplace request. */
 export function entryFor<B>(l: ExosListing, request: PlannedListingEntry<B>['request']): PlannedListingEntry<B> {
-  return { listing_id: l.listing_id, seat_from: l.seat_from, seat_thru: l.seat_thru, quantity: l.quantity, request };
+  return { listing_id: l.listing_id, seat_from: l.seat_from, seat_thru: l.seat_thru, quantity: l.quantity, unit_price: l.price, request };
 }
 
 /** Marketplaces that only take one currency. */

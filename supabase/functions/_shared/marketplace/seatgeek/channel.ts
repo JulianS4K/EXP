@@ -52,8 +52,9 @@ export function normalizeSeatGeekOrder(raw: unknown): MarketplaceSale {
     status,
     // Not on the order: GET /orders/customer -> customerEmail().
     buyerEmail: null,
-    // `total` is subtotal less fees: what the seller is paid. SeatGeek is USD.
-    proceeds: Number.isFinite(total) ? { amount: total, currency: 'USD' } : null,
+    // `total` is subtotal less fees (5%, unrounded: 139.05 -> 132.0975): what
+    // the seller is paid, to the cent. SeatGeek is USD.
+    proceeds: Number.isFinite(total) ? { amount: Math.round(total * 100 + 1e-6) / 100, currency: 'USD' } : null,
     confirmBy: null,
     shipBy: null,
     createdAt: o.created ?? null,
