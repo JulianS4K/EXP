@@ -1,7 +1,8 @@
 // Vouchers (pretix-style access tokens) — distinct from discount codes.
 //
 // Buyers validate a code (checkVoucher) before checkout; a valid voucher may
-// unlock a sold-out tier and/or pin a price. Organizers mint/list/delete codes.
+// unlock a sold-out tier, pin a price or take a percent / amount off (promo
+// codes, mig 20260928060000). Organizers mint/list/delete codes.
 // Codes are org-secret (staff RLS); the buyer path only ever gets a yes/no + the
 // grant, never the code list.
 
@@ -15,6 +16,10 @@ export interface VoucherCheck {
   restrictTierId: string | null;
   canBypass: boolean;
   overridePrice: number | null;
+  /** Percent off the scheduled price (0-100 exclusive), or null. */
+  discountPercent: number | null;
+  /** Amount off each ticket, or null. */
+  discountAmount: number | null;
   reason: string | null;
 }
 
@@ -26,6 +31,8 @@ export interface Voucher {
   usedCount: number;
   bypassCapacity: boolean;
   priceOverride: number | null;
+  discountPercent: number | null;
+  discountAmount: number | null;
   reservedEmail: string | null;
   validUntil: string | null;
   comment: string | null;
@@ -39,12 +46,27 @@ export async function checkVoucher(eventId: string, code: string, email?: string
   });
   if (error) throw error;
   const r = Array.isArray(data) ? data[0] : data;
+  const valid = r?.is_valid === true;
+  // What a valid code takes off (mig 20260928060000). Before that migration the
+  // RPC is missing: no discount, as then.
+  let discountPercent: number | null = null;
+  let discountAmount: number | null = null;
+  if (valid) {
+    const { data: d } = await supabase.rpc('exos_voucher_discount', {
+      p_event_id: eventId, p_code: code.trim(), p_email: email ?? null,
+    });
+    const row = Array.isArray(d) ? d[0] : d;
+    discountPercent = row?.discount_percent != null ? Number(row.discount_percent) : null;
+    discountAmount = row?.discount_amount != null ? Number(row.discount_amount) : null;
+  }
   return {
-    valid: r?.is_valid === true,
+    valid,
     voucherId: r?.voucher_id ?? null,
     restrictTierId: r?.restrict_tier_id ?? null,
     canBypass: r?.can_bypass === true,
     overridePrice: r?.override_price != null ? Number(r.override_price) : null,
+    discountPercent,
+    discountAmount,
     reason: r?.reason ?? null,
   };
 }
@@ -71,6 +93,9 @@ export async function issueVoucher(input: {
   reservedEmail?: string | null;
   bypassCapacity?: boolean;
   priceOverride?: number | null;
+  /** Percent off (0-100 exclusive); at most one of priceOverride / discountPercent / discountAmount. */
+  discountPercent?: number | null;
+  discountAmount?: number | null;
   maxUses?: number;
   validHours?: number | null;
   comment?: string | null;
@@ -88,6 +113,9 @@ export async function issueVoucher(input: {
     p_comment: input.comment ?? null,
     // Only sent when set (mig 20260925012000 added it).
     ...(input.code?.trim() ? { p_code: input.code.trim() } : {}),
+    // Only sent when set (mig 20260928060000 added them).
+    ...(input.discountPercent != null ? { p_discount_percent: input.discountPercent } : {}),
+    ...(input.discountAmount != null ? { p_discount_amount: input.discountAmount } : {}),
   });
   if (error) throw error;
   return data as string;
@@ -100,7 +128,10 @@ export async function listVouchers(eventId: string): Promise<Voucher[]> {
   if (error) throw error;
   return (data ?? []).map((r: any) => ({
     id: r.id, code: r.code, tierId: r.tier_id, maxUses: r.max_uses, usedCount: r.used_count,
-    bypassCapacity: r.bypass_capacity, priceOverride: r.price_override, reservedEmail: r.reserved_email,
+    bypassCapacity: r.bypass_capacity, priceOverride: r.price_override,
+    discountPercent: r.discount_percent != null ? Number(r.discount_percent) : null,
+    discountAmount: r.discount_amount != null ? Number(r.discount_amount) : null,
+    reservedEmail: r.reserved_email,
     validUntil: r.valid_until, comment: r.comment, createdAt: r.created_at,
   }));
 }

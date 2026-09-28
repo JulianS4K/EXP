@@ -6,6 +6,7 @@ import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
 import { startCheckout } from '../lib/checkout';
+import { guestCheckoutAllowed } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
 import AddToCalendar from '../components/AddToCalendar';
@@ -28,12 +29,14 @@ import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkout
 import { getVoucherTier } from '../lib/vouchers';
 import { attachReferral } from '../lib/referrals';
 import ShareModal from '../components/ShareModal';
+import GuestCheckoutModal from '../components/GuestCheckoutModal';
 import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
 import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
@@ -55,6 +58,8 @@ export default function EventDetails() {
   const [org, setOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  // Signed-out paid checkout: ask for an email instead of an account.
+  const [guestOpen, setGuestOpen] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
   // Phone buy bar: shown while the buy card is off screen.
   const buyCardRef = useRef<HTMLDivElement>(null);
@@ -222,15 +227,14 @@ export default function EventDetails() {
   };
   
   // All-in: exactly what exos-checkout will charge per ticket — the scheduled
-  // price (or a server-validated voucher's pinned price) plus exclusive tax.
+  // price, after a server-validated code's rule (pinned price, % or $ off;
+  // voucherUnitPrice is the function checkout uses), plus exclusive tax.
   const calculateFinalPrice = () => {
     if (!event) return 0;
     if (!selectedTier) return event.price;
-    const voucherApplies =
-      voucher?.overridePrice != null && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
-    const base = voucherApplies
-      ? (voucher!.overridePrice as number)
-      : effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    const voucherApplies = !!voucher && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
+    const scheduled = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    const base = voucherApplies ? voucherUnitPrice(scheduled, voucher) : scheduled;
     return allInPrice(base, selectedTier.exclusiveTaxPercent);
   };
 
@@ -272,6 +276,46 @@ export default function EventDetails() {
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   const paidNotOnSale = !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
+  // Sign in, then pick up the purchase where the buyer left it.
+  const signInToBuy = async () => {
+    if (!event) return;
+    // Pick up where they left off once signed in (survives the OAuth
+    // round trip, which reloads the page).
+    pendingBuyRef.current = true;
+    // A redirect sign-in (Google/Apple) reloads the page: keep the choice so
+    // it can be put back, never replayed without a tap.
+    try {
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
+    } catch { /* storage blocked */ }
+    toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
+    await signIn();
+  };
+
+  // Paid checkout (signed in, or as a guest with just an email).
+  const goToCheckout = async (tierId: string, guestEmail?: string) => {
+    if (!event) return;
+    setPurchasing(true);
+    try {
+      const url = await startCheckout({
+        eventId: event.id,
+        tierId,
+        quantity,
+        successUrl: publicUrl(guestEmail ? 'my-tickets?checkout=success&guest=1' : 'my-tickets?checkout=success'),
+        cancelUrl: publicUrl(`event/${event.id}`),
+        addons: addonSel.items,
+        voucherCode: voucher?.code,
+        attribution,
+        guestEmail,
+      });
+      clearPrefill(event.id);
+      window.location.href = url; // leave the SPA for Stripe-hosted checkout
+    } catch (err: any) {
+      console.error('Checkout failed:', err);
+      toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
+      setPurchasing(false);
+    }
+  };
+
   const handlePurchase = async () => {
     if (!event) return;
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
@@ -280,16 +324,16 @@ export default function EventDetails() {
       return;
     }
     if (!user) {
-      // Pick up where they left off once signed in (survives the OAuth
-      // round trip, which reloads the page).
-      pendingBuyRef.current = true;
-      // A redirect sign-in (Google/Apple) reloads the page: keep the choice so
-      // it can be put back, never replayed without a tap.
-      try {
-        sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
-      } catch { /* storage blocked */ }
-      toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
-      await signIn();
+      // Paid tickets: check out as a guest with just an email (unless the
+      // organizer switched that off, or the code is a personal capacity-bypass
+      // offer). Free claims still need an account to mint into.
+      const pick = selectedTierId ? allTiers.find((x) => x.id === selectedTierId) : allTiers[0];
+      const paid = (pick?.price ?? event.price ?? 0) > 0 || addonSel.totalCents > 0;
+      if (pick?.id && paid && stripeEnabled && guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass) {
+        setGuestOpen(true);
+        return;
+      }
+      await signInToBuy();
       return;
     }
     // Never fall back to another tier: buying tier 0 when the buyer picked a
@@ -314,25 +358,7 @@ export default function EventDetails() {
         toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
         return;
       }
-      setPurchasing(true);
-      try {
-        const url = await startCheckout({
-          eventId: event.id,
-          tierId: tier.id,
-          quantity,
-          successUrl: publicUrl('my-tickets?checkout=success'),
-          cancelUrl: publicUrl(`event/${event.id}`),
-          addons: addonSel.items,
-          voucherCode: voucher?.code,
-          attribution,
-        });
-        clearPrefill(event.id);
-        window.location.href = url; // leave the SPA for Stripe-hosted checkout
-      } catch (err: any) {
-        console.error('Checkout failed:', err);
-        toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
-        setPurchasing(false);
-      }
+      await goToCheckout(tier.id);
       return;
     }
 
@@ -1072,6 +1098,16 @@ export default function EventDetails() {
         — that's how a buyer who arrived via a promoter link can pass
         the same attribution forward when they share.
       */}
+      <GuestCheckoutModal
+        open={guestOpen}
+        busy={purchasing}
+        onClose={() => setGuestOpen(false)}
+        onSignIn={() => { setGuestOpen(false); void signInToBuy(); }}
+        onContinue={(email) => {
+          const tierId = selectedTierId ?? allTiers[0]?.id;
+          if (tierId) void goToCheckout(tierId, email);
+        }}
+      />
       {event && (
         <ShareModal
           open={showShare}

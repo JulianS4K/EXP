@@ -25,6 +25,29 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Fan-first build (from reports/Organizer and fan ticketing needs.md, started 2026-09-28)
+
+Operator scope: everything on the report's build lists except same-day payout. Marketplaces are omnichannel
+distribution of Exos's own inventory, not resale.
+
+- ✅ **Guest checkout** (`20260928050000_exos_guest_checkout`, authored, not applied): pay with just an email; tickets
+  go to the confirmed account with that email or arrive as claim links. Anti-bot limits per email, per network
+  (hashed IP) and a ceiling on live guest holds; organizer switch per event. Tests: `tests/exos/test_guest_checkout.sql`
+  (G1–G11), `src/lib/guestCheckout.test.ts`. Follow-ups: guest mode for the embedded iframe checkout; a CAPTCHA
+  (Turnstile) on the email step if the network limit isn't enough; door lookup of unclaimed guest orders by email.
+- ✅ **Promo codes that work + quota editor** (`20260928060000_exos_voucher_discounts_quota_editor`, authored, not
+  applied): vouchers take a percent or an amount off (pretix price modes), priced by `_shared/pricing.ts`
+  `voucherUnitPrice` in both checkout and the event page; saved `exos_discount_codes` carry over. Edit event →
+  **Promo and access codes** and **Shared capacity (quotas)**. **Security fix:** quota RLS didn't tie a quota to its
+  event's org, so another org's owner could close a ticket type they don't own (reproduced; likely live in prod since
+  `20260702123030`). Tests: `tests/exos/test_voucher_discounts_quotas.sql` (V1–V5, Q1–Q3), `voucherDiscounts.test.ts`.
+- ✅ **Marketplace seats per ticket type, visible** (UI only): the per-type backend (`exos_set_channel_allocation`,
+  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind `SHOW_DISTRIBUTION`.
+  `SHOW_MARKETPLACES` now shows the Marketplaces section (Create + Edit event): tick marketplaces, then seats per ticket
+  type per marketplace (GA on StubHub only, VIP everywhere), with a "Same on all" shortcut. The list is the five
+  integrated marketplaces (Ticketmaster/AXS/Viagogo/TickPick/TEvo were listed but never integrated). Sending stays
+  dry-run until live writes are authorized.
+
 ## All-in pricing (operator decision 2026-09-24)
 
 ✅ **Every buyer-facing price is all-in.**

@@ -41,6 +41,7 @@ the details with counsel.)
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
 | `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 500 |
+| `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | all | Supabase sets these automatically |
 
 **The SPA build is also a switch.** The storefront's paid checkout and the org's "Connect Stripe"
@@ -112,6 +113,12 @@ for each case.
 | 9 | Tier with a `price_schedule` step already started | The Stripe line item shows the scheduled price, which is also what the storefront shows |
 | 11 | **All-in:** a tier priced $10.05 with an 8.875% exclusive tax rule; buy 3 | The storefront shows **$10.94** per ticket ("all-in · incl. tax"), and Stripe charges **$32.82**. That's one line at $10.94 × 3, whose description notes the tax included. There's no separate Tax line and no fee line |
 | 10 | Replay an event from the Stripe dashboard | Nothing changes (every handler is idempotent) |
+| 12 | **Guest, no account:** signed out, Buy, enter a new email, pay | Session `fulfilled` with `guest = true` and no `buyer_uid`; tickets owned by the org owner, each with a pending transfer to the email; one `transfer-initiated` mail with a claim link per ticket. Open a link, sign in with the one-time code: the ticket (and any add-ons) move to that account |
+| 13 | **Guest, existing account:** signed out, buy with the email of a confirmed account | Tickets owned by that account, no transfers, a `ticket-issued` mail |
+| 14 | Six guest checkouts from one network within 10 minutes | The sixth gets "too many checkouts from this network" (409), no Stripe session |
+| 16 | **Promo code:** create `EARLY20` (20% off, 100 uses) in Edit event → Promo and access codes; apply it on a $40 tier and buy 2 | The event page shows $32 per ticket (plus any tax), Stripe charges $64, tickets record `price_paid` 32, the code shows 2/100 used |
+| 17 | A $5-off code on a $4 tier | 409 "that code takes off more than the ticket price", no Stripe session |
+| 15 | Untick **Guest checkout** in Edit event, then buy signed out | The Buy button opens sign-in, not the email step; a direct call with `guest_email` gets 409 "sign in to buy tickets for this event" |
 
 Useful queries:
 
@@ -140,6 +147,20 @@ Rebuild the SPA **without** `VITE_STRIPE_PUBLISHABLE_KEY`, which hides paid chec
 `exos-checkout` so no new sessions can start. Keep the webhook endpoint enabled until in-flight
 sessions have settled, because refunds and disputes still need it.
 `stripe-webhook` is idempotent and safe to keep running.
+
+## Guest checkout (mig 20260928050000)
+
+A signed-out buyer on a paid ticket gets an email step ("Where should we send your tickets?") instead of a
+sign-in wall, then Stripe's page (Apple Pay / Google Pay / card). `exos-checkout` takes `guest_email` when there is
+no JWT and calls the service-role `exos_create_guest_hold`. At fulfilment the tickets go to the confirmed account
+with that email, or are parked on the org owner with a claim link per ticket (the marketplace-order path), so the
+buyer never needs an account to pay and signs in with a one-time code only to show the QR.
+
+Limits that replace "a confirmed inbox per hold": one live cart per email per event; maxPerOrder, and maxPerAccount
+counted per email; five guest holds per network per 10 minutes (salted IP hash, never the IP); live guest holds
+capped at a quarter of what's left for the event (at least 10 seats). Organizers switch guests off per event with
+**Guest checkout** in Edit event (`purchase_limits.guestCheckout = false`). Capacity-bypass codes and free claims
+still need an account. The embedded (venue-site iframe) checkout still signs in first.
 
 ## Known gaps (see `KANBAN.md`)
 

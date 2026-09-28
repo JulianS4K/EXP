@@ -18,7 +18,9 @@ import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 
 export default function MyTickets() {
-  const { user } = useAuth();
+  const { user, signIn } = useAuth();
+  // Back from a guest checkout (mig 20260928050000): tickets went by email.
+  const [guestDone, setGuestDone] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -56,7 +58,9 @@ export default function MyTickets() {
     //   ?claimed=N        — a free claim that already minted N tickets
     const params = new URLSearchParams(location.search);
     const claimed = Number(params.get('claimed'));
-    if (params.get('checkout') === 'success') {
+    if (params.get('checkout') === 'success' && params.get('guest') === '1') {
+      setGuestDone(true);
+    } else if (params.get('checkout') === 'success') {
       toast({ kind: 'success', title: 'Payment received', message: 'Your tickets will appear here in a moment.' });
     } else if (Number.isInteger(claimed) && claimed > 0) {
       toast({ kind: 'success', title: "You're in!", message: `${claimed} ticket${claimed === 1 ? '' : 's'} reserved.` });
@@ -123,6 +127,22 @@ export default function MyTickets() {
     };
   }, [user, toast]);
 
+  if (!user && guestDone) return (
+    <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
+      <div className="max-w-md" role="status">
+        <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
+        <h1 className="disp text-4xl tracking-tight leading-none mb-4">Check your email</h1>
+        <p className="text-white/70 mb-6">
+          Your tickets are on their way{guestEmailHint() ? <> to <strong className="text-white">{guestEmailHint()}</strong></> : null}.
+          Sign in with that email (we'll send a one-time code, no password) to see your QR codes here.
+          Tickets can be forwarded to friends from the email.
+        </p>
+        <button onClick={() => void signIn()} className="bg-brand-primary text-black font-black uppercase tracking-wider px-8 py-3">
+          Sign in to see tickets
+        </button>
+      </div>
+    </div>
+  );
   if (!user) return (
     <div className="wall min-h-screen flex items-center justify-center p-20 text-center">
       <p className="type text-white/50 uppercase tracking-widest text-[12px]">{t('tickets.vaultHint')}</p>
@@ -373,4 +393,8 @@ export default function MyTickets() {
       )}
    </div>
   );
+}
+
+function guestEmailHint(): string | null {
+  try { return localStorage.getItem('exos.guestEmail'); } catch { return null; }
 }

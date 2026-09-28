@@ -61,7 +61,7 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // Optional Automatiq integration. The endpoint is not implemented yet, so we
 // gate the call behind an env flag — otherwise every event creation 404s and
 // writes a misleading `syncStatus: 'failed'` to the doc.
-import { SHOW_DISCOUNT_CODES, SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
+import { MARKETPLACE_NETWORKS, SHOW_DISCOUNT_CODES, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
@@ -1873,29 +1873,18 @@ export default function CreateEvent() {
            </div>
         </div>
 
-        {SHOW_DISTRIBUTION && (<>
-        {/* Distribution Networks */}
+        {SHOW_MARKETPLACES && (<>
+        {/* Marketplaces (seats per ticket type are set in Edit event). */}
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Tag className="text-brand-primary w-5 h-5" />
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Distribution Hub</h3>
+              <h3 className="disp text-lg uppercase tracking-wide text-white">Marketplaces</h3>
            </div>
-           
-           <p className="type text-[10px] text-white/40 uppercase tracking-widest leading-relaxed">Select global markets for synchronized inventory listing.</p>
+
+           <p className="type text-xs text-white/50 leading-relaxed">Also sell this event's tickets on these marketplaces. After you save, Edit event lets you choose how many seats of each ticket type each one gets (for example GA on StubHub only, VIP everywhere).</p>
            
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {[
-                { id: 'stubhub', name: 'StubHub' },
-                { id: 'seatgeek', name: 'SeatGeek' },
-                { id: 'ticketmaster', name: 'Ticketmaster' },
-                { id: 'axs', name: 'AXS' },
-                { id: 'vivid', name: 'Vivid Seats' },
-                { id: 'gametime', name: 'Gametime' },
-                { id: 'viagogo', name: 'Viagogo' },
-                { id: 'ticketevolution', name: 'Ticket Evolution' },
-                { id: 'tickpick', name: 'TickPick' },
-                { id: 'gotickets', name: 'GoTickets' }
-              ].map(network => (
+              {MARKETPLACE_NETWORKS.map(network => (
                 <label key={network.id} className="flex items-center space-x-3 p-4 bg-black/40 cursor-pointer hover:bg-black/60 transition-colors border border-white/10 has-[:checked]:border-brand-primary has-[:checked]:bg-brand-primary/10">
                    <input
                      type="checkbox"

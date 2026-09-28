@@ -1,11 +1,27 @@
 export type TicketType = 'paid' | 'free' | 'donation';
 
-// Resale-marketplace distribution isn't built (and upstream APIs are
-// read-only), so the create/edit forms keep its controls hidden.
+// The old "distribution" blocks (exclusivity, the unsaved discount-token
+// editor) stay hidden.
 export const SHOW_DISTRIBUTION = false;
 
-// Percent/fixed discount codes (exos_discount_codes) aren't redeemed by
-// checkout yet; vouchers are the working code path.
+// Marketplaces: omnichannel distribution of the event's own inventory. The
+// organizer picks marketplaces and sets seats per ticket type (GA on StubHub
+// only, VIP everywhere, ...). Listings are planned; nothing is sent to a
+// marketplace until the operator authorizes live writes (dry-run writers).
+export const SHOW_MARKETPLACES = true;
+
+/** The marketplaces Exos is integrated with (docs/marketplace/). */
+export const MARKETPLACE_NETWORKS = [
+  { id: 'stubhub', name: 'StubHub' },
+  { id: 'seatgeek', name: 'SeatGeek' },
+  { id: 'vivid', name: 'Vivid Seats' },
+  { id: 'gametime', name: 'Gametime' },
+  { id: 'gotickets', name: 'GoTickets' },
+] as const;
+
+// The old exos_discount_codes editor stays off: promo codes (% / $ off) are
+// vouchers now (mig 20260928060000, Edit event → Promo and access codes),
+// which checkout redeems. Saved discount codes were carried over.
 export const SHOW_DISCOUNT_CODES = false;
 
 /**
