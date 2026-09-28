@@ -38,7 +38,7 @@ on so that one Exos model fits all of them (mig `20260927050000`,
 | Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | no (CUSTOM splits only) | no | **listings of at most max per order** |
 | Seats | optional | required with a row | optional | optional (`lowSeat` / `highSeat`) | optional, can be hidden (`hideSeats`) | internal GA seat numbers per listing; row `GA` |
 | Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | ANY / NEVER_LEAVE_ONE / … | ANY / NEVERLEAVEONE / … | any, within the listing |
-| Delivery type | ticket / mobile transfer (per event) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | `ELECTRONIC` + `electronicTransfer` | an Exos claim link per ticket |
+| Delivery type | `MobileTransfer`, else `ElectronicTransfer` (from the event's accepted types) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | `ELECTRONIC` + `electronicTransfer` | **mobile transfer, else electronic transfer, everywhere** (`EXOS_TRANSFER_STOCK`); the buyer gets an Exos claim link |
 | Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | full PUT / DELETE by external id (100 per call) | full PUT (Vivid id read back by our id) / DELETE by `internalTicketId` | one diff (create / update / delete) against what the marketplace has |
 | Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | webhooks (unsigned: read back) + `GET /rest/sales` | **polling only**: `GET /v1/getOrders` (XML), `getOrder` | normalized to one `MarketplaceSale` |
 | Sale names the listing | `external_listing_id` | `listing.id` | `listing_reference_id` / `source_id` | `externalTicketId` | `brokerTicketId` | `listing_ref` on the order: which block |
@@ -49,7 +49,8 @@ on so that one Exos model fits all of them (mig `20260927050000`,
 **The Exos listing** (`planExosListings`): for each allocation, blocks of at
 most the event's max per order, each a contiguous run of the allocation's
 internal seat numbers, row `GA`, the listing price (face value = the ticket
-type's price), split any, delivered by claim link, in hand on the event day,
+type's price), split any, listed as mobile transfer (else electronic transfer)
+and delivered by claim link, in hand on the event day,
 with the event as text (name, venue, venue-local date and time) and a stable
 `ex…` listing id. Every marketplace gets exactly these listings; its module
 only renames the fields (StubHub `listingPlan.ts`, SeatGeek `listingPlan.ts`,

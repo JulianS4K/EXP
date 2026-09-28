@@ -21,7 +21,7 @@
 // Flow once writes are authorized (see writer.ts):
 //   1. constraints: client.getRequestedEventListingConstraints(buildRequestedEvent(ev))
 //      (or listEventListingConstraints(id) for a known event)
-//   2. ticketType = pickTicketType(constraints)       → ticket / mobile transfer
+//   2. ticketType = pickTicketType(constraints)       → mobile / electronic transfer
 //   3. build*ListingRequest(exos row, { ticketType, … }, ev)
 //      then checkListingConstraints(request, constraints)
 //   4. preview: client.previewSellerListing[ForRequestedEvent](…)
@@ -33,6 +33,7 @@
 // before listing on it.
 
 import type { BarcodeInformation, Money, MoneyInput, Seating } from './types.ts';
+import { EXOS_TRANSFER_STOCK } from '../exosListing.ts';
 import {
   ListingMappingError,
   buildRequestedEvent,
@@ -247,12 +248,13 @@ export function buildRequestedEventListingRequest(
 // ── Ticket type ──────────────────────────────────────────────────────
 
 /**
- * Exos lists tickets as a transfer (decided 2026-09-26): ticket transfer
- * first, mobile transfer second. StubHub doesn't enumerate ticket_type
- * values; each event's constraints list what it accepts. So we never send a
- * guessed string: `pickTicketType` returns the constraint's own `type`.
+ * Exos lists tickets as a transfer on every marketplace: mobile transfer
+ * first, electronic transfer second (operator, 2026-09-28; EXOS_TRANSFER_STOCK
+ * in ../exosListing.ts). StubHub doesn't enumerate ticket_type values; each
+ * event's constraints list what it accepts. So we never send a guessed
+ * string: `pickTicketType` returns the constraint's own `type`.
  */
-export const EXOS_TICKET_TYPE_PREFERENCE = ['TicketTransfer', 'MobileTransfer'] as const;
+export const EXOS_TICKET_TYPE_PREFERENCE = EXOS_TRANSFER_STOCK.stubhub;
 
 const squashType = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 

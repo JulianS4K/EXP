@@ -27,7 +27,7 @@ Auth on every endpoint: **OAuth2** (bearer token). Responses are
 | Listing create | StubHub recommends `POST /sellerlistings` (**requested event**: event + venue as text, and StubHub maps or creates the event). Required: `seating` (`section` required), `ticket_type`, `split_type`, `number_of_tickets`, plus `ticket_price` **or** `ticket_proceeds`. |
 | `external_id` | Creating with an `external_id` that already exists makes StubHub **delete the old listing and create a new one**. |
 | `split_type` | `Any`, `None`, `AvoidOne`, `AvoidOneAndThree`, `Pairs`. Constraint items are `{ type, name, description }`; send `type`. |
-| `ticket_type` | Not enumerated anywhere. Each event's constraints list what it accepts in `ticket_types[]` = `{ type, name, id }`; send `type`. For an event StubHub doesn't have yet, `PUT /listingconstraints` with the requested-event body returns them. **Exos uses ticket transfer, then mobile transfer**, picked from that list by `pickTicketType()`. |
+| `ticket_type` | Not enumerated anywhere. Each event's constraints list what it accepts in `ticket_types[]` = `{ type, name, id }`; send `type`. For an event StubHub doesn't have yet, `PUT /listingconstraints` with the requested-event body returns them. **Exos uses mobile transfer, then electronic transfer** (the standard on every marketplace), picked from that list by `pickTicketType()`. |
 | `eticket_urls` item | `{ url, index? }` |
 | `barcodes` item | `{ seat_ordinal, seat, row, barcode_values[] }` |
 | Ticket holders | `GET /sales/{id}/ticketholders` returns one `TicketHolder`, which includes `email_address`. |
@@ -259,7 +259,7 @@ pending transfer to the buyer's email. It also emails the buyer the claim
 links, so the tickets reach them as an Exos transfer as well as through
 StubHub. See [How StubHub ties into Exos](../README.md#how-stubhub-ties-into-exos).
 
-Ticket type vs. delivery: Exos lists as **ticket transfer / mobile
+Ticket type vs. delivery: Exos lists as **mobile transfer / electronic
 transfer** and delivers by e-ticket URL. StubHub may expect a transfer-type
 listing to be fulfilled with `mobile_provider` + `transfer_confirmation_number`
 rather than `eticket_urls`. Exos isn't on the provider list, so run the
@@ -273,7 +273,7 @@ Open questions for go-live:
   sale. If there's no email, `buyerEmail()` returns null and that sale
   needs a human.
 - **Transfer ticket types per event.** `pickTicketType()` throws when an event
-  accepts neither ticket transfer nor mobile transfer, listing what it does
+  accepts neither mobile transfer nor electronic transfer, listing what it does
   accept. Decide per case whether to fall back (e.g. `ETicket`).
 - **Webhook delivery-id header name.** The spec says each delivery has a
   unique id but doesn't name the header. Read it off the first sandbox

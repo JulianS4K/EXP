@@ -14,7 +14,7 @@
 //
 // ticket_type is left null in the plan: StubHub lists the accepted types per
 // event (listing constraints), and pickTicketType() chooses from those at
-// send time (ticket transfer, then mobile transfer). A plan never carries a
+// send time (mobile transfer, then electronic transfer). A plan never carries a
 // guessed value. Listings are created unpublished.
 
 import { exosEventForListing, type ExosEventRow } from './eventRequest.ts';

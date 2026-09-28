@@ -19,6 +19,8 @@
 //     allocation and to the block's seats.
 //   * split "any" within the block, delivery by Exos claim link (a transfer
 //     the buyer accepts into any Exos account), in hand on the event day.
+//   * listed as a transfer everywhere: mobile transfer, else electronic
+//     transfer (EXOS_TRANSFER_STOCK), never e-ticket, paper or screenshot.
 //   * the event as text (name, venue, venue-local date and time): SeatGeek
 //     and Gametime match on it; StubHub needs it to request an event.
 //
@@ -34,6 +36,26 @@ import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } fro
 
 export const EXOS_LISTING_NOTES =
   'Delivered by Exos: you get a link to claim the tickets into your Exos account; the entry QR code is in the Exos app.';
+
+/**
+ * How each marketplace lists Exos tickets: mobile transfer, else electronic
+ * transfer (operator, 2026-09-28), in that marketplace's own words. The
+ * buyer accepts a transfer: the Exos claim link.
+ *   stubhub    per event, from the types it accepts: MobileTransfer, then
+ *              ElectronicTransfer (stubhub/listing.ts pickTicketType)
+ *   seatgeek   stock_type "mobile" (its transfer type)
+ *   gametime   Stock "mobile_transfer"
+ *   gotickets  stockType MOBILE_TICKETS (fulfilled with SUBMIT_TRANSFER_URL)
+ *   vivid      stockType ELECTRONIC with electronicTransfer (Vivid has no
+ *              mobile-transfer stock type; TMET is Ticketmaster's own)
+ */
+export const EXOS_TRANSFER_STOCK = {
+  stubhub: ['MobileTransfer', 'ElectronicTransfer'],
+  seatgeek: 'mobile',
+  gametime: 'mobile_transfer',
+  gotickets: 'MOBILE_TICKETS',
+  vivid: 'ELECTRONIC',
+} as const;
 
 export interface ExosAllocation {
   /** exos_distribution_listings.id */

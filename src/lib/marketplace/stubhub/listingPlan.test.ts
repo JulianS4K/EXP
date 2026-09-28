@@ -30,7 +30,7 @@ describe('planStubHubListing', () => {
       published: false, ticket_type: null,
     });
     expect(p.listings[0].request.body).not.toHaveProperty('display_number_of_tickets');
-    expect(p.ticket_type_from).toEqual(['TicketTransfer', 'MobileTransfer']);
+    expect(p.ticket_type_from).toEqual(['MobileTransfer', 'ElectronicTransfer']);
     const ep = STUBHUB_ENDPOINTS[p.listings[0].request.endpoint as keyof typeof STUBHUB_ENDPOINTS];
     expect([ep.method, ep.path]).toEqual(['POST', '/events/{eventId}/sellerlistings']);
   });
