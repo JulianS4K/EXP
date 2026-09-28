@@ -156,9 +156,11 @@ describe('StubHub catalog search', () => {
 });
 
 describe('channelsFromEnv', () => {
-  it('wires StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats; catalog search only with credentials', () => {
+  it('wires StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats and Ticket Evolution; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid']);
+    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo']);
+    // TEvo has no event search yet, so the link pass skips it.
+    expect(none.get('evo')!.capabilities).toMatchObject({ findEvents: false, listings: false, fulfilByUrls: true });
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
     expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
     expect(none.get('vivid')!.capabilities.findEvents).toBe(false);
@@ -168,5 +170,13 @@ describe('channelsFromEnv', () => {
     expect(withCreds.get('seatgeek')!.capabilities.findEvents).toBe(true);
     expect(withCreds.get('vivid')!.capabilities.findEvents).toBe(true);
     expect(withCreds.get('vivid')!.searchesPerRun).toBe(6);
+  });
+
+  it('plans TEvo delivery only once TEVO_REVIEWER_ID is set', () => {
+    const sale = { externalOrderId: '190840', quantity: 1 } as never;
+    const url = ['https://exos.example/bridge/claim/00000000-0000-4000-8000-000000000001'];
+    expect(() => channelsFromEnv(() => undefined).get('evo')!.planFulfilByUrls!(sale, url)).toThrow(/TEVO_REVIEWER_ID/);
+    const set = channelsFromEnv((k) => (k === 'TEVO_REVIEWER_ID' ? '2487' : undefined));
+    expect(set.get('evo')!.planFulfilByUrls!(sale, url)[0].body).toEqual({ reviewer_id: 2487 });
   });
 });

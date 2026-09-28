@@ -10,6 +10,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | Gametime | [`gametime/`](gametime/README.md) | API v3 (Swagger 2.0), onboarding guide, CSV columns, example CSV, Postman collection, 2026-09-27 |
 | GoTickets | [`gotickets/`](gotickets/README.md) | Seller Central API v1 (OpenAPI 3.0.1), 2026-09-28 |
 | Vivid Seats | [`vivid/`](vivid/README.md) | Broker Portal API 1.0.0 (OpenAPI 3.0.1), 2026-09-28 |
+| Ticket Evolution | [`tevo/`](tevo/README.md) | API v9 order-processing HOWTOs (TEvo Integrations wiki), 2026-09-28; orders side only |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
@@ -69,7 +70,7 @@ the tickets' internal seats, and the marketplace's steps in order.
 
 Details per marketplace: [`stubhub/`](stubhub/README.md),
 [`seatgeek/`](seatgeek/README.md), [`gametime/`](gametime/README.md),
-[`gotickets/`](gotickets/README.md), [`vivid/`](vivid/README.md).
+[`gotickets/`](gotickets/README.md), [`vivid/`](vivid/README.md), [`tevo/`](tevo/README.md).
 
 ## How StubHub ties into Exos
 

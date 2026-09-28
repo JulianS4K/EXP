@@ -47,6 +47,12 @@ distribution of Exos's own inventory, not resale.
   type per marketplace (GA on StubHub only, VIP everywhere), with a "Same on all" shortcut. The list is the five
   integrated marketplaces (Ticketmaster/AXS/Viagogo/TickPick/TEvo were listed but never integrated). Sending stays
   dry-run until live writes are authorized.
+- 🟡 **Ticket Evolution (channel `evo`), orders side** (`20260928070000_exos_tevo_channel`, authored, not applied):
+  read client (signed X-Token / X-Signature), order kinds (sale to TEvo vs to a Client) with the Riskified gate,
+  dry-run writer (accept, shipment update, complete), mobile-transfer delivery plan, polling in
+  `exos-marketplace-sales`. Buying, etickets and physical delivery are forbidden. **Blocked on TEvo docs**: how to
+  list inventory, the signature scheme, webhook / Order Integration payloads, transfer_source values
+  (`docs/marketplace/tevo/README.md`). Not in the organizer UI until listing works.
 
 ## All-in pricing (operator decision 2026-09-24)
 
