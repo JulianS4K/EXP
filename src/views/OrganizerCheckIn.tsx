@@ -14,7 +14,9 @@ import {
 import { Ticket, Event } from '../types';
 import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Html5Qrcode } from 'html5-qrcode';
+// html5-qrcode (~330KB) is loaded on demand when the scanner opens, so it
+// never ships on other routes or before the camera is actually needed.
+import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { verifyBarcode, extractTicketIdFromAny } from '../lib/barcode';
@@ -326,6 +328,7 @@ export default function OrganizerCheckIn() {
     startScannerTimeoutRef.current = setTimeout(async () => {
       startScannerTimeoutRef.current = null;
       try {
+        const { Html5Qrcode } = await import('html5-qrcode');
         const html5Qr = new Html5Qrcode('reader');
         scannerRef.current = html5Qr;
         await html5Qr.start(

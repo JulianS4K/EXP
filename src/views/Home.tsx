@@ -3,7 +3,6 @@ import { Event } from '../types';
 import { listPublicEvents } from '../lib/events';
 import { Link } from 'react-router-dom';
 import { Calendar, MapPin, Search } from 'lucide-react';
-import { motion } from 'motion/react';
 import { formatInTz } from '../lib/datetime';
 import { formatCurrency } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
@@ -238,18 +237,16 @@ export default function Home() {
           </div>
 
           <div className="relative max-w-4xl mb-7">
-            <motion.h1
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="leading-[0.82]"
-            >
+            {/* CSS entrance (.anim-slide-in in index.css) keeps the motion
+                library off the landing page's initial download. */}
+            <h1 className="leading-[0.82] anim-slide-in">
               <span className="disp block text-6xl md:text-8xl tracking-tight text-white" style={{ transform: 'skewX(-5deg)' }}>
                 WHAT ARE YOU
               </span>
               <span className="disp inline-block text-6xl md:text-9xl tracking-tight neon under-spray mt-2" style={{ transform: 'skewX(-5deg)' }}>
                 DOING TONIGHT?
               </span>
-            </motion.h1>
+            </h1>
             <span className="marker absolute right-0 top-2 md:top-6 text-brand-secondary text-2xl md:text-3xl rotate-[7deg] hidden sm:block">
               real tickets only →
             </span>
@@ -377,7 +374,7 @@ export default function Home() {
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                   {featured.map((event, i) => (
-                    <motion.div
+                    <div
                       key={event.id}
                       className="group relative bg-[#111] border border-white/10 hover:border-brand-primary/60 transition-all overflow-hidden"
                     >
@@ -404,7 +401,7 @@ export default function Home() {
                           </div>
                         </div>
                       </Link>
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
               </section>

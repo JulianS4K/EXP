@@ -28,12 +28,19 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           // Vite 8 / Rollup 4 type `manualChunks` as a function only — the
-          // object form no longer satisfies the type (TS2769). Function form
-          // below preserves the original split (stripe / qr / motion).
+          // object form no longer satisfies the type (TS2769).
+          //
+          // react/react-dom get their own long-cached vendor chunk. The two QR
+          // libraries are split apart: qrcode.react (tiny, renders ticket
+          // codes) and html5-qrcode (the camera scanner, dynamically imported
+          // by the check-in view only). They used to share one "qr" chunk,
+          // which also swallowed react and got preloaded on every page.
           manualChunks: (id: string) => {
+            if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react';
             if (id.includes('node_modules/@stripe/stripe-js')) return 'stripe';
-            if (id.includes('node_modules/html5-qrcode') || id.includes('node_modules/qrcode.react')) return 'qr';
-            if (id.includes('node_modules/motion')) return 'motion';
+            if (id.includes('node_modules/qrcode.react')) return 'qrcode';
+            if (id.includes('node_modules/html5-qrcode')) return 'scanner';
+            if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion') || id.includes('node_modules/motion-dom') || id.includes('node_modules/motion-utils')) return 'motion';
             return undefined;
           },
         },
