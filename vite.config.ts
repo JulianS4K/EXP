@@ -27,21 +27,25 @@ export default defineConfig(() => {
       // entry chunk size considerably.
       rollupOptions: {
         output: {
-          // Vite 8 / Rollup 4 type `manualChunks` as a function only — the
-          // object form no longer satisfies the type (TS2769).
+          // Vite 8 bundles with Rolldown, whose chunk groups (codeSplitting)
+          // replace the deprecated manualChunks. Each group also pulls in its
+          // modules' dependencies, so `priority` decides who owns a shared
+          // dep: react has to win, or it lands inside whichever library group
+          // reached it first (it used to ride in the "qr" chunk).
           //
           // react/react-dom get their own long-cached vendor chunk. The two QR
-          // libraries are split apart: qrcode.react (tiny, renders ticket
+          // libraries are split apart: qrcode.react (small, renders ticket
           // codes) and html5-qrcode (the camera scanner, dynamically imported
-          // by the check-in view only). They used to share one "qr" chunk,
-          // which also swallowed react and got preloaded on every page.
-          manualChunks: (id: string) => {
-            if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react';
-            if (id.includes('node_modules/@stripe/stripe-js')) return 'stripe';
-            if (id.includes('node_modules/qrcode.react')) return 'qrcode';
-            if (id.includes('node_modules/html5-qrcode')) return 'scanner';
-            if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion') || id.includes('node_modules/motion-dom') || id.includes('node_modules/motion-utils')) return 'motion';
-            return undefined;
+          // by the check-in view only). They used to share one "qr" chunk
+          // that was preloaded on every page.
+          codeSplitting: {
+            groups: [
+              { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 40 },
+              { name: 'stripe', test: /node_modules[\\/]@stripe[\\/]stripe-js[\\/]/, priority: 30 },
+              { name: 'qrcode', test: /node_modules[\\/]qrcode\.react[\\/]/, priority: 30 },
+              { name: 'scanner', test: /node_modules[\\/]html5-qrcode[\\/]/, priority: 30 },
+              { name: 'motion', test: /node_modules[\\/](motion|framer-motion|motion-dom|motion-utils)[\\/]/, priority: 20 },
+            ],
           },
         },
       },
