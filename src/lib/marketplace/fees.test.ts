@@ -35,14 +35,20 @@ describe('net-equal list price', () => {
       for (const target of [1, 99, 500, 3248, 4000, 4011, 11278, 24819, 99999]) {
         const list = netEqualListCents(ch, target);
         for (let n = 1; n <= 12; n++) expect(payoutCents(ch, list, n), `${ch} ${target} x${n}`).toBeGreaterThanOrEqual(target * n);
-        if (list > target) expect(payoutCents(ch, list - 2, 1), `${ch} ${target} tight`).toBeLessThan(target);
+        // Smallest: a cent less leaves some quantity short.
+        if (list > target) {
+          const short = Array.from({ length: 100 }, (_, i) => i + 1).some((n) => payoutCents(ch, list - 1, n) < target * n);
+          expect(short, `${ch} ${target} smallest`).toBe(true);
+        }
       }
     }
   });
 
   it('grosses up by the store fee, and leaves unknown stores at the Exos price', () => {
-    expect(netEqualListPrice('seatgeek', 40)).toBe(42.11); // 42.11 x 0.95 = 40.0045
-    expect(netEqualListPrice('evo', 40)).toBe(41.25); // 41.25 - 1.24 = 40.01
+    expect(netEqualListPrice('seatgeek', 40)).toBe(42.11); // 42.11 - 2.1055 = 40.0045 -> pays 40.00
+    expect(payoutCents('seatgeek', 4211, 1)).toBe(4000);
+    expect(payoutCents('evo', 4124, 1)).toBe(4000);
+    expect(netEqualListPrice('evo', 40)).toBe(41.24); // 41.24 - 1.24 = 40.00
     expect(netEqualListPrice('vivid', 40)).toBe(40);
     expect(netEqualListPrice('stubhub', 40)).toBe(40);
   });
@@ -65,7 +71,7 @@ describe('planners list net-equal', () => {
 
   it('prices each store so the organizer nets the Exos price there', () => {
     expect(planSeatGeekListings(alloc()).listings[0].request.body.cost).toBe(42.11);
-    expect(planTevoListings(alloc()).listings[0].request.body.inventory.ticket.price).toBe(41.25);
+    expect(planTevoListings(alloc()).listings[0].request.body.inventory.ticket.price).toBe(41.24);
     expect(planGametimeListings(alloc()).listings[0].request.body.Cost).toBe('40.00');
     const set = planExosListings(alloc(), 'SeatGeek', 'seatgeek');
     expect(set.listings[0]).toMatchObject({ price: 42.11, exos_price: 40 });

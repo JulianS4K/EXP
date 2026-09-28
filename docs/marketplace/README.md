@@ -61,14 +61,14 @@ per-order cap that works on all of them, so StubHub moved from one display-cappe
 ### Seller fees and net-equal pricing (`_shared/marketplace/fees.ts`, mig `20260929062000`)
 
 An organizer nets the same whichever store sells the ticket. Each marketplace takes a seller fee out of the price
-Exos lists at, so Exos lists at the smallest price whose payout is at least the Exos price (half a cent of room
-where the store rounds its fee up). Whatever a marketplace adds on top for its buyers is its own markup: Exos can't
+Exos lists at, so Exos lists at the smallest price whose payout is the Exos price after the fee, for every quantity (40.00
+nets 40.00). Whatever a marketplace adds on top for its buyers is its own markup: Exos can't
 see it and doesn't need it. An organizer's marketplace price in the grid still wins when it's higher.
 
 | Store | Seller fee | Evidence | Lists 40.00 at |
 |---|---|---|---|
-| Ticket Evolution | 3% of the order total, to the cent, half up (`order.fee`) | 4,371 of 4,371 S4K sales, May-Sep 2026 | 41.25 |
-| SeatGeek | 5% of the subtotal, unrounded (`fees`; `total` = subtotal - fees) | 8,506 of 8,507 orders since March 2026 (one at 9.75%) | 42.11 |
+| Ticket Evolution | 3% of the order total, to the cent, half up (`order.fee`) | 4,371 of 4,371 S4K sales, May-Sep 2026 | 41.24 (fee 1.24, nets 40.00) |
+| SeatGeek | 5% of the subtotal, unrounded (`fees`; `total` = subtotal - fees) | 8,506 of 8,507 orders since March 2026 (one at 9.75%) | 42.11 (fee 2.1055, nets 40.00) |
 | StubHub, Gametime, GoTickets, Vivid | unknown: their sales report the payout only | S4K's list prices aren't in Terminal's data | 40.00 until measured |
 
 Every sale records the per-ticket price its listing carried (`exos_marketplace_orders.list_unit_price`, from the

@@ -4,10 +4,10 @@
 // Buyers on a marketplace pay whatever that marketplace adds on top; Exos
 // can't see or control that markup. What Exos controls is the price it lists
 // at, and each marketplace takes its seller fee out of that before paying.
-// Net-equal pricing lists at the smallest price whose payout is at least what
-// Exos charges for the ticket, so a sale anywhere pays the organizer the same
-// as a sale on Exos. A marketplace price never undercuts Exos: the payout
-// alone is at least the Exos price, so the list price is higher.
+// Net-equal pricing lists at the smallest price whose payout, after the fee,
+// is what Exos charges for the ticket (40.00 nets 40.00), so a sale anywhere
+// pays the organizer the same as a sale on Exos. A marketplace price never
+// undercuts Exos: the payout alone is the Exos price, so the list price is higher.
 //
 // Rates, from real S4K orders (docs/marketplace/README.md, "Seller fees"):
 //   evo       3% of the order total, rounded to the cent, half up (TEvo
@@ -49,22 +49,28 @@ export function sellerFeeCents(channel: SplitChannel, grossCents: number): numbe
   return f.rounding === 'cent_half_up' ? Math.floor(exact + 0.5) : exact;
 }
 
+/** The most tickets one listing is checked for (a listing is at most one order: max per order). */
+export const NET_EQUAL_MAX_QTY = 100;
+
 /**
- * The per-ticket list price, in cents, whose payout is at least `targetCents`
- * per ticket for any quantity: the smallest L with L - fee(L) >= target, with
- * half a cent of room for the marketplace rounding its fee up.
- * (Payout on n tickets is n*L - fee(n*L); with L*(1-r) >= target + 0.5c it's
- * at least n*target for every n.)
+ * The per-ticket list price, in cents, that nets exactly `targetCents` per
+ * ticket after the marketplace's fee: the smallest L whose payout on n
+ * tickets is at least n x target for every n up to NET_EQUAL_MAX_QTY. It
+ * starts at target / (1 - rate) and steps up a cent while the fee's
+ * rounding would leave any quantity short.
  */
 export function netEqualListCents(channel: SplitChannel, targetCents: number): number {
   const f = SELLER_FEES[channel];
   if (!Number.isInteger(targetCents) || targetCents <= 0) return targetCents;
   if (!f || f.bps <= 0) return targetCents;
-  const room = f.rounding === 'cent_half_up' ? 1 : 0; // half a cent, in half-cents
-  // L >= (target + room/2) / (1 - bps/10000), in whole cents.
-  const num = (2 * targetCents + room) * 10000;
-  const den = 2 * (10000 - f.bps);
-  return Math.ceil(num / den);
+  let list = Math.ceil((targetCents * 10000) / (10000 - f.bps));
+  // Never below the exact gross-up; a cent or two above covers rounding.
+  const short = (l: number) => {
+    for (let n = 1; n <= NET_EQUAL_MAX_QTY; n++) if (payoutCents(channel, l, n) < targetCents * n) return true;
+    return false;
+  };
+  while (short(list)) list++;
+  return list;
 }
 
 /** Dollars in, dollars out (2 decimals): the net-equal list price for an Exos price. */
