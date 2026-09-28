@@ -58,6 +58,16 @@
   (TicketDetail), operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
   APNs client certificates work on the edge runtime (pushes are a dry run until then), schedule the push cron.
 
+## Venue POS scaffold (Phase 3) 2026-09-29
+
+- 🟡 **POS scaffolding** (`20260929074000_exos_pos_scaffold`, `_shared/pos/`, `exos-pos`, authored, not applied /
+  not deployed; `docs/pos.md`): data model for devices, catalog (ticket / bar / merch, tax rule, 86, stock), tabs on a
+  ticket or wristband, orders + lines + split tenders (cash / card / comp, tips), cash drawers (expected vs counted)
+  and end-of-night settlement (`exos_pos_settlement_summary`, same math as `buildSettlement`). Door staff ring bar
+  and merch in cash / comp; card tenders and walk-up ticket lines are server-only. **No live payments**: Stripe
+  Terminal is an interface plus a `FakeTerminal`; `exos-pos` answers 501 for payment actions. No card data stored.
+  Open operator decisions in `docs/pos.md` (fee on POS sales, tip base, POS staff role, tab pre-auth, hardware).
+
 ## Net-equal marketplace pricing 2026-09-29
 
 - 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
@@ -177,7 +187,7 @@ distribution of Exos's own inventory, not resale.
 | 0 | Payments go-live + P1 audit fixes | 🟡 in progress: P0 live; P1 items below |
 | 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 in-app browser ✅, Maps ✅, checkout links ✅, promoter kit ✅, fan/promoter sharing + app Stories bridge ✅; next: prerendered SEO pages, CRM, wallet passes |
 | 2 | Face-value resale exchange + pricing intelligence (read-only from Terminal-2) | ⬜ |
-| 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | ⬜ |
+| 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | 🟡 scaffold authored (data model, pure money logic, 501 placeholder; `docs/pos.md`); terminal not wired |
 | 4 | Channel hub (Otter): one inventory across own channels, then authorized marketplaces (item 8) | ⬜ |
 | 5 | Platform: DB split, public API, plugins, new cities | ⬜ |
 
