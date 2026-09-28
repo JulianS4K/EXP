@@ -34,15 +34,22 @@ the details with counsel.)
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
 - [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
       delayed methods would outlive the 30-minute seat hold.
-- [x] Platform fee decided (operator, 2026-09-28): **3% of every transaction, paid by the organizer**,
-      on Exos checkouts and marketplace sales alike (`_shared/platformFee.ts`, `EXOS_FEE_BPS`; SQL
-      `exos_platform_fee_bps()`). `EXOS_PLATFORM_FEE_BPS` still overrides checkout; keep all three equal.
-- [ ] **Card processing vs the 3%.** With destination charges the platform pays Stripe (standard US
-      card pricing is about 2.9% + 30¢), and the 3% is all Exos keeps. On a 40.00 Exos checkout that's
-      1.20 in, about 1.46 out; Exos only clears Stripe's cost on orders above about 300. Marketplace
-      sales carry no card fee for Exos (the marketplace charged the card), so the 3% there is margin.
-      Decide: pass Stripe's fee to the organizer as well, add a fixed part (for example 3% + 30¢), move
-      to direct charges (the organizer's account pays Stripe), or accept the loss on small orders.
+- [x] Platform fee decided (operator, 2026-09-28): **Exos keeps 3% of every transaction, after
+      Stripe, paid by the organizer.** On an Exos checkout the application fee is 3% + Stripe's card
+      fee, because with destination charges the platform pays Stripe (`checkoutApplicationFeeCents`,
+      `_shared/platformFee.ts`). A 40.00 order: 1.20 + 1.46 = 2.66, so the organizer gets 37.34. On a
+      marketplace sale Exos takes 3% of the payout (`exos_fee`, SQL `exos_platform_fee_bps()`), with no
+      card fee because the marketplace charged the card. `EXOS_PLATFORM_FEE_BPS` overrides the 3% at
+      checkout; keep it equal to `EXOS_FEE_BPS` and the SQL function.
+- [ ] **Confirm Stripe's rate.** Checkout estimates Stripe's fee at standard US card pricing
+      (2.9% + 30¢; set `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` if the account has a
+      negotiated rate). International and some premium cards cost Stripe more, and on those Exos keeps
+      slightly less than 3%. Reading the real fee from each charge's balance transaction would make it
+      exact; it isn't built.
+- [ ] **Refunds and the card fee.** A refund returns the application fee in proportion by default
+      (`refund_application_fee`), card-fee part included, but Stripe keeps its fee, so Exos pays it on
+      refunded orders. Decide whether a refund keeps the card-fee part (`EXOS_REFUND_KEEP_PLATFORM_FEE`
+      keeps the whole fee today; a card-fee-only option isn't built).
 - [ ] Transactional email works: `RESEND_API_KEY` and `EXOS_MAIL_FROM` are set for `exos-mail-drain`,
       and at least one real email has gone out. Ticket emails are part of checkout.
 
@@ -56,6 +63,7 @@ the details with counsel.)
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
 | `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 300 (3%, `_shared/platformFee.ts`) |
+| `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` | exos-checkout | Optional, default 290 / 30: Stripe's card fee, added to the application fee |
 | `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |
 | `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | all | Supabase sets these automatically |

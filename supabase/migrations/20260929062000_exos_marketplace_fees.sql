@@ -24,11 +24,12 @@
 -- 180 days, to confirm the known rates and learn the others. The buyer's
 -- price (the marketplace's own markup on top) isn't visible and isn't needed.
 --
--- Exos earns on every sale: 3% of every transaction, paid by the organizer
--- (operator, 2026-09-28; _shared/platformFee.ts). On a marketplace sale the
--- transaction Exos handles is the marketplace's payout, so exos_fee = 3% of
--- proceeds (to the cent, half up) and organizer_net = proceeds - exos_fee:
--- the same as an Exos checkout of the Exos price (40.00 -> 38.80 either way).
+-- Exos earns on every sale: 3% of every transaction, net after card
+-- processing, paid by the organizer (operator, 2026-09-28;
+-- _shared/platformFee.ts). On a marketplace sale the transaction Exos handles
+-- is the marketplace's payout and there's no card fee (the marketplace charged
+-- the card), so exos_fee = 3% of proceeds (to the cent, half up) and
+-- organizer_net = proceeds - exos_fee (40.00 -> 38.80).
 -- exos_platform_fee_bps() is the one place the SQL side keeps the rate.
 --
 -- Service role only. Re-run safe (IF NOT EXISTS / CREATE OR REPLACE / DROP

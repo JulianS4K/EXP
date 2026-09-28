@@ -313,7 +313,7 @@ export function MarketplaceGrid({
         seat is never on sale in two places. 0 takes the listing down and gives its seats back. The price under each
         number is what that marketplace lists it at. Leave it blank and Exos lists it so you net the ticket price there
         too: the marketplace's seller fee goes on top (TEvo 3%, SeatGeek 5%, the others as Exos learns them). Exos takes
-        its 3% the same way everywhere, so you net the same per ticket on every store. It can be higher, never lower
+        3% of what the marketplace pays; there's no card fee on your side, since the marketplace charged the card. It can be higher, never lower
         than what Exos charges. "Split" says what a marketplace buyer can take from a listing: any number, any number
         that doesn't leave one seat behind, pairs only, or the whole listing, on every marketplace.
         {maxPerOrder

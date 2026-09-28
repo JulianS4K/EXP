@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { EXOS_FEE_BPS, exosFeeCents, organizerNetCents } from '../../supabase/functions/_shared/platformFee.ts';
+import {
+  EXOS_FEE_BPS,
+  STRIPE_CARD_FEE,
+  checkoutApplicationFeeCents,
+  exosFeeCents,
+  organizerNetCents,
+  stripeFeeCents,
+} from '../../supabase/functions/_shared/platformFee.ts';
 import { netEqualListCents, payoutCents } from './marketplace';
 
 describe('the Exos fee: 3% of every transaction, paid by the organizer', () => {
@@ -12,11 +19,23 @@ describe('the Exos fee: 3% of every transaction, paid by the organizer', () => {
     expect(organizerNetCents(4000)).toBe(3880);
   });
 
-  it('leaves the organizer the same net on Exos and on every marketplace', () => {
-    const exosCheckout = organizerNetCents(4000);
+  it('on an Exos checkout, carries Stripe\'s card fee so Exos nets 3%', () => {
+    expect(STRIPE_CARD_FEE).toEqual({ bps: 290, fixedCents: 30 });
+    expect(stripeFeeCents(4000)).toBe(146); // 1.16 + 0.30
+    expect(checkoutApplicationFeeCents(4000)).toBe(266); // organizer gets 37.34
+    for (const amount of [500, 2000, 4000, 12345, 100000]) {
+      const appFee = checkoutApplicationFeeCents(amount);
+      expect(appFee - stripeFeeCents(amount), `${amount}`).toBe(exosFeeCents(amount)); // Exos keeps exactly 3%
+    }
+    expect(checkoutApplicationFeeCents(0)).toBe(0); // free orders: no fee, no charge
+    expect(checkoutApplicationFeeCents(20)).toBe(20); // never more than the order
+    expect(checkoutApplicationFeeCents(4000, { card: { bps: 0, fixedCents: 0 } })).toBe(120);
+  });
+
+  it('on a marketplace sale, 3% of the payout is already net (the marketplace charged the card)', () => {
     for (const ch of ['seatgeek', 'evo', 'vivid'] as const) {
       const payout = payoutCents(ch, netEqualListCents(ch, 4000), 1);
-      expect(organizerNetCents(payout), ch).toBe(exosCheckout); // 38.80
+      expect(organizerNetCents(payout), ch).toBe(3880);
     }
   });
 });

@@ -73,8 +73,9 @@ see it and doesn't need it. An organizer's marketplace price in the grid still w
 
 Every sale records the per-ticket price its listing carried (`exos_marketplace_orders.list_unit_price`, from the
 plan entry's `unit_price` by `listing_ref`, set once) and `marketplace_fee` = listed price x quantity - proceeds.
-The Exos fee applies here too: 3% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee), the same
-3% an Exos checkout pays, so a 40.00 ticket nets the organizer 38.80 on every store.
+The Exos fee applies here too: 3% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
+to Exos, like the 3% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
+organizer 38.80 on a marketplace and 37.34 on Exos; the marketplace's fee already covers its card processing.
 `exos_marketplace_fee_rates` shows each store's realized rate over 180 days: it confirms the known rates, and once
 a store with an unknown rate sells, its rate goes into `SELLER_FEES`. TEvo proceeds are net of `order.fee`, and
 SeatGeek's sub-cent `total` is rounded to the cent.

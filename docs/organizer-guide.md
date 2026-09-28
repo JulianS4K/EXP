@@ -41,8 +41,10 @@ paid events can't be sold.**
 - **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
   *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee. Exos
-  takes 3% of every sale from your payout, on Exos and on marketplaces alike: a 40.00 ticket pays
-  you 38.80 wherever it sells (marketplace prices are raised to cover their own seller fee).
+  takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
+  a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
+  card was charged there, so a 40.00 ticket pays you 38.80 (marketplace prices are raised to cover
+  their own seller fee).
 - **Scheduled prices** (early-bird → regular → last-minute). Buyers are charged the price that's
   live when they check out, which is the one the storefront shows.
 - **Vouchers:**
