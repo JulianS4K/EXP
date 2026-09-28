@@ -219,6 +219,26 @@ T1–T3, `gotickets.test.ts`). All dry-run.
 - [ ] Operator: GOTICKETS_ACCESS_ID / _SECRET / GOTICKETS_WEBHOOK_TOKEN, webhooks (SALE, ORDER_CANCELLED),
   WriteAuthorization.
 
+## Scarcity mode + day-of cutoff 2026-09-28
+
+Mig `20260928040000` (tested: `test_marketplace_scarcity.sql` C1–C6, `test_channel_allocations.sql`, e2e).
+- ✅ 3 hours before doors every marketplace pool goes to 0 (live ones once the marketplace confirms): day-of
+  sales are Exos's.
+- ✅ Selling marketplaces are reloaded first and in full; stagnant ones (no sale in 24 h, 2 h on the last day)
+  are never reloaded and drop to one order's worth, 0 near sellout.
+- ✅ Near sellout (Exos's free seats under one order's worth per pool) quiet pools shrink to one order's worth,
+  and Exos keeps one order's worth for itself.
+- ✅ Grid line shows each pool's state; exos-distribute says why a pool is empty.
+- ✅ Scenario dry run: `scripts/scarcity-sim` (19 scenarios, real functions); findings in
+  docs/marketplace/scarcity-sim.md. Integrity held everywhere.
+- [ ] From the dry run: don't grow a pool while its live listing has an unconfirmed change; alert on a stuck
+  sender; show staff seats still held at doors (a stopped sender strands them).
+- [ ] From the dry run: "auto" caps (a hot marketplace hit its cap while seats went unsold), grid caps as
+  ceilings (only require cap >= sold), and say so when a cap is set below what's sold.
+- [ ] Per-event cutoff override (3 hours is fixed for now).
+- [ ] Live sender: the cutoff and stagnant shrinks only reach live listings once it sends the planned deletes
+  and calls exos_confirm_channel_listing.
+
 ## Vivid Seats 2026-09-28
 
 Broker Portal API 1.0.0 (docs/marketplace/vivid). Mig `20260928030000` (tested: `test_vivid_orders.sql` T1–T3,

@@ -1,0 +1,330 @@
+   200 GA, 4 marketplaces (cap 40 each), steady demand that just about sells out; Exos gets 3x walk-up on the day
+== 01 baseline: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 74 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-72h  Exos free 18 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 2/2 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 11 | gametime 4/4 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 7 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 3 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 123, gametime 6, seatgeek 19, stubhub 40, vivid 12); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 9, gametime 14, seatgeek 5, stubhub 15, vivid 11
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   demand 4x baseline: sells out days early
+== 02 hot show: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-72h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-24h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-12h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-6h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 103, gametime 21, seatgeek 18, stubhub 37, vivid 21); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 486, gametime 58, seatgeek 108, stubhub 127, vivid 59
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 46.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   demand 0.3x baseline: lots left at the door
+== 03 cold show: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 148 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 113 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 8/8 selling
+   T-24h  Exos free 109 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-12h  Exos free 108 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-6h  Exos free 104 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-3h  Exos free 104 | gametime 4/4 closed | seatgeek 4/4 closed | stubhub 4/4 closed | vivid 4/4 closed
+   T-1h  Exos free 116 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 116 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 84/200 (exos 58, gametime 7, seatgeek 6, stubhub 8, vivid 5); unsold 116
+   lost demand (seats buyers wanted but couldn't get there): none
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   StubHub is where the buyers are; Exos's own storefront is quiet
+== 04 marketplace-heavy: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 98 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 0/0 normal | vivid 8/8 selling
+   T-72h  Exos free 73 | gametime 8/8 selling | seatgeek 8/8 selling | stubhub 0/0 normal | vivid 4/4 stagnant
+   T-24h  Exos free 63 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 0/0 normal | vivid 4/4 stagnant
+   T-12h  Exos free 48 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 0/0 normal | vivid 4/4 stagnant
+   T-6h  Exos free 42 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 0/0 normal | vivid 8/8 selling
+   T-3h  Exos free 39 | gametime 8/8 closed | seatgeek 4/4 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 51 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 51 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 149/200 (exos 38, gametime 30, seatgeek 23, stubhub 40, vivid 18); unsold 51
+   lost demand (seats buyers wanted but couldn't get there): stubhub 224
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   Exos sells most; marketplaces trickle
+== 05 Exos-heavy: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 39 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-24h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-12h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-6h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 192, gametime 0, seatgeek 4, stubhub 1, vivid 3); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 112, gametime 6, seatgeek 9, stubhub 7
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   quiet for two weeks, then most demand arrives on the last day (walk-up)
+== 06 day-of surge: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 132 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 99 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-24h  Exos free 92 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-12h  Exos free 60 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-6h  Exos free 34 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-3h  Exos free 19 | gametime 8/8 closed | seatgeek 4/4 closed | stubhub 4/4 closed | vivid 8/8 closed
+   T-1h  Exos free 39 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 36 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 167/200 (exos 93, gametime 13, seatgeek 23, stubhub 20, vivid 18); unsold 33
+   lost demand (seats buyers wanted but couldn't get there): stubhub 5, vivid 2
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   10 seats, 4 marketplaces each capped at 10: Exos's floor vs. four pools
+   setup: the grid refused seatgeek cap 10: exos_set_channel_allocation: only 4 more seat(s) free on this ticket type
+   setup: the grid refused gametime cap 10: exos_set_channel_allocation: only 4 more seat(s) free on this ticket type
+   setup: the grid refused vivid cap 10: exos_set_channel_allocation: only 4 more seat(s) free on this ticket type
+== 07 tiny tier: 10 seats, max per order 4, 1 marketplace(s), 336 h to doors
+   T-168h  Exos free 0 | stubhub 0/0 scarce
+   T-72h  Exos free 0 | stubhub 0/0 scarce
+   T-24h  Exos free 0 | stubhub 0/0 scarce
+   T-12h  Exos free 0 | stubhub 0/0 scarce
+   T-6h  Exos free 0 | stubhub 0/0 scarce
+   T-3h  Exos free 0 | stubhub 0/0 closed
+   T-1h  Exos free 0 | stubhub 0/0 closed
+   T-0h  Exos free 0 | stubhub 0/0 closed
+   RESULT sold 10/10 (exos 6, stubhub 4); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 122, stubhub 44
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   baseline demand, marketplaces busy on the last day, and the sender takes 4 steps (4 h far out, 1 h on the day) to update them
+== 08 slow sender: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 43 | gametime 8/8 selling | seatgeek 8/8 selling | stubhub 8/3 selling | vivid 8/8 selling
+   T-72h  Exos free 17 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 4/4 stagnant | vivid 0/0 stagnant
+   T-24h  Exos free 4 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-12h  Exos free 1 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-6h  Exos free 1 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 124, gametime 16, seatgeek 20, stubhub 31, vivid 9); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 30, gametime 13, seatgeek 33, stubhub 20, vivid 10
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 7.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   baseline demand, marketplaces busy on the last day, and the sender stops 30 h before doors: shrinks and the cutoff never reach the marketplaces
+== 09 sender down on the last day: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 74 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-72h  Exos free 18 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 2/2 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 11 | gametime 4/4 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 2 | gametime 8/3 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 2 | gametime 6/1 selling | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 6/1 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 6/1 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 6/1 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 194/200 (exos 114, gametime 9, seatgeek 19, stubhub 40, vivid 12); unsold 6
+   lost demand (seats buyers wanted but couldn't get there): exos 12, gametime 17, seatgeek 11, stubhub 39, vivid 11
+   held by marketplaces at doors: 6; hours Exos had no free seat while a pool held some: 6.3 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   hot show plus refunds: 10 seats at T-30h and 6 at T-5h (after the scarcity line)
+== 10 refunds near sellout: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-72h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-30.0h  action: 10 seats refunded
+   T-24h  Exos free 7 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-5.0h  action: 6 seats refunded
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 110, gametime 24, seatgeek 23, stubhub 40, vivid 19); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 392, gametime 36, seatgeek 89, stubhub 133, vivid 65
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 38.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   no maxPerOrder (pools default to 8, floor 4); buyers want up to 8
+== 11 no max per order: 200 seats, max per order none, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 23 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 2 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-24h  Exos free 1 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-12h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-6h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 159, gametime 0, seatgeek 12, stubhub 25, vivid 4); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 92, gametime 18, seatgeek 25, stubhub 12, vivid 23
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 28.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   maxPerOrder 1: pools of 2, Exos floor 1
+== 12 max per order 1: 200 seats, max per order 1, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 78 | gametime 2/2 selling | seatgeek 2/2 selling | stubhub 2/2 selling | vivid 2/2 selling
+   T-72h  Exos free 17 | gametime 2/2 selling | seatgeek 2/2 selling | stubhub 2/2 selling | vivid 2/2 selling
+   T-24h  Exos free 2 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 0 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 104, gametime 13, seatgeek 29, stubhub 40, vivid 14); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 26, gametime 5, seatgeek 7, stubhub 6, vivid 4
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 5.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   no doors_at: the cutoff counts from the start time
+== 13 no doors time: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors (no doors time: cutoff from the start)
+   T-168h  Exos free 74 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-72h  Exos free 18 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 2/2 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 11 | gametime 4/4 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 7 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 3 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 123, gametime 6, seatgeek 19, stubhub 40, vivid 12); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 4, gametime 14, seatgeek 5, stubhub 15, vivid 11
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   doors 3 h before the start: cutoff is 6 h before the start
+== 14 doors 3h before start: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 74 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-72h  Exos free 18 | gametime 8/8 selling | seatgeek 4/4 stagnant | stubhub 2/2 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 11 | gametime 4/4 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-12h  Exos free 7 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-6h  Exos free 3 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 scarce | vivid 0/0 stagnant
+   T-3h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 0 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 123, gametime 6, seatgeek 19, stubhub 40, vivid 12); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 9, gametime 14, seatgeek 5, stubhub 15, vivid 11
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   pools filled 14 days out, published 3 days out (idle clock starts at publish)
+== 15 grid filled before publish: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 168 | gametime 8/8 normal | seatgeek 8/8 normal | stubhub 8/8 normal | vivid 8/8 normal
+   T-72.0h  published
+   T-72h  Exos free 168 | gametime 8/8 normal | seatgeek 8/8 normal | stubhub 8/8 normal | vivid 8/8 normal
+   T-24h  Exos free 132 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 8/8 selling | vivid 4/4 stagnant
+   T-12h  Exos free 130 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-6h  Exos free 110 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 8/8 selling
+   T-3h  Exos free 103 | gametime 4/4 closed | seatgeek 4/4 closed | stubhub 4/4 closed | vivid 4/4 closed
+   T-1h  Exos free 116 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 111 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 89/200 (exos 58, gametime 0, seatgeek 7, stubhub 16, vivid 8); unsold 111
+   lost demand (seats buyers wanted but couldn't get there): none
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   StubHub cap cut from 40 to 12 at T-200h while live and selling; SeatGeek unticked at T-100h (live: delist, then release)
+== 16 organizer changes mid-sale: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-200.0h  action: stubhub cap set to 12
+   T-168h  Exos free 86 | gametime 4/4 stagnant | seatgeek 8/8 selling | stubhub 0/0 stagnant | vivid 4/4 stagnant
+   T-100.0h  action: seatgeek unticked
+   T-72h  Exos free 43 | gametime 8/8 selling | seatgeek 0/0 fixed | stubhub 0/0 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 22 | gametime 4/4 stagnant | seatgeek 0/0 fixed | stubhub 0/0 stagnant | vivid 4/4 stagnant
+   T-12h  Exos free 8 | gametime 5/5 selling | seatgeek 0/0 fixed | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-6h  Exos free 9 | gametime 0/0 stagnant | seatgeek 0/0 fixed | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 6 | gametime 0/0 closed | seatgeek 0/0 fixed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 2 | gametime 0/0 closed | seatgeek 0/0 fixed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 2 | gametime 0/0 closed | seatgeek 0/0 fixed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 200/200 (exos 129, gametime 14, seatgeek 19, stubhub 19, vivid 19); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 3, gametime 6, seatgeek 5, stubhub 36, vivid 4
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   nobody buys on any marketplace
+== 17 dead marketplaces: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 97 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 43 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 19 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-12h  Exos free 17 | gametime 4/4 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 4/4 stagnant
+   T-6h  Exos free 17 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 14 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 11 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 10 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 190/200 (exos 190, gametime 0, seatgeek 0, stubhub 0, vivid 0); unsold 10
+   lost demand (seats buyers wanted but couldn't get there): none
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   only StubHub, cap 150 of 200, hot on StubHub
+== 18 one marketplace, big cap: 200 seats, max per order 4, 1 marketplace(s), 336 h to doors
+   T-168h  Exos free 57 | stubhub 8/8 selling
+   T-72h  Exos free 0 | stubhub 0/0 selling
+   T-24h  Exos free 0 | stubhub 0/0 scarce
+   T-12h  Exos free 0 | stubhub 0/0 scarce
+   T-6h  Exos free 0 | stubhub 0/0 scarce
+   T-3h  Exos free 0 | stubhub 0/0 closed
+   T-1h  Exos free 0 | stubhub 0/0 closed
+   T-0h  Exos free 0 | stubhub 0/0 closed
+   RESULT sold 200/200 (exos 62, stubhub 138); unsold 0
+   lost demand (seats buyers wanted but couldn't get there): exos 44, stubhub 83
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 5.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
+   marketplaces never go live (dry-run today): pools hold seats nobody can buy
+== 19 not live yet: 200 seats, max per order 4, 4 marketplace(s), 336 h to doors
+   T-168h  Exos free 97 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-72h  Exos free 43 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-24h  Exos free 19 | gametime 4/4 stagnant | seatgeek 4/4 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-12h  Exos free 17 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 4/4 stagnant | vivid 4/4 stagnant
+   T-6h  Exos free 17 | gametime 0/0 stagnant | seatgeek 0/0 stagnant | stubhub 0/0 stagnant | vivid 0/0 stagnant
+   T-3h  Exos free 14 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-1h  Exos free 11 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   T-0h  Exos free 10 | gametime 0/0 closed | seatgeek 0/0 closed | stubhub 0/0 closed | vivid 0/0 closed
+   RESULT sold 190/200 (exos 190, gametime 0, seatgeek 0, stubhub 0, vivid 0); unsold 10
+   lost demand (seats buyers wanted but couldn't get there): none
+   held by marketplaces at doors: 0; hours Exos had no free seat while a pool held some: 0.0 h
+   marketplace sales sent to a human (sold more than held): none
+   marketplace sales served from Exos's free seats (pool short, seats free): none
+   integrity: ok (never over capacity, no seat held or sold twice)
+
