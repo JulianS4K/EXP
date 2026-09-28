@@ -213,3 +213,39 @@ describe('TevoWriter', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('multi-item orders', () => {
+  const ALLOC2 = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const LISTING2 = exosListingId(ALLOC2, 1);
+  const item = (id: number, qty: number, ext: string, price = '45.00') =>
+    ({ id, order_item_id: id + 100, quantity: qty, price, ticket_group: { id: id + 1000, section: 'GA', row: 'GA', external_id: ext } });
+
+  it('items from one Exos listing: summed and fulfilled as usual', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 2, LISTING), item(2, 3, LISTING)] }));
+    expect(s).toMatchObject({ status: 'confirmed', quantity: 5, externalListingId: ALLOC, note: null, proceeds: { amount: 225 } });
+  });
+
+  it('items from different Exos listings: never the whole quantity from the first one', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 2, LISTING), item(2, 3, LISTING2)] }));
+    expect(s.status).toBe('unknown');
+    expect(s.note).toMatch(/2 different Exos listings/);
+    expect(s.note).toContain(LISTING2);
+  });
+
+  it('a cancelled multi-listing order is still a cancellation', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'cancelled', items: [item(1, 2, LISTING), item(2, 3, LISTING2)] }));
+    expect(s.status).toBe('cancelled');
+    expect(s.note).toBeNull();
+  });
+
+  it('Exos items next to broker items: only the Exos quantity counts, and a person delivers it', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 4, 'BROKER-9'), item(2, 2, LISTING)] }));
+    expect(s).toMatchObject({ status: 'unknown', quantity: 2, externalListingId: ALLOC });
+    expect(s.note).toMatch(/broker items/);
+  });
+
+  it('the writer refuses to accept a multi-listing order', () => {
+    const w = new TevoWriter();
+    expect(() => w.acceptOrder(officeOrder({ items: [item(1, 2, LISTING), item(2, 1, LISTING2)] }), { reviewer_id: 1 })).toThrow(/several Exos listings/);
+  });
+});

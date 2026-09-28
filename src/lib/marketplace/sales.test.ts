@@ -30,7 +30,7 @@ describe('recordPayload', () => {
     expect(recordPayload(sale, { id: 555 })).toEqual({
       channel: 'stubhub', external_order_id: '555', external_event_id: null, external_listing_id: ALLOC, listing_ref: LISTING,
       quantity: 2, sale_status: 'confirmed', buyer_email: 'b@x.com', currency: 'USD', proceeds: '90.50',
-      confirm_by: '2026-10-02T00:00:00Z', sold_at: '2026-10-01T00:00:00Z', raw: { id: 555 },
+      confirm_by: '2026-10-02T00:00:00Z', sold_at: '2026-10-01T00:00:00Z', raw: { id: 555 }, sale_note: null,
     });
   });
 

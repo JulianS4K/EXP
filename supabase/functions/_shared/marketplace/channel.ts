@@ -91,6 +91,12 @@ export interface MarketplaceSale {
   createdAt: string | null;
   section: string | null;
   row: string | null;
+  /**
+   * Why a human has to look at it, when the channel can tell (e.g. a TEvo
+   * order spanning several Exos listings; status is then 'unknown'). Stored
+   * as exos_marketplace_orders.sale_note and shown as the attention reason.
+   */
+  note?: string | null;
 }
 
 export interface ChannelCapabilities {

@@ -187,6 +187,9 @@ export class TevoWriter {
     if (!items.length || items.some((it) => !exosListingRef(it))) {
       throw new TevoWriteRefusedError('acceptOrder', `order ${id} is not (only) for Exos listings; the account may carry broker orders`);
     }
+    if (new Set(items.map((it) => exosListingRef(it))).size > 1) {
+      throw new TevoWriteRefusedError('acceptOrder', `order ${id} spans several Exos listings: a person delivers it`);
+    }
     const gate = fraudGate(order);
     if ('reason' in gate) throw new TevoWriteRefusedError('acceptOrder', gate.reason);
     if (!Number.isInteger(body.reviewer_id) || body.reviewer_id <= 0) throw new TevoWriteRefusedError('acceptOrder', 'no reviewer_id');

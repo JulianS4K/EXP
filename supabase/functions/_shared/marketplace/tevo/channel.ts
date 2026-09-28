@@ -38,12 +38,18 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
   const o = raw as TevoOrder;
   if (!o || typeof o !== 'object' || o.id == null || !/^\d+$/.test(String(o.id))) throw new Error('not a TEvo order');
   const items = Array.isArray(o.items) ? o.items : [];
-  const first = items[0];
-  const listing = exosListingRef(first);
-  const qty = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+  // Only items sold from an Exos listing are Exos's (the account also carries
+  // broker inventory). An order can hold several items: every Exos item must
+  // name the SAME Exos listing, or no one listing can supply the quantity.
+  const exosItems = items.filter((it) => exosListingRef(it) != null);
+  const refs = [...new Set(exosItems.map((it) => exosListingRef(it)!))];
+  const counted = exosItems.length ? exosItems : items;
+  const first = counted[0];
+  const listing = refs[0] ?? exosListingRef(first);
+  const qty = counted.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
   let proceeds = 0;
-  let priced = items.length > 0;
-  for (const it of items) {
+  let priced = counted.length > 0;
+  for (const it of counted) {
     const p = num(it.price);
     if (!Number.isFinite(p)) priced = false;
     else proceeds += p * (Number(it.quantity) || 0);
@@ -54,7 +60,15 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
   // clears; one it declined is a cancellation.
   const waiting = 'wait' in gate && gate.wait;
   const declined = orderKind(o) === 'sale_to_client' && 'reason' in gate && !waiting;
-  const status: SaleStatus = declined ? 'cancelled' : waiting ? 'pending' : STATUS[String(o.state ?? '').toLowerCase()] ?? 'unknown';
+  const mapped: SaleStatus = declined ? 'cancelled' : waiting ? 'pending' : STATUS[String(o.state ?? '').toLowerCase()] ?? 'unknown';
+  // Several Exos listings in one order: never fulfil the whole quantity from
+  // the first one. It goes to a human (status 'unknown' + the reason), unless
+  // it's cancelled anyway.
+  const split = refs.length > 1 && mapped !== 'cancelled';
+  // Exos items next to broker items: TEvo accepts an order as a whole, so
+  // Exos can't deliver its part on its own either.
+  const mixed = !split && refs.length === 1 && exosItems.length < items.length && mapped !== 'cancelled';
+  const status: SaleStatus = split || mixed ? 'unknown' : mapped;
   return {
     channel: 'evo',
     externalOrderId: String(o.id),
@@ -70,6 +84,11 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
     createdAt: o.created_at ?? null,
     section: first?.ticket_group?.section ?? null,
     row: first?.ticket_group?.row ?? null,
+    note: split
+      ? `Ticket Evolution order has items from ${refs.length} different Exos listings (${refs.join(', ')}): fulfil each listing's tickets by hand`
+      : mixed
+        ? 'Ticket Evolution order mixes this Exos listing with broker items: fulfil the Exos tickets by hand'
+        : null,
   };
 }
 
