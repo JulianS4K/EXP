@@ -18,6 +18,7 @@ import { allocationIdFromListingId } from '../listingIds.ts';
 import { planTevoDelivery } from './fulfilment.ts';
 import { exosListingRef, fraudGate, orderEmail, orderKind } from './orders.ts';
 import type { TevoOrder } from './types.ts';
+import { tevoAmountCents } from './payments.ts';
 
 const STATUS: Record<string, SaleStatus> = {
   pending: 'pending',
@@ -27,11 +28,6 @@ const STATUS: Record<string, SaleStatus> = {
   rejected: 'cancelled',
   canceled: 'cancelled',
   cancelled: 'cancelled',
-};
-
-const num = (v: unknown): number => {
-  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
-  return Number.isFinite(n) ? n : NaN;
 };
 
 export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
@@ -47,13 +43,27 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
   const first = counted[0];
   const listing = refs[0] ?? exosListingRef(first);
   const qty = counted.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
-  let proceeds = 0;
+  // Proceeds are what the seller is paid: the items' price less TEvo's seller
+  // fee (order.fee, ~3%; the EvoPay payment is the gross). In cents. The fee
+  // is per order: when broker items share the order, Exos's part of it is
+  // prorated by price.
+  const lineCents = (it: (typeof items)[number]) => {
+    const c = tevoAmountCents(it.price);
+    return c == null ? null : c * (Number(it.quantity) || 0);
+  };
+  let grossCents = 0;
   let priced = counted.length > 0;
   for (const it of counted) {
-    const p = num(it.price);
-    if (!Number.isFinite(p)) priced = false;
-    else proceeds += p * (Number(it.quantity) || 0);
+    const c = lineCents(it);
+    if (c == null) priced = false;
+    else grossCents += c;
   }
+  const feeCents = Math.max(0, tevoAmountCents(o.fee) ?? 0);
+  const orderCents = items.reduce((s, it) => s + (lineCents(it) ?? 0), 0);
+  const exosFeeCents = counted.length === items.length || orderCents <= 0
+    ? feeCents
+    : Math.round((feeCents * grossCents) / orderCents);
+  const proceeds = (grossCents - exosFeeCents) / 100;
   const gate = fraudGate(o);
   // A Client sale Riskified hasn't cleared: exos-marketplace-sales doesn't
   // ingest it yet (tevoAwaitingFraudCheck), so no tickets exist before it
@@ -78,7 +88,7 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
     quantity: qty,
     status,
     buyerEmail: orderEmail(o),
-    proceeds: priced && qty > 0 ? { amount: Math.round(proceeds * 100) / 100, currency: 'USD' } : null,
+    proceeds: priced && qty > 0 ? { amount: proceeds, currency: 'USD' } : null,
     confirmBy: null,
     shipBy: null,
     createdAt: o.created_at ?? null,

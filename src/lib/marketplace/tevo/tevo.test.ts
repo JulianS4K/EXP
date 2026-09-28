@@ -238,6 +238,16 @@ describe('multi-item orders', () => {
     expect(s.note).toBeNull();
   });
 
+  it("proceeds are net of TEvo's seller fee (order 8089940-19196777: 32.48 - 0.97 = 31.51)", () => {
+    const one = normalizeTevoOrder(officeOrder({ state: 'completed', total: '32.48', fee: '0.97', service_fee: '0.0', items: [item(1, 1, LISTING, '32.48')] }));
+    expect(one.proceeds).toEqual({ amount: 31.51, currency: 'USD' });
+    // No fee on the order: the items' price, as before.
+    expect(normalizeTevoOrder(officeOrder({ items: [item(1, 2, LISTING, '45.00')] })).proceeds).toEqual({ amount: 90, currency: 'USD' });
+    // Shared with broker items: Exos bears its price share of the fee (2 x 45 of 6 x 45 -> 1/3 of 3.00).
+    const mixed = normalizeTevoOrder(officeOrder({ state: 'accepted', fee: '3.00', items: [item(1, 4, 'BROKER-9'), item(2, 2, LISTING)] }));
+    expect(mixed.proceeds).toEqual({ amount: 89, currency: 'USD' });
+  });
+
   it('Exos items next to broker items: only the Exos quantity counts, and a person delivers it', () => {
     const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 4, 'BROKER-9'), item(2, 2, LISTING)] }));
     expect(s).toMatchObject({ status: 'unknown', quantity: 2, externalListingId: ALLOC });

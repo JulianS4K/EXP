@@ -113,6 +113,14 @@ include Terminal-2's broker ones.
 - **Pending vs settled:** a pending payment only changes the order's *pending* balance; money has moved once it's
   `completed` / `captured`. `summarizeTevoPayments` nets settled payments minus settled refunds, keeps pending apart,
   and lists any state it doesn't know, so a person can look.
+- **The payment is the gross; TEvo's fee comes off it.** The seller's fee is the order's top-level `fee`, not
+  `service_fee`, which is the buyer's. On real order 8089940-19196777 (2026-09-26, office sale): `total` 32.48,
+  `fee` 0.97 (2.99%), `service_fee` 0.0, one `evopay` payment of 32.48. TEvo's order page shows net 31.51. So Exos's
+  sale proceeds (`normalizeTevoOrder`) are the items' price less `fee`. When broker items share the order, Exos's
+  part of the fee is prorated by price.
+- **`completed` isn't "cash received".** On that order the EvoPay payment was `completed` one second after the sale,
+  before the event. It means the payment is applied to the order. When EvoPay actually settles to the bank is
+  separate, and the payout ledger has to reconcile that on its own.
 - **Stored copies drop the personal fields:** `normalizeTevoPayment` keeps ids, type, state, direction and amount in
   cents. It drops `credit_card`, the `avs_*` / `cvv_*` results and `performed_by`, and the Status list's buyer and
   seller names, which can be a person's.
