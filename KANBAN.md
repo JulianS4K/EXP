@@ -25,6 +25,19 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Email templates for buyers and organizers 2026-09-29
+
+- 🟡 **Transactional + follow-up mail** (`20260929071000_exos_mail_templates`, `_shared/mail-templates.ts`,
+  `exos-mail-drain`; authored, not applied / deployed; `docs/email.md`): payload rows rendered and escaped in TS.
+  Buyer: event cancelled with each holder's refund status (trigger, any cancel path), event updated, refund issued
+  (per Stripe refund), after-show mail (thanks, follow, next events); receipt and reminder extended in place.
+  Organizer: event published, low inventory / sold out, payout sent / pending (`exos_queue_payout_mail`, for the
+  payout ledger), free months ending (14 days and 1 day before), daily sales digest, weekly summary, day 0/3/7
+  onboarding that stops when done. Once-only ledger (`exos_mail_dedupe`), follow-ups honour the opt-out, no buyer
+  PII in organizer mail. Operator: apply, deploy the drain, add the `exos_send_mail_followups` cron line
+  (`docs/email.md`). Next: settings toggle for `post_event_emails_enabled`, a separate organizer-digest opt-out,
+  move `event-rescheduled` and `waitlist-open` to payload templates (links, subject escaping).
+
 ## Net-equal marketplace pricing 2026-09-29
 
 - 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
