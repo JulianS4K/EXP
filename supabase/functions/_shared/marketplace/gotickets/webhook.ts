@@ -6,6 +6,14 @@
 // (exos-marketplace-sales?channel=gotickets&token=…, GOTICKETS_WEBHOOK_TOKEN)
 // and never acts on the payload itself: it reads the sale back from the API
 // (GET /rest/sales/{id}) and records that.
+//
+// Where the token may arrive, in order of preference:
+//   1. the `X-Exos-Webhook-Token` header (register the webhook with it when
+//      GoTickets lets the target carry custom headers);
+//   2. `Authorization: Bearer <token>`;
+//   3. the `token` query parameter (the fallback for a bare target URL).
+// Prefer a header: a query-string secret can end up in proxy and platform
+// access logs. Exos itself never logs the request URL.
 
 import type { GoTicketsWebhookPayload } from './types.ts';
 
@@ -16,6 +24,18 @@ export function verifyGoTicketsWebhookToken(got: string | null, expected: string
   let diff = g.length ^ expected.length;
   for (let i = 0; i < Math.max(g.length, expected.length); i++) diff |= (g.charCodeAt(i) || 0) ^ (expected.charCodeAt(i) || 0);
   return diff === 0;
+}
+
+export const GOTICKETS_WEBHOOK_TOKEN_HEADER = 'x-exos-webhook-token';
+
+/** The webhook token from the request: header first, then the query string. */
+export function goticketsWebhookToken(headers: Pick<Headers, 'get'>, url: URL): string | null {
+  const h = headers.get(GOTICKETS_WEBHOOK_TOKEN_HEADER)?.trim();
+  if (h) return h;
+  const auth = headers.get('authorization')?.trim() ?? '';
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  if (m) return m[1].trim();
+  return url.searchParams.get('token');
 }
 
 export class GoTicketsWebhookError extends Error {

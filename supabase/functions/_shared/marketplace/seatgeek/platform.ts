@@ -7,6 +7,7 @@
 //
 // Only GET /2/events is used. Its datetime_utc has no zone suffix; it is UTC.
 
+import { guardedFetch } from '../netError.ts';
 import type { EventCandidate } from '../channel.ts';
 import type { FetchLike } from './transport.ts';
 
@@ -61,7 +62,7 @@ export class SeatGeekPlatformClient {
       per_page: String(perPage),
       client_id: this.clientId,
     });
-    const res = await this.fetchImpl(`${this.host}/2/events?${params}`, { method: 'GET', headers: { Accept: 'application/json' } });
+    const res = await guardedFetch(this.fetchImpl, `${this.host}/2/events?${params}`, { method: 'GET', headers: { Accept: 'application/json' } }, 'seatgeek platform GET /2/events', [this.clientId]);
     if (!res.ok) throw new Error(`seatgeek platform GET /2/events -> ${res.status}`);
     const page = (await res.json()) as PlatformEventsPage;
     return page.events ?? [];

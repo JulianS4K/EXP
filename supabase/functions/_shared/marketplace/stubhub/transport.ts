@@ -8,6 +8,7 @@
 // host root. StubHub rejects requests without a User-Agent
 // (`user_agent_required`), so one is always sent.
 
+import { guardedFetch } from '../netError.ts';
 import { buildPath, type Endpoint } from './endpoints.ts';
 import type { ApiErrorBody } from './types.ts';
 
@@ -133,7 +134,7 @@ export async function execute(
 
   for (let attempt = 0; ; attempt++) {
     const token = await cfg.accessToken();
-    const res = await cfg.fetch(url, {
+    const res = await guardedFetch(cfg.fetch, url, {
       method: ep.method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -142,7 +143,7 @@ export async function execute(
         ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       },
       body: hasBody ? JSON.stringify(parts.body) : undefined,
-    });
+    }, `stubhub ${ep.method} ${ep.path}`, [token]);
     if (res.ok) return res;
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(retryDelayMs(res, attempt));

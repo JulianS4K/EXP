@@ -21,6 +21,7 @@
 //     side (listings, sales, payments, webhooks). StubHub's refresh tokens
 //     are single-use, so each refresh persists the new one.
 
+import { guardedFetch } from '../netError.ts';
 import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints.ts';
 import {
   DEFAULT_USER_AGENT,
@@ -336,7 +337,7 @@ export function basicAuthHeader(clientId: string, clientSecret: string): string 
 async function requestToken(opts: TokenEndpointOptions, form: URLSearchParams): Promise<TokenResponse & { access_token: string }> {
   const fetchImpl: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
   if (opts.scopes?.length) form.set('scope', opts.scopes.join(' '));
-  const res = await fetchImpl(opts.tokenUrl, {
+  const res = await guardedFetch(fetchImpl, opts.tokenUrl, {
     method: 'POST',
     headers: {
       Authorization: basicAuthHeader(opts.clientId, opts.clientSecret),
@@ -344,7 +345,7 @@ async function requestToken(opts: TokenEndpointOptions, form: URLSearchParams): 
       'User-Agent': opts.userAgent ?? DEFAULT_USER_AGENT,
     },
     body: form.toString(),
-  });
+  }, 'stubhub POST token', [opts.clientId, opts.clientSecret, form.get('refresh_token'), form.get('code')]);
   if (!res.ok) throw new StubHubError(`stubhub token -> ${res.status}`, res.status, await res.text());
   const data = (await res.json()) as TokenResponse;
   if (!data.access_token) throw new StubHubError('stubhub token: no access_token in response', res.status, null);

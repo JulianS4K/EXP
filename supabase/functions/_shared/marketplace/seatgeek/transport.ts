@@ -13,6 +13,7 @@
 // caller decides (recreate after a rejected order, retry after it settles).
 // PATCH /order takes multipart/form-data; everything else is JSON or none.
 
+import { guardedFetch } from '../netError.ts';
 import { SEATGEEK_API_HOST, buildPath, type Endpoint } from './endpoints.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -122,7 +123,7 @@ export async function execute(
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(parts.body);
     }
-    const res = await cfg.fetch(url, { method: ep.method, headers, body });
+    const res = await guardedFetch(cfg.fetch, url, { method: ep.method, headers, body }, `seatgeek ${ep.method} ${ep.path}`, [headers.Authorization.slice(cfg.authScheme.length + 1)]);
     if (res.ok) return res;
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(retryDelayMs(res, attempt));

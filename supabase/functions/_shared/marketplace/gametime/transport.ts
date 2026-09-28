@@ -6,6 +6,7 @@
 // appears in an error, a log line or a planned request (those use
 // relativeUrl, which has no key).
 
+import { guardedFetch } from '../netError.ts';
 import { GAMETIME_API_HOSTS, buildPath, type Endpoint, type GametimeEnvironment } from './endpoints.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -87,7 +88,7 @@ export async function execute(cfg: TransportConfig, ep: Endpoint, parts: Request
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(parts.body);
     }
-    const res = await cfg.fetch(url, { method: ep.method, headers, body });
+    const res = await guardedFetch(cfg.fetch, url, { method: ep.method, headers, body }, `gametime ${ep.method} ${ep.path}`, [key]);
     if (res.ok) return res;
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(500 * 2 ** attempt);

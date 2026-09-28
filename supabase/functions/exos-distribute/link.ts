@@ -12,6 +12,7 @@
 // Nothing here writes to a marketplace.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { redactError } from "../_shared/log.ts";
 import {
   exosEventRef,
   isChannelId,
@@ -109,7 +110,7 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
           : { ...base, status: "unmatched", external_event_id: null, method: "auto_match", confidence: null, candidates: top.length ? top : null };
       } catch (e) {
         counts.errors++;
-        console.error("exos-distribute: catalog search failed", net, ev.id, String(e));
+        console.error("exos-distribute: catalog search failed", net, ev.id, redactError(e));
         continue;
       }
 

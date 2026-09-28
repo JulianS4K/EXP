@@ -2,6 +2,7 @@
 // (writer.ts). Auth is two headers, X-Api-Access-Id and X-Api-Access-Secret;
 // neither is ever put in a URL, an error or a plan.
 
+import { guardedFetch } from '../netError.ts';
 import { GOTICKETS_API_HOST, buildPath, type Endpoint } from './endpoints.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -81,7 +82,7 @@ export async function execute(cfg: TransportConfig, ep: Endpoint, parts: Request
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(parts.body);
     }
-    const res = await cfg.fetch(url, { method: ep.method, headers, body });
+    const res = await guardedFetch(cfg.fetch, url, { method: ep.method, headers, body }, `gotickets ${ep.method} ${ep.path}`, [c.accessId, c.accessSecret]);
     if (res.ok) return res;
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(500 * 2 ** attempt);

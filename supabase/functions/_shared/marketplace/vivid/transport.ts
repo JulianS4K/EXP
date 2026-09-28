@@ -12,6 +12,7 @@
 // <success>false</success> and a message; readVividBody() turns those into
 // VividError too.
 
+import { guardedFetch } from '../netError.ts';
 import { VIVID_API_HOST, buildPath, type Endpoint } from './endpoints.ts';
 import { XmlError, child, parseXml, type XmlElement } from './xml.ts';
 
@@ -123,7 +124,7 @@ export async function execute(cfg: TransportConfig, ep: Endpoint, parts: Request
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
       body = formBody(ep.auth === 'param' ? { ...parts.form, apiToken: c.apiToken } : parts.form);
     }
-    const res = await cfg.fetch(url, { method: ep.method, headers, body });
+    const res = await guardedFetch(cfg.fetch, url, { method: ep.method, headers, body }, `vivid ${ep.method} ${ep.path}`, [c.apiToken, c.integratorToken]);
     if (res.ok) return { res, creds: c };
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(1000 * 2 ** attempt);

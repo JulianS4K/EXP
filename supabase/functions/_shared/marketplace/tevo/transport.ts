@@ -13,6 +13,7 @@
 // error or a log line: errors name the endpoint's path, and any echo of
 // either is redacted.
 
+import { guardedFetch } from '../netError.ts';
 import { TEVO_HOSTS, buildPath, type Endpoint, type TevoEnvironment } from './endpoints.ts';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -117,7 +118,7 @@ export async function execute(cfg: TransportConfig, ep: Endpoint, parts: Request
   for (let attempt = 0; ; attempt++) {
     const headers: Record<string, string> = { Accept: 'application/json', 'X-Token': c.token, 'X-Signature': signature };
     if (hasBody) headers['Content-Type'] = 'application/json';
-    const res = await cfg.fetch(url, { method: ep.method, headers, body });
+    const res = await guardedFetch(cfg.fetch, url, { method: ep.method, headers, body }, `tevo ${ep.method} ${ep.path}`, [c.token, c.secret, signature]);
     if (res.ok) return { res, creds: c };
     if (retryOn.has(res.status) && attempt < cfg.maxRetries) {
       await cfg.sleep(1000 * 2 ** attempt);

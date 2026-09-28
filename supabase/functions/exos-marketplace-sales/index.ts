@@ -41,7 +41,11 @@
 // STUBHUB_WEBHOOK_AUTHORIZATION. SeatGeek (optional): SEATGEEK_API_TOKEN
 // (Seller Direct seller token; orders + customer reads), SEATGEEK_WEBHOOK_TOKEN.
 // GoTickets (optional): GOTICKETS_ACCESS_ID, GOTICKETS_ACCESS_SECRET,
-// GOTICKETS_WEBHOOK_TOKEN (in the webhook target URL: ?channel=gotickets&token=).
+// GOTICKETS_WEBHOOK_TOKEN (sent as the X-Exos-Webhook-Token header or
+// Authorization: Bearer, or failing that in the target URL's ?token=; the
+// request URL is never logged).
+// Errors are logged through safeErrorText / MarketplaceNetworkError: no URL
+// (Gametime and Vivid v1 put their keys in the query string), no secret.
 // Vivid Seats (optional): VIVID_API_TOKEN (never in a logged URL: the
 // transport redacts it), VIVID_INTEGRATOR_TOKEN.
 // Ticket Evolution (optional): TEVO_API_TOKEN, TEVO_API_SECRET (signs every
@@ -54,6 +58,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
+import { redactError } from "../_shared/log.ts";
 import type { MarketplaceChannel, MarketplaceSale } from "../_shared/marketplace/channel.ts";
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planDelivery, recordPayload } from "../_shared/marketplace/sales.ts";
@@ -75,7 +80,7 @@ import type { GametimePurchase } from "../_shared/marketplace/gametime/types.ts"
 import { parseGametimeSaleNotification, verifyGametimeWebhook } from "../_shared/marketplace/gametime/webhook.ts";
 import { GoTicketsClient } from "../_shared/marketplace/gotickets/client.ts";
 import type { GoTicketsSale } from "../_shared/marketplace/gotickets/types.ts";
-import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookToken } from "../_shared/marketplace/gotickets/webhook.ts";
+import { GOTICKETS_SALE_WEBHOOKS, goticketsWebhookToken, parseGoTicketsWebhook, verifyGoTicketsWebhookToken } from "../_shared/marketplace/gotickets/webhook.ts";
 import { VividClient } from "../_shared/marketplace/vivid/client.ts";
 import type { VividOrder } from "../_shared/marketplace/vivid/types.ts";
 import { TevoClient } from "../_shared/marketplace/tevo/client.ts";
@@ -91,12 +96,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!);
   const channels = channelsFromEnv(env);
 
-  // GoTickets webhook (?channel=gotickets&token=…): GoTickets doesn't sign its
-  // webhooks, so the target URL carries our token, and the payload is only a
-  // pointer: the sale is read back from the API before anything is recorded.
+  // GoTickets webhook (?channel=gotickets): GoTickets doesn't sign its
+  // webhooks, so the request carries our token (X-Exos-Webhook-Token header,
+  // Authorization: Bearer, or ?token=), and the payload is only a pointer:
+  // the sale is read back from the API before anything is recorded. Never log
+  // req.url here: it may hold the token.
   const url = new URL(req.url);
   if (!req.headers.get("x-cron-secret") && url.searchParams.get("channel") === "gotickets") {
-    if (!verifyGoTicketsWebhookToken(url.searchParams.get("token"), env("GOTICKETS_WEBHOOK_TOKEN") ?? "")) {
+    if (!verifyGoTicketsWebhookToken(goticketsWebhookToken(req.headers, url), env("GOTICKETS_WEBHOOK_TOKEN") ?? "")) {
       return json({ error: "unauthorized" }, 401);
     }
     try {
@@ -108,7 +115,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.log("exos-marketplace-sales: GoTickets", n.type, n.id, sale.sellerStatus ?? "");
       return json(await ingest(sb, channels.get("gotickets")!, [sale], undefined));
     } catch (e) {
-      console.error("exos-marketplace-sales: GoTickets webhook failed", e);
+      console.error("exos-marketplace-sales: GoTickets webhook failed", redactError(e));
       return json({ error: "internal error" }, 500);
     }
   }
@@ -126,7 +133,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.log("exos-marketplace-sales: Gametime sale", n.id, n.quantity, p?.status ?? "(not read)");
       return json(await ingest(sb, channels.get("gametime")!, [{ ...n, ...(p ?? {}) }], undefined));
     } catch (e) {
-      console.error("exos-marketplace-sales: Gametime webhook failed", e);
+      console.error("exos-marketplace-sales: Gametime webhook failed", redactError(e));
       return json({ error: "internal error" }, 500);
     }
   }
@@ -149,7 +156,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (route.kind === "attention") return json({ noted: await noteSeatGeekListingIssues(sb, n.metadata.notification_type, route.items) });
       return json({ ignored: n.metadata.notification_type });
     } catch (e) {
-      console.error("exos-marketplace-sales: SeatGeek webhook failed", e);
+      console.error("exos-marketplace-sales: SeatGeek webhook failed", redactError(e));
       // 500 so SeatGeek retries; ingest is idempotent per order.
       return json({ error: "internal error" }, 500);
     }
@@ -169,7 +176,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const out = await ingest(sb, channels.get("stubhub")!, [sale], stubhubBuyerEmail(sh));
       return json(out);
     } catch (e) {
-      console.error("exos-marketplace-sales: webhook failed", e);
+      console.error("exos-marketplace-sales: webhook failed", redactError(e));
       // 500 so StubHub retries; ingest is idempotent per sale.
       return json({ error: "internal error" }, 500);
     }
@@ -244,7 +251,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     return json(result);
   } catch (e) {
-    console.error("exos-marketplace-sales failed", e);
+    console.error("exos-marketplace-sales failed", redactError(e));
     return json({ error: "internal error" }, 500);
   }
 });
@@ -309,7 +316,7 @@ async function openTevoOrders(te: TevoClient): Promise<TevoOrder[]> {
   try {
     return await te.listOrders({ state: "pending" });
   } catch (e) {
-    console.error("exos-marketplace-sales: TEvo listOrders failed", String(e));
+    console.error("exos-marketplace-sales: TEvo listOrders failed", redactError(e));
     return [];
   }
 }
@@ -350,7 +357,7 @@ async function recheckTevoOrders(sb: SupabaseClient, te: TevoClient, skip: Set<s
       const o = await te.getOrder(r.external_order_id);
       if (o) out.push(o);
     } catch (e) {
-      console.error("exos-marketplace-sales: TEvo order recheck failed", r.external_order_id, String(e));
+      console.error("exos-marketplace-sales: TEvo order recheck failed", r.external_order_id, redactError(e));
     }
   }
   return out;
@@ -366,7 +373,7 @@ async function openVividOrders(vs: VividClient): Promise<VividOrder[]> {
     try {
       out.push(...await vs.getOrders(status));
     } catch (e) {
-      console.error("exos-marketplace-sales: Vivid Seats getOrders failed", status, String(e));
+      console.error("exos-marketplace-sales: Vivid Seats getOrders failed", status, redactError(e));
     }
   }
   const seen = new Set<string>();
@@ -396,7 +403,7 @@ async function recheckVividOrders(sb: SupabaseClient, vs: VividClient, skip: Set
       if (o) out.push(o);
       else console.warn("exos-marketplace-sales: Vivid Seats order not returned on recheck", r.external_order_id);
     } catch (e) {
-      console.error("exos-marketplace-sales: Vivid Seats order recheck failed", r.external_order_id, String(e));
+      console.error("exos-marketplace-sales: Vivid Seats order recheck failed", r.external_order_id, redactError(e));
     }
   }
   return out;
@@ -421,7 +428,7 @@ async function recheckGoTicketsSales(sb: SupabaseClient, go: GoTicketsClient, sk
     try {
       out.push(await go.getSale(r.external_order_id));
     } catch (e) {
-      console.error("exos-marketplace-sales: GoTickets sale recheck failed", r.external_order_id, String(e));
+      console.error("exos-marketplace-sales: GoTickets sale recheck failed", r.external_order_id, redactError(e));
     }
   }
   return out;
@@ -463,7 +470,7 @@ async function recheckGametimePurchases(sb: SupabaseClient, gt: GametimeClient, 
       const p = await gt.getPurchase(r.external_order_id);
       if (p) out.push(p);
     } catch (e) {
-      console.error("exos-marketplace-sales: Gametime purchase recheck failed", r.external_order_id, String(e));
+      console.error("exos-marketplace-sales: Gametime purchase recheck failed", r.external_order_id, redactError(e));
     }
   }
   return out;
@@ -539,7 +546,7 @@ async function recheckSeatGeekOrders(sb: SupabaseClient, sg: SeatGeekClient, ski
     try {
       out.push(await sg.getOrder(r.external_order_id));
     } catch (e) {
-      console.error("exos-marketplace-sales: SeatGeek order recheck failed", r.external_order_id, String(e));
+      console.error("exos-marketplace-sales: SeatGeek order recheck failed", r.external_order_id, redactError(e));
     }
   }
   return out;
@@ -610,7 +617,7 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
       }
     } catch (e) {
       counts.errors++;
-      console.error("exos-marketplace-sales: sale failed", channel.id, String(e));
+      console.error("exos-marketplace-sales: sale failed", channel.id, redactError(e));
     }
   }
   return counts;
