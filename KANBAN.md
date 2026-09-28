@@ -204,6 +204,62 @@ Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_sea
   external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
 - [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
 
+## Bandsintown + Last.fm (researched 2026-09-28, not started)
+
+Research only; nothing built. Their docs were unreachable from the build sandbox, so re-check field lists
+and terms against the official specs before building.
+
+**Bandsintown** (first: it can bring buyers)
+- API: `rest.bandsintown.com` v3, read-only, `app_id` on every call. Bandsintown approves every use.
+  `GET /artists/{name}`: profile, image, MusicBrainz id, tracker count, upcoming count.
+  `GET /artists/{name}/events?date=upcoming|past|all|from,to`: dates, on-sale, venue + lat/long, lineup,
+  offers (ticket links). No search, buyer data or sales. v2's event create/cancel is legacy; don't count on it.
+- Distribution is the prize. Bandsintown pulls events from ticketing partners (Ticketmaster, AXS, Eventbrite,
+  See Tickets, Humanitix, Ticketsauce). An event that names an artist lists on that artist's page with the
+  partner's ticket link, then spreads to Spotify, Apple Music, Google, YouTube and Shazam. Discovery only: no
+  inventory, no double-sell risk. The `bandsintown` channel value already exists (mig 20260523200000), unused.
+- [ ] Operator: apply for an `app_id`; ask Bandsintown about ticketing-partner status and their feed spec.
+- [ ] Public, cached feed of published Exos events (lineup, venue, times, on-sale, Exos ticket URL) in their
+  partner format. Bandsintown pulls it, we never write to them (read-only rule). Dark until the deal is signed.
+- [ ] Read client (marketplace pattern; `app_id` redacted from logs), cached: artist lookup + upcoming events.
+- [ ] Event-editor enrichment when a performer is added: Bandsintown link, image, "N fans track this artist".
+- [ ] Demand signal for scarcity mode: tracker count, recent sell-outs, nearby dates → per-event pool size,
+  stagnant window, whether to use the cutoff (the scenario dry run showed fixed rules are the weak point).
+- [ ] Booking / conflict check: the artist plays nearby within a few weeks; routing (the night before/after).
+
+**Last.fm** (second: data, not distribution)
+- API: `ws.audioscrobbler.com/2.0/?method=…`, free self-serve API key. `artist.getInfo` (listeners, plays,
+  bio, tags, similar), `artist.getSimilar`, `artist.getTopTags`, `tag.getTopArtists`, `artist.search`,
+  `geo.getTopArtists` (country only), `user.getTopArtists` / `getRecentTracks` / `getLovedTracks` (public
+  profiles, or Last.fm sign-in). Event methods (`geo.getEvents`, `artist.getEvents`) were removed in 2016: no
+  tour dates, no ticket links.
+- Terms: free for non-commercial use. Commercial use (Exos) needs an agreement via partners@last.fm before
+  production. At most 5 requests/s per IP averaged over 5 min; caching expected.
+- [ ] Operator: commercial agreement with Last.fm (a free key is enough to build and test).
+- [ ] Read client behind `LASTFM_API_KEY`, cached: artist info, similar artists, tags.
+- [ ] Demand score: listeners + plays alongside Bandsintown's tracker count; auto-fill the event's genre from tags.
+- [ ] Recommendations: "fans of this also like…" on event pages; promoter targeting via similar artists.
+- [ ] Music DNA (see the Roadmap's music identity item): a buyer links Last.fm, and their top artists seed
+  "Suggested for you".
+
+## Merch: store links + print-on-demand (researched 2026-09-28, not started)
+
+**Bonfire** has no public developer API, so it can't be integrated beyond a link. (The search hit
+bonfire.com/store/api is a merch store named "API".) It's apparel-only print-on-demand with stores and
+campaigns, printed in 2–21 day batches or on demand, free to sell (margin in the base cost), paid out by PayPal.
+- [ ] Merch store link on events (any store: Bonfire, Fourthwall, Shopify, …): a "Merch" button on the event
+  page, confirmation email and ticket. No build dependency; the organizer's store handles orders and shipping.
+  No sales data comes back to Exos.
+
+**Printful** (or Printify / Fourthwall: all have APIs) as fulfilment behind Exos add-ons, so merch sells in the
+ticket checkout (one Stripe payment, Exos / organizer sets the margin).
+- Printful API: products and variants, orders, shipping rates, mockups, webhooks.
+- [ ] Add-on variants (size / colour); shipping address + shipping cost at checkout; returns.
+- [ ] Printful client: create the print order when the ticket order is fulfilled; track status by webhook.
+  A third-party write: dry-run by default + operator WriteAuthorization, like the marketplace writers.
+- [ ] Operator: Printful (or chosen provider) account and API key; decide who owns the margin.
+- At-the-show merch is separate: the venue POS item in the Phases table (Toast / Stripe Terminal).
+
 ## GoTickets 2026-09-28
 
 Seller Central API v1 (docs/marketplace/gotickets). Mig `20260928020000` (tested: `test_gotickets_orders.sql`
