@@ -27,6 +27,13 @@ arrive, Exos accepts them and delivers a mobile transfer. Nothing is sent to TEv
 | deleteInventory | `DELETE /v9/inventory/{inventory_id}` | write | 204 |
 | bulkUpdateInventory / bulkDeleteInventory | `PATCH` / `DELETE /v9/inventory` | forbidden | Up to 1,000 groups by TEvo id: one wrong id reaches broker inventory. Exos changes its listings one at a time |
 | listListings | `GET /v9/listings` | read | Buyer-side search; not used for selling |
+| listPayments | `GET /v9/payments?order_id=` | read | An order's payments (`order_id` required). For the payout ledger: did TEvo's EvoPay payment arrive |
+| showPayment | `GET /v9/payments/{payment_id}` | read | One payment |
+| paymentsStatus | `GET /v9/payments/status` | read | The office's payments across orders, filterable (`order_type`, `transaction_type`, `transaction_state`, `created_at.gte`, …). TEvo documents it as **POS only**: may be refused for an API token |
+| createPayment | `POST /v9/payments` | forbidden | Moves money on an order |
+| applyPayment | `GET /v9/payments/{id}/apply` | forbidden | **A GET that completes a pending payment.** Access is decided by the tag, never the method |
+| cancelPayment | `GET /v9/payments/{id}/cancel` | forbidden | **A GET that cancels a pending payment** |
+| refundPayment | `POST /v9/payments/{id}/refund` | forbidden | Reverses a payment (may void an unsettled card charge) |
 | createOrder | `POST /v9/orders` | forbidden | A purchase (substitutions too). Exos never buys |
 | add / finalize / remove etickets, deliver_etickets | `POST …/etickets` | forbidden | Static PDF/QR files can't carry a rotating Exos barcode |
 
@@ -93,6 +100,25 @@ office rules out any clash and keeps TEvo's own reports clean.
    ticket, so `updateShipment {mobile_transfer_type: TMMobile}`; TEvo answers with the
    recipient's email and name; Exos issues the order's transfers to that email; then
    `completeShipment`.
+
+## Payments (how TEvo pays Exos)
+
+TEvo pays the seller through EvoPay, after the event. Exos only **reads** payments (`tevo/payments.ts`,
+`TevoClient.listPayments` / `getPayment` / `paymentsStatus`); every payment write is forbidden, since the office's orders
+include Terminal-2's broker ones.
+
+- **A payment:** `id`, `order_link_id` (the order), `type` (`cash`, `check`, `credit_card`, `evopay`, `money_order`,
+  `offline`, `paypal`, `tbd`; Status says `EvopayTransaction`, …), `state` (`pending`, `completed`, `captured`, …),
+  `amount` (a decimal string), `is_refund`, `refunded_from_id`.
+- **Pending vs settled:** a pending payment only changes the order's *pending* balance; money has moved once it's
+  `completed` / `captured`. `summarizeTevoPayments` nets settled payments minus settled refunds, keeps pending apart,
+  and lists any state it doesn't know, so a person can look.
+- **Stored copies drop the personal fields:** `normalizeTevoPayment` keeps ids, type, state, direction and amount in
+  cents. It drops `credit_card`, the `avs_*` / `cvv_*` results and `performed_by`, and the Status list's buyer and
+  seller names, which can be a person's.
+- **Not built yet:** the payout ledger that polls these for Exos's TEvo orders and matches them to what the
+  organizer is owed. The operator decides that ledger's design, including whether Exos takes a fee on marketplace
+  sales.
 
 ## Open questions for TEvo integrations
 

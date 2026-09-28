@@ -17,6 +17,11 @@
 //   * bulk inventory update / delete: one call changes up to 1,000 ticket
 //     groups by TEvo id, broker ones included if an id is wrong. Exos
 //     changes its listings one at a time, each checked as its own.
+//   * payments (create / apply / cancel / refund): they move money on an
+//     order, and the office's orders include Terminal-2's broker ones.
+//     TEvo pays Exos (EvoPay); Exos only reads what was paid. Note that
+//     apply and cancel are GETs that change state: access is decided by
+//     this tag, never by the HTTP method.
 // The TEvo office can carry Terminal-2 broker inventory and orders; the
 // writer only touches Exos listings and orders for them (writer.ts).
 
@@ -59,6 +64,13 @@ export const TEVO_ENDPOINTS = {
   /** 204. */
   deleteInventory: e('DELETE', '/v9/inventory/{inventory_id}', 'write'),
 
+  // Payments: how TEvo pays Exos for an order (read for the payout ledger).
+  /** ?order_id= (required): the order's payments. */
+  listPayments: e('GET', '/v9/payments', 'read'),
+  showPayment: e('GET', '/v9/payments/{payment_id}', 'read'),
+  /** The office's payments across orders; TEvo documents it for its POS only. */
+  paymentsStatus: e('GET', '/v9/payments/status', 'read'),
+
   // Buyer-side search (read-only; not used for selling).
   listListings: e('GET', '/v9/listings', 'read'),
 
@@ -70,6 +82,12 @@ export const TEVO_ENDPOINTS = {
   deliverEtickets: e('POST', '/v9/orders/{order_id}/deliver_etickets', 'forbidden'),
   bulkUpdateInventory: e('PATCH', '/v9/inventory', 'forbidden'),
   bulkDeleteInventory: e('DELETE', '/v9/inventory', 'forbidden'),
+  createPayment: e('POST', '/v9/payments', 'forbidden'),
+  /** A GET that completes a pending payment. */
+  applyPayment: e('GET', '/v9/payments/{payment_id}/apply', 'forbidden'),
+  /** A GET that cancels a pending payment. */
+  cancelPayment: e('GET', '/v9/payments/{payment_id}/cancel', 'forbidden'),
+  refundPayment: e('POST', '/v9/payments/{payment_id}/refund', 'forbidden'),
 } as const satisfies Record<string, Endpoint>;
 
 export type EndpointName = keyof typeof TEVO_ENDPOINTS;

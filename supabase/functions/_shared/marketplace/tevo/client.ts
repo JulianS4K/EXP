@@ -17,6 +17,7 @@ import {
   type TransportConfig,
 } from './transport.ts';
 import type { TevoOrder, TevoShipment } from './types.ts';
+import type { TevoPayment, TevoPaymentStatusRow } from './payments.ts';
 
 export { TevoError };
 
@@ -54,6 +55,27 @@ export class TevoClient {
   async getOrder(orderId: string | number): Promise<TevoOrder | null> {
     const v = await this.read('showOrder', undefined, { order_id: orderId });
     return v && typeof v === 'object' && 'id' in v ? (v as TevoOrder) : null;
+  }
+
+  /** GET /v9/payments?order_id=: what TEvo has paid (or refunded) on one order. Raw: normalize before storing. */
+  async listPayments(orderId: string | number): Promise<TevoPayment[]> {
+    if (!/^\d+$/.test(String(orderId))) throw new Error('tevo client: order_id must be a TEvo order id');
+    const v = await this.read('listPayments', { order_id: String(orderId) });
+    const list = Array.isArray(v) ? v : (v as { payments?: unknown } | null)?.payments;
+    return Array.isArray(list) ? (list as TevoPayment[]) : [];
+  }
+
+  /** GET /v9/payments/{id}. Raw: normalize before storing. */
+  async getPayment(paymentId: string | number): Promise<TevoPayment | null> {
+    const v = await this.read('showPayment', undefined, { payment_id: paymentId });
+    return v && typeof v === 'object' && 'id' in v ? (v as TevoPayment) : null;
+  }
+
+  /** GET /v9/payments/status: the office's payments (TEvo documents it for its POS; may be refused). */
+  async paymentsStatus(query: Record<string, QueryValue> = {}): Promise<TevoPaymentStatusRow[]> {
+    const v = await this.read('paymentsStatus', query);
+    const list = Array.isArray(v) ? v : (v as { payments?: unknown } | null)?.payments;
+    return Array.isArray(list) ? (list as TevoPaymentStatusRow[]) : [];
   }
 
   /** GET /v9/shipments/{id}. */
