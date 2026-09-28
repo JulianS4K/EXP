@@ -2,7 +2,8 @@
 
 Where Exos stands against the platforms NYC promoters, venues and comedy rooms actually use, and
 what to build to win. `docs/strategy.md` has the phase plan and `docs/gtm-nyc.md` the sales motion;
-this doc is the evidence behind both. Snapshot: 2026-09-26.
+this doc is the evidence behind both. Snapshot: 2026-09-26; Exos column re-checked against the code
+2026-09-28.
 
 **Sourcing.** Competitor facts come from search-result snippets (vendor pages, press, review
 sites, and comparison pages written by rival vendors). Treat each figure as "reported". Check the
@@ -44,13 +45,14 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 |---|---|---|---|---|---|---|---|---|
 | All-in price, no buyer fee | **Y** | P | Y | P | P | Y | Y | N |
 | Paid checkout live | **N** (built, not deployed) | Y | Y | Y | Y | Y | Y | Y |
+| Checkout without an account | Y (paid tickets, email only; free claims still need sign-in) | ? | N (app account) | Y | ? | ? | Y | ? |
 | Tiers, hidden tiers, access codes | Y | Y | Y | Y | Y | P | Y | ? |
 | Scheduled price steps | Y (time-based) | Y | Y | Y | Y | ? | Y | ? |
-| Discount codes | P (built, not wired to checkout) | Y | Y | Y | Y | Y | Y | ? |
+| Discount codes | Y (vouchers: % off, $ off or a pinned price, redeemed at checkout) | Y | Y | Y | Y | Y | Y | ? |
 | Recurring / timed entry | P (clones events; no slot picker) | P | ? | Y | ? | N | Y | Y |
-| Reserved / table seating | **N** | P (tables) | ? | Y | ? | N | Y | ? |
-| Tables, bottles, minimums | **N** | Y | N | N | ? | P | P | ? |
-| Guest list / comps | P (bulk comps; no guest-list door mode) | Y | ? | ? | ? | P | P | ? |
+| Reserved / table seating | P (table packages; no seat map) | P (tables) | ? | Y | ? | N | Y | ? |
+| Tables, bottles, minimums | Y (table packages: deposit, party size, minimum spend; bottles as add-ons) | Y | N | N | ? | P | P | ? |
+| Guest list / comps | Y (bulk comps, promoter-fed guest lists, guest-list door mode, works offline) | Y | ? | ? | ? | P | P | ? |
 | Waitlist with auto-offer | **Y** (holds the seat) | ? | Y | Y | Y (auto-charge) | P | Y | ? |
 | Transfers | Y (free) | ? | Y | P | Y | N | ? | ? |
 | Face-value resale | **N** | ? | Y | via Tixel | Y | N | via Tixel | ? |
@@ -58,11 +60,11 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 | Offline door scanning | **Y** | ? (scan failures in reviews) | ? | Y | ? | ? | Y | ? |
 | Box office / tap-to-pay door sales | **N** | Y | ? | Y | Y | N | Y | Y |
 | Promoter links + leaderboard | Y | Y | ? | P | Y | N | P | ? |
-| Promoter commissions / payouts | **N** | Y (Kickback) | ? | N | Y | N | N | ? |
-| Fan referral rewards | P (counts only) | Y | ? | N | Y | N | N | N |
+| Promoter commissions / payouts | Y (per-promoter terms, accrual, reversal on refund, payout ledger; money is paid outside Exos) | Y (Kickback) | ? | N | Y | N | N | ? |
+| Fan referral rewards | Y (organizer rule: free ticket after N referred sales; leaderboard) | Y | ? | N | Y | N | N | N |
 | Email: follows, announcements, reminders | Y (needs Resend key) | Y | P | Y | Y | Y | P | Y |
 | SMS campaigns | **N** | Y (free) | ? | N | ? | Y | N | Y |
-| Abandoned-checkout recovery | **N** | ? | ? | ? | ? | ? | ? | ? |
+| Abandoned-checkout recovery | P (one reminder email, server-side; live once payments and mail are) | ? | ? | ? | ? | ? | ? | ? |
 | Discovery (feed, map, saves) | Y (web, no audience yet) | Y | Y (Fever reach) | Y | Y (8M users) | Y | N | Y |
 | Instagram in-app checkout | Y (untested on devices) | ? | N (app) | ? | ? | ? | ? | P |
 | Apple / Google Wallet | **N** (web pass only) | ? | N | ? | ? | Y (Apple) | ? | ? |
@@ -70,7 +72,8 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 | API / webhooks | P (read-only API) | P | P | Y | P | N | Y | ? |
 | Embed widget | P (opens Exos in a tab) | P | Y | Y | ? | N | Y | ? |
 | Spanish | P (buyer side only) | ? | Y | Y | Y | N | Y | ? |
-| Organizer-initiated money refund | **N** (void only; refund in Stripe) | Y | Y | Y | Y | ? | Y | ? |
+| Organizer-initiated money refund | Y (full, per-ticket, partial or refund-everyone from the event report) | Y | Y | Y | Y | ? | Y | ? |
+| Fee-compliance record (shown vs charged, export) | **Y** | ? | ? | ? | ? | ? | ? | ? |
 | Settlement / door-deal splits | **N** | N | P | N | N | N | N | P |
 | Push to StubHub / SeatGeek | N (scaffold, kept undeployed) | N | N (refuses) | P (Tixel) | ? | N | P (Tixel) | ? |
 
@@ -88,22 +91,21 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 ## Where Exos is behind (the gaps that lose deals)
 
 1. **Paid checkout isn't live.** Every competitor takes money today. Nothing below matters to a
-   paying promoter until `docs/payments-go-live.md` is done.
-2. **Promoter commissions.** Posh's Kickback is why NYC promoter teams sell on Posh. Exos tracks
-   promoters but can't pay them.
-3. **Tables, bottles and guest lists.** Nightlife revenue sits in tables. Posh, Tablelist,
-   Discotech and SevenRooms own this; Exos has nothing.
-4. **Door sales.** Posh and Shotgun take tap-to-pay at the door. Exos can only comp.
-5. **SMS.** Posh gives it away free. Exos has email only.
-6. **Face-value resale.** DICE, RA and Shotgun have it, and Eventbrite, Ticket Tailor and Opendate
+   paying promoter until `docs/payments-go-live.md` is done. Commissions, refunds, tables, guest
+   checkout and vouchers are all built and wait on it.
+2. **Door sales.** Posh and Shotgun take tap-to-pay at the door. Exos can only comp.
+3. **SMS.** Posh gives it away free. Exos has email only.
+4. **Face-value resale.** DICE, RA and Shotgun have it, and Eventbrite, Ticket Tailor and Opendate
    get it through Tixel. Exos has free transfers only.
-7. **Wallet passes.** Organizers and buyers expect Apple and Google Wallet.
-8. **Money refunds from the organizer screen.** Today an organizer has to go to Stripe.
+5. **Wallet passes.** Organizers and buyers expect Apple and Google Wallet.
+6. **Seat maps.** Tables are sold as packages; there is no reserved-seat or section map yet.
 
 ## Openings nobody has closed
 
 - **Fee compliance you can prove.** A per-order record of the exact all-in price shown and
-  charged, exportable for a lawyer. Nobody sells this, and NY enforcement is active.
+  charged, exportable for a lawyer. Nobody sells this, and NY enforcement is active. Exos has it
+  built (mig `20260926070000`, `PriceDisclosureExport` on the event report); it starts filling
+  when payments go live.
 - **Fast payouts without the 5% tax.** Posh charges 5% for instant payout, and DICE holds 5% for 6
   months. Stripe Connect Express already pays out on a rolling basis, so fast payouts are ours to
   lose.
@@ -118,24 +120,25 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 
 ## What to build, in order
 
-Each item states the competitor it neutralises. Items 2 to 9 can be built and tested while
-payments stay off; they go live with paid events.
+Each item states the competitor it neutralises. Items marked **Built** are in the code and go live
+with paid events.
 
 | # | Build | Beats | Size | Notes |
 |---|---|---|---|---|
 | 1 | **Payments go-live** | everyone | ops | `docs/payments-go-live.md`; operator-gated deploys. Blocks every paid feature |
-| 2 | **Promoter commissions** | Posh Kickback, Shotgun | M | Per-promoter rate (% or flat), accrual on sale, reversal on refund, a payout ledger, promoter-portal earnings. Money paths get SQL harness cases |
-| 3 | **Fan referral rewards** | Posh, Shotgun | S | Counting exists (`exos_fan_referrals`). Add the reward rule (credit or comp after N sales) and a leaderboard |
-| 4 | **Organizer refund button** | Posh, Eventbrite | S | Full and partial refunds from the event report through `exos-checkout` / Stripe; ties into item 2 reversals |
-| 5 | **Tables and guest lists** | Posh, Tablelist, Discotech | L | Table inventory with minimum spend, deposit, party size and host; a guest-list door mode on the check-in screen |
+| 2 | **Promoter commissions** | Posh Kickback, Shotgun | M | **Built** (mig `20260926020000`; `PromoterCommissionPanel`, promoter-portal earnings). Per-promoter rate, accrual on sale, reversal on refund, payout ledger |
+| 3 | **Fan referral rewards** | Posh, Shotgun | S | **Built** (mig `20260926030000`; `ReferralRewardsPanel`, `ReferralProgress`). Reward rule and leaderboard on top of `exos_fan_referrals` |
+| 4 | **Organizer refund button** | Posh, Eventbrite | S | **Built** (mig `20260926040000`, `exos-refund`; `RefundPanel` on the event report). Full, per-ticket, partial and refund-everyone |
+| 5 | **Tables and guest lists** | Posh, Tablelist, Discotech | L | **Built** (mig `20260926050000`; `TableTierFields`, `TableAssignmentsPanel`, `GuestListDoor`). Table packages with deposit, party size and minimum spend; guest-list door mode, offline |
 | 6 | **Wallet passes with the rotating code** | DICE, Posh | M | Apple `.pkpass` + Google Wallet; needs signing certs (operator). hi.events `Services/Domain/Wallet/` as reference |
 | 7 | **SMS opt-in and blasts** | Posh | M | Twilio + 10DLC registration; strict opt-out handling (Posh's $900K TCPA settlement is the warning) |
-| 8 | **Abandoned-checkout reminder** | — | S | From expired `exos_checkout_sessions`, one email, opt-out respected |
-| 9 | **Fee-compliance record** | Posh, Tablelist, Punchup | S | Store the displayed and charged all-in price per order, plus an export |
+| 8 | **Abandoned-checkout reminder** | — | S | **Built** (mig `20260926060000`). From expired `exos_checkout_sessions`, one email, opt-out respected |
+| 9 | **Fee-compliance record** | Posh, Tablelist, Punchup | S | **Built** (mig `20260926070000`; `PriceDisclosureExport`). Displayed and charged all-in price per order, plus an export |
 | 10 | **Face-value resale** | DICE, RA, Tixel partners | L | Phase 2 in `docs/strategy.md`; reuse transfers + `exos_seats_available`. Check NY Art. 25 first |
 | 11 | **Door sales (tap-to-pay)** | Posh, Shotgun | L | Phase 3; Stripe Terminal / Tap to Pay through `exos_mint_tickets` |
 | 12 | **Cabaret / section seating** | Seat Engine, Punchup | L | Priced sections and front tables before a full seat-map builder |
 
-Recommended first build: **item 2, promoter commissions.** It's the single feature most tied to
-why NYC promoter teams choose Posh. It extends shipped code (promoter tracking, leaderboard,
-portal, attribution), and it can be finished and tested before payments go live.
+Recommended next build: **item 1, payments go-live**, then **item 6, wallet passes**. Items 2 to 5,
+8 and 9 are built (and guest checkout and working discount codes shipped alongside them), so what
+stands between Exos and a paying NYC promoter is turning payments on. After that, wallet passes
+keep the rotating code without an app, which DICE can't match.

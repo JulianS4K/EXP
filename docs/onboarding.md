@@ -26,13 +26,13 @@ did not move**. Both apps share the Supabase project `hzrizjeaxlqcxfrtczpq`.
 | You're changing… | Edit it in | Then |
 |---|---|---|
 | The SPA (`src/`, `server.ts`, `public/`) | **this repo** | Build, then copy `dist/` into `Terminal-2/static/bridge/` to ship it |
-| A migration, an edge function or an SQL test | **Terminal-2** (authoritative) | Copy the same file here in the same change |
+| An `*exos*` migration, an edge function (`exos-*`, `stripe-webhook`) or an SQL test (`tests/exos/`) | **this repo** (authoritative since 2026-09-26; Terminal-2 no longer keeps copies) | Apply / deploy to the shared project only with operator permission. Migration names contain `exos`, and the timestamp must not clash with Terminal-2's history |
 | Docs about Exos | this repo (`docs/`, `KANBAN.md`) | — |
 
 `supabase/README.md` has the details and caveats. For example, 18 Terminal-2 migrations without
-"exos" in the name also change Exos tables. When the database gets its own project (step 4 of
-Terminal-2's `docs/archive/2026-07-02-bridge-extraction-plan.md`), this flips and this repo becomes
-the source for everything.
+"exos" in the name (cross-cutting security / index sweeps) also changed Exos tables; they stay in
+Terminal-2 as history. When the database gets its own project (step 4 of Terminal-2's
+`docs/archive/2026-07-02-bridge-extraction-plan.md`), the shared-project caveats go away.
 
 ## Setup
 
