@@ -25,6 +25,14 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Marketplace payout ledger 2026-09-29
+
+- 🟡 **Payout ledger** (`20260929070000_exos_payout_ledger`, `exos-payouts`, authored, not applied / deployed;
+  `docs/payouts.md`): remittances (what a marketplace paid, allocated to orders; payable only once confirmed),
+  per-order money states, one open payout per org of `organizer_net` less clawbacks, Stripe Connect transfers
+  dry-run unless `EXOS_PAYOUTS_LIVE=true`. TEvo payments are read automatically; other marketplaces are recorded
+  from statements until their payout-report APIs are wired.
+
 ## Net-equal marketplace pricing 2026-09-29
 
 - 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
