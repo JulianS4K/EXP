@@ -210,7 +210,7 @@ export default function TransferTicket() {
                   required
                   type="email"
                   placeholder="enter recipient email address"
-                  className="type w-full bg-white/5 border border-white/10 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus:border-brand-primary transition-all text-base tracking-wide"
+                  className="type w-full bg-white/5 border border-white/10 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
                   value={recipientEmail}
                   onChange={(e) => setRecipientEmail(e.target.value)}
                 />
@@ -224,7 +224,7 @@ export default function TransferTicket() {
                 maxLength={100}
                 autoComplete="off"
                 placeholder="who you're sending it to, for your receipt"
-                className="type w-full bg-white/5 border border-white/10 py-5 px-6 text-white placeholder-white/35 focus:outline-none focus:border-brand-primary transition-all text-base tracking-wide"
+                className="type w-full bg-white/5 border border-white/10 py-5 px-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
               />

@@ -118,7 +118,7 @@ export default function AnnouncementsPanel({
               maxLength={SUBJECT_MAX}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Subject — e.g. Doors now open at 7pm"
-              className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm font-bold rounded-lg"
+              className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm font-bold rounded-lg"
             />
           </div>
           <div>
@@ -128,7 +128,7 @@ export default function AnnouncementsPanel({
               rows={4}
               onChange={(e) => setBody(e.target.value)}
               placeholder="Your message to ticket holders…"
-              className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm rounded-lg resize-y"
+              className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm rounded-lg resize-y"
             />
             <p className="text-[10px] text-slate-400 text-right mt-1">
               {body.length}/{BODY_MAX}

@@ -16,6 +16,7 @@ import { useToast } from '../context/ToastContext';
 import { listSavedEvents } from '../lib/saves';
 import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
+import Dialog from '../components/Dialog';
 
 export default function MyTickets() {
   const { user, signIn } = useAuth();
@@ -168,7 +169,7 @@ export default function MyTickets() {
           </div>
           <div className="flex border border-white/10 bg-white/5">
             <button className="disp px-8 py-2.5 text-lg tracking-wide bg-brand-primary text-black">{t('tickets.active')}</button>
-            <button className="disp px-8 py-2.5 text-lg tracking-wide text-white/40 hover:text-white transition-colors">{t('tickets.archive')}</button>
+            <button className="disp px-8 py-2.5 text-lg tracking-wide text-white/60 hover:text-white transition-colors">{t('tickets.archive')}</button>
           </div>
         </div>
 
@@ -189,7 +190,7 @@ export default function MyTickets() {
                              <Mail className="text-brand-primary w-6 h-6" />
                           </div>
                           <div className="min-w-0">
-                             <p className="type text-[10px] text-black/70 uppercase tracking-widest leading-none mb-1">ref id: {trans.id.slice(0,6)}</p>
+                             <p className="type text-[11px] text-black/70 uppercase tracking-widest leading-none mb-1">ref id: {trans.id.slice(0,6)}</p>
                              <h3 className="disp text-2xl text-black leading-none tracking-tight truncate">{trans.eventTitle}</h3>
                           </div>
                        </div>
@@ -207,7 +208,7 @@ export default function MyTickets() {
 
             {outboundTransfers.length > 0 && (
               <div>
-                <h2 className="type text-[12px] text-white/40 uppercase tracking-widest mb-6 flex items-center gap-3">
+                <h2 className="type text-[12px] text-white/60 uppercase tracking-widest mb-6 flex items-center gap-3">
                   <span className="w-2 h-2 bg-white/30 rounded-full animate-pulse"></span>
                   pending outbound transfers ({outboundTransfers.length})
                 </h2>
@@ -216,12 +217,12 @@ export default function MyTickets() {
                     <div key={trans.id} className="bg-[#111] border border-white/10 p-7 group">
                        <div className="flex items-center gap-5 mb-7">
                           <div className="w-14 h-14 bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                             <Mail className="text-white/25 w-6 h-6 group-hover:text-brand-primary transition-colors" />
+                             <Mail className="text-white/60 w-6 h-6 group-hover:text-brand-primary transition-colors" />
                           </div>
                           <div className="min-w-0">
-                             <p className="type text-[10px] text-white/30 uppercase tracking-widest leading-none mb-1">transfer id: {trans.id.slice(0,6)}</p>
+                             <p className="type text-[11px] text-white/60 uppercase tracking-widest leading-none mb-1">transfer id: {trans.id.slice(0,6)}</p>
                              <h3 className="disp text-2xl text-white leading-none tracking-tight truncate">{trans.eventTitle}</h3>
-                             <p className="type text-[10px] text-brand-primary uppercase tracking-widest mt-1">to: {trans.receiverEmail.split('@')[0]}...</p>
+                             <p className="type text-[11px] text-brand-primary uppercase tracking-widest mt-1">to: {trans.receiverEmail.split('@')[0]}...</p>
                           </div>
                        </div>
                        <button
@@ -241,7 +242,7 @@ export default function MyTickets() {
         {tickets.length === 0 ? (
           <div className="text-center py-40 border border-dashed border-white/20">
             <TicketIcon className="w-24 h-24 text-white/5 mx-auto mb-10" />
-            <p className="type text-white/30 mb-12 uppercase tracking-widest text-[12px]">{t('tickets.empty')}</p>
+            <p className="type text-white/60 mb-12 uppercase tracking-widest text-[12px]">{t('tickets.empty')}</p>
             <Link to="/" className="disp inline-flex items-center bg-brand-primary text-black px-8 py-3 text-lg tracking-wide hover:bg-white transition-colors">
               FIND EVENTS
             </Link>
@@ -273,11 +274,11 @@ export default function MyTickets() {
                   <div className="p-6">
                     <div className="flex justify-between items-end mb-7">
                       <div>
-                        <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">{t('tickets.date')}</p>
+                        <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('tickets.date')}</p>
                         <p className="disp text-lg text-white tracking-wide">{event?.date ? formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</p>
                       </div>
                       <div className="text-right">
-                        <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">{t('tickets.passes')}</p>
+                        <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('tickets.passes')}</p>
                         <span className="stamp neon text-base">{eventTickets.length} ACTIVE</span>
                       </div>
                     </div>
@@ -326,7 +327,7 @@ export default function MyTickets() {
                   </Link>
                   <div className="p-6 flex items-center justify-between gap-4">
                     <div>
-                      <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">{t('tickets.date')}</p>
+                      <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('tickets.date')}</p>
                       <p className="disp text-lg text-white tracking-wide">
                         {ev.date ? formatInTz(ev.date.toDate(), ev.timezone, { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBA'}
                       </p>
@@ -348,16 +349,19 @@ export default function MyTickets() {
       </div>
 
       {/* Receipts Modal */}
-      {showReceipts && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-           <div className="absolute inset-0 bg-black/90" onClick={() => setShowReceipts(null)}></div>
-           <div className="relative bg-[#111] border border-white/10 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+      <Dialog
+        open={!!showReceipts}
+        onClose={() => setShowReceipts(null)}
+        labelledBy="receipts-title"
+        backdropClassName="bg-black/90"
+        className="bg-[#111] border border-white/10 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+      >
               <div className="p-8 border-b border-white/5 flex justify-between items-center bg-black">
-                 <h2 className="disp text-2xl tracking-tight">{t('tickets.history')}</h2>
-                 <button onClick={() => setShowReceipts(null)} className="type text-white/40 hover:text-white text-[11px] uppercase tracking-widest">{t('tickets.close')}</button>
+                 <h2 id="receipts-title" className="disp text-2xl tracking-tight">{t('tickets.history')}</h2>
+                 <button onClick={() => setShowReceipts(null)} className="type text-white/60 hover:text-white text-[11px] uppercase tracking-widest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary">{t('tickets.close')}</button>
               </div>
               <div className="p-8 space-y-6">
-                 {(() => {
+                 {showReceipts && (() => {
                    const eventTickets = groupedTickets[showReceipts];
                    const receiptsMap = new Map<string, { tickets: typeof eventTickets, firstTicket: typeof eventTickets[0] }>();
                    eventTickets.forEach(t => {
@@ -370,11 +374,11 @@ export default function MyTickets() {
                    return Array.from(receiptsMap.values()).map(({ tickets, firstTicket }) => (
                     <div key={firstTicket.id} className="bg-white/5 p-6 border border-white/10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 group hover:border-brand-primary transition-all">
                        <div>
-                          <p className="type text-[10px] text-brand-primary uppercase tracking-widest mb-1">receipt id: {firstTicket.orderId?.slice(0, 8) || 'LEGACY_SYNC'}</p>
+                          <p className="type text-[11px] text-brand-primary uppercase tracking-widest mb-1">receipt id: {firstTicket.orderId?.slice(0, 8) || 'LEGACY_SYNC'}</p>
                           <h4 className="disp text-2xl tracking-tight text-white">
-                             {firstTicket.tierName || 'GENERAL'} <span className="type text-white/40 text-xs ml-2 normal-case tracking-normal">× {tickets.length}</span>
+                             {firstTicket.tierName || 'GENERAL'} <span className="type text-white/60 text-xs ml-2 normal-case tracking-normal">× {tickets.length}</span>
                           </h4>
-                          <p className="type text-[10px] text-white/40 uppercase tracking-widest mt-1">{firstTicket.purchaseDate ? format(firstTicket.purchaseDate.toDate(), 'PPP p') : 'N/A'}</p>
+                          <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">{firstTicket.purchaseDate ? format(firstTicket.purchaseDate.toDate(), 'PPP p') : 'N/A'}</p>
                        </div>
                        <div className="flex items-center space-x-4 w-full md:w-auto">
                           <Link
@@ -388,9 +392,7 @@ export default function MyTickets() {
                    ));
                  })()}
               </div>
-           </div>
-        </div>
-      )}
+      </Dialog>
    </div>
   );
 }

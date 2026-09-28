@@ -10,7 +10,7 @@ import { useToast } from '../context/ToastContext';
 
 const inputCls =
   'w-full bg-slate-50 border-2 border-transparent rounded-2xl py-3 px-5 text-slate-900 font-bold ' +
-  'focus:outline-none focus:border-brand-primary focus:bg-white transition-all shadow-inner';
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary focus:bg-white transition-all shadow-inner';
 
 interface TierOption { id: string; name: string }
 

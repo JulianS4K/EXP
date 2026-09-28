@@ -1194,7 +1194,7 @@ export default function OrganizerCheckIn() {
                   placeholder="Name, last 6 of pass ID, or full ID"
                   aria-label="Search by name or pass ID"
                   autoComplete="off"
-                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus:border-tm-blue transition-all"
+                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-all"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                 />

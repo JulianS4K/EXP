@@ -249,12 +249,12 @@ export default function OrgMembers() {
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="email@venue.com"
-                className="flex-1 bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:outline-none focus:border-tm-blue transition-colors"
+                className="flex-1 bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-colors"
               />
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as OrgRole)}
-                className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold text-slate-900 focus:outline-none focus:border-tm-blue transition-colors capitalize"
+                className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-colors capitalize"
               >
                 {ROLE_OPTIONS.map((r) => (
                   <option key={r} value={r}>{r}</option>
@@ -376,7 +376,7 @@ export default function OrgMembers() {
                                 <select
                                   value={m.role}
                                   onChange={(e) => handleRoleChange(m.uid, e.target.value as OrgRole)}
-                                  className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:border-tm-blue transition-colors capitalize"
+                                  className="bg-white border border-slate-200 rounded px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-colors capitalize"
                                 >
                                   {ROLE_OPTIONS.map((r) => (
                                     <option key={r} value={r}>{r}</option>

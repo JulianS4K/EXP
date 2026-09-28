@@ -233,7 +233,7 @@ export default function WalletPass() {
         >
           <ArrowLeft size={14} aria-hidden="true" /> back
         </button>
-        <div className="type text-[10px] uppercase tracking-widest text-white/30 flex items-center gap-2">
+        <div className="type text-[11px] uppercase tracking-widest text-white/60 flex items-center gap-2">
           <Sun size={12} aria-hidden="true" /> max brightness for best scan
         </div>
       </div>
@@ -264,9 +264,9 @@ export default function WalletPass() {
                 <QRCodeSVG value={barcode || ticket.id} size={260} level="H" includeMargin={false} fgColor="#000000" />
               ) : (
                 <div className="w-[260px] h-[260px] flex flex-col items-center justify-center text-center px-6">
-                  <Lock className="w-10 h-10 text-black/30 mb-4" aria-hidden="true" />
+                  <Lock className="w-10 h-10 text-black/60 mb-4" aria-hidden="true" />
                   <p className="type text-[11px] uppercase tracking-widest text-black/50">Entry code locked</p>
-                  <p className="type text-[11px] text-black/40 mt-1">
+                  <p className="type text-[11px] text-black/60 mt-1">
                     Unlocks 24h before{event?.date ? ` · ${formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ' the event'}
                   </p>
                 </div>
@@ -280,7 +280,7 @@ export default function WalletPass() {
                 >
                   {stamp.text}
                 </div>
-                <p className="text-black font-black text-[10px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
+                <p className="text-black font-black text-[11px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
                   {stamp.sub}
                 </p>
               </div>
@@ -289,20 +289,20 @@ export default function WalletPass() {
 
           <div className="mt-6 pt-6 border-t border-dashed border-black/20 flex justify-between items-end">
             <div className="text-left">
-              <p className="type text-[9px] uppercase tracking-widest text-black/40 mb-1">holder</p>
+              <p className="type text-[11px] uppercase tracking-widest text-black/60 mb-1">holder</p>
               <p className="disp text-lg tracking-tight leading-none">
                 {ticket.attendeeName || user.displayName || user.email || 'Guest'}
               </p>
             </div>
             <div className="text-right">
-              <p className="type text-[9px] uppercase tracking-widest text-black/40 mb-1">tier</p>
+              <p className="type text-[11px] uppercase tracking-widest text-black/60 mb-1">tier</p>
               <p className="disp text-lg tracking-tight leading-none">{ticket.tierName || 'GA'}</p>
             </div>
           </div>
 
           {!muted && qrUnlocked ? (
             <div className="mt-6 flex flex-col items-center">
-              <p className="type text-[9px] text-black/40 uppercase tracking-widest">code refreshes in</p>
+              <p className="type text-[11px] text-black/60 uppercase tracking-widest">code refreshes in</p>
               <p className="disp text-3xl text-black tracking-tight leading-none mt-1">
                 00:{timeLeft.toString().padStart(2, '0')}
               </p>
@@ -316,13 +316,13 @@ export default function WalletPass() {
           ) : null}
 
           <div className="mt-6 text-center">
-            <p className="type text-[9px] text-black/30 break-all">{ticket.id}</p>
+            <p className="type text-[11px] text-black/60 break-all">{ticket.id}</p>
           </div>
         </div>
       </div>
 
       <div className="px-6 pb-6 text-center relative z-10">
-        <p className="type text-[9px] uppercase tracking-[0.3em] text-white/20">
+        <p className="type text-[11px] uppercase tracking-[0.3em] text-white/60">
           Exos · Scan-Only Pass
         </p>
       </div>

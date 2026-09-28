@@ -632,7 +632,7 @@ export default function EventDetails() {
             </p>
             {event.cancelReason && (
               <p className="text-sm text-red-100/80 mb-2">
-                <span className="type uppercase tracking-widest text-brand-accent/60 text-[10px]">Reason: </span>
+                <span className="type uppercase tracking-widest text-brand-accent/60 text-[11px]">Reason: </span>
                 {event.cancelReason}
               </p>
             )}
@@ -647,12 +647,12 @@ export default function EventDetails() {
 
         {eventStatus === 'draft' && isOrganizer && (
           <div className="mb-8 p-4 border border-amber-300/30 bg-amber-300/10 flex items-center justify-between">
-            <p className="type text-[10px] uppercase tracking-widest text-amber-200">
+            <p className="type text-[11px] uppercase tracking-widest text-amber-200">
               DRAFT — only you can see this. Publish from the Edit screen to list it.
             </p>
             <Link
               to={`/edit-event/${event.id}`}
-              className="type text-[10px] uppercase tracking-widest text-amber-200 hover:text-white"
+              className="type text-[11px] uppercase tracking-widest text-amber-200 hover:text-white"
             >
               Edit →
             </Link>
@@ -660,7 +660,7 @@ export default function EventDetails() {
         )}
         {eventStatus === 'cancelled' && (
           <div className="mb-8 p-4 border border-brand-accent/40 bg-brand-accent/10">
-            <p className="type text-[10px] uppercase tracking-widest text-brand-accent">
+            <p className="type text-[11px] uppercase tracking-widest text-brand-accent">
               CANCELLED — sales are closed.
             </p>
           </div>
@@ -690,10 +690,10 @@ export default function EventDetails() {
                    <Calendar className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">date &amp; time</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">date &amp; time</p>
                    <p className="disp text-xl tracking-tight">{formatInTz(event.date.toDate(), event.timezone, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
                    {event.date && eventStatus !== 'cancelled' && (
-                     <p className="type text-[10px] text-brand-primary uppercase tracking-widest mt-1">
+                     <p className="type text-[11px] text-brand-primary uppercase tracking-widest mt-1">
                        <EventCountdown
                          startsAt={event.date.toDate()}
                          doorsOpen={
@@ -707,7 +707,7 @@ export default function EventDetails() {
                      </p>
                    )}
                    {event.timing && (
-                     <div className="flex gap-3 mt-1 type text-[10px] text-white/40 uppercase tracking-widest">
+                     <div className="flex gap-3 mt-1 type text-[11px] text-white/60 uppercase tracking-widest">
                         {event.timing.doorsOpen && (
                           <span>
                             DOORS {formatInTz(
@@ -731,7 +731,7 @@ export default function EventDetails() {
                           </span>
                         )}
                         {event.timezone && (
-                          <span className="text-white/30">// {event.timezone}</span>
+                          <span className="text-white/60">// {event.timezone}</span>
                         )}
                      </div>
                    )}
@@ -742,7 +742,7 @@ export default function EventDetails() {
                    <MapPin className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">location</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">location</p>
                    <p className="disp text-xl tracking-tight">{event.location}</p>
                 </div>
               </div>
@@ -756,7 +756,7 @@ export default function EventDetails() {
                   are usually what the buyer cares about most. */}
               {event.performers && event.performers.length > 0 ? (
                 <div className="p-7 bg-[#111] sm:col-span-2">
-                  <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">performers</p>
+                  <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">performers</p>
                   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
                     {event.performers.map((name, i) => {
                       const links = linksForArtist(name, event.artistLinks);
@@ -783,10 +783,10 @@ export default function EventDetails() {
                    <Tag className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">genres</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">genres</p>
                    <p className="disp text-xl tracking-tight">
                       {event.genres?.join(', ') || event.category}
-                      {event.subgenres && event.subgenres.length > 0 && <span className="text-white/40 ml-2">({event.subgenres.join(', ')})</span>}
+                      {event.subgenres && event.subgenres.length > 0 && <span className="text-white/60 ml-2">({event.subgenres.join(', ')})</span>}
                    </p>
                 </div>
               </div>
@@ -803,7 +803,7 @@ export default function EventDetails() {
                     {(org?.name || 'O').charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="type text-[10px] text-white/40 uppercase tracking-widest mb-1">presented by</p>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">presented by</p>
                     <h3 className="disp text-2xl tracking-tight">{org?.name || 'Event Organizer'}</h3>
                     {org?.marketing?.socials && Object.values(org.marketing.socials).some(Boolean) ? (
                       <SocialLinks socials={org.marketing.socials} className="flex items-center gap-3 mt-2" />
@@ -821,9 +821,9 @@ export default function EventDetails() {
             <div id="buy" ref={buyCardRef} className="lg:sticky top-24 bg-[#111] border border-white/10 overflow-hidden scroll-mt-24">
               <div className="p-7">
                 <div className="mb-8">
-                    <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">price</p>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
                     <p className="disp text-6xl neon tracking-tight">{formatCurrency(priceToDisplay * quantity, event.currency)}</p>
-                    <p className="type mt-1 text-[10px] uppercase tracking-widest text-white/40">
+                    <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
                       {selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
                     </p>
                     {selectedTier && (() => {
@@ -834,7 +834,7 @@ export default function EventDetails() {
                       if (!next || next.price <= cur) return null;
                       const nextAllIn = allInPrice(next.price, selectedTier.exclusiveTaxPercent);
                       return (
-                        <p className="type mt-2 text-[10px] uppercase tracking-widest text-brand-accent">
+                        <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent">
                           ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
                           {formatInTz(new Date(next.startsAt), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
@@ -845,7 +845,7 @@ export default function EventDetails() {
                 {/* Tier Selection */}
                 {event.ticketTiers && event.ticketTiers.length > 0 && (
                   <div className="mb-8 space-y-2">
-                     <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">{t('event.pickTicket')}</p>
+                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.pickTicket')}</p>
                      {visibleTiers.map((tier) => {
                        const tierLive = liveTier(tier.id, tier.capacity);
                        const tierLeft = Math.max(0, tierLive.capacity - tierLive.sold);
@@ -875,7 +875,7 @@ export default function EventDetails() {
                               return (
                                 <span className="inline-flex items-center gap-2 shrink-0">
                                   {markedDown && (
-                                    <span className="type text-white/30 line-through text-xs">{formatCurrency(opening, event.currency)}</span>
+                                    <span className="type text-white/60 line-through text-xs">{formatCurrency(opening, event.currency)}</span>
                                   )}
                                   <span className="stamp neon text-base">{formatCurrency(eff, event.currency)}</span>
                                 </span>
@@ -883,7 +883,7 @@ export default function EventDetails() {
                             })()}
                          </div>
 
-                         <p className="type text-[10px] text-white/50 mb-3">{tier.description}</p>
+                         <p className="type text-[11px] text-white/50 mb-3">{tier.description}</p>
                          {tier.accessible && (
                            <p className="type text-[11px] text-sky-200 mb-3 flex items-start gap-1.5">
                              <AccessIcon className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
@@ -894,7 +894,7 @@ export default function EventDetails() {
 
                          <div className="flex items-center gap-2">
                            <span className={`w-1.5 h-1.5 ${tierLeft < 10 ? 'bg-brand-accent' : 'bg-brand-primary'}`}></span>
-                           <span className={`type text-[9px] uppercase tracking-widest leading-none ${tierLeft === 0 ? 'text-brand-accent' : 'text-white/40'}`}>
+                           <span className={`type text-[11px] uppercase tracking-widest leading-none ${tierLeft === 0 ? 'text-brand-accent' : 'text-white/60'}`}>
                              {tierLeft === 0
                                ? t('event.tierSoldOut')
                                : !stripeEnabled && tier.price > 0
@@ -909,7 +909,7 @@ export default function EventDetails() {
                 )}
 
                 <div className="mb-8">
-                   <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">quantity</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
                       <button
                         onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -925,7 +925,7 @@ export default function EventDetails() {
                         <Plus className="w-4 h-4 text-white" />
                       </button>
                    </div>
-                   <p className="type text-[9px] text-white/20 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
                 </div>
 
                 {/* Who is going — optional per-ticket names. FREE claim path only:
@@ -933,7 +933,7 @@ export default function EventDetails() {
                     checkout metadata route is a later add). */}
                 {priceToDisplay === 0 && addonSel.totalCents === 0 && (
                 <div className="mb-8">
-                   <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/20">{t('event.optional')}</span></p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/60">{t('event.optional')}</span></p>
                    <div className="space-y-2">
                      {Array.from({ length: quantity }).map((_, i) => (
                        <input
@@ -943,7 +943,7 @@ export default function EventDetails() {
                          onChange={(e) => setAttendeeNames((prev) => { const next = [...prev]; next[i] = e.target.value; return next; })}
                          aria-label={`Name on ticket ${i + 1}`}
                          placeholder={i === 0 ? t('event.ticketYou', { n: 1, name: user?.displayName || t('event.you') }) : t('event.ticketFriend', { n: i + 1 })}
-                         className="type w-full bg-black border border-white/10 px-3 py-2.5 text-white text-sm placeholder-white/25 focus:border-brand-primary outline-none"
+                         className="type w-full bg-black border border-white/10 px-3 py-2.5 text-white text-sm placeholder-white/25 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                        />
                      ))}
                    </div>
@@ -952,14 +952,14 @@ export default function EventDetails() {
 
                 <div className="space-y-6 mb-6">
                   <div className="divide-y divide-white/5 border-t border-white/5">
-                    <div className="flex justify-between type text-[10px] py-3.5 uppercase tracking-widest">
-                      <span className="text-white/30">status</span>
+                    <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
+                      <span className="text-white/60">status</span>
                       <span className={soldOut ? 'text-brand-accent' : 'neon'}>
                         {soldOut ? t('event.soldOut') : t('event.available')}
                       </span>
                     </div>
-                    <div className="flex justify-between type text-[10px] py-3.5 uppercase tracking-widest">
-                      <span className="text-white/30">tickets available</span>
+                    <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
+                      <span className="text-white/60">tickets available</span>
                       <span className="text-white">
                         {selectedTier
                           ? (() => {
@@ -1041,7 +1041,7 @@ export default function EventDetails() {
                   </button>
                 )}
 
-                <div className="mt-7 flex flex-col gap-3.5 type text-[10px] uppercase tracking-widest text-white/30">
+                <div className="mt-7 flex flex-col gap-3.5 type text-[11px] uppercase tracking-widest text-white/60">
                   <div className="flex items-center gap-3">
                     <ShieldCheck className="w-4 h-4 text-brand-primary" />
                     secure digital entry
@@ -1076,7 +1076,7 @@ export default function EventDetails() {
         return (
           <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-black/95 border-t border-white/10 backdrop-blur px-4 py-3 flex items-center gap-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
             <div className="min-w-0 flex-1">
-              <p className="type text-[10px] uppercase tracking-widest text-white/40">{from == null ? t('event.soldOut') : t('event.from')}</p>
+              <p className="type text-[11px] uppercase tracking-widest text-white/60">{from == null ? t('event.soldOut') : t('event.from')}</p>
               {from != null && <p className="disp text-2xl neon leading-none">{from === 0 ? t('event.free') : formatCurrency(from, event.currency)}</p>}
             </div>
             <button

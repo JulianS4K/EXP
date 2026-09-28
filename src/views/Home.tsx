@@ -233,7 +233,7 @@ export default function Home() {
           <div className="inline-flex items-center gap-2 border border-brand-primary/60 text-white px-3 py-1.5 mb-8">
             <MapPin className="w-4 h-4 text-brand-primary" />
             <span className="disp text-lg tracking-wide leading-none pt-0.5">NEW YORK</span>
-            <span className="text-[10px] text-white/50">▼</span>
+            <span className="text-[11px] text-white/50">▼</span>
           </div>
 
           <div className="relative max-w-4xl mb-7">
@@ -265,7 +265,7 @@ export default function Home() {
               onChange={(e) => setSearchTerm(e.target.value)}
               aria-label="Search events"
               placeholder="search bands, venues, nights..."
-              className="type w-full bg-[#111] border border-white/20 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus:border-brand-primary transition-all text-base tracking-wide"
+              className="type w-full bg-[#111] border border-white/20 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
             />
           </div>
 
@@ -284,7 +284,7 @@ export default function Home() {
                       : 'bg-white/5 border border-white/15 text-white/75 hover:border-brand-primary'
                   }`}
                 >
-                  <span className="type text-[10px] uppercase tracking-widest block leading-none">{p.kicker}</span>
+                  <span className="type text-[11px] uppercase tracking-widest block leading-none">{p.kicker}</span>
                   <span className="disp text-2xl tracking-wide leading-none mt-1 block">{p.label}</span>
                 </button>
               );
@@ -340,7 +340,7 @@ export default function Home() {
           </div>
         ) : events.length === 0 ? (
           <div className="text-center py-32 border border-white/10 border-dashed">
-            <p className="disp text-3xl text-white/40 mb-8 tracking-tight" style={{ transform: 'skewX(-4deg)' }}>
+            <p className="disp text-3xl text-white/60 mb-8 tracking-tight" style={{ transform: 'skewX(-4deg)' }}>
               NO EVENTS IN THIS AREA.
             </p>
             <Link to="/dashboard" className="disp text-lg bg-brand-primary text-black px-6 py-2 inline-block hover:scale-[1.03] transition-transform tracking-wide">
@@ -349,7 +349,7 @@ export default function Home() {
           </div>
         ) : filteredEvents.length === 0 ? (
           <div className="text-center py-32 border border-white/10 border-dashed">
-            <p className="disp text-3xl text-white/40 mb-3 tracking-tight" style={{ transform: 'skewX(-4deg)' }}>
+            <p className="disp text-3xl text-white/60 mb-3 tracking-tight" style={{ transform: 'skewX(-4deg)' }}>
               NOTHING MATCHES "{searchTerm}".
             </p>
             <button
@@ -434,7 +434,7 @@ export default function Home() {
                             {(event.category || 'EVENT').toUpperCase()}
                           </span>
                           <div className="absolute bottom-3 left-3 right-3">
-                            <p className="type text-[10px] uppercase tracking-widest text-brand-primary mb-0.5">
+                            <p className="type text-[11px] uppercase tracking-widest text-brand-primary mb-0.5">
                               {`${eventDayLabel(event)} · ${eventTime(event)}`.toLowerCase()}
                             </p>
                             <h3 className="disp text-2xl text-white leading-[0.9] tracking-tight line-clamp-2">{event.title}</h3>
@@ -458,14 +458,14 @@ export default function Home() {
                   <h2 className="disp text-4xl md:text-5xl tracking-tight text-white" style={{ transform: 'skewX(-5deg)' }}>
                     ALL <span className="neon">UPCOMING</span>
                   </h2>
-                  <span className="marker text-white/35 text-lg rotate-[-3deg]">sorted by date</span>
+                  <span className="marker text-white/60 text-lg rotate-[-3deg]">sorted by date</span>
                 </div>
                 {agendaGroups.map((day) => (
                   <div key={day.label} className="mb-10">
                     <div className="flex items-center gap-3 mb-4">
                       <span className="marker text-2xl text-white rotate-[-2deg]">{day.label}</span>
                       <div className="flex-1 border-t border-dashed border-white/20"></div>
-                      <span className="type text-[11px] uppercase tracking-widest text-white/35">
+                      <span className="type text-[11px] uppercase tracking-widest text-white/60">
                         {day.items.length} {day.items.length === 1 ? 'show' : 'shows'}
                       </span>
                     </div>
@@ -490,7 +490,7 @@ export default function Home() {
                                 {event.title}
                               </h3>
                             </div>
-                            <p className="type text-[11px] uppercase tracking-wide text-white/40 mt-1 truncate">
+                            <p className="type text-[11px] uppercase tracking-wide text-white/60 mt-1 truncate">
                               {event.location}
                               {event.category ? ` · ${event.category.toLowerCase()}` : ''}
                             </p>

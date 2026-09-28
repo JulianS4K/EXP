@@ -20,7 +20,7 @@ import {
 
 const money = (cents: number, currency?: string | null) => formatCurrency(cents / 100, (currency || 'usd').toUpperCase());
 const today = () => new Date().toISOString().slice(0, 10);
-const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary';
+const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
 const label = 'type text-[10px] uppercase tracking-widest text-white/50';
 
 export default function PromoterCommissionPanel({

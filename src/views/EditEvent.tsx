@@ -80,6 +80,7 @@ import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
+import Dialog from '../components/Dialog';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -724,7 +725,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Title</label>
                 <input 
                   required
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.title}
                   onChange={(e) => setEventData({ ...eventData, title: e.target.value })}
                 />
@@ -732,7 +733,7 @@ export default function EditEvent() {
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Category</label>
                 <select 
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.category}
                   onChange={(e) => setEventData({ ...eventData, category: e.target.value })}
                 >
@@ -767,7 +768,7 @@ export default function EditEvent() {
                 <input
                   type="text"
                   placeholder="e.g. Ambient, Techno, Deep House (Comma separated)"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={(eventData.subgenres || []).join(', ')}
                   onChange={(e) => {
                     const val = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -786,7 +787,7 @@ export default function EditEvent() {
                 <input
                   type="text"
                   placeholder="e.g. Skrillex, Boys Noize, Boombox Cartel (max 10, comma-separated)"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={(eventData.performers || []).join(', ')}
                   onChange={(e) => {
                     const val = e.target.value
@@ -819,7 +820,7 @@ export default function EditEvent() {
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Narrative Description</label>
               <textarea 
                 rows={4}
-                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.description}
                 onChange={(e) => setEventData({ ...eventData, description: e.target.value })}
               />
@@ -852,7 +853,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.date as Timestamp | undefined, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -873,7 +874,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.doorsOpen, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -900,7 +901,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.startTime, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -928,7 +929,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.endTime, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -955,7 +956,7 @@ export default function EditEvent() {
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Venue Destination</label>
                 <input
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.location || ''}
                   onChange={(e) => setEventData({ ...eventData, location: e.target.value })}
                 />
@@ -971,7 +972,7 @@ export default function EditEvent() {
                         placeholder={key.charAt(0).toUpperCase() + key.slice(1)}
                         aria-label={key}
                         maxLength={key === 'postal' ? 20 : key === 'street' || key === 'country' ? 120 : 80}
-                        className={`bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary ${
+                        className={`bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary ${
                           key === 'street' || key === 'country' ? 'md:col-span-6' :
                           key === 'city' ? 'md:col-span-3' :
                           key === 'region' ? 'md:col-span-2' : 'md:col-span-1'
@@ -995,7 +996,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total Venue Capacity</label>
                 <input
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.totalTickets}
                   onChange={(e) => setEventData({ ...eventData, totalTickets: parseInt(e.target.value) })}
                 />
@@ -1009,7 +1010,7 @@ export default function EditEvent() {
                 <label htmlFor="edit-event-currency" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Currency</label>
                 <select
                   id="edit-event-currency"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.currency || 'USD'}
                   onChange={(e) => setEventData({ ...eventData, currency: e.target.value })}
                 >
@@ -1032,7 +1033,7 @@ export default function EditEvent() {
                 <label htmlFor="edit-event-timezone" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Timezone</label>
                 <select
                   id="edit-event-timezone"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.timezone || getBrowserTimezone()}
                   onChange={(e) => setEventData({ ...eventData, timezone: e.target.value })}
                 >
@@ -1050,7 +1051,7 @@ export default function EditEvent() {
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Seating Structure</label>
               <textarea 
                 placeholder="Section A: Row 1-10 (VIP), Section B: Row 1-20 (GA)..."
-                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.seatingManifest || ''}
                 onChange={(e) => setEventData({ ...eventData, seatingManifest: e.target.value })}
               />
@@ -1069,7 +1070,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per transaction</label>
                 <input 
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerOrder || 8}
                   onChange={(e) => setEventData({ 
                     ...eventData, 
@@ -1081,7 +1082,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per user account</label>
                 <input 
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerAccount || 8}
                   onChange={(e) => setEventData({ 
                     ...eventData, 
@@ -1146,7 +1147,7 @@ export default function EditEvent() {
                            required 
                            type="text"
                            placeholder="Enter tier name..."
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.name}
                            onChange={(e) => updateTier(tier.id, 'name', e.target.value)}
                          />
@@ -1158,7 +1159,7 @@ export default function EditEvent() {
                            type="number"
                            min="0"
                            step="0.01"
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.price}
                            onChange={(e) => updateTier(tier.id, 'price', e.target.value)}
                          />
@@ -1169,7 +1170,7 @@ export default function EditEvent() {
                            required 
                            type="number"
                            min="1"
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.capacity}
                            onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)}
                          />
@@ -1179,7 +1180,7 @@ export default function EditEvent() {
                          <textarea
                            required
                            placeholder="Describe the exclusivity of this tier..."
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.description}
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
@@ -1203,7 +1204,7 @@ export default function EditEvent() {
                             aria-label="What this accessible ticket includes"
                             maxLength={ACCESSIBLE_NOTE_MAX}
                             placeholder="e.g. Wheelchair space + 1 companion seat"
-                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                             value={tier.accessibleNote ?? ''}
                             onChange={(e) => updateTier(tier.id, 'accessibleNote', e.target.value)}
                           />
@@ -1235,7 +1236,7 @@ export default function EditEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
                             <select
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).ticketType ?? 'paid'}
                               onChange={(e) => updateTier(tier.id, 'ticketType', e.target.value)}
                             >
@@ -1247,7 +1248,7 @@ export default function EditEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
                             <select
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).visibility ?? 'public'}
                               onChange={(e) => updateTier(tier.id, 'visibility', e.target.value)}
                             >
@@ -1259,7 +1260,7 @@ export default function EditEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
                             <input
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesStart, eventData.timezone)}
                               onClick={(e) => {
                                 const el = e.currentTarget as HTMLInputElement;
@@ -1280,7 +1281,7 @@ export default function EditEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
                             <input
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesEnd, eventData.timezone)}
                               onClick={(e) => {
                                 const el = e.currentTarget as HTMLInputElement;
@@ -1607,7 +1608,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Signature (HEX)</label>
                 <div className="flex space-x-4">
                   <input 
-                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus:border-brand-primary transition-colors"
+                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.primaryColor || ''}
                     onChange={(e) => setEventData({ 
                       ...eventData, 
@@ -1621,7 +1622,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Signature (HEX)</label>
                 <div className="flex space-x-4">
                   <input
-                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus:border-brand-primary transition-colors"
+                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.accentColor || ''}
                     onChange={(e) => setEventData({
                       ...eventData,
@@ -1654,7 +1655,7 @@ export default function EditEvent() {
                     type="text"
                     maxLength={SLUG_MAX}
                     placeholder="summer-horizon-2026"
-                    className="w-full bg-black border border-white/20 py-4 pl-32 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary"
+                    className="w-full bg-black border border-white/20 py-4 pl-32 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={eventData.branding?.customSlug || ''}
                     onChange={(e) =>
                       setEventData({
@@ -1843,16 +1844,14 @@ export default function EditEvent() {
       </form>
 
       {/* Cancellation confirmation modal. */}
-      {showCancelModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => !cancelling && setShowCancelModal(false)}
-        >
-          <div
-            className="w-full max-w-md bg-[#111] border border-white/10 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">
+      <Dialog
+        open={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        dismissible={!cancelling}
+        labelledBy="cancel-event-title"
+        className="w-full max-w-md bg-[#111] border border-white/10 p-6"
+      >
+            <h2 id="cancel-event-title" className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">
               Cancel event?
             </h2>
             <p className="text-sm text-white/50 mb-4">
@@ -1869,7 +1868,7 @@ export default function EditEvent() {
               rows={3}
               maxLength={500}
               placeholder="Venue closure, artist illness, etc."
-              className="w-full bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary"
+              className="w-full bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
             />
             <div className="flex gap-2 mt-4 justify-end">
               <button
@@ -1889,9 +1888,7 @@ export default function EditEvent() {
                 {cancelling ? 'Cancelling…' : 'Cancel event'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Dialog>
     </div>
   );
 }

@@ -75,7 +75,7 @@ export default function WaitlistPanel({ eventId }: { eventId: string }) {
           max={500}
           value={releaseN}
           onChange={(e) => setReleaseN(Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1)))}
-          className="w-20 border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm font-bold rounded-lg"
+          className="w-20 border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm font-bold rounded-lg"
         />
         <button
           type="button"

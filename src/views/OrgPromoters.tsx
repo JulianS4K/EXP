@@ -119,7 +119,7 @@ export default function OrgPromoters() {
   if (!user) return <div className="max-w-3xl mx-auto p-20 text-center type text-white/50 uppercase tracking-widest text-xs">Sign in to manage promoters.</div>;
 
   const ranked = [...promoters].sort((a, b) => (stats.get(b.id)?.tickets ?? 0) - (stats.get(a.id)?.tickets ?? 0));
-  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary';
+  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">

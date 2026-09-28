@@ -46,7 +46,7 @@ export default function PromoterSocialsForm({ token, socials, allowTagging }: {
     }
   };
 
-  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary';
+  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
   return (
     <form onSubmit={save} className="bg-[#111] border border-white/10 p-4 mb-8">
       <p className="type text-[10px] uppercase tracking-widest text-brand-primary mb-2 flex items-center gap-1">

@@ -290,7 +290,7 @@ export default function OrganizerOnboarding() {
                 maxLength={100}
                 required
                 placeholder="e.g. Mister Saturday Night, Public Records, Brooklyn Steel"
-                className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
               />
               <p className="text-slate-400 text-xs mt-1">
                 The name buyers see on tickets and the storefront.
@@ -315,7 +315,7 @@ export default function OrganizerOnboarding() {
                   maxLength={80}
                   required
                   placeholder="brooklyn-steel"
-                  className="flex-1 py-3 text-sm text-slate-900 focus:outline-none"
+                  className="flex-1 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                 />
               </div>
               <p className="text-slate-400 text-xs mt-1">
@@ -395,7 +395,7 @@ export default function OrganizerOnboarding() {
                         value={primary}
                         onChange={(e) => setPrimary(e.target.value)}
                         maxLength={7}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
                       <div className="w-10 h-10 rounded border border-slate-200" style={{ background: primary }} aria-hidden />
                     </div>
@@ -411,7 +411,7 @@ export default function OrganizerOnboarding() {
                         value={accent}
                         onChange={(e) => setAccent(e.target.value)}
                         maxLength={7}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
                       <div className="w-10 h-10 rounded border border-slate-200" style={{ background: accent }} aria-hidden />
                     </div>

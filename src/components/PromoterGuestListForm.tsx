@@ -17,7 +17,7 @@ import {
 import { validateGuestInput } from '../lib/guestLists';
 import { useToast } from '../context/ToastContext';
 
-const inputCls = 'bg-black border border-white/20 py-2 px-3 text-white text-sm focus:outline-none focus:border-brand-primary';
+const inputCls = 'bg-black border border-white/20 py-2 px-3 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
 
 export default function PromoterGuestListForm({ token }: { token: string }) {
   const [lists, setLists] = useState<PromoterGuestList[] | null>(null);

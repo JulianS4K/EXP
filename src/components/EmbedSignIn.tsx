@@ -68,7 +68,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
     if (err) setError(err.message || 'Sign-in failed.');
   };
 
-  const input = 'w-full bg-black border border-white/15 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/50';
+  const input = 'w-full bg-black border border-white/15 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-white/50';
   const button = 'disp block w-full py-3 text-lg tracking-wide text-center disabled:opacity-50';
   const link = 'type text-[10px] uppercase tracking-widest text-white/40 hover:text-white/70';
 

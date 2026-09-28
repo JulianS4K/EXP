@@ -108,7 +108,7 @@ export function EventAccessInfoEditor({
           rows={3}
           maxLength={ACCESS_NOTES_MAX}
           placeholder="e.g. Step-free entrance on 5th St. The balcony is stairs only."
-          className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+          className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
           value={value.notes ?? ''}
           onChange={(e) => onChange({ ...value, notes: e.target.value })}
         />
@@ -122,7 +122,7 @@ export function EventAccessInfoEditor({
           type="text"
           maxLength={ACCESS_CONTACT_MAX}
           placeholder="access@yourvenue.com"
-          className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+          className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
           value={value.contact ?? ''}
           onChange={(e) => onChange({ ...value, contact: e.target.value })}
         />
