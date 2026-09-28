@@ -242,6 +242,24 @@ and terms against the official specs before building.
 - [ ] Music DNA (see the Roadmap's music identity item): a buyer links Last.fm, and their top artists seed
   "Suggested for you".
 
+## Merch: store links + print-on-demand (researched 2026-09-28, not started)
+
+**Bonfire** has no public developer API, so it can't be integrated beyond a link. (The search hit
+bonfire.com/store/api is a merch store named "API".) It's apparel-only print-on-demand with stores and
+campaigns, printed in 2–21 day batches or on demand, free to sell (margin in the base cost), paid out by PayPal.
+- [ ] Merch store link on events (any store: Bonfire, Fourthwall, Shopify, …): a "Merch" button on the event
+  page, confirmation email and ticket. No build dependency; the organizer's store handles orders and shipping.
+  No sales data comes back to Exos.
+
+**Printful** (or Printify / Fourthwall: all have APIs) as fulfilment behind Exos add-ons, so merch sells in the
+ticket checkout (one Stripe payment, Exos / organizer sets the margin).
+- Printful API: products and variants, orders, shipping rates, mockups, webhooks.
+- [ ] Add-on variants (size / colour); shipping address + shipping cost at checkout; returns.
+- [ ] Printful client: create the print order when the ticket order is fulfilled; track status by webhook.
+  A third-party write: dry-run by default + operator WriteAuthorization, like the marketplace writers.
+- [ ] Operator: Printful (or chosen provider) account and API key; decide who owns the margin.
+- At-the-show merch is separate: the venue POS item in the Phases table (Toast / Stripe Terminal).
+
 ## GoTickets 2026-09-28
 
 Seller Central API v1 (docs/marketplace/gotickets). Mig `20260928020000` (tested: `test_gotickets_orders.sql`
