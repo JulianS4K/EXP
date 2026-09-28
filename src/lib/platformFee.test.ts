@@ -3,7 +3,9 @@ import {
   EXOS_FEE_BPS,
   STRIPE_CARD_FEE,
   checkoutApplicationFeeCents,
+  exosFeeBpsAt,
   exosFeeCents,
+  FEE_FREE_MONTHS,
   organizerNetCents,
   stripeFeeCents,
 } from '../../supabase/functions/_shared/platformFee.ts';
@@ -30,6 +32,17 @@ describe('the Exos fee: 3% of every transaction, paid by the organizer', () => {
     expect(checkoutApplicationFeeCents(0)).toBe(0); // free orders: no fee, no charge
     expect(checkoutApplicationFeeCents(20)).toBe(20); // never more than the order
     expect(checkoutApplicationFeeCents(4000, { card: { bps: 0, fixedCents: 0 } })).toBe(120);
+  });
+
+  it('is free for the first 6 months (card processing still applies at checkout)', () => {
+    expect(FEE_FREE_MONTHS).toBe(6);
+    const now = new Date('2026-12-01T00:00:00Z');
+    expect(exosFeeBpsAt('2027-04-01T00:00:00Z', now)).toBe(0);
+    expect(exosFeeBpsAt('2026-11-30T00:00:00Z', now)).toBe(300);
+    expect(exosFeeBpsAt(null, now)).toBe(300);
+    expect(exosFeeBpsAt('not a date', now)).toBe(300);
+    // Free months: the application fee is just Stripe's card fee, so Exos nets 0 and loses nothing.
+    expect(checkoutApplicationFeeCents(4000, { bps: exosFeeBpsAt('2027-04-01T00:00:00Z', now) })).toBe(146);
   });
 
   it('on a marketplace sale, 3% of the payout is already net (the marketplace charged the card)', () => {

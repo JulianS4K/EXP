@@ -41,6 +41,11 @@ the details with counsel.)
       marketplace sale Exos takes 3% of the payout (`exos_fee`, SQL `exos_platform_fee_bps()`), with no
       card fee because the marketplace charged the card. `EXOS_PLATFORM_FEE_BPS` overrides the 3% at
       checkout; keep it equal to `EXOS_FEE_BPS` and the SQL function.
+- [x] **First 6 months free** (operator, 2026-09-28): no Exos fee until
+      `exos_org_billing.fee_free_until`, which is signup + 6 months (orgs that exist when mig
+      `20260929062000` is applied get 6 months from then). Checkout still passes Stripe's card fee
+      through. Staff can extend a design partner's date with an UPDATE (service role); organizers can
+      read it but not change it.
 - [ ] **Confirm Stripe's rate.** Checkout estimates Stripe's fee at standard US card pricing
       (2.9% + 30¢; set `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` if the account has a
       negotiated rate). International and some premium cards cost Stripe more, and on those Exos keeps

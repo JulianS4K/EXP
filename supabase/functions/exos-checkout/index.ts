@@ -35,7 +35,7 @@ import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from ".
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
-import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents } from "../_shared/platformFee.ts";
+import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, exosFeeBpsAt } from "../_shared/platformFee.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -297,7 +297,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // The Exos fee: 3% net after Stripe, from the organizer's share. The
   // platform pays Stripe's card fee under destination charges, so the
   // application fee is 3% plus that fee (_shared/platformFee.ts).
-  const feeBps = Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS));
+  // No Exos fee during the org's first 6 months (exos_org_billing); card processing still applies.
+  const { data: billing } = await sb.from("exos_org_billing").select("fee_free_until").eq("org_id", ev.org_id).maybeSingle();
+  const feeBps = exosFeeBpsAt(
+    (billing as { fee_free_until?: string } | null)?.fee_free_until,
+    new Date(),
+    Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
+  );
   const applicationFee = checkoutApplicationFeeCents(amountCents, {
     bps: feeBps,
     card: {

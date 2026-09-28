@@ -5,8 +5,9 @@
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: exos_marketplace_orders (+list_unit_price, +marketplace_fee,
 --              +exos_fee, +organizer_net, BEFORE trigger)
---           C: FUNCTION exos_platform_fee_bps, exos_listing_unit_price,
---              exos_tg_marketplace_fee;
+--           C: TABLE exos_org_billing (+ insert trigger on exos_orgs);
+--              FUNCTION exos_platform_fee_bps, exos_org_fee_bps,
+--              exos_listing_unit_price, exos_tg_marketplace_fee;
 --              VIEW exos_marketplace_fee_rates
 -- Pre-reqs: 20260929061000, 20260927050000 (listing_ref)
 --
@@ -32,6 +33,15 @@
 -- organizer_net = proceeds - exos_fee (40.00 -> 38.80).
 -- exos_platform_fee_bps() is the one place the SQL side keeps the rate.
 --
+-- The first 6 months are free (operator, 2026-09-28): no Exos fee until
+-- exos_org_billing.fee_free_until, set to 6 months after the org is created
+-- (existing orgs: 6 months from when this migration is applied, since no
+-- one has paid a fee yet). Card processing still applies at checkout. The
+-- date lives in its own table: org members can read it, only the server can
+-- change it (staff extend it for a design partner with an UPDATE), so an
+-- organizer can't extend their own free period. exos_org_fee_bps(org, at)
+-- is the rate for an org at a moment: 0 inside the window, else 3%.
+--
 -- Service role only. Re-run safe (IF NOT EXISTS / CREATE OR REPLACE / DROP
 -- TRIGGER IF EXISTS). D4 authors; applying to prod is operator-gated.
 -- ============================================================================
@@ -45,6 +55,52 @@ ALTER TABLE public.exos_marketplace_orders
 -- The Exos fee rate in basis points (300 = 3%). Keep in step with EXOS_FEE_BPS.
 CREATE OR REPLACE FUNCTION public.exos_platform_fee_bps()
 RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 300 $$;
+
+-- Per-org billing terms the organizer can see but not change.
+CREATE TABLE IF NOT EXISTS public.exos_org_billing (
+  org_id         uuid PRIMARY KEY REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  fee_free_until timestamptz NOT NULL,
+  note           text,
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.exos_org_billing ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_org_billing FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.exos_org_billing TO authenticated;
+GRANT ALL ON public.exos_org_billing TO service_role;
+DROP POLICY IF EXISTS exos_org_billing_sel ON public.exos_org_billing;
+CREATE POLICY exos_org_billing_sel ON public.exos_org_billing FOR SELECT TO authenticated
+  USING (public.exos_is_admin() OR public.exos_has_org_role(org_id, ARRAY['owner','manager','finance']));
+COMMENT ON TABLE public.exos_org_billing IS
+  'Per-org fee terms (mig 20260929062000): no Exos fee before fee_free_until. Server-written only.';
+
+-- Existing orgs: 6 months from now (no fee has been charged yet). Re-run safe.
+INSERT INTO public.exos_org_billing (org_id, fee_free_until)
+SELECT o.id, greatest(o.created_at, now()) + interval '6 months' FROM public.exos_orgs o
+ON CONFLICT (org_id) DO NOTHING;
+
+-- New orgs: 6 months from signup.
+CREATE OR REPLACE FUNCTION public.exos_tg_org_billing()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  INSERT INTO public.exos_org_billing (org_id, fee_free_until)
+  VALUES (NEW.id, coalesce(NEW.created_at, now()) + interval '6 months')
+  ON CONFLICT (org_id) DO NOTHING;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_tg_org_billing() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_orgs_billing ON public.exos_orgs;
+CREATE TRIGGER exos_orgs_billing AFTER INSERT ON public.exos_orgs
+  FOR EACH ROW EXECUTE FUNCTION public.exos_tg_org_billing();
+
+-- The Exos fee rate for an org at a moment: 0 during its free months, else 3%.
+CREATE OR REPLACE FUNCTION public.exos_org_fee_bps(p_org uuid, p_at timestamptz)
+RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM public.exos_org_billing b
+                            WHERE b.org_id = p_org AND coalesce(p_at, now()) < b.fee_free_until)
+              THEN 0 ELSE public.exos_platform_fee_bps() END;
+$$;
+REVOKE ALL ON FUNCTION public.exos_org_fee_bps(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_org_fee_bps(uuid, timestamptz) TO service_role;
 
 COMMENT ON COLUMN public.exos_marketplace_orders.list_unit_price IS
   'Per-ticket price the Exos listing carried when the sale arrived (planned listing entry unit_price). Mig 20260929062000.';
@@ -79,8 +135,9 @@ BEGIN
   NEW.marketplace_fee := CASE
     WHEN NEW.list_unit_price IS NOT NULL AND NEW.proceeds IS NOT NULL AND NEW.quantity > 0
     THEN round(NEW.list_unit_price * NEW.quantity - NEW.proceeds, 4) END;
+  -- The rate when the sale happened (0 during the org's free months).
   NEW.exos_fee := CASE WHEN NEW.proceeds IS NOT NULL
-    THEN round(NEW.proceeds * public.exos_platform_fee_bps() / 10000.0, 2) END;
+    THEN round(NEW.proceeds * public.exos_org_fee_bps(NEW.org_id, coalesce(NEW.sold_at, NEW.created_at, now())) / 10000.0, 2) END;
   NEW.organizer_net := NEW.proceeds - NEW.exos_fee;
   RETURN NEW;
 END $$;

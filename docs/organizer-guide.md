@@ -40,7 +40,8 @@ paid events can't be sold.**
 - Performers and artist links.
 - **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
-  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee. Exos
+  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee. Your
+  first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
   takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
   a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
   card was charged there, so a 40.00 ticket pays you 38.80 (marketplace prices are raised to cover

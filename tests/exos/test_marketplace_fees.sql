@@ -6,6 +6,9 @@
 --   F2 a later re-plan at a new price doesn't rewrite a past sale
 --   F3 exos_marketplace_fee_rates: the realized rate per store; service role only
 --   F4 the Exos fee: 3% of the payout, and the organizer's net (40.00 -> 38.80)
+--   F5 the first 6 months are free: a new org gets fee_free_until = signup +
+--      6 months; a sale inside it pays no Exos fee; members can read the
+--      date, nobody but the server can change it
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -17,6 +20,8 @@ INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('7e000000-0000-0000-0000-0000000000d1','7e000000-0000-0000-0000-0000000000e1','GA',40,20,0);
 SELECT public.exos_set_channel_allocation('7e000000-0000-0000-0000-0000000000e1','seatgeek','7e000000-0000-0000-0000-0000000000d1',10);
+-- F1-F4 run after the org's free months (F5 covers them).
+UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day' WHERE org_id = '7e000000-0000-0000-0000-000000000001';
 -- The plan exos-distribute stores: 40.00 net on SeatGeek (5%) lists at 42.11.
 UPDATE public.exos_distribution_listings
    SET planned_listing = jsonb_build_object('channel','seatgeek','listings', jsonb_build_array(
@@ -76,5 +81,32 @@ BEGIN
   END IF;
   IF public.exos_platform_fee_bps() <> 300 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
   RAISE NOTICE 'F4 PASS: Exos takes 3%% of every marketplace payout';
+
+  -- F5: back inside the free months, a new sale pays no Exos fee.
+  UPDATE public.exos_org_billing SET fee_free_until = now() + interval '1 day' WHERE org_id = '7e000000-0000-0000-0000-000000000001';
+  o := pg_temp.sale('7e-3', 1, '42.75');
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 0 OR m.organizer_net IS DISTINCT FROM 42.75 THEN
+    RAISE EXCEPTION 'F5 FAIL: free months charged: exos % net %', m.exos_fee, m.organizer_net;
+  END IF;
+  IF public.exos_org_fee_bps('7e000000-0000-0000-0000-000000000001', now() + interval '2 days') <> 300 THEN
+    RAISE EXCEPTION 'F5 FAIL: rate after the free months';
+  END IF;
+  -- A new org gets six months from signup.
+  INSERT INTO public.exos_orgs(id,name,slug,owner_uid,created_at) VALUES
+    ('7e000000-0000-0000-0000-000000000002','7E New','7e-new','7e000000-0000-0000-0000-0000000000a0','2026-10-01T00:00:00Z');
+  IF (SELECT fee_free_until FROM public.exos_org_billing WHERE org_id = '7e000000-0000-0000-0000-000000000002')
+     IS DISTINCT FROM '2027-04-01T00:00:00Z'::timestamptz THEN
+    RAISE EXCEPTION 'F5 FAIL: new org free until %', (SELECT fee_free_until FROM public.exos_org_billing WHERE org_id = '7e000000-0000-0000-0000-000000000002');
+  END IF;
+  -- Organizers read it; only the server writes it.
+  IF NOT has_table_privilege('authenticated', 'public.exos_org_billing', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.exos_org_billing', 'UPDATE')
+     OR has_table_privilege('authenticated', 'public.exos_org_billing', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.exos_org_billing', 'DELETE')
+     OR has_function_privilege('authenticated', 'public.exos_org_fee_bps(uuid, timestamptz)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'F5 FAIL: organizers could change their free months';
+  END IF;
+  RAISE NOTICE 'F5 PASS: 6 months free from signup; organizers can see it, not change it';
 END $$;
 ROLLBACK;

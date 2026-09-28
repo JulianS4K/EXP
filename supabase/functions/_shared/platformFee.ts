@@ -14,10 +14,26 @@
 //                      (mig 20260929062000). The marketplace charged the
 //                      card, so there's no Stripe fee and 3% is net already.
 //
+// The first 6 months are free (operator, 2026-09-28): no Exos fee until the
+// org's exos_org_billing.fee_free_until (signup + 6 months). Card processing
+// still passes through at checkout.
+//
 // Buyers never pay an Exos fee. Rounded to the cent, half up. The SQL side reads the same rate from
 // exos_platform_fee_bps(); change both together.
 
 export const EXOS_FEE_BPS = 300;
+
+/** How long a new org pays no Exos fee (exos_org_billing.fee_free_until = signup + this). */
+export const FEE_FREE_MONTHS = 6;
+
+/**
+ * The Exos rate for an org at `now`: 0 before its fee_free_until (its first
+ * 6 months), else `bps`. No billing row (or a bad date) = the normal rate.
+ */
+export function exosFeeBpsAt(feeFreeUntil: string | null | undefined, now: Date, bps: number = EXOS_FEE_BPS): number {
+  const until = feeFreeUntil ? Date.parse(feeFreeUntil) : NaN;
+  return Number.isFinite(until) && now.getTime() < until ? 0 : bps;
+}
 
 /** The Exos fee on a transaction of `amountCents`: 3%, to the cent, half up (4000 -> 120, 2150 -> 65). */
 export function exosFeeCents(amountCents: number, bps: number = EXOS_FEE_BPS): number {
