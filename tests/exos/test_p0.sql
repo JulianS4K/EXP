@@ -299,9 +299,12 @@ BEGIN
   ASSERT r2 = 0, 'T: a tax-inclusive tier adds nothing';
   ASSERT r3 = 0, 'T: a tier with no tax rule adds nothing';
   ASSERT r4 = 8.875, 'T: add-ons expose their exclusive rate too';
-  ASSERT has_function_privilege('anon','public.exos_tier_exclusive_tax_percent(uuid)','EXECUTE')
-     AND has_function_privilege('anon','public.exos_addon_exclusive_tax_percent(uuid)','EXECUTE'),
-         'T: anon must be able to evaluate the tax helpers behind the views';
+  -- The views run as their owner (security_invoker off), so anon needs no
+  -- EXECUTE on the helpers; mig 20260929080000 revokes it (they answered for
+  -- any tier id, drafts included).
+  ASSERT NOT has_function_privilege('anon','public.exos_tier_exclusive_tax_percent(uuid)','EXECUTE')
+     AND NOT has_function_privilege('anon','public.exos_addon_exclusive_tax_percent(uuid)','EXECUTE'),
+         'T: the tax helpers behind the views are not anon RPCs';
   RAISE NOTICE 'OK  T all-in: exclusive tax visible to buyers (tier + add-on), 0 when included/none';
 END $$;
 
