@@ -100,7 +100,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   for (const row of rows) {
     const rendered = renderMail(row.html, unsubById.get(row.id), appUrl);
-    if (!rendered.ok) {
+    // `in` narrows the union whatever the checker's strictness.
+    if ("error" in rendered) {
       await sb.rpc("exos_mail_mark", {
         p_id: row.id, p_ok: false, p_error: rendered.error, p_max_attempts: maxAttempts,
       });
