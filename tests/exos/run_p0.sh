@@ -64,7 +64,6 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929040000_exos_door_hardening \
          20260929041000_exos_event_scanner_scope \
          20260929050000_exos_marketplace_sale_note \
-         20260929050000_exos_marketplace_sale_note \
          20260929051000_exos_marketplace_attention \
          20260929052000_exos_marketplace_pricing; do
   $PSQL -f "$MIG/$m.sql"
@@ -142,7 +141,6 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929030000_exos_money_path_fixes \
          20260929040000_exos_door_hardening \
          20260929041000_exos_event_scanner_scope \
-         20260929050000_exos_marketplace_sale_note \
          20260929050000_exos_marketplace_sale_note \
          20260929051000_exos_marketplace_attention \
          20260929052000_exos_marketplace_pricing; do
