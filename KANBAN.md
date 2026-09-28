@@ -25,6 +25,15 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Exos for AI assistants (MCP) 2026-09-29
+
+- 🟡 **Remote MCP server** (`exos-mcp`, `20260929060000_exos_mcp`, authored, not deployed; `docs/mcp.md`): one
+  Streamable-HTTP server for Claude, ChatGPT and any MCP client. Public read-only tools (`search_events`,
+  `get_event`, `get_ticket_link`, plus ChatGPT's `search` / `fetch`); organizer tools with an Exos API key
+  (`my_events`, `event_sales`, `door_status`, `marketplace_attention`), scoped in SQL to the key's org. Nothing is
+  bought or changed: purchases are links. Next: OAuth for consumer connector screens, confirmed write tools,
+  Apps SDK widgets.
+
 ## Build review fixes 2026-09-29 (six-area review, 2026-09-28)
 
 - 🟡 **Security hardening** (`20260929010000_exos_security_hardening`, authored, not applied; apply with
