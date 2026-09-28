@@ -23,7 +23,7 @@
 // claim link), Splittype ANY within the block. Edit is "y" as in Gametime's
 // example file (not described there).
 
-import { entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
+import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 import { isExosListingId } from '../listingIds.ts';
 
 export const GAMETIME_CSV_COLUMNS = [
@@ -73,7 +73,7 @@ export function planGametimeListings(a: GametimeAllocation): PlannedGametimeList
       Splittype: 'ANY',
       Splitvalue: '',
       FaceValue: l.face_value != null ? money(l.face_value) : '',
-      Stock: 'mobile_transfer',
+      Stock: EXOS_TRANSFER_STOCK.gametime,
       Discount: '',
       ZonePrice: '',
     };

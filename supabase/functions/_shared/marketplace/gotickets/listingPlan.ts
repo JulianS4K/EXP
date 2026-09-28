@@ -12,7 +12,7 @@
 // the StubHub / SeatGeek event ids when Exos has them linked. Until it does,
 // the listing is "unmapped" (still addressable by externalTicketId).
 
-import { entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
+import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 import type { GoTicketsListing } from './types.ts';
 
 export type GoTicketsAllocation = ExosAllocation & {
@@ -42,7 +42,7 @@ export function planGoTicketsListings(a: GoTicketsAllocation): PlannedGoTicketsL
       instant: false,
       splitType: 'ANY',
       inHandDate: l.in_hand_date,
-      stockType: 'MOBILE_TICKETS',
+      stockType: EXOS_TRANSFER_STOCK.gotickets,
       ...(l.face_value != null ? { faceValue: l.face_value } : {}),
       price: l.price,
       eventName: l.event.name,

@@ -232,8 +232,10 @@ Broker Portal API 1.0.0 (docs/marketplace/vivid). Mig `20260928030000` (tested: 
 - ✅ Grid column with a small pool; the same Exos listings (blocks, internal seats sent with hideSeats).
 - ✅ Sales: polling only (no webhooks): getOrders UNCONFIRMED + PENDING_SHIPMENT (XML) and a getOrder recheck;
   delivery planned as confirmOrder (+ internal seats) then transferOrderViaURL with the claim links.
-- [ ] Confirm with Vivid: claim links via transferOrderViaURL (and transferSource), stockType for URL
-  transfers, events/search date format, how a cancelled order shows (no status is documented), integrator
+- ✅ Listed as electronic transfer (stockType ELECTRONIC + electronicTransfer): every marketplace now lists
+  Exos tickets as mobile transfer, else electronic transfer (`EXOS_TRANSFER_STOCK`; StubHub prefers
+  MobileTransfer, then ElectronicTransfer; operator 2026-09-28).
+- [ ] Confirm with Vivid: claim links via transferOrderViaURL (and transferSource), events/search date format, how a cancelled order shows (no status is documented), integrator
   token.
 - [ ] Operator: VIVID_API_TOKEN (+ VIVID_INTEGRATOR_TOKEN if issued), WriteAuthorization.
 

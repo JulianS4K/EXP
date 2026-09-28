@@ -15,7 +15,7 @@
 // which can take a while.
 
 import { exosEventRef } from '../channel.ts';
-import { entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
+import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 import type { VividListing } from './types.ts';
 
 export type VividAllocation = ExosAllocation & {
@@ -51,7 +51,7 @@ export function planVividListings(a: VividAllocation): PlannedVividListings {
       ...(l.face_value != null ? { faceValue: l.face_value } : {}),
       priceCurrency: 'USD',
       splitType: 'ANY',
-      stockType: 'ELECTRONIC',
+      stockType: EXOS_TRANSFER_STOCK.vivid,
       electronic: true,
       electronicTransfer: true,
       inHandDate: `${l.in_hand_date}T00:00:00`,

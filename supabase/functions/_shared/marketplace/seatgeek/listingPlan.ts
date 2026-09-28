@@ -14,7 +14,7 @@
 // link), is_edelivery true, split_type ANY, in_hand_date the event day.
 // seller_listing_id (max 32 chars) is the Exos listing id.
 
-import { entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
+import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 import type { SeatGeekListing } from './types.ts';
 
 export {
@@ -65,7 +65,7 @@ export function planSeatGeekListings(a: SeatGeekAllocation): PlannedSeatGeekList
       row: l.row,
       seat_from: l.seat_from,
       seat_thru: l.seat_thru,
-      stock_type: 'mobile',
+      stock_type: EXOS_TRANSFER_STOCK.seatgeek,
       is_edelivery: true,
       split_type: 'ANY',
       in_hand_date: l.in_hand_date,

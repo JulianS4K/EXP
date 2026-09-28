@@ -115,7 +115,6 @@ Nothing is sent to Vivid Seats.
 | Question | Where it matters |
 |---|---|
 | Does Vivid accept an Exos claim link through `transferOrderViaURL`, and what should `transferSource` / `transferSourceURL` say? | delivery |
-| Which `stockType` fits a URL transfer? Exos sends `ELECTRONIC` with `electronicTransfer: true`. | listing plan |
 | What date format does `events/search` take for `fromDate` / `toDate`? Exos sends `YYYY-MM-DDTHH:MM:SS`, venue-local. | linking |
 | How does a cancelled order show? No cancelled status is documented, and `getOrders` returns only open orders. Exos logs a recheck that returns nothing and leaves it to a human. | sales |
 | Is an `X-Integrator-Token` needed for this integration? | auth |

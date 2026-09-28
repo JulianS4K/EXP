@@ -171,9 +171,9 @@ describe('buildRequestedEventListingRequest', () => {
 describe('pickTicketType', () => {
   const types = (...items: Array<{ type: string; name?: string }>) => ({ _embedded: { ticket_types: items } });
 
-  it('prefers ticket transfer, then mobile transfer, returning the event\'s own type string', () => {
-    expect(pickTicketType(types({ type: 'ETicket' }, { type: 'MobileTransfer' }, { type: 'TicketTransfer' }))).toBe('TicketTransfer');
-    expect(pickTicketType(types({ type: 'ETicket' }, { type: 'MobileTransfer' }))).toBe('MobileTransfer');
+  it('prefers mobile transfer, then electronic transfer, returning the event\'s own type string', () => {
+    expect(pickTicketType(types({ type: 'ETicket' }, { type: 'ElectronicTransfer' }, { type: 'MobileTransfer' }))).toBe('MobileTransfer');
+    expect(pickTicketType(types({ type: 'ETicket' }, { type: '9', name: 'Electronic Transfer' }))).toBe('9');
   });
 
   it('matches on display name and ignores case/spacing', () => {
@@ -183,7 +183,7 @@ describe('pickTicketType', () => {
 
   it('refuses to guess when the event accepts neither, listing what it does accept', () => {
     expect(() => pickTicketType(types({ type: 'ETicket', name: 'E-ticket' }, { type: 'Paper' }))).toThrow(
-      /TicketTransfer \/ MobileTransfer; available: ETicket \(E-ticket\), Paper/,
+      /MobileTransfer \/ ElectronicTransfer; available: ETicket \(E-ticket\), Paper/,
     );
     expect(() => pickTicketType({})).toThrow(/none listed/);
   });
