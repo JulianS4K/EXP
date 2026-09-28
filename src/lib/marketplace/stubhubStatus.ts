@@ -20,6 +20,22 @@ export interface StubHubDistributionRow {
   planned_listing?: unknown;
   /** Internal seat numbers of the unsold allocated seats ("{[1,11)}"); staff only. */
   internal_seats?: string | null;
+  /** Pools (mig 20260928010000): the grid's cap, what's sold, what the listings show. */
+  sell_cap?: number | null;
+  sold_qty?: number | null;
+  list_qty?: number | null;
+}
+
+/** "Holding 4 now, up to 10 in total, 2 sold" for a grid cell, or null. */
+export function poolLine(row: StubHubDistributionRow | null): string | null {
+  if (!row || row.sell_cap == null || row.sell_cap <= 0 || row.status === 'delisted') return null;
+  const held = row.requested_qty ?? 0;
+  const sold = row.sold_qty ?? 0;
+  const parts = [`Holding ${held} now`, `up to ${row.sell_cap} in total`];
+  if (sold) parts.push(`${sold} sold`);
+  if (row.list_qty != null && row.list_qty < held) parts.push(`${held - row.list_qty} back to Exos once the marketplace takes the lower number`);
+  else if (held === 0 && sold < row.sell_cap) parts.push('none free right now');
+  return parts.join(', ') + '.';
 }
 
 /** An event's rows on one marketplace: the event row, and an allocation per ticket type. */
@@ -130,7 +146,7 @@ export function allocationCellStatus(row: StubHubDistributionRow | null, channel
   const plan = (row.planned_listing ?? null) as PlanShape | null;
   const qty = row.requested_qty ?? 0;
   if (row.status === 'delisting') return { tone: 'warn', text: `Coming off ${label}; the seats return to Exos once it's down.` };
-  if (row.status === 'delisted' || qty <= 0) return null;
+  if (row.status === 'delisted' || (qty <= 0 && !row.sell_cap)) return null;
   if (plan?.error) return { tone: 'warn', text: plan.error };
   if (row.error) return { tone: 'warn', text: row.error };
   if (row.status === 'listed' || row.status === 'listing') {

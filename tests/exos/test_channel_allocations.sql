@@ -24,6 +24,13 @@
 --   (20260927050000)
 --   A13 one standard on every marketplace: a StubHub sale records its listing
 --       (listing_ref) and gets that block's seats, like SeatGeek and Gametime
+--   (20260928010000)
+--   A14 small pools: the grid sets a cap; the marketplace holds only 2 x max
+--       per order at a time, Exos can sell the rest
+--   A15 a sale tops the pool back up, with free seats only; later frees are
+--       picked up by the refill run
+--   A16 shrinking a LIVE listing keeps the seats held (the listings show the
+--       lower number) until the marketplace confirms it
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_channel_allocations.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -367,5 +374,83 @@ BEGIN
   END IF;
   RAISE NOTICE 'A13 ok: StubHub records its listing and takes that block''s seats (3, 4), like SeatGeek and Gametime';
 END $$;
+-- A14-A16: pools ------------------------------------------------------------------
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks,purchase_limits) VALUES
+  ('4e000000-0000-0000-0000-0000000000e6','4e000000-0000-0000-0000-000000000001','Pools','published','2027-04-01T02:00:00Z','Hall',20,0,ARRAY['stubhub','gametime'],'{"maxPerOrder":2}');
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
+  ('4e000000-0000-0000-0000-0000000000d8','4e000000-0000-0000-0000-0000000000e6','GA',40,20,0);
+CREATE OR REPLACE FUNCTION pg_temp.pool(p_ch text) RETURNS text LANGUAGE sql AS $$
+  SELECT sell_cap||'/'||sold_qty||'/'||requested_qty||'/'||list_qty FROM public.exos_distribution_listings
+   WHERE channel = p_ch AND tier_id = '4e000000-0000-0000-0000-0000000000d8'
+$$;
+
+-- A14 --------------------------------------------------------------------------
+DO $$
+BEGIN
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e6','stubhub','4e000000-0000-0000-0000-0000000000d8',10);
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e6','gametime','4e000000-0000-0000-0000-0000000000d8',6);
+  -- cap / sold / held / listed: each holds 2 x max per order (2) = 4.
+  IF pg_temp.pool('stubhub') <> '10/0/4/4' OR pg_temp.pool('gametime') <> '6/0/4/4' THEN
+    RAISE EXCEPTION 'A14 FAIL: pools % %', pg_temp.pool('stubhub'), pg_temp.pool('gametime');
+  END IF;
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8') <> 12 THEN
+    RAISE EXCEPTION 'A14 FAIL: Exos can sell % (want 20 - 4 - 4)', public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8');
+  END IF;
+  -- The cap can't promise seats that are gone.
+  BEGIN
+    PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e6','stubhub','4e000000-0000-0000-0000-0000000000d8',17);
+    RAISE EXCEPTION 'A14 FAIL: a cap beyond the free seats was accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  RAISE NOTICE 'A14 ok: both marketplaces live with 4 seats each; Exos sells the other 12';
+END $$;
+
+-- A15 --------------------------------------------------------------------------
+DO $$
+DECLARE alloc uuid;
+BEGIN
+  SELECT id INTO alloc FROM public.exos_distribution_listings WHERE channel = 'stubhub' AND tier_id = '4e000000-0000-0000-0000-0000000000d8';
+  PERFORM public.exos_record_marketplace_order(jsonb_build_object('channel','stubhub','external_order_id','A15-1',
+    'external_listing_id', alloc::text, 'quantity',2,'sale_status','confirmed','buyer_email','p1@x.com'));
+  PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A15-1'));
+  IF pg_temp.pool('stubhub') <> '10/2/4/4' THEN RAISE EXCEPTION 'A15 FAIL: not topped up: %', pg_temp.pool('stubhub'); END IF;
+  -- Exos sells all but 1 of its free seats; StubHub then sells its 4: it can only get 1 back.
+  UPDATE public.exos_ticket_tiers SET sold = sold + 9 WHERE id = '4e000000-0000-0000-0000-0000000000d8';
+  UPDATE public.exos_events SET tickets_sold = tickets_sold + 9 WHERE id = '4e000000-0000-0000-0000-0000000000e6';
+  PERFORM public.exos_record_marketplace_order(jsonb_build_object('channel','stubhub','external_order_id','A15-2',
+    'external_listing_id', alloc::text, 'quantity',4,'sale_status','confirmed','buyer_email','p2@x.com'));
+  PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A15-2'));
+  IF pg_temp.pool('stubhub') <> '10/6/1/1' OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8') <> 0 THEN
+    RAISE EXCEPTION 'A15 FAIL: refill beyond free seats: % (Exos %)', pg_temp.pool('stubhub'), public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8');
+  END IF;
+  -- A refund frees 3; the refill run picks them up.
+  UPDATE public.exos_ticket_tiers SET sold = sold - 3 WHERE id = '4e000000-0000-0000-0000-0000000000d8';
+  PERFORM public.exos_refill_channel_pools();
+  IF pg_temp.pool('stubhub') <> '10/6/4/4' THEN RAISE EXCEPTION 'A15 FAIL: refill run: %', pg_temp.pool('stubhub'); END IF;
+  RAISE NOTICE 'A15 ok: sales top the pool back up, only with free seats; the refill run catches later frees';
+END $$;
+
+-- A16 --------------------------------------------------------------------------
+UPDATE public.exos_distribution_listings SET status = 'listed', external_listing_id = 'GT-LIVE'
+ WHERE channel = 'gametime' AND tier_id = '4e000000-0000-0000-0000-0000000000d8';
+DO $$
+DECLARE alloc uuid; v_before int4multirange;
+BEGIN
+  SELECT id, internal_seats INTO alloc, v_before FROM public.exos_distribution_listings
+   WHERE channel = 'gametime' AND tier_id = '4e000000-0000-0000-0000-0000000000d8';
+  PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e6','gametime','4e000000-0000-0000-0000-0000000000d8',1);
+  -- Live: still holds 4, the listings should show 1.
+  IF pg_temp.pool('gametime') <> '1/0/4/1' THEN RAISE EXCEPTION 'A16 FAIL: live shrink released early: %', pg_temp.pool('gametime'); END IF;
+  PERFORM public.exos_refill_channel_pools();
+  IF pg_temp.pool('gametime') <> '1/0/4/1' THEN RAISE EXCEPTION 'A16 FAIL: refill run released a live hold'; END IF;
+  -- Gametime has the new quantity: the 3 highest seats go back to Exos.
+  PERFORM public.exos_confirm_channel_listing(alloc);
+  IF pg_temp.pool('gametime') <> '1/0/1/1'
+     OR (SELECT internal_seats FROM public.exos_distribution_listings WHERE id = alloc) <> public.exos_seats_take(v_before, 1) THEN
+    RAISE EXCEPTION 'A16 FAIL: after confirm: %', pg_temp.pool('gametime');
+  END IF;
+  RAISE NOTICE 'A16 ok: a live listing is shrunk only once the marketplace has the lower number';
+END $$;
 ROLLBACK;
+
 

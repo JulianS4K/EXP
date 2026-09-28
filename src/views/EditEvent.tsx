@@ -1733,7 +1733,7 @@ export default function EditEvent() {
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
-             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}`).join('|')}>
+             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}
                channels={(['stubhub', 'seatgeek', 'gametime'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}

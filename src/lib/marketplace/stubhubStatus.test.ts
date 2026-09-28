@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, gametimeStatus, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, poolLine, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -81,5 +81,18 @@ describe('gametimeStatus', () => {
     expect(gametimeStatus(row({ status: 'failed', error: 'x' }), ev)).toEqual({ tone: 'warn', text: 'x' });
     expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gametime')?.text)
       .toBe("1 listing ready. Not sent yet: Gametime selling isn't switched on.");
+  });
+});
+
+describe('poolLine', () => {
+  it('says what a marketplace holds, its cap and what it sold', () => {
+    expect(poolLine(null)).toBeNull();
+    expect(poolLine(row({ tier_id: 't', requested_qty: 4, sell_cap: 10, sold_qty: 2, list_qty: 4 })))
+      .toBe('Holding 4 now, up to 10 in total, 2 sold.');
+    expect(poolLine(row({ tier_id: 't', requested_qty: 0, sell_cap: 10, sold_qty: 6, list_qty: 0 })))
+      .toBe('Holding 0 now, up to 10 in total, 6 sold, none free right now.');
+    expect(poolLine(row({ tier_id: 't', status: 'listed', requested_qty: 4, sell_cap: 1, list_qty: 1 })))
+      .toBe('Holding 4 now, up to 1 in total, 3 back to Exos once the marketplace takes the lower number.');
+    expect(poolLine(row({ tier_id: 't', status: 'delisted', requested_qty: 0, sell_cap: 0 }))).toBeNull();
   });
 });

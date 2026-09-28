@@ -166,30 +166,45 @@ The flow, end to end:
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
 
-### No double buys: StubHub gets its own seats
+### No double buys: every marketplace holds its own small pool
 
-The seats on a StubHub listing are the same seats Exos sells, and StubHub's
-sale reaches Exos minutes later (webhook or poll). So "sync the quantity after
-each sale" can only narrow the window where both sides sell the last seat.
-Exos closes it instead with disjoint pools (mig `20260926193000`):
+The seats on a marketplace listing are the same seats Exos sells, and a
+marketplace sale reaches Exos seconds to minutes later (webhook or poll). So
+"sync the quantity after each sale" can only narrow the window where two
+places sell the last seat. Exos closes it instead with disjoint pools: at any
+moment a seat is held by exactly one of Exos, StubHub, SeatGeek or Gametime
+(migs `20260926193000`, `20260928010000`). "Broadcast everything everywhere"
+was considered and set aside for now: it would oversell near sell-out and
+leave marketplace orders to cancel (with penalties).
 
-- **Allocate.** The event editor's Marketplaces grid, or
-  `exos_set_channel_allocation`, sets N seats of a ticket type aside for
-  StubHub (`exos_distribution_listings.requested_qty`). Exos's availability
-  (`exos_tier_available`, `exos_quota_available`) leaves them out. Every Exos
-  path that sells or reserves a seat reads that availability: checkout
-  holds, free claims, comps, box office, waitlist offers.
-- **It only takes free seats.** It runs under the same locks as a cart hold
-  and writes the tier row, so a concurrent Exos checkout re-checks and can't
-  take a seat that was just allocated.
-- **A StubHub sale uses its own seats.** It takes them out of the allocation
-  in the same transaction that mints them, so it never competes with Exos
-  buyers. StubHub selling more than was allocated goes to a human.
-- **Give seats back.** Lowering the allocation releases the seats to Exos
-  straight away; taking a live listing down releases them once it's down
-  (delist, then release).
-- **Keep the StubHub listing quantity equal to the allocation.** StubHub
-  stops at its quantity, and Exos stops at capacity minus the allocation.
+- **The grid sets a cap, the marketplace holds a small pool.** The event
+  editor's Marketplaces grid (or `exos_set_channel_allocation`) sets the most
+  a marketplace sells of a ticket type (`sell_cap`). It holds only a few at a
+  time (`requested_qty`): **2 x the event's max per order** (8 without one;
+  `pool_size` overrides), never more than what's left of its cap. The event
+  is live on every ticked marketplace at once, and Exos sells everything not
+  held.
+- **Held seats are out of Exos's availability** (`exos_tier_available`,
+  `exos_quota_available`). Every Exos path that sells or reserves a seat reads
+  it: checkout holds, free claims, comps, box office, waitlist offers.
+- **Topped up with free seats only.** After each marketplace sale (same
+  transaction), and for every pool on each `exos-distribute` run
+  (`exos_refill_channel_pools`, which also picks up refunds and released
+  holds), the pool is refilled toward its size, under the same locks as a
+  cart hold, so it can't race an Exos checkout. If Exos has sold the rest,
+  the marketplace just holds less: the cap is a ceiling, not a promise.
+- **A marketplace sale uses its own pool.** Its seats come out of the pool in
+  the same transaction that mints them, so it never competes with Exos
+  buyers or another marketplace. Selling more than the pool holds goes to a
+  human.
+- **Giving seats back: never before the marketplace has the lower number.**
+  With nothing on the marketplace, a lower cap releases seats at once. A
+  **live** listing keeps them held while its listings are planned at the lower
+  number (`list_qty`, the lowest seats); they return to Exos only when the
+  marketplace confirms (`exos_confirm_channel_listing`, called by the live
+  writer after the update). Taking a listing down works the same way (delist,
+  then release).
+- **Per order:** listings hold at most the event's max per order.
 
 Two limits are enforced, not papered over:
 - Allocation is refused when the event's overall cap is lower than its

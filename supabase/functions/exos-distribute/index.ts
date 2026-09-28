@@ -34,6 +34,11 @@
 //    every run, so listings follow price / limit / allocation / sale changes.
 //    An allocation being pulled back ('delisting') gets a delist plan; one
 //    with nothing on the marketplace is released at once.
+//    Each marketplace holds a small pool (mig 20260928010000): 2 x max per
+//    order at a time, topped up after each sale and here on every run
+//    (exos_refill_channel_pools), up to the organizer's cap. A live listing
+//    waiting to shrink is planned at list_qty (the lowest seats) while the
+//    rest stay held until the marketplace confirms.
 //
 // 1c. The Gametime inventory file: Gametime takes listings only as a CSV of
 //    the account's whole inventory (FTP), re-sent at least every six hours.
@@ -106,12 +111,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seatgeek: !!channels.get("seatgeek")?.findEvents,
       gametime: false,
     });
+    // Top every marketplace pool back up to its size, with free seats only
+    // (mig 20260928010000): picks up seats freed since the last sale.
+    const { data: refilled, error: rErr } = await sb.rpc("exos_refill_channel_pools");
+    if (rErr) console.error("exos-distribute: pool refill failed", rErr.message);
     const stubhub = await syncChannel(sb, "stubhub");
     const seatgeek = await syncChannel(sb, "seatgeek");
     const gametime = await syncChannel(sb, "gametime");
     const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, listings: { stubhub, seatgeek, gametime }, gametime_file: gametimeFile, automatiq });
+    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -220,6 +229,7 @@ interface AllocationRow {
   unit_price: number | string | null;
   external_listing_id: string | null;
   internal_seats: string | null;
+  list_qty: number | null;
   listed_snapshot: unknown;
   planned_listing: unknown;
   exos_events: AllocationForListing["event"] & { timezone?: string | null; status?: string };
@@ -234,11 +244,12 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   // Live and to-be-listed allocations of published events.
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, status, requested_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, " +
+    .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, " +
       `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label)`)
     .eq("channel", channel)
     .not("tier_id", "is", null)
-    .gt("requested_qty", 0)
+    // Holding seats, or allowed to (a pool at 0 while Exos has none free).
+    .or("requested_qty.gt.0,sell_cap.gt.0")
     .in("status", ["pending", "planned", "failed", "listing", "listed"])
     .eq("exos_events.status", "published")
     .limit(200);
@@ -254,11 +265,17 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
     for (const r of rows) {
       let plan: unknown;
       try {
-        if (channel === "stubhub") {
+        if ((r.list_qty ?? r.requested_qty ?? 0) <= 0) {
+          // Empty pool: nothing to list now; anything live comes down (it refills when seats free up).
+          plan = syncListings({
+            channel, listings: [], per_order_cap: 0,
+            unresolved: [`nothing held: no free seats for ${LABEL[channel]} right now`],
+          }, r.listed_snapshot);
+        } else if (channel === "stubhub") {
           const p = planStubHubListing({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, stubhubEventId: linked.get(r.event_id) ?? null,
-            internal_seats: r.internal_seats,
+            internal_seats: r.internal_seats, list_qty: r.list_qty,
             previous: r.listed_snapshot ?? r.planned_listing,
           });
           plan = syncListings(p, r.listed_snapshot);
@@ -266,7 +283,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
           const p = planSeatGeekListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
-            internal_seats: r.internal_seats,
+            internal_seats: r.internal_seats, list_qty: r.list_qty,
             previous: r.listed_snapshot ?? r.planned_listing,
           });
           plan = syncListings(p, r.listed_snapshot);
@@ -274,7 +291,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
           const p = planGametimeListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events,
-            internal_seats: r.internal_seats,
+            internal_seats: r.internal_seats, list_qty: r.list_qty,
             previous: r.listed_snapshot ?? r.planned_listing,
           });
           plan = syncListings(p, r.listed_snapshot);

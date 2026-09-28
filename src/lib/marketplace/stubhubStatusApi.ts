@@ -9,7 +9,7 @@ import type { MarketplaceRow, StubHubDistributionRow } from './stubhubStatus';
 
 export type AllocationChannel = 'stubhub' | 'seatgeek' | 'gametime';
 
-const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats';
+const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats, sell_cap, sold_qty, list_qty';
 
 /** Every StubHub / SeatGeek / Gametime row of the event. */
 export async function getMarketplaceRows(eventId: string): Promise<MarketplaceRow[]> {
@@ -40,11 +40,12 @@ export function getStubHubDistribution(eventId: string): Promise<StubHubDistribu
 }
 
 /**
- * How many seats of one ticket type go to a marketplace
- * (exos_set_channel_allocation). Exos stops selling those seats at once; 0
- * takes the listing down and then gives them back. Refused when the seats
- * aren't free, the marketplace isn't ticked, or the event's overall cap is
- * tighter than its ticket types.
+ * The most a marketplace sells of one ticket type (exos_set_channel_allocation).
+ * It holds a small pool at a time (2 x max per order), topped up from Exos's
+ * free seats as it sells; Exos sells the rest. 0 takes the listing down and
+ * then gives the seats back. Refused when that many seats aren't left, the
+ * marketplace isn't ticked, or the event's overall cap is tighter than its
+ * ticket types.
  */
 export async function setChannelAllocation(eventId: string, channel: AllocationChannel, tierId: string, qty: number): Promise<number> {
   const { data, error } = await supabase.rpc('exos_set_channel_allocation', {

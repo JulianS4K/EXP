@@ -204,6 +204,18 @@ Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_sea
   external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
 - [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
 
+## Small marketplace pools 2026-09-28
+
+Mig `20260928010000` (tested: `test_channel_allocations.sql` A14–A16, e2e). Chosen over "broadcast everything
+everywhere" (oversells near sell-out; cancelled marketplace orders carry penalties).
+- ✅ The grid sets a cap per marketplace; each holds a pool of 2 x max per order, topped up from free seats
+  after each sale and on every exos-distribute run. Exos sells everything not held.
+- ✅ A live listing is only shrunk once the marketplace confirms the lower number (`list_qty` meanwhile;
+  `exos_confirm_channel_listing`).
+- [ ] Live writer: call `exos_confirm_channel_listing` after each accepted listing update.
+- [ ] Later, per event: full broadcast (shared pool + confirm/deny + instant fan-out + last-seats guard)
+  for events not at risk of selling out.
+
 ## One Exos listing standard 2026-09-27
 
 Mig `20260927050000` (tested: `test_channel_allocations.sql` A13, `sync.test.ts`, StubHub / SeatGeek /

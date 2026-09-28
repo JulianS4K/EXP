@@ -105,3 +105,12 @@ describe('the same listings on every marketplace', () => {
     expect(syncListings(next, live).ops.update.map((u) => Object.keys(u.patch))).toEqual([['ticket_price'], ['ticket_price']]);
   });
 });
+
+describe('a live listing waiting to shrink', () => {
+  it('lists the lowest list_qty seats; the rest stay held', () => {
+    // Holds 6 (seats 1-6) but should show 2 until the marketplace takes it.
+    const p = planSeatGeekListings({ ...a, list_qty: 2 });
+    expect(p.listings.map((l) => [l.seat_from, l.seat_thru, l.quantity])).toEqual([[1, 2, 2]]);
+    expect(() => planSeatGeekListings({ ...a, list_qty: 7 })).toThrow(/internal seat numbers/);
+  });
+});

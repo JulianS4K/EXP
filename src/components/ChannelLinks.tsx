@@ -11,7 +11,7 @@ import {
 } from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
 import { setChannelAllocation, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
-import { allocationCellStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { allocationCellStatus, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { formatSeatRanges, parseSeatRanges } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
@@ -151,7 +151,7 @@ export function MarketplaceGrid({
   const rowFor = (ch: string, tierId: string) => rows.find((r) => r.channel === ch && r.tier_id === tierId) ?? null;
   const current = (ch: string, tierId: string) => {
     const r = rowFor(ch, tierId);
-    return r && r.status !== 'delisted' && r.status !== 'failed' ? r.requested_qty ?? 0 : 0;
+    return r && r.status !== 'delisted' && r.status !== 'failed' ? r.sell_cap ?? r.requested_qty ?? 0 : 0;
   };
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -199,8 +199,9 @@ export function MarketplaceGrid({
     <div className="space-y-3">
       <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Marketplaces</h3>
       <p className="type text-xs text-white/50">
-        Seats per ticket type for each marketplace. Exos stops selling them, so nobody can buy the same seat twice; 0 takes the
-        listing down and gives them back.
+        The most each marketplace sells, per ticket type. Each one holds only a few seats at a time (twice your max per order)
+        and is topped up from the free seats as it sells, so the event is live everywhere while Exos sells the rest, and a
+        seat is never on sale in two places. 0 takes the listing down and gives its seats back.
         {maxPerOrder
           ? ` One marketplace order can take at most ${maxPerOrder} (your max per order).`
           : ' Set a max per order to stop one marketplace order taking them all.'}
@@ -224,6 +225,7 @@ export function MarketplaceGrid({
                   const r = rowFor(ch, t.id);
                   const st = allocationCellStatus(r, ch);
                   const seats = r && (r.requested_qty ?? 0) > 0 ? formatSeatRanges(parseSeatRanges(r.internal_seats ?? null)) : '';
+                  const pool = poolLine(r);
                   return (
                     <td key={ch} className="py-2 pr-3">
                       <input
@@ -233,6 +235,7 @@ export function MarketplaceGrid({
                         className="w-20 bg-black border border-white/20 px-2 py-1 text-white disabled:opacity-50"
                       />
                       {st && <span role="status" className={`block mt-1 ${tone[st.tone]}`}>{st.text}</span>}
+                      {pool && <span className="block mt-1 text-white/50">{pool}</span>}
                       {seats && <span className="block mt-1 text-white/30">Internal seats {seats}</span>}
                     </td>
                   );

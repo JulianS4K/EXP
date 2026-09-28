@@ -30,7 +30,7 @@
 
 import { exosEventRef, localDate, type ExosEventRowForChannels } from './channel.ts';
 import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, stableListingNumbers } from './listingIds.ts';
-import { parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
+import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
 
 export const EXOS_LISTING_NOTES =
   'Delivered by Exos: you get a link to claim the tickets into your Exos account; the entry QR code is in the Exos app.';
@@ -43,8 +43,14 @@ export interface ExosAllocation {
   unit_price: number | string | null;
   tier: { name: string; price: number | string; section_label?: string | null } | null;
   event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
-  /** exos_distribution_listings.internal_seats: one number per allocated seat. */
+  /** exos_distribution_listings.internal_seats: one number per held seat. */
   internal_seats: string | SeatRun[] | null;
+  /**
+   * What the listings should show (mig 20260928010000): below requested_qty
+   * while a live listing waits for the marketplace to take the lower number;
+   * the lowest list_qty seats are listed. NULL: requested_qty.
+   */
+  list_qty?: number | null;
   /** What the marketplace has (listed_snapshot) or was last planned, for stable listing numbers. */
   previous?: unknown;
 }
@@ -122,17 +128,19 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
   if (!a.event) throw new Error('event not found');
   const ref = exosEventRef({ ...a.event, id: a.event.id ?? a.id });
   if (!ref) throw new Error('the event needs a name, a start time and a venue');
-  const qty = a.requested_qty ?? 0;
+  const held = a.requested_qty ?? 0;
+  const qty = a.list_qty ?? held;
   if (!Number.isInteger(qty) || qty <= 0) throw new Error(`nothing allocated to ${label}`);
   const price = Number(a.unit_price ?? a.tier.price);
   if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
   const face = Number(a.tier.price);
   const section = (a.tier.section_label || a.tier.name || '').trim().slice(0, 127);
   if (!section) throw new Error('the ticket type has no name to use as the section');
-  const runs = parseSeatRanges(a.internal_seats);
-  if (seatCount(runs) !== qty) {
-    throw new Error(`the allocation has ${seatCount(runs)} internal seat numbers for ${qty} seats: save it again`);
+  const all = parseSeatRanges(a.internal_seats);
+  if (seatCount(all) !== held || qty > held) {
+    throw new Error(`the allocation has ${seatCount(all)} internal seat numbers for ${held} seats: save it again`);
   }
+  const runs = qty < held ? lowestSeats(all, qty) : all;
   const blocks = seatBlocks(runs, maxPerOrder(a.event.purchase_limits));
   const prev = plannedEntries(a.previous).map((e) => ({ seller_listing_id: e.listing_id, seat_from: e.seat_from, seat_thru: e.seat_thru }));
   const numbers = stableListingNumbers(a.id, blocks, prev);
