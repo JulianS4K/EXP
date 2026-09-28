@@ -73,7 +73,7 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
-import { gametimeStatus, seatGeekStatus, stubHubStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
@@ -1729,6 +1729,7 @@ export default function EditEvent() {
                stubHubStatus(eventRow('stubhub'), { ...ev, stubhubTicked: nets.includes('stubhub') }),
                seatGeekStatus(eventRow('seatgeek'), { ...ev, ticked: nets.includes('seatgeek') }),
                gametimeStatus(eventRow('gametime'), { ...ev, ticked: nets.includes('gametime') }),
+               goTicketsStatus(eventRow('gotickets'), { ...ev, ticked: nets.includes('gotickets') }),
              ].filter((st): st is NonNullable<typeof st> => !!st);
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
@@ -1736,7 +1737,7 @@ export default function EditEvent() {
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}
-               channels={(['stubhub', 'seatgeek', 'gametime'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
+               channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
                tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
                rows={marketRows}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}

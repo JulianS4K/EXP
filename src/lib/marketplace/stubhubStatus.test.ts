@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, gametimeStatus, poolLine, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -94,5 +94,15 @@ describe('poolLine', () => {
     expect(poolLine(row({ tier_id: 't', status: 'listed', requested_qty: 4, sell_cap: 1, list_qty: 1 })))
       .toBe('Holding 4 now, up to 1 in total, 3 back to Exos once the marketplace takes the lower number.');
     expect(poolLine(row({ tier_id: 't', status: 'delisted', requested_qty: 0, sell_cap: 0 }))).toBeNull();
+  });
+});
+
+describe('goTicketsStatus', () => {
+  it('explains GoTickets', () => {
+    const ev = { ticked: true, published: true, primaryMarketOnly: false };
+    expect(goTicketsStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(goTicketsStatus(row({ status: 'planned' }), ev)?.text).toMatch(/matches the listings to its event itself/);
+    expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gotickets')?.text)
+      .toBe("1 listing ready. Not sent yet: GoTickets selling isn't switched on.");
   });
 });

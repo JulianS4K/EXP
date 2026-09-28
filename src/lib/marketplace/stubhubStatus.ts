@@ -83,8 +83,29 @@ export function stubHubStatus(
   }
 }
 
-export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime';
-export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = { stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime' };
+export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets';
+export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = {
+  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets',
+};
+
+/** The event line for GoTickets: it maps listings to its own events. */
+export function goTicketsStatus(
+  row: StubHubDistributionRow | null,
+  ev: { ticked: boolean; published: boolean; primaryMarketOnly: boolean },
+): StubHubStatus | null {
+  if (!ev.ticked) return null;
+  if (ev.primaryMarketOnly) return { tone: 'muted', text: 'Primary market only is on, so nothing goes to GoTickets.' };
+  if (!row) {
+    return ev.published
+      ? { tone: 'muted', text: 'Save to queue GoTickets.' }
+      : { tone: 'muted', text: 'GoTickets listings are planned when you publish.' };
+  }
+  if (row.status === 'failed') return { tone: 'warn', text: row.error || 'GoTickets: something needs a look.' };
+  return {
+    tone: 'info',
+    text: "GoTickets matches the listings to its event itself (name, venue, time, and the StubHub / SeatGeek event when linked). Not sent yet: GoTickets selling isn't switched on.",
+  };
+}
 
 /** The event line for Gametime: no event search or creation, and listings go up as a file. */
 export function gametimeStatus(

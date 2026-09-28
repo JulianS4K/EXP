@@ -9,7 +9,7 @@
 //    'review'. Writes exos_channel_event_links only.
 //
 // 1. Marketplace event rows (migs 20260926190000 / 20260927030000 / 040000).
-//    Publishing an event with StubHub / SeatGeek / Gametime ticked queues an event row
+//    Publishing an event with StubHub / SeatGeek / Gametime / GoTickets ticked queues an event row
 //    (no ticket type) per marketplace.
 //    StubHub: if the event is already linked to a StubHub event, the plan just
 //    records that: nothing to create. If a possible match waits on staff, the
@@ -77,13 +77,14 @@ import { planSeatGeekListings } from "../_shared/marketplace/seatgeek/listingPla
 import { planDelist, syncListings } from "../_shared/marketplace/sync.ts";
 import { planGametimeListings, type GametimeCsvRow } from "../_shared/marketplace/gametime/inventory.ts";
 import { GametimeWriter } from "../_shared/marketplace/gametime/writer.ts";
+import { planGoTicketsListings } from "../_shared/marketplace/gotickets/listingPlan.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
 
-type MarketChannel = "stubhub" | "seatgeek" | "gametime";
-const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime"];
-const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime" };
+type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets";
+const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets"];
+const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets" };
 
 interface DistRow {
   id: string;
@@ -110,6 +111,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       stubhub: !!channels.get("stubhub")?.findEvents,
       seatgeek: !!channels.get("seatgeek")?.findEvents,
       gametime: false,
+      gotickets: false,
     });
     // Top every marketplace pool back up to its size, with free seats only
     // (mig 20260928010000): picks up seats freed since the last sale.
@@ -118,9 +120,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const stubhub = await syncChannel(sb, "stubhub");
     const seatgeek = await syncChannel(sb, "seatgeek");
     const gametime = await syncChannel(sb, "gametime");
+    const gotickets = await syncChannel(sb, "gotickets");
     const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime }, gametime_file: gametimeFile, automatiq });
+    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -189,7 +192,7 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
       // No event creation on SeatGeek or Gametime: listings carry the event as text.
       patch = {
         status: "planned",
-        planned_request: { linked: false, catalog_checked: !!link, matched_on: row.channel === "gametime" ? "event name + venue + date" : "event name + venue" },
+        planned_request: { linked: false, catalog_checked: !!link, matched_on: row.channel === "gotickets" ? "GoTickets maps it (event name + venue + time, StubHub / SeatGeek ids)" : row.channel === "gametime" ? "event name + venue + date" : "event name + venue" },
         error: null,
       };
       counts.planned++;
@@ -261,6 +264,15 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
     const { data: links } = await sb.from("exos_channel_event_links").select("event_id, external_event_id")
       .eq("channel", channel).in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
     const linked = new Map(((links ?? []) as Array<{ event_id: string; external_event_id: string }>).map((l) => [l.event_id, l.external_event_id]));
+    // GoTickets maps listings to its events itself; the StubHub / SeatGeek ids help it.
+    const crossLinks = new Map<string, { stubhub?: string; seatgeek?: string }>();
+    if (channel === "gotickets") {
+      const { data: other } = await sb.from("exos_channel_event_links").select("event_id, channel, external_event_id")
+        .in("channel", ["stubhub", "seatgeek"]).in("status", ["linked", "created"]).in("event_id", rows.map((r) => r.event_id));
+      for (const l of (other ?? []) as Array<{ event_id: string; channel: "stubhub" | "seatgeek"; external_event_id: string }>) {
+        crossLinks.set(l.event_id, { ...crossLinks.get(l.event_id), [l.channel]: l.external_event_id });
+      }
+    }
 
     for (const r of rows) {
       let plan: unknown;
@@ -285,6 +297,16 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
             tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
             internal_seats: r.internal_seats, list_qty: r.list_qty,
             previous: r.listed_snapshot ?? r.planned_listing,
+          });
+          plan = syncListings(p, r.listed_snapshot);
+        } else if (channel === "gotickets") {
+          const x = crossLinks.get(r.event_id) ?? {};
+          const p = planGoTicketsListings({
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events,
+            internal_seats: r.internal_seats, list_qty: r.list_qty,
+            previous: r.listed_snapshot ?? r.planned_listing,
+            stubhubEventId: x.stubhub ?? null, seatgeekEventId: x.seatgeek ?? null,
           });
           plan = syncListings(p, r.listed_snapshot);
         } else {
@@ -380,8 +402,8 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .from("exos_distribution_listings")
     .select("id, event_id, org_id, channel, requested_qty, unit_price")
     .eq("status", "pending")
-    // StubHub, SeatGeek and Gametime are listed directly (passes 1b / 1c), not via Automatiq.
-    .not("channel", "in", "(stubhub,seatgeek,gametime)")
+    // StubHub, SeatGeek, Gametime and GoTickets are listed directly (passes 1b / 1c), not via Automatiq.
+    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets)")
     .is("tier_id", null)
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);

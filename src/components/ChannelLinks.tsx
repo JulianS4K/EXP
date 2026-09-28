@@ -15,7 +15,7 @@ import { allocationCellStatus, poolLine, type MarketplaceRow } from '../lib/mark
 import { formatSeatRanges, parseSeatRanges } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
-  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
+  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
 };
 
 function when(iso: string | null): string {

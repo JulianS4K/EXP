@@ -204,6 +204,21 @@ Mig `20260927030000` (tested: `test_channel_allocations.sql` A7–A12, `test_sea
   external_listing_id on success, and mark a 'delisting' row 'delisted' once the marketplace confirms.
 - [ ] Report internal seats on fulfilment (SeatGeek PATCH /order `seats`) once going live.
 
+## GoTickets 2026-09-28
+
+Seller Central API v1 (docs/marketplace/gotickets). Mig `20260928020000` (tested: `test_gotickets_orders.sql`
+T1–T3, `gotickets.test.ts`). All dry-run.
+- ✅ Endpoint table; the inventory snapshot, delete-by-event and anything keyed by GoTickets' own listing id
+  are forbidden; the writer only touches listings whose externalTicketId is an Exos id.
+- ✅ Grid column with a small pool; the same Exos listings (blocks, internal seats as lowSeat / highSeat).
+  GoTickets maps them to its events itself (name, venue, time, plus the StubHub / SeatGeek event ids).
+- ✅ Sales: polling (recent + unconfirmed + recheck) and webhooks with our token in the target URL, always
+  read back from the API; delivery planned as confirm + fulfil with the claim links.
+- [ ] Confirm with GoTickets: claim links as SUBMIT_TRANSFER_URL (and transfer proof), eventDateTime zone,
+  webhook signing, rate limits.
+- [ ] Operator: GOTICKETS_ACCESS_ID / _SECRET / GOTICKETS_WEBHOOK_TOKEN, webhooks (SALE, ORDER_CANCELLED),
+  WriteAuthorization.
+
 ## Small marketplace pools 2026-09-28
 
 Mig `20260928010000` (tested: `test_channel_allocations.sql` A14–A16, e2e). Chosen over "broadcast everything

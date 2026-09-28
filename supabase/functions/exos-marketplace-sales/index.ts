@@ -36,6 +36,8 @@
 // STUBHUB_REFRESH_TOKEN (seller login, read:sales + read:ticketholders),
 // STUBHUB_WEBHOOK_AUTHORIZATION. SeatGeek (optional): SEATGEEK_API_TOKEN
 // (Seller Direct seller token; orders + customer reads), SEATGEEK_WEBHOOK_TOKEN.
+// GoTickets (optional): GOTICKETS_ACCESS_ID, GOTICKETS_ACCESS_SECRET,
+// GOTICKETS_WEBHOOK_TOKEN (in the webhook target URL: ?channel=gotickets&token=).
 // Gametime (optional): GAMETIME_API_KEY (the `source` key), GAMETIME_ENV
 // ('staging' | production), GAMETIME_WEBHOOK_AUTHORIZATION.
 // Deploy with --no-verify-jwt (the webhook
@@ -62,6 +64,9 @@ import {
 import { GametimeClient } from "../_shared/marketplace/gametime/client.ts";
 import type { GametimePurchase } from "../_shared/marketplace/gametime/types.ts";
 import { parseGametimeSaleNotification, verifyGametimeWebhook } from "../_shared/marketplace/gametime/webhook.ts";
+import { GoTicketsClient } from "../_shared/marketplace/gotickets/client.ts";
+import type { GoTicketsSale } from "../_shared/marketplace/gotickets/types.ts";
+import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookToken } from "../_shared/marketplace/gotickets/webhook.ts";
 
 const LOOKBACK_HOURS = 6;
 const env = (k: string) => Deno.env.get(k);
@@ -71,8 +76,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!);
   const channels = channelsFromEnv(env);
 
+  // GoTickets webhook (?channel=gotickets&token=…): GoTickets doesn't sign its
+  // webhooks, so the target URL carries our token, and the payload is only a
+  // pointer: the sale is read back from the API before anything is recorded.
+  const url = new URL(req.url);
+  if (!req.headers.get("x-cron-secret") && url.searchParams.get("channel") === "gotickets") {
+    if (!verifyGoTicketsWebhookToken(url.searchParams.get("token"), env("GOTICKETS_WEBHOOK_TOKEN") ?? "")) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    try {
+      const n = parseGoTicketsWebhook(await req.json());
+      if (!GOTICKETS_SALE_WEBHOOKS.has(n.type)) return json({ ignored: n.type });
+      const go = goticketsClient();
+      if (!go) return json({ skipped: "no GoTickets credentials to read the sale" });
+      const sale = await go.getSale(n.id);
+      console.log("exos-marketplace-sales: GoTickets", n.type, n.id, sale.sellerStatus ?? "");
+      return json(await ingest(sb, channels.get("gotickets")!, [sale], undefined));
+    } catch (e) {
+      console.error("exos-marketplace-sales: GoTickets webhook failed", e);
+      return json({ error: String(e) }, 500);
+    }
+  }
+
   // Gametime sales notification (?channel=gametime; its own Authorization value).
-  if (!req.headers.get("x-cron-secret") && new URL(req.url).searchParams.get("channel") === "gametime") {
+  if (!req.headers.get("x-cron-secret") && url.searchParams.get("channel") === "gametime") {
     if (!verifyGametimeWebhook(req.headers.get("authorization"), env("GAMETIME_WEBHOOK_AUTHORIZATION") ?? "")) {
       return json({ error: "unauthorized" }, 401);
     }
@@ -166,6 +193,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else {
       result.gametime = { skipped: "no GAMETIME_API_KEY" };
     }
+
+    const go = goticketsClient();
+    if (go) {
+      // Sales placed recently, every unconfirmed one, and a recheck of known orders.
+      const sales = [...await go.searchSales({ orderTimeFrom: since }), ...await go.unconfirmedSales()];
+      const seen = new Set<string>();
+      const unique = sales.filter((x) => (seen.has(String(x.id)) ? false : (seen.add(String(x.id)), true)));
+      unique.push(...await recheckGoTicketsSales(sb, go, seen));
+      result.gotickets = await ingest(sb, channels.get("gotickets")!, unique, undefined);
+    } else {
+      result.gotickets = { skipped: "no GOTICKETS_ACCESS_ID / GOTICKETS_ACCESS_SECRET" };
+    }
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
@@ -206,6 +245,36 @@ function seatgeekClient(): SeatGeekClient | undefined {
 function gametimeClient(): GametimeClient | undefined {
   const key = env("GAMETIME_API_KEY")?.trim();
   return key ? new GametimeClient({ apiKey: () => key, environment: env("GAMETIME_ENV") === "staging" ? "staging" : "production" }) : undefined;
+}
+
+function goticketsClient(): GoTicketsClient | undefined {
+  const id = env("GOTICKETS_ACCESS_ID")?.trim(), secret = env("GOTICKETS_ACCESS_SECRET")?.trim();
+  return id && secret ? new GoTicketsClient({ credentials: () => ({ accessId: id, accessSecret: secret }) }) : undefined;
+}
+
+// Sales Exos already has, re-read by order id, so a later cancellation still arrives. A few per run.
+async function recheckGoTicketsSales(sb: SupabaseClient, go: GoTicketsClient, skip: Set<string>): Promise<GoTicketsSale[]> {
+  const { data, error } = await sb.from("exos_marketplace_orders")
+    .select("external_order_id")
+    .eq("channel", "gotickets")
+    .in("status", ["received", "fulfilled", "needs_attention"])
+    .gt("created_at", new Date(Date.now() - 60 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(SG_RECHECK_PER_RUN);
+  if (error) {
+    console.error("exos-marketplace-sales: GoTickets recheck list failed", error.message);
+    return [];
+  }
+  const out: GoTicketsSale[] = [];
+  for (const r of (data ?? []) as Array<{ external_order_id: string }>) {
+    if (skip.has(r.external_order_id)) continue;
+    try {
+      out.push(await go.getSale(r.external_order_id));
+    } catch (e) {
+      console.error("exos-marketplace-sales: GoTickets sale recheck failed", r.external_order_id, String(e));
+    }
+  }
+  return out;
 }
 
 // Every open (actionable) Gametime purchase, every page (the account may
@@ -354,7 +423,8 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
       }
       const { data: rec, error: rErr } = await sb.rpc("exos_record_marketplace_order", {
         p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale)
-          : channel.id === "gametime" ? stripGametimePurchase(raw as GametimePurchase) : raw),
+          : channel.id === "gametime" ? stripGametimePurchase(raw as GametimePurchase)
+          : channel.id === "gotickets" ? stripGoTicketsSale(raw as GoTicketsSale) : raw),
       });
       if (rErr) throw new Error(`record: ${rErr.message}`);
       const row = (rec as Array<{ order_id: string; status: string }> | null)?.[0];
@@ -412,6 +482,15 @@ function stripStubHubSale(s: Sale): unknown {
 /** The purchase minus the recipient's contact details and barcodes (the email has its own column). */
 function stripGametimePurchase(p: GametimePurchase): unknown {
   const { email: _e, phone: _p, first_name: _f, last_name: _l, seats: _s, ...rest } = p ?? ({} as GametimePurchase);
+  return rest;
+}
+
+/** The sale minus the customer's contact details, files and shipping (the email has its own column). */
+function stripGoTicketsSale(s: GoTicketsSale): unknown {
+  const {
+    customerFirstName: _f, customerLastName: _l, customerEmailAddress: _e, customerPhoneNumber: _p,
+    shippingLabel: _s, transferFiles: _t, pickupFiles: _k, supportDocumentationFiles: _d, ...rest
+  } = s ?? ({} as GoTicketsSale);
   return rest;
 }
 

@@ -8,6 +8,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | StubHub | [`stubhub/`](stubhub/README.md) | PDFs 2026-09-14 (API v2.249.0.0, Catalog v1.0.0.75) + OpenAPI specs from viagogo/stubhub-api-docs |
 | SeatGeek | [`seatgeek/`](seatgeek/README.md) | Seller Direct API 1.0.0 (OAS3), 2026-09-27; event search via the public Platform API |
 | Gametime | [`gametime/`](gametime/README.md) | API v3 (Swagger 2.0), onboarding guide, CSV columns, example CSV, Postman collection, 2026-09-27 |
+| GoTickets | [`gotickets/`](gotickets/README.md) | Seller Central API v1 (OpenAPI 3.0.1), 2026-09-28 |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
@@ -19,30 +20,30 @@ read-only. Every endpoint is tagged below as **read** or **write**. A write
 needs explicit operator authorization before any code calls it, per the
 charter's §6.1 carve-out process.
 
-## StubHub, SeatGeek and Gametime side by side
+## StubHub, SeatGeek, Gametime and GoTickets side by side
 
-StubHub, SeatGeek and Gametime are wired; the rest come later, as adapters
-in the same layer. What each one offers, and what Exos standardized on so
-that one Exos model fits all three (mig `20260927050000`,
+StubHub, SeatGeek, Gametime and GoTickets are wired; the rest come later, as
+adapters in the same layer. What each one offers, and what Exos standardized
+on so that one Exos model fits all of them (mig `20260927050000`,
 `_shared/marketplace/exosListing.ts`):
 
-| | StubHub | SeatGeek | Gametime | **Exos standard** |
-|---|---|---|---|---|
-| Auth | OAuth2 (client credentials; seller refresh token) | seller token (`Authorization`) | API key in `?source=` | kept out of logs and plans on all three |
-| Find the event | catalog search | Platform API search | none | linked when found; listings always carry the event as text |
-| Create the event | `PUT /sellerevents`, or a requested-event listing | no | no | StubHub only; the others match on name, venue, date |
-| Create listings | REST, one per call | REST `PUT /listings/single/{id}`, one per call | **CSV of the whole account on FTP, every < 6 h** | the same planned listings, sent each marketplace's way |
-| Our listing id | `external_id` | `seller_listing_id` (≤ 32 chars) | `TicketID` (examples numeric) | `ex<base32 allocation id><n>`, stable across re-plans |
-| Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | **listings of at most max per order** |
-| Seats | optional | required with a row | optional | internal GA seat numbers per listing; row `GA` |
-| Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | any, within the listing |
-| Delivery type | ticket / mobile transfer (per event) | `mobile` | `mobile_transfer` | an Exos claim link per ticket |
-| Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | one diff (create / update / delete) against what the marketplace has |
-| Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | normalized to one `MarketplaceSale` |
-| Sale names the listing | `external_listing_id` | `listing.id` | `listing_reference_id` / `source_id` | `listing_ref` on the order: which block |
-| Buyer email | `/sales/{id}/ticketholders` | `/orders/customer` | on the purchase | stored on the order; contact details stripped from the raw copy |
-| Statuses | pending / confirmed / delivered / cancelled … | submitted / confirmed / fulfilled / denied / void | unconfirmed / unfulfilled / completed / rejected | pending / confirmed / delivered / cancelled / unknown |
-| Deliver | PATCH sale: confirmed + e-ticket URLs | PATCH order: fulfilled + transfer URLs (GA: no confirm first) | confirm (+ seats), then confirm_transfer + URLs | the same plan everywhere: claim links, the tickets' internal seats, the steps in order |
+| | StubHub | SeatGeek | Gametime | GoTickets | **Exos standard** |
+|---|---|---|---|---|---|
+| Auth | OAuth2 (client credentials; seller refresh token) | seller token (`Authorization`) | API key in `?source=` | access id + secret headers | kept out of logs and plans everywhere |
+| Find the event | catalog search | Platform API search | none | none needed: it maps listings itself (name, venue, time, StubHub / SeatGeek ids) | linked when found; listings always carry the event as text |
+| Create the event | `PUT /sellerevents`, or a requested-event listing | no | no | no | StubHub only; the others match on name, venue, date |
+| Create listings | REST, one per call | REST `PUT /listings/single/{id}`, one per call | **CSV of the whole account on FTP, every < 6 h** | REST, up to 100 per call | the same planned listings, sent each marketplace's way |
+| Our listing id | `external_id` | `seller_listing_id` (≤ 32 chars) | `TicketID` (examples numeric) | `externalTicketId` (≤ 100 chars) | `ex<base32 allocation id><n>`, stable across re-plans |
+| Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | no (CUSTOM splits only) | **listings of at most max per order** |
+| Seats | optional | required with a row | optional | optional (`lowSeat` / `highSeat`) | internal GA seat numbers per listing; row `GA` |
+| Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | ANY / NEVER_LEAVE_ONE / … | any, within the listing |
+| Delivery type | ticket / mobile transfer (per event) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | an Exos claim link per ticket |
+| Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | full PUT / DELETE by external id (100 per call) | one diff (create / update / delete) against what the marketplace has |
+| Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | webhooks (unsigned: read back) + `GET /rest/sales` | normalized to one `MarketplaceSale` |
+| Sale names the listing | `external_listing_id` | `listing.id` | `listing_reference_id` / `source_id` | `externalTicketId` | `listing_ref` on the order: which block |
+| Buyer email | `/sales/{id}/ticketholders` | `/orders/customer` | on the purchase | on the sale | stored on the order; contact details stripped from the raw copy |
+| Statuses | pending / confirmed / delivered / cancelled … | submitted / confirmed / fulfilled / denied / void | unconfirmed / unfulfilled / completed / rejected | UNCONFIRMED / PENDING_FULFILLMENT / COMPLETED … + cancelReason | pending / confirmed / delivered / cancelled / unknown |
+| Deliver | PATCH sale: confirmed + e-ticket URLs | PATCH order: fulfilled + transfer URLs (GA: no confirm first) | confirm (+ seats), then confirm_transfer + URLs | confirm, then fulfil with SUBMIT_TRANSFER_URL + URLs | the same plan everywhere: claim links, the tickets' internal seats, the steps in order |
 
 **The Exos listing** (`planExosListings`): for each allocation, blocks of at
 most the event's max per order, each a contiguous run of the allocation's
@@ -51,8 +52,8 @@ type's price), split any, delivered by claim link, in hand on the event day,
 with the event as text (name, venue, venue-local date and time) and a stable
 `ex…` listing id. Every marketplace gets exactly these listings; its module
 only renames the fields (StubHub `listingPlan.ts`, SeatGeek `listingPlan.ts`,
-Gametime `inventory.ts`). Blocks are the one per-order cap that works on all
-three, so StubHub moved from one display-capped listing to the same blocks.
+Gametime `inventory.ts`, GoTickets `listingPlan.ts`). Blocks are the one
+per-order cap that works on all of them, so StubHub moved from one display-capped listing to the same blocks.
 
 **Stored plans** share one shape: `{ channel, listings: [{ listing_id,
 seat_from, seat_thru, quantity, request: { endpoint, method, path, body } }],
