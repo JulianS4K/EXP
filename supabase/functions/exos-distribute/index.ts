@@ -43,6 +43,10 @@
 //    (exos_refill_channel_pools), up to the organizer's cap. A live listing
 //    waiting to shrink is planned at list_qty (the lowest seats) while the
 //    rest stay held until the marketplace confirms.
+//    Scarcity mode (mig 20260928040000): 3 hours before doors every pool
+//    goes to 0 (day-of sales are Exos's); marketplaces that sell are
+//    reloaded first, stagnant ones aren't; near sellout pools shrink to one
+//    order's worth and Exos keeps one order's worth for itself.
 //
 // 1c. The Gametime inventory file: Gametime takes listings only as a CSV of
 //    the account's whole inventory (FTP), re-sent at least every six hours.
@@ -252,8 +256,17 @@ interface AllocationRow {
   list_qty: number | null;
   listed_snapshot: unknown;
   planned_listing: unknown;
+  /** Scarcity mode (mig 20260928040000): closed | stagnant | scarce | selling | normal | fixed. */
+  exos_pool_state: string | null;
   exos_events: AllocationForListing["event"] & { timezone?: string | null; status?: string };
   exos_ticket_tiers: AllocationForListing["tier"];
+}
+
+// Why a pool holds nothing to list (scarcity mode, mig 20260928040000).
+function emptyPoolReason(state: string | null, label: string): string {
+  if (state === "closed") return `marketplace sales closed 3 hours before doors: Exos sells the rest, ${label} listings come down`;
+  if (state === "stagnant") return `no ${label} sale lately and seats are short: they went back to Exos`;
+  return `nothing held: no free seats for ${label} right now`;
 }
 
 const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
@@ -264,7 +277,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   // Live and to-be-listed allocations of published events.
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, " +
+    .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, exos_pool_state, " +
       `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label)`)
     .eq("channel", channel)
     .not("tier_id", "is", null)
@@ -298,7 +311,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
           // Empty pool: nothing to list now; anything live comes down (it refills when seats free up).
           plan = syncListings({
             channel, listings: [], per_order_cap: 0,
-            unresolved: [`nothing held: no free seats for ${LABEL[channel]} right now`],
+            unresolved: [emptyPoolReason(r.exos_pool_state, LABEL[channel])],
           }, r.listed_snapshot);
         } else if (channel === "stubhub") {
           const p = planStubHubListing({

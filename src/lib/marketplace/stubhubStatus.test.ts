@@ -95,6 +95,19 @@ describe('poolLine', () => {
       .toBe('Holding 4 now, up to 1 in total, 3 back to Exos once the marketplace takes the lower number.');
     expect(poolLine(row({ tier_id: 't', status: 'delisted', requested_qty: 0, sell_cap: 0 }))).toBeNull();
   });
+
+  it('says what scarcity mode is doing', () => {
+    expect(poolLine(row({ tier_id: 't', requested_qty: 4, sell_cap: 10, sold_qty: 2, list_qty: 4, exos_pool_state: 'selling' })))
+      .toBe('Holding 4 now, up to 10 in total, 2 sold. Selling: reloaded first.');
+    expect(poolLine(row({ tier_id: 't', requested_qty: 2, sell_cap: 10, list_qty: 2, exos_pool_state: 'stagnant' })))
+      .toBe('Holding 2 now, up to 10 in total. No sale lately: not reloaded.');
+    expect(poolLine(row({ tier_id: 't', requested_qty: 2, sell_cap: 10, list_qty: 2, exos_pool_state: 'scarce' })))
+      .toBe("Holding 2 now, up to 10 in total. Nearly sold out: holding one order's worth.");
+    expect(poolLine(row({ tier_id: 't', requested_qty: 0, sell_cap: 10, list_qty: 0, exos_pool_state: 'closed' })))
+      .toBe('Closed 3 hours before doors: Exos sells the rest at the door.');
+    expect(poolLine(row({ tier_id: 't', status: 'listed', requested_qty: 3, sell_cap: 10, list_qty: 0, exos_pool_state: 'closed' })))
+      .toBe('Closed 3 hours before doors: Exos sells the rest at the door; 3 back to Exos once the listings are down.');
+  });
 });
 
 describe('goTicketsStatus', () => {

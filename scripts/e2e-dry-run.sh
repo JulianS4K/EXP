@@ -156,6 +156,7 @@ console.log('   plan  ' + p.steps[0].method + ' ' + p.steps[0].path + ': confirm
 ok "2 tickets parked on the organizer, transferred to bob + emailed; StubHub sold 2 and holds 8 again (topped up), Exos has 88"
 
 step "8. Bob at the door BEFORE claiming: the ticket is still in transfer"
+START=$(q "SELECT starts_at FROM exos_events WHERE id='$EV'")
 q "UPDATE exos_events SET starts_at=now()-interval '1 hour', doors_at=now()-interval '2 hours' WHERE id='$EV'"   # doors open (clock simulated)
 BT=$(q "SELECT id FROM exos_tickets WHERE order_ref='stubhub:SH-9001' ORDER BY id LIMIT 1")
 OLD=$(barcode $BT)
@@ -169,6 +170,9 @@ done
 need "$(q "SELECT count(*) FROM exos_tickets WHERE order_ref='stubhub:SH-9001' AND owner_id='$BOB' AND pending_transfer_id IS NULL")" 2 "bob owns both"
 need "$(scan $BT "$OLD")" barcode-rejected "the pre-claim barcode"
 ok "bob owns both; the barcode from before the claim no longer works (secret rotated)"
+# Back to a month out for the marketplace sales below: from 3 hours before
+# doors the marketplaces stop selling (scarcity mode, mig 20260928040000).
+q "UPDATE exos_events SET starts_at='$START', doors_at=NULL WHERE id='$EV'"
 
 step "10. Carol (no account) buys 3 on StubHub under a relay email, signs up with her own, claims"
 RELAY=c4r0l-7x2@relay.stubhub.example
@@ -260,6 +264,7 @@ need "$(q "SELECT exos_channel_allocated('$GA')")" 0 "released after the delist"
 ok "StubHub GA set to 0 while live: delist planned, the 6 held seats stay set aside until StubHub confirms, then return to Exos"
 
 step "15. Doors: the scanner at work"
+q "UPDATE exos_events SET starts_at=now()-interval '1 hour', doors_at=now()-interval '2 hours' WHERE id='$EV'"   # doors open again
 AT=$(q "SELECT id FROM exos_tickets WHERE owner_id='$ALICE' AND order_ref='cs_e2e_alice' ORDER BY id LIMIT 1")
 need "$(scan $AT "$(barcode $AT)")" checked-in "alice valid"
 need "$(q "SELECT status FROM exos_tickets WHERE id='$AT'")" used "alice checked in"

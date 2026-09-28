@@ -220,6 +220,61 @@ Two limits are enforced, not papered over:
 `tests/exos/race_channel_allocations.sh` races two real sessions for the last
 seat in three orders, and never sells it twice.
 
+### Near sellout: scarcity mode and the day-of cutoff
+
+Mig `20260928040000`, decided by the operator on 2026-09-28. Pools already
+keep every seat in one place; this decides **who holds the last seats**.
+Day-of sales are a big share of revenue, so the end of the sale belongs to
+Exos, and the marketplace seats that remain go where they sell.
+
+1. **Cutoff: 3 hours before doors** (`doors_at`, else `starts_at`).
+   - Every marketplace pool goes to 0, and Exos sells the rest.
+   - A pool with nothing live comes back at once.
+   - A live pool is planned down to 0. Its seats stay held until the
+     marketplace confirms, then return to Exos.
+2. **Selling vs stagnant.** A pool is *selling* if it had a sale in the
+   window: 24 hours, or 2 hours once the cutoff is less than a day away.
+   - **Selling** pools are reloaded to their full size, first. Each refill run
+     tops up pools in order of their last sale.
+   - **Stagnant** pools have held seats for the whole window without a sale.
+     They are never reloaded: they drop to one order's worth (max per order),
+     and to 0 when seats are scarce.
+   - The clock starts when the pool gets seats, when the event is published,
+     and at every sale.
+3. **Scarcity.** The *scarcity line* is one order's worth of Exos free seats
+   per marketplace pool on that ticket type. Below it:
+   - pools that aren't selling shrink to one order's worth;
+   - pools that aren't selling never grow past the line;
+   - selling pools grow only with seats above an Exos floor of one order's
+     worth.
+
+   So Exos never sells out while the marketplaces still hold seats. The
+   remaining marketplace seats stay in whole blocks, on the marketplaces that
+   sell.
+
+Example: max 4 per order, 4 marketplaces ticked, 10 GA seats unsold. StubHub
+holds 8 and is selling, SeatGeek holds 2 and is quiet, Gametime and Vivid
+Seats hold nothing, and Exos is sold out. The scarcity line is 4 × 4 = 16, so
+the ticket type is scarce.
+
+| When | What happens |
+|---|---|
+| Now | StubHub keeps its 8: it's selling. SeatGeek keeps 2 but won't grow. Nothing is reloaded. |
+| StubHub goes a window without a sale | It drops to one order's worth (4). The other 4 go back to Exos. |
+| SeatGeek stagnant (no sale all window) | It drops to 0. Its 2 go back to Exos. |
+| A marketplace sells again | It's reloaded, but only from seats above Exos's floor (4). Exos is never emptied again. |
+| 3 hours before doors | Every pool goes to 0. Exos sells whatever is left at the door. |
+
+Scarcity mode never takes seats away from a marketplace that is actively
+selling. It stops feeding it until Exos has its floor, and pulls seats back
+from the quiet ones.
+
+- The event editor's grid shows each pool's state (`exos_pool_state`: selling,
+  stagnant, scarce, closed).
+- `exos-distribute` notes why a pool is empty on its plan.
+- Tests: `tests/exos/test_marketplace_scarcity.sql` (C1–C6);
+  `test_channel_allocations.sql` A2–A4 and A15–A16 now expect Exos's floor.
+
 ### One order can't take the whole allocation; over-limit accounts are flagged
 
 - **Per order: capped by listing size, everywhere.** Each allocation becomes

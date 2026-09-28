@@ -24,18 +24,35 @@ export interface StubHubDistributionRow {
   sell_cap?: number | null;
   sold_qty?: number | null;
   list_qty?: number | null;
+  /**
+   * Scarcity mode (mig 20260928040000), the computed field exos_pool_state:
+   * closed (3 hours before doors) | stagnant | scarce | selling | normal | fixed.
+   */
+  exos_pool_state?: string | null;
 }
+
+/** What scarcity mode is doing with a pool, for the grid; null when nothing special. */
+const POOL_STATE_NOTE: Record<string, string> = {
+  selling: 'Selling: reloaded first',
+  stagnant: 'No sale lately: not reloaded',
+  scarce: 'Nearly sold out: holding one order\'s worth',
+};
 
 /** "Holding 4 now, up to 10 in total, 2 sold" for a grid cell, or null. */
 export function poolLine(row: StubHubDistributionRow | null): string | null {
   if (!row || row.sell_cap == null || row.sell_cap <= 0 || row.status === 'delisted') return null;
+  if (row.exos_pool_state === 'closed') {
+    const back = row.requested_qty ? `; ${row.requested_qty} back to Exos once the listings are down` : '';
+    return `Closed 3 hours before doors: Exos sells the rest at the door${back}.`;
+  }
   const held = row.requested_qty ?? 0;
   const sold = row.sold_qty ?? 0;
   const parts = [`Holding ${held} now`, `up to ${row.sell_cap} in total`];
   if (sold) parts.push(`${sold} sold`);
   if (row.list_qty != null && row.list_qty < held) parts.push(`${held - row.list_qty} back to Exos once the marketplace takes the lower number`);
   else if (held === 0 && sold < row.sell_cap) parts.push('none free right now');
-  return parts.join(', ') + '.';
+  const note = POOL_STATE_NOTE[row.exos_pool_state ?? ''];
+  return parts.join(', ') + '.' + (note ? ` ${note}.` : '');
 }
 
 /** An event's rows on one marketplace: the event row, and an allocation per ticket type. */

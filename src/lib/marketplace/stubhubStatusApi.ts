@@ -9,7 +9,7 @@ import type { MarketplaceRow, StubHubDistributionRow } from './stubhubStatus';
 
 export type AllocationChannel = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
 
-const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats, sell_cap, sold_qty, list_qty';
+const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats, sell_cap, sold_qty, list_qty, exos_pool_state';
 
 /** Every StubHub / SeatGeek / Gametime row of the event. */
 export async function getMarketplaceRows(eventId: string): Promise<MarketplaceRow[]> {

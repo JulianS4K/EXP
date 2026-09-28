@@ -2,8 +2,11 @@
 # Concurrency check for channel seat allocations (mig 20260926193000): two
 # real sessions race for the last seat. Not in CI (timing-based); run by hand
 # against a DB built by run_p0.sh:   bash tests/exos/race_channel_allocations.sh exos_p0_test
-# Expect: race 1 -> StubHub keeps the seat, Exos refused; race 2 -> Exos keeps
-# it, allocation refused; race 3 -> both sell (1 allocated + 1 free), 2/2 sold.
+# Expect: never more sold than capacity. Since scarcity mode (mig
+# 20260928040000) a pool never takes Exos's last order's worth, so on these
+# 1- and 2-seat tiers the allocation holds nothing: race 1 -> Exos gets the
+# seat; race 2 -> Exos keeps it, allocation refused; race 3 -> Exos and the
+# StubHub sale both sell from free seats, 2/2 sold.
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"

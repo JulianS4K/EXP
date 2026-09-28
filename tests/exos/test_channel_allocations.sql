@@ -89,9 +89,12 @@ BEGIN
     RAISE EXCEPTION 'A2 FAIL: allocated seats Exos already sold';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
+  -- A cap of 6 fits (3 held + 3 free), but with 3 free the ticket type is
+  -- scarce (20260928040000): the pool doesn't grow into Exos's floor of one
+  -- order's worth (4), so Exos keeps its 3.
   PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e1','stubhub','4e000000-0000-0000-0000-0000000000d1',6);
-  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d1') <> 0 THEN
-    RAISE EXCEPTION 'A2 FAIL: after allocating 6 with 4 sold, Exos should have 0';
+  IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d1') <> 3 THEN
+    RAISE EXCEPTION 'A2 FAIL: scarce: the pool grew into Exos''s floor (Exos has %)', public.exos_tier_available('4e000000-0000-0000-0000-0000000000d1');
   END IF;
   PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e1','stubhub','4e000000-0000-0000-0000-0000000000d1',2);
   IF public.exos_tier_available('4e000000-0000-0000-0000-0000000000d1') <> 4 THEN
@@ -130,14 +133,19 @@ BEGIN
   IF public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e1','stubhub','4e000000-0000-0000-0000-0000000000d1',3) <> 3 THEN
     RAISE EXCEPTION 'A3 FAIL: owner could not set the allocation';
   END IF;
+  -- 4 free = Exos's floor (one order's worth per pool): the pool stays at 2.
+  IF (SELECT requested_qty FROM public.exos_distribution_listings
+       WHERE channel = 'stubhub' AND tier_id = '4e000000-0000-0000-0000-0000000000d1') <> 2 THEN
+    RAISE EXCEPTION 'A3 FAIL: the pool grew into Exos''s floor';
+  END IF;
   RAISE NOTICE 'A3 ok: tight house cap / wrong tier / strangers refused; owner allowed';
 END $$;
 RESET ROLE;
 
 -- A4 ---------------------------------------------------------------------------
--- Exos sells everything it can (10 - 4 - 3 = 3 more): now sold 7, allocation 3.
-UPDATE public.exos_ticket_tiers SET sold = 7 WHERE id = '4e000000-0000-0000-0000-0000000000d1';
-UPDATE public.exos_events SET tickets_sold = 7 WHERE id = '4e000000-0000-0000-0000-0000000000e1';
+-- Exos sells everything it can (10 - 4 - 2 = 4 more): now sold 8, pool 2.
+UPDATE public.exos_ticket_tiers SET sold = 8 WHERE id = '4e000000-0000-0000-0000-0000000000d1';
+UPDATE public.exos_events SET tickets_sold = 8 WHERE id = '4e000000-0000-0000-0000-0000000000e1';
 UPDATE public.exos_distribution_listings SET status = 'listed', external_listing_id = 'SH-A'
  WHERE event_id = '4e000000-0000-0000-0000-0000000000e1' AND channel = 'stubhub'
    AND tier_id = '4e000000-0000-0000-0000-0000000000d1';
@@ -147,7 +155,7 @@ BEGIN
   IF public.exos_seats_available('4e000000-0000-0000-0000-0000000000d1', 1) THEN
     RAISE EXCEPTION 'A4 FAIL: Exos can still sell a StubHub seat';
   END IF;
-  PERFORM public.exos_record_marketplace_order('{"channel":"stubhub","external_order_id":"A4","external_listing_id":"SH-A","quantity":2,"sale_status":"confirmed","buyer_email":"sh@x.com"}');
+  PERFORM public.exos_record_marketplace_order('{"channel":"stubhub","external_order_id":"A4","external_listing_id":"SH-A","quantity":1,"sale_status":"confirmed","buyer_email":"sh@x.com"}');
   PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A4'));
   SELECT * INTO o FROM public.exos_marketplace_orders WHERE external_order_id = 'A4';
   IF o.status <> 'fulfilled' THEN RAISE EXCEPTION 'A4 FAIL: StubHub sale refused: %', o.attention_reason; END IF;
@@ -414,19 +422,33 @@ BEGIN
     'external_listing_id', alloc::text, 'quantity',2,'sale_status','confirmed','buyer_email','p1@x.com'));
   PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A15-1'));
   IF pg_temp.pool('stubhub') <> '10/2/4/4' THEN RAISE EXCEPTION 'A15 FAIL: not topped up: %', pg_temp.pool('stubhub'); END IF;
-  -- Exos sells all but 1 of its free seats; StubHub then sells its 4: it can only get 1 back.
+  -- Exos sells all but 1 of its free seats; StubHub then sells its 4. It's
+  -- selling, so it's reloaded, but only above Exos's floor of one order's
+  -- worth (2): with 1 free, it gets nothing and Exos keeps its last seat.
   UPDATE public.exos_ticket_tiers SET sold = sold + 9 WHERE id = '4e000000-0000-0000-0000-0000000000d8';
   UPDATE public.exos_events SET tickets_sold = tickets_sold + 9 WHERE id = '4e000000-0000-0000-0000-0000000000e6';
   PERFORM public.exos_record_marketplace_order(jsonb_build_object('channel','stubhub','external_order_id','A15-2',
     'external_listing_id', alloc::text, 'quantity',4,'sale_status','confirmed','buyer_email','p2@x.com'));
   PERFORM public.exos_fulfil_marketplace_order((SELECT id FROM public.exos_marketplace_orders WHERE external_order_id = 'A15-2'));
-  IF pg_temp.pool('stubhub') <> '10/6/1/1' OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8') <> 0 THEN
+  IF pg_temp.pool('stubhub') <> '10/6/0/0' OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8') <> 1 THEN
     RAISE EXCEPTION 'A15 FAIL: refill beyond free seats: % (Exos %)', pg_temp.pool('stubhub'), public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8');
   END IF;
-  -- A refund frees 3; the refill run picks them up.
+  -- A refund frees 3 (4 free). The refill run reloads selling StubHub down
+  -- to Exos's floor (2 left); that makes the tier scarce, so Gametime (not
+  -- selling, not live) drops to one order's worth, and those 2 go to StubHub
+  -- on the next run: StubHub 4, Gametime 2, Exos 2.
   UPDATE public.exos_ticket_tiers SET sold = sold - 3 WHERE id = '4e000000-0000-0000-0000-0000000000d8';
   PERFORM public.exos_refill_channel_pools();
-  IF pg_temp.pool('stubhub') <> '10/6/4/4' THEN RAISE EXCEPTION 'A15 FAIL: refill run: %', pg_temp.pool('stubhub'); END IF;
+  PERFORM public.exos_refill_channel_pools();
+  IF pg_temp.pool('stubhub') <> '10/6/4/4' OR pg_temp.pool('gametime') <> '6/0/2/2'
+     OR public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8') <> 2 THEN
+    RAISE EXCEPTION 'A15 FAIL: refill run: % (Exos %)', pg_temp.pool('stubhub'), public.exos_tier_available('4e000000-0000-0000-0000-0000000000d8');
+  END IF;
+  -- Stable: another run changes nothing.
+  PERFORM public.exos_refill_channel_pools();
+  IF pg_temp.pool('stubhub') <> '10/6/4/4' OR pg_temp.pool('gametime') <> '6/0/2/2' THEN
+    RAISE EXCEPTION 'A15 FAIL: another refill moved: % %', pg_temp.pool('stubhub'), pg_temp.pool('gametime');
+  END IF;
   RAISE NOTICE 'A15 ok: sales top the pool back up, only with free seats; the refill run catches later frees';
 END $$;
 
@@ -439,11 +461,11 @@ BEGIN
   SELECT id, internal_seats INTO alloc, v_before FROM public.exos_distribution_listings
    WHERE channel = 'gametime' AND tier_id = '4e000000-0000-0000-0000-0000000000d8';
   PERFORM public.exos_set_channel_allocation('4e000000-0000-0000-0000-0000000000e6','gametime','4e000000-0000-0000-0000-0000000000d8',1);
-  -- Live: still holds 4, the listings should show 1.
-  IF pg_temp.pool('gametime') <> '1/0/4/1' THEN RAISE EXCEPTION 'A16 FAIL: live shrink released early: %', pg_temp.pool('gametime'); END IF;
+  -- Live: still holds its 2 (scarcity took it to 2 in A15), the listings should show 1.
+  IF pg_temp.pool('gametime') <> '1/0/2/1' THEN RAISE EXCEPTION 'A16 FAIL: live shrink released early: %', pg_temp.pool('gametime'); END IF;
   PERFORM public.exos_refill_channel_pools();
-  IF pg_temp.pool('gametime') <> '1/0/4/1' THEN RAISE EXCEPTION 'A16 FAIL: refill run released a live hold'; END IF;
-  -- Gametime has the new quantity: the 3 highest seats go back to Exos.
+  IF pg_temp.pool('gametime') <> '1/0/2/1' THEN RAISE EXCEPTION 'A16 FAIL: refill run released a live hold'; END IF;
+  -- Gametime has the new quantity: the highest seat goes back to Exos.
   PERFORM public.exos_confirm_channel_listing(alloc);
   IF pg_temp.pool('gametime') <> '1/0/1/1'
      OR (SELECT internal_seats FROM public.exos_distribution_listings WHERE id = alloc) <> public.exos_seats_take(v_before, 1) THEN
