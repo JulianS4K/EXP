@@ -229,6 +229,12 @@ Mig `20260928040000` (tested: `test_marketplace_scarcity.sql` C1–C6, `test_cha
 - ✅ Near sellout (Exos's free seats under one order's worth per pool) quiet pools shrink to one order's worth,
   and Exos keeps one order's worth for itself.
 - ✅ Grid line shows each pool's state; exos-distribute says why a pool is empty.
+- ✅ Scenario dry run: `scripts/scarcity-sim` (19 scenarios, real functions); findings in
+  docs/marketplace/scarcity-sim.md. Integrity held everywhere.
+- [ ] From the dry run: don't grow a pool while its live listing has an unconfirmed change; alert on a stuck
+  sender; show staff seats still held at doors (a stopped sender strands them).
+- [ ] From the dry run: "auto" caps (a hot marketplace hit its cap while seats went unsold), grid caps as
+  ceilings (only require cap >= sold), and say so when a cap is set below what's sold.
 - [ ] Per-event cutoff override (3 hours is fixed for now).
 - [ ] Live sender: the cutoff and stagnant shrinks only reach live listings once it sends the planned deletes
   and calls exos_confirm_channel_listing.

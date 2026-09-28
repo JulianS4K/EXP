@@ -1,0 +1,904 @@
+[
+ {
+  "name": "01 baseline",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "200 GA, 4 marketplaces (cap 40 each), steady demand that just about sells out; Exos gets 3x walk-up on the day"
+ },
+ {
+  "name": "02 hot show",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.6,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.2,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.14,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.08,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.08,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "demand 4x baseline: sells out days early"
+ },
+ {
+  "name": "03 cold show",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.045,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.015,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.01,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.006,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.006,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "demand 0.3x baseline: lots left at the door"
+ },
+ {
+  "name": "04 marketplace-heavy",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.03,
+   "dayof_mult": 2,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.3,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "StubHub is where the buyers are; Exos's own storefront is quiet"
+ },
+ {
+  "name": "05 Exos-heavy",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.3,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.01,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.01,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.005,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.005,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "Exos sells most; marketplaces trickle"
+ },
+ {
+  "name": "06 day-of surge",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.05,
+   "dayof_mult": 14,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 12,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.015,
+    "dayof_mult": 12,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.01,
+    "dayof_mult": 12,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.01,
+    "dayof_mult": 12,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "quiet for two weeks, then most demand arrives on the last day (walk-up)"
+ },
+ {
+  "name": "07 tiny tier",
+  "seed": 0.31,
+  "capacity": 10,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 10,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 10,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 10,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 10,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "10 seats, 4 marketplaces each capped at 10: Exos's floor vs. four pools"
+ },
+ {
+  "name": "08 slow sender",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 6,
+    "lag": 4,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 6,
+    "lag": 4,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 6,
+    "lag": 4,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 6,
+    "lag": 4,
+    "qty_max": 4
+   }
+  ],
+  "desc": "baseline demand, marketplaces busy on the last day, and the sender takes 4 steps (4 h far out, 1 h on the day) to update them"
+ },
+ {
+  "name": "09 sender down on the last day",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 6,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 6,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 6,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 6,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "sender_down_h": 30,
+  "desc": "baseline demand, marketplaces busy on the last day, and the sender stops 30 h before doors: shrinks and the cutoff never reach the marketplaces"
+ },
+ {
+  "name": "10 refunds near sellout",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.5,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.2,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.12,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.06,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.06,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "actions": [
+   {
+    "at_h": 30,
+    "type": "refund",
+    "qty": 10
+   },
+   {
+    "at_h": 5,
+    "type": "refund",
+    "qty": 6
+   }
+  ],
+  "desc": "hot show plus refunds: 10 seats at T-30h and 6 at T-5h (after the scarcity line)"
+ },
+ {
+  "name": "11 no max per order",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": null,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.1,
+   "dayof_mult": 3,
+   "qty_max": 8
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 8
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.025,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 8
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.015,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 8
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.015,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 8
+   }
+  ],
+  "desc": "no maxPerOrder (pools default to 8, floor 4); buyers want up to 8"
+ },
+ {
+  "name": "12 max per order 1",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 1,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.35,
+   "dayof_mult": 3,
+   "qty_max": 1
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.12,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 1
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.08,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 1
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 1
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 1
+   }
+  ],
+  "desc": "maxPerOrder 1: pools of 2, Exos floor 1"
+ },
+ {
+  "name": "13 no doors time",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "doors_before_start_min": -1,
+  "desc": "no doors_at: the cutoff counts from the start time"
+ },
+ {
+  "name": "14 doors 3h before start",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "doors_before_start_min": 180,
+  "desc": "doors 3 h before the start: cutoff is 6 h before the start"
+ },
+ {
+  "name": "15 grid filled before publish",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "publish_h": 72,
+  "desc": "pools filled 14 days out, published 3 days out (idle clock starts at publish)"
+ },
+ {
+  "name": "16 organizer changes mid-sale",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0.05,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0.035,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0.02,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "actions": [
+   {
+    "at_h": 200,
+    "type": "set_cap",
+    "ch": "stubhub",
+    "qty": 12
+   },
+   {
+    "at_h": 100,
+    "type": "untick",
+    "ch": "seatgeek"
+   }
+  ],
+  "desc": "StubHub cap cut from 40 to 12 at T-200h while live and selling; SeatGeek unticked at T-100h (live: delist, then release)"
+ },
+ {
+  "name": "17 dead marketplaces",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "nobody buys on any marketplace"
+ },
+ {
+  "name": "18 one marketplace, big cap",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.1,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 150,
+    "rate": 0.25,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4
+   }
+  ],
+  "desc": "only StubHub, cap 150 of 200, hot on StubHub"
+ },
+ {
+  "name": "19 not live yet",
+  "seed": 0.31,
+  "capacity": 200,
+  "max_per_order": 4,
+  "start_h": 336,
+  "exos": {
+   "rate": 0.15,
+   "dayof_mult": 3,
+   "qty_max": 4
+  },
+  "channels": [
+   {
+    "ch": "stubhub",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4,
+    "live": false
+   },
+   {
+    "ch": "seatgeek",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4,
+    "live": false
+   },
+   {
+    "ch": "gametime",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4,
+    "live": false
+   },
+   {
+    "ch": "vivid",
+    "cap": 40,
+    "rate": 0,
+    "dayof_mult": 2,
+    "lag": 1,
+    "qty_max": 4,
+    "live": false
+   }
+  ],
+  "desc": "marketplaces never go live (dry-run today): pools hold seats nobody can buy"
+ }
+]

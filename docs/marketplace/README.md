@@ -272,6 +272,8 @@ from the quiet ones.
 - The event editor's grid shows each pool's state (`exos_pool_state`: selling,
   stagnant, scarce, closed).
 - `exos-distribute` notes why a pool is empty on its plan.
+- Scenario dry run (19 scenarios through the real functions, with what it
+  found): [`scarcity-sim.md`](scarcity-sim.md).
 - Tests: `tests/exos/test_marketplace_scarcity.sql` (C1–C6);
   `test_channel_allocations.sql` A2–A4 and A15–A16 now expect Exos's floor.
 
