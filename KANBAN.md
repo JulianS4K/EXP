@@ -25,6 +25,18 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Apple Wallet + Google Wallet passes 2026-09-29
+
+- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, authored, not
+  applied / deployed; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
+  ticket they own. Passes carry a `W-` door code the scanner accepts: Google renders a TOTP `rotatingBarcode` (key
+  derived from `barcode_secret`, never the secret), Apple a static code bound to the pass epoch. A transfer, refund
+  or release voids the pass (trigger) and queues an update; the PassKit web service (register / serials / latest
+  pass / log) and a cron push run deliver it. The holder can reissue to kill a screenshotted code. 503 "wallet not
+  configured" until the operator adds the Apple / Google credentials (no fake signatures). Next: SPA buttons
+  (TicketDetail), operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
+  APNs client certificates work on the edge runtime (pushes are a dry run until then), schedule the push cron.
+
 ## Net-equal marketplace pricing 2026-09-29
 
 - 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
@@ -253,7 +265,8 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
   (and their flag) were removed from Create / Edit event.
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
-- [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
+- [~] Native Apple / Google Wallet passes (the "open pass" is still a web page). Backend authored
+  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons + operator credentials still to do.
 
 ## SeatGeek 2026-09-27
 
@@ -742,8 +755,9 @@ indie-primary + secondary-market positioning. `[ ]` = not started,
   rideshare, in-app upgrades — SeatGeek **Rally**). We stop at ticket +
   add-ons.
 - `[~]` **Native Apple / Google Wallet passes.** *(TM, AXS, SeatGeek.)*
-  Browser-only `WalletPass` today; native `.pkpass` / Google Wallet
-  scaffolds still on the rebuild queue.
+  Browser-only `WalletPass` today; the native `.pkpass` / Google Wallet
+  backend is authored (`exos-wallet`, 2026-09-29, `docs/wallet.md`), SPA
+  buttons and credentials pending.
 - `[ ]` **Self-service upgrades + gift cards / gifting.** *(TM,
   SeatGeek.)* Upgrades depend on the seat-map work.
 

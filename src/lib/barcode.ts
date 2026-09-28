@@ -49,6 +49,8 @@
 //     the first win — the second loses the race and is refused, with both
 //     attempts visible in the audit log.
 
+import { verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
+
 const BUCKET_MS = 30_000;
 // Accept barcodes from the current bucket or up to N buckets in either
 // direction. The window has to cover:
@@ -187,6 +189,16 @@ export async function verifyBarcode(
   secret: string,
   options: { now?: number } = {},
 ): Promise<VerifyResult> {
+  // Wallet pass codes (W-…, Apple static / Google TOTP; docs/wallet.md). The
+  // signature is checked here; the server also requires the pass to be live
+  // at that epoch (a voided / reissued pass is refused there).
+  if (typeof payload === 'string' && payload.startsWith('W-')) {
+    const w = await verifyWalletCode(payload, secret, options);
+    if (!w.code) return { ok: false, reason: 'malformed', legacy: false };
+    return w.ok
+      ? { ok: true, legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId }
+      : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
+  }
   if (typeof payload !== 'string' || !payload.startsWith('T-')) {
     return { ok: false, reason: 'malformed', legacy: false };
   }
@@ -250,7 +262,7 @@ export async function verifyBarcode(
  */
 export function extractTicketIdFromAny(payload: string): string | null {
   if (!payload || typeof payload !== 'string') return null;
-  const trimmed = payload.startsWith('T-') ? payload.slice(2) : payload;
+  const trimmed = payload.startsWith('T-') || payload.startsWith('W-') ? payload.slice(2) : payload;
   const id = trimmed.split(':')[0];
   return id || null;
 }
