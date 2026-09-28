@@ -89,7 +89,7 @@ export interface PlannedListingEntry<B = unknown> {
 }
 
 export interface PlannedMarketplaceListings<B = unknown> {
-  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets';
+  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
   listings: Array<PlannedListingEntry<B>>;
   per_order_cap: number;
   /** Fields the plan couldn't fill without guessing. */

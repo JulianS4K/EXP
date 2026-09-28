@@ -6,7 +6,9 @@
 //     (waiting on staff), are never touched here
 //   * the channel's read-only catalog search + decideMatch(); 'unmatched'
 //     rows are searched again after RECHECK_HOURS
-// Only channels in the registry with catalog access take part (StubHub today).
+// Only channels in the registry with catalog access take part (StubHub,
+// SeatGeek and Vivid Seats, each when its credentials are set). A channel can
+// search less often than the default (Vivid Seats: one search every 5 s).
 // Nothing here writes to a marketplace.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -75,6 +77,7 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
   const linkBy = new Map(((links ?? []) as LinkRow[]).map((l) => [`${l.event_id}:${l.channel}`, l]));
 
   const counts = { ...empty, events: rows.length };
+  const perChannel = new Map<ChannelId, number>();
   const recheckBefore = now.getTime() - RECHECK_HOURS * 3_600_000;
 
   for (const ev of rows) {
@@ -91,6 +94,9 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
       const base = { event_id: ev.id, org_id: ev.org_id, channel: net, checked_at: now.toISOString(), updated_at: now.toISOString() };
       if (!ch.findEvents) continue; // no catalog access for this channel (yet)
       if (counts.searched >= SEARCHES_PER_RUN) return counts; // the rest wait for the next run
+      const used = perChannel.get(net) ?? 0;
+      if (ch.searchesPerRun != null && used >= ch.searchesPerRun) continue; // this channel's share is spent
+      perChannel.set(net, used + 1);
       counts.searched++;
       let row: Record<string, unknown>;
       try {
@@ -124,7 +130,7 @@ export async function linkEvents(sb: SupabaseClient, channels: Map<ChannelId, Ma
       // A new link changes what the marketplace's event row should say
       // (nothing to create, attach to this event, or wait on staff): re-queue
       // the event row (never the allocations) while the marketplace has nothing.
-      if (net === "stubhub" || net === "seatgeek") {
+      if (net === "stubhub" || net === "seatgeek" || net === "vivid") {
         const { error: qErr } = await sb.from("exos_distribution_listings")
           .update({ status: "pending", planned_request: null, error: null, updated_at: now.toISOString() })
           .eq("event_id", ev.id).eq("channel", net).is("tier_id", null)

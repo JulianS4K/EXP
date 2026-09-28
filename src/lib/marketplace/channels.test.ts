@@ -156,14 +156,17 @@ describe('StubHub catalog search', () => {
 });
 
 describe('channelsFromEnv', () => {
-  it('wires StubHub, SeatGeek, Gametime and GoTickets; catalog search only with credentials', () => {
+  it('wires StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets']);
+    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid']);
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
     expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
-    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c' };
+    expect(none.get('vivid')!.capabilities.findEvents).toBe(false);
+    const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c', VIVID_API_TOKEN: 'd' };
     const withCreds = channelsFromEnv((k) => env[k]);
     expect(withCreds.get('stubhub')!.capabilities.findEvents).toBe(true);
     expect(withCreds.get('seatgeek')!.capabilities.findEvents).toBe(true);
+    expect(withCreds.get('vivid')!.capabilities.findEvents).toBe(true);
+    expect(withCreds.get('vivid')!.searchesPerRun).toBe(6);
   });
 });

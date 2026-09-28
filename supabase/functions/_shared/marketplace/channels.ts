@@ -1,5 +1,5 @@
 // The channel registry: which marketplaces are wired, built from secrets.
-// StubHub, SeatGeek, Gametime and GoTickets; the rest plug in here later. A channel without
+// StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats; the rest plug in here later. A channel without
 // credentials still exists (it can plan requests); it just can't search its
 // catalog.
 //
@@ -7,6 +7,9 @@
 //   STUBHUB_ENV            'sandbox' | 'production' (default sandbox)
 //   STUBHUB_CLIENT_ID / STUBHUB_CLIENT_SECRET   catalog reads (client credentials)
 //   SEATGEEK_CLIENT_ID     SeatGeek Platform API event search (read-only)
+//   VIVID_API_TOKEN        Vivid Seats Broker Portal token (event search here;
+//   VIVID_INTEGRATOR_TOKEN orders in exos-marketplace-sales), + the optional
+//                          X-Integrator-Token
 
 import type { ChannelId, MarketplaceChannel } from './channel.ts';
 import { StubHubClient, clientCredentialsToken } from './stubhub/client.ts';
@@ -16,6 +19,8 @@ import { seatGeekChannel } from './seatgeek/channel.ts';
 import { SeatGeekPlatformClient } from './seatgeek/platform.ts';
 import { gametimeChannel } from './gametime/channel.ts';
 import { goTicketsChannel } from './gotickets/channel.ts';
+import { vividChannel } from './vivid/channel.ts';
+import { VividClient } from './vivid/client.ts';
 
 export type Env = (key: string) => string | undefined;
 
@@ -46,6 +51,12 @@ export function channelsFromEnv(env: Env, fetchImpl?: typeof fetch): Map<Channel
   out.set('gametime', gametimeChannel());
   // GoTickets maps listings to its events itself.
   out.set('gotickets', goTicketsChannel());
+
+  const vividToken = env('VIVID_API_TOKEN')?.trim();
+  const vividIntegrator = env('VIVID_INTEGRATOR_TOKEN')?.trim() || null;
+  out.set('vivid', vividChannel(vividToken
+    ? new VividClient({ credentials: () => ({ apiToken: vividToken, integratorToken: vividIntegrator }), ...(fetchImpl ? { fetch: fetchImpl } : {}) })
+    : undefined));
 
   return out;
 }

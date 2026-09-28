@@ -219,6 +219,24 @@ T1–T3, `gotickets.test.ts`). All dry-run.
 - [ ] Operator: GOTICKETS_ACCESS_ID / _SECRET / GOTICKETS_WEBHOOK_TOKEN, webhooks (SALE, ORDER_CANCELLED),
   WriteAuthorization.
 
+## Vivid Seats 2026-09-28
+
+Broker Portal API 1.0.0 (docs/marketplace/vivid). Mig `20260928030000` (tested: `test_vivid_orders.sql` T1–T3,
+`vivid.test.ts`). All dry-run.
+- ✅ Endpoint table; the writer addresses listings only by our ticketId (`internalTicketId`), never Vivid's
+  listingId; an update's Vivid id must be read back by our ticketId; the v1 listing writes are forbidden.
+- ✅ API token: `Api-token` header on v2, `apiToken` query / form field on v1, added at send time and redacted
+  from every URL, error and plan.
+- ✅ Event linking: `GET /events/search` (name + local day), at most 6 searches per run (one per 5 s); the
+  linked event goes on the listings as productionId, otherwise Vivid's mapping team matches them.
+- ✅ Grid column with a small pool; the same Exos listings (blocks, internal seats sent with hideSeats).
+- ✅ Sales: polling only (no webhooks): getOrders UNCONFIRMED + PENDING_SHIPMENT (XML) and a getOrder recheck;
+  delivery planned as confirmOrder (+ internal seats) then transferOrderViaURL with the claim links.
+- [ ] Confirm with Vivid: claim links via transferOrderViaURL (and transferSource), stockType for URL
+  transfers, events/search date format, how a cancelled order shows (no status is documented), integrator
+  token.
+- [ ] Operator: VIVID_API_TOKEN (+ VIVID_INTEGRATOR_TOKEN if issued), WriteAuthorization.
+
 ## Small marketplace pools 2026-09-28
 
 Mig `20260928010000` (tested: `test_channel_allocations.sql` A14–A16, e2e). Chosen over "broadcast everything

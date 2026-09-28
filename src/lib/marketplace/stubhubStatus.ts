@@ -83,10 +83,36 @@ export function stubHubStatus(
   }
 }
 
-export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets';
+export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
 export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = {
-  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets',
+  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats',
 };
+
+/** The event line for Vivid Seats: which Vivid event the listings attach to, or its mapping team. */
+export function vividStatus(
+  row: StubHubDistributionRow | null,
+  ev: { ticked: boolean; published: boolean; primaryMarketOnly: boolean },
+): StubHubStatus | null {
+  if (!ev.ticked) return null;
+  if (ev.primaryMarketOnly) return { tone: 'muted', text: 'Primary market only is on, so nothing goes to Vivid Seats.' };
+  if (!row) {
+    return ev.published
+      ? { tone: 'muted', text: 'Save to queue Vivid Seats.' }
+      : { tone: 'muted', text: 'Vivid Seats listings are planned when you publish.' };
+  }
+  switch (row.status) {
+    case 'pending':
+      return { tone: 'info', text: 'Queued: Exos is looking for this event on Vivid Seats.' };
+    case 'planned':
+      return row.planned_request?.linked
+        ? { tone: 'ok', text: `Vivid Seats listings attach to Vivid event ${row.planned_request.external_event_id}.` }
+        : { tone: 'info', text: "Not matched to a Vivid Seats event: Vivid's team maps the listings from the event name, venue and time, which can take a while. Not sent yet: Vivid Seats selling isn't switched on." };
+    case 'failed':
+      return { tone: 'warn', text: row.error || 'Vivid Seats: something needs a look.' };
+    default:
+      return { tone: 'muted', text: `Vivid Seats: ${row.status}.` };
+  }
+}
 
 /** The event line for GoTickets: it maps listings to its own events. */
 export function goTicketsStatus(

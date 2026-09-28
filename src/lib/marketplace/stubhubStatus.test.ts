@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, vividStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -104,5 +104,18 @@ describe('goTicketsStatus', () => {
     expect(goTicketsStatus(row({ status: 'planned' }), ev)?.text).toMatch(/matches the listings to its event itself/);
     expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gotickets')?.text)
       .toBe("1 listing ready. Not sent yet: GoTickets selling isn't switched on.");
+  });
+});
+
+describe('vividStatus', () => {
+  it('explains Vivid Seats: a linked event, or its mapping team', () => {
+    const ev = { ticked: true, published: true, primaryMarketOnly: false };
+    expect(vividStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(vividStatus(row({ status: 'pending' }), ev)?.text).toMatch(/looking for this event on Vivid Seats/);
+    expect(vividStatus(row({ status: 'planned', planned_request: { linked: true, external_event_id: '4455667' } }), ev))
+      .toEqual({ tone: 'ok', text: 'Vivid Seats listings attach to Vivid event 4455667.' });
+    expect(vividStatus(row({ status: 'planned', planned_request: { linked: false } }), ev)?.text).toMatch(/mapping|maps the listings/);
+    expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}, {}] } }), 'vivid')?.text)
+      .toBe("2 listings ready. Not sent yet: Vivid Seats selling isn't switched on.");
   });
 });
