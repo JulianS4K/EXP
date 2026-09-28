@@ -72,7 +72,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
           const { error: piErr } = await sb.from("exos_checkout_sessions")
             .update({ payment_intent: pi }).eq("session_id", row.session_id);
           if (piErr) { console.error(`reconcile: payment_intent persist failed for ${row.session_id}`, piErr); out.errors++; }
+          // The same ledger + price-disclosure records the webhook writes, so an
+          // order fulfilled here isn't missing from either (refunds find their
+          // session through the payment row). Both are idempotent.
+          const { error: payErr } = await sb.rpc("exos_record_payment", {
+            p_session_id: row.session_id, p_payment_intent: pi, p_amount_cents: cs.amount_total ?? 0,
+            p_status: "succeeded", p_currency: cs.currency ?? "usd", p_provider_event_id: row.session_id,
+          });
+          if (payErr) { console.error(`reconcile: record_payment failed for ${row.session_id}`, payErr); out.errors++; }
         }
+        const { error: pdErr } = await sb.rpc("exos_record_price_charged", {
+          p_session_id: row.session_id, p_amount_cents: cs.amount_total ?? 0, p_currency: cs.currency ?? "usd",
+        });
+        if (pdErr) console.error(`reconcile: price_charged record failed for ${row.session_id} (non-fatal)`, pdErr);
         out.fulfilled++;
       } else if (cs.status === "expired") {
         const { error: exErr } = await sb.from("exos_checkout_sessions")

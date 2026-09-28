@@ -1,4 +1,5 @@
 import { geocodeEvent } from '../lib/geo';
+import { CHECKOUT_CURRENCIES, isCheckoutCurrency } from '../lib/currency';
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
@@ -1013,12 +1014,10 @@ export default function EditEvent() {
                   value={eventData.currency || 'USD'}
                   onChange={(e) => setEventData({ ...eventData, currency: e.target.value })}
                 >
-                  {(['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'MXN', 'BRL'] as const).map((c) => (
+                  {CHECKOUT_CURRENCIES.map(({ code: c }) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
-                  {!['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'MXN', 'BRL'].includes(
-                    (eventData.currency || 'USD').toUpperCase(),
-                  ) && (
+                  {!isCheckoutCurrency(eventData.currency || 'USD') && (
                     <option value={(eventData.currency || 'USD').toUpperCase()}>
                       {(eventData.currency || 'USD').toUpperCase()}
                     </option>

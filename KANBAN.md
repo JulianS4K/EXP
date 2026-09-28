@@ -36,6 +36,12 @@
   server-set only; add-on tax rates stay on their event. Code: StubHub writer refuses non-Exos listings and
   sales, TEvo tickets wait for the fraud check, guest IP from the platform header, API limiter fails closed.
   `test_security_hardening.sql` S1–S7.
+- 🟡 **Money path fixes** (`20260929030000`, authored, not applied): holds respect the event's house cap
+  (`exos_event_house_available`), organizer refunds void tickets only once the refund succeeds (webhook now
+  handles `refund.updated` / `charge.refund.updated` / `refund.failed`), receipts show amount + tax
+  (`exos_receipt_html`). Code: two-decimal currencies only (JPY was charged 100x), cards only, reconcile writes
+  the payment ledger, idempotent Connect account creation (`EXOS_CONNECT_ACCOUNT_TYPE`). **Waiting on operator:**
+  fee floor, Express vs Standard, chargeback policy.
 - 🟡 **Pool refill order** (`20260929020000`): deterministic, longest-idle shrinks first (fixed a flaky C2).
 
 ## Fan-first build (from reports/Organizer and fan ticketing needs.md, started 2026-09-28)

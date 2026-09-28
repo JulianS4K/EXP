@@ -24,8 +24,16 @@ the details with counsel.)
 - [ ] Migrations `20260924215000`, `…223000`, `20260925020000` and `…021000` are applied (done 2026-09-24/25).
 - [ ] Every P0 migration is applied (`supabase/migrations/20260924205115`, `…205508`, `…205916`,
       `…210103`), plus all-in pricing (`…211840`). Check with `SELECT name FROM supabase_migrations.schema_migrations WHERE name LIKE '%exos_p0%';`
-- [ ] Stripe account with **Connect** enabled. Organizers onboard as Express accounts, and charges
-      are **destination charges** (`transfer_data.destination`) with an `application_fee_amount`.
+- [ ] Stripe account with **Connect** enabled. Charges are **destination charges**
+      (`transfer_data.destination`) with an `application_fee_amount`, so the platform pays Stripe's
+      fee and carries lost chargebacks. **Operator decision pending:** the account type
+      (`EXOS_CONNECT_ACCOUNT_TYPE`: `standard`, today's default, or `express`, which suits
+      destination charges), a minimum fee per ticket, and whether lost chargebacks are recovered
+      from the organizer.
+- [ ] Events are priced in a two-decimal currency (`_shared/currency.ts`: USD, EUR, GBP, CAD,
+      AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
+- [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
+      delayed methods would outlive the 30-minute seat hold.
 - [ ] Decide the platform fee. `EXOS_PLATFORM_FEE_BPS` defaults to `500` (5%). The operator
       confirms the model and the rate. `exos-checkout` carries a `TODO(operator)` for this.
 - [ ] Transactional email works: `RESEND_API_KEY` and `EXOS_MAIL_FROM` are set for `exos-mail-drain`,
@@ -41,6 +49,7 @@ the details with counsel.)
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
 | `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 500 |
+| `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |
 | `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | all | Supabase sets these automatically |
 
@@ -86,7 +95,10 @@ version the handler is written against).
 1. **Platform endpoint.** Listen to events on *your account*:
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed`, `checkout.session.expired`,
-   `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`.
+   `charge.refunded`, `charge.refund.updated`, `refund.updated`, `refund.failed`,
+   `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`.
+   A refund voids tickets only once it has **succeeded**; a pending one that later fails leaves
+   them with the buyer (the refund events settle it).
    Destination charges raise these on the platform. Signing secret → `STRIPE_WEBHOOK_SECRET`.
 2. **Connected-accounts endpoint.** Listen to events on *connected accounts*: `account.updated`.
    This is how an organizer's onboarding status (`chargesEnabled`, `payoutsEnabled`) reaches Exos.
@@ -102,7 +114,7 @@ for each case.
 
 | # | Do | Expect (check in SQL) |
 |---|---|---|
-| 1 | Org owner runs Connect onboarding and finishes the Express form | `exos_org_secrets.payments` has `chargesEnabled: true` (from `account.updated`) |
+| 1 | Org owner runs Connect onboarding and finishes the Stripe form | `exos_org_secrets.payments` has `chargesEnabled: true` (from `account.updated`) |
 | 2 | Buy 2 tickets | Session `fulfilled`, 2 active tickets with `order_ref = session_id`, an `exos_order_payments` row, one ticket email queued, and the fee shown on the Stripe payment |
 | 3 | Refund $10 of it in the Stripe dashboard | Session `partially_refunded`, tickets **still active**, one refund row with Stripe's `re_…` id |
 | 4 | Refund the rest | Session `refunded`, **both tickets voided**, tier `sold` back down by 2 |
@@ -164,5 +176,15 @@ still need an account. The embedded (venue-site iframe) checkout still signs in 
 
 ## Known gaps (see `KANBAN.md`)
 
-- Redirect URLs (`success_url`, `cancel_url`, `return_url`) aren't allow-listed.
-- Add-ons can oversell under concurrency, because they're read, then charged, with no hold.
+Fixed since this list was first written: redirect URLs are allow-listed (`EXOS_REDIRECT_ORIGINS`),
+add-ons are re-checked at fulfilment (an order that can't be filled fails and is refunded),
+holds respect the event's house cap, refunds void only once they succeed, the reconcile sweep
+writes the payment ledger, receipts show the amount and tax, and Connect onboarding can't create
+two accounts for one org.
+
+Still open:
+- The fee model (minimum per ticket, who pays Stripe's fee) and the chargeback policy are operator
+  decisions; until then a cheap ticket or any refund can cost the platform money.
+- Tax: rates are organizer-entered; there is no Stripe Tax or nexus logic.
+- Organizer payout reporting beyond the Connect status.
+- The money edge functions have no handler-level tests (the SQL harnesses cover the database side).

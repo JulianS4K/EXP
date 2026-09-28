@@ -1,4 +1,5 @@
 import { useAccessColumns } from '../hooks/useAccessColumns';
+import { CHECKOUT_CURRENCIES } from '../lib/currency';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createEvent, getEventForEdit, type EventInput } from '../lib/events';
@@ -74,16 +75,8 @@ const AUTOMATIQ_ENABLED =
 // non-USD currencies is wired up by the payments team — this just
 // stores the picker value alongside the event so prices render in
 // the right symbol everywhere.
-const SUPPORTED_CURRENCIES: { code: string; label: string }[] = [
-  { code: 'USD', label: 'USD — US Dollar' },
-  { code: 'EUR', label: 'EUR — Euro' },
-  { code: 'GBP', label: 'GBP — British Pound' },
-  { code: 'CAD', label: 'CAD — Canadian Dollar' },
-  { code: 'AUD', label: 'AUD — Australian Dollar' },
-  { code: 'JPY', label: 'JPY — Japanese Yen' },
-  { code: 'MXN', label: 'MXN — Mexican Peso' },
-  { code: 'BRL', label: 'BRL — Brazilian Real' },
-];
+// Two-decimal currencies only (lib/currency.ts): amounts are minor units x 100.
+const SUPPORTED_CURRENCIES: readonly { code: string; label: string }[] = CHECKOUT_CURRENCIES;
 
 // A unique violation (23505) on the events slug: the only failure a new
 // slug can fix. Anything else (including a later tier insert) is rethrown.

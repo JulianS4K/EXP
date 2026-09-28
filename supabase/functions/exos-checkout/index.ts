@@ -32,6 +32,7 @@ import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pri
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
+import { isCheckoutCurrency } from "../_shared/currency.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -188,6 +189,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const currency = (ev.currency ?? "usd").toLowerCase();
+  // Amounts below are minor units = major x 100: two-decimal currencies only
+  // (a zero-decimal JPY price would be charged 100 times over).
+  if (!isCheckoutCurrency(currency)) {
+    return json({ error: `tickets can't be sold in ${currency.toUpperCase()} yet: pick another currency for this event` }, 409);
+  }
   // The tier's scheduled price as of now, the same price the storefront shows
   // (early-bird → regular → last-minute), then the voucher's rule: a pinned
   // price, a percent off or an amount off (voucherUnitPrice, shared with the SPA).
@@ -359,6 +365,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   try {
     session = await stripe.checkout.sessions.create({
       mode: "payment",
+      // Cards only (Apple Pay and Google Pay come with them). Bank debits and
+      // other delayed methods would complete "unpaid", outlive the 30-minute
+      // hold and settle days later into seats that may be gone.
+      payment_method_types: ["card"],
       line_items: lineItems,
       payment_intent_data: {
         application_fee_amount: applicationFee,
