@@ -50,8 +50,18 @@ BEGIN
   PERFORM set_config('app.jwt', '{"email":"p1scan@x.com"}', false);
   ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c001','manual','verified',NULL,NULL) ->> 'reason' = 'wrong-event',
          'P1: no event id is refused';
-  ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c001','manual','verified',NULL,e1) ->> 'reason' = 'checked-in',
-         'P1: manual override admits';
+  IF to_regprocedure('public.exos_check_in_ticket(uuid,text,text,text,uuid,text,timestamptz,text)') IS NOT NULL THEN
+    -- mig 20260929040000: a typed override needs an owner / manager and a reason.
+    ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c001','manual','verified',NULL,e1) ->> 'reason' = 'needs-manager',
+           'P1: a scanner cannot type a ticket in';
+    PERFORM set_config('app.uid', 'f7000000-0000-0000-0000-0000000000a1', false);
+    ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c001','manual','verified',NULL,e1,'checked ID') ->> 'reason' = 'checked-in',
+           'P1: manual override admits';
+    PERFORM set_config('app.uid', 'f7000000-0000-0000-0000-0000000000a3', false);
+  ELSE
+    ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c001','manual','verified',NULL,e1) ->> 'reason' = 'checked-in',
+           'P1: manual override admits';
+  END IF;
   ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c002','manual','manual',
            'T-f7000000-0000-0000-0000-00000000c002:x:1:forged',e1) ->> 'reason' = 'barcode-rejected', 'P1: forged payload rejected (manual)';
   ASSERT public.exos_check_in_ticket('f7000000-0000-0000-0000-00000000c003','manual','manual',
