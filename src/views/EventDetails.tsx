@@ -44,6 +44,8 @@ import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
 import { paymentsEnabled } from '../lib/payments';
+import SubscribeCalendar from '../components/SubscribeCalendar';
+import { venueFeedLinks, venueKey } from '../lib/calendar';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -1110,6 +1112,13 @@ export default function EventDetails() {
                     send via sms
                   </button>
                   <AddToCalendar event={event} />
+                  {(() => {
+                    // The venue's calendar: every Exos event at this venue (docs/calendar.md).
+                    const key = venueKey(event.location, event.address);
+                    return key ? (
+                      <SubscribeCalendar links={venueFeedLinks(key)} label={`${event.location} calendar`} />
+                    ) : null;
+                  })()}
                   <button onClick={handleInstagramStory} className="flex items-center gap-3 hover:text-brand-primary transition-colors text-left">
                     <Instagram className="w-4 h-4 text-brand-primary" />
                     share to instagram
