@@ -6,6 +6,9 @@ import {
   getChannelLinks,
   getMarketplaceOrders,
   linkChannelEvent,
+  markMarketplaceOrderHandled,
+  marketplaceOrderActions,
+  resendMarketplaceClaimLinks,
   type ChannelLink,
   type MarketplaceOrder,
 } from '../lib/marketplace/linksApi';
@@ -102,26 +105,78 @@ const ORDER_STATUS: Record<MarketplaceOrder['status'], string> = {
 
 /** Sales made on the marketplaces, and the ones that need a human. */
 export function MarketplaceOrders({ eventId }: { eventId: string }) {
+  const { toast } = useToast();
   const [orders, setOrders] = useState<MarketplaceOrder[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => getMarketplaceOrders(eventId).then(setOrders).catch(() => setOrders([]));
   useEffect(() => {
     void getMarketplaceOrders(eventId).then(setOrders).catch(() => setOrders([]));
   }, [eventId]);
+
+  const run = async (id: string, what: () => Promise<string | null>) => {
+    setBusy(id);
+    try {
+      const done = await what();
+      if (done) toast({ kind: 'success', message: done });
+      await load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not do that.';
+      toast({ kind: 'error', message: msg.replace(/^exos_[a-z_]+: /, '') });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const resend = (o: MarketplaceOrder) => run(o.id, async () => {
+    const n = await resendMarketplaceClaimLinks(o.id);
+    return `Sent ${n} claim link${n === 1 ? '' : 's'} to the buyer again.`;
+  });
+  const handled = (o: MarketplaceOrder) => run(o.id, async () => {
+    const note = window.prompt('Mark handled: what did you do? (optional, for your team)');
+    if (note === null) return null; // cancelled
+    await markMarketplaceOrderHandled(o.id, note);
+    return "Marked handled. Exos won't retry this order on its own.";
+  });
+
   if (!orders?.length) return null;
   return (
     <div className="space-y-3">
       <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Marketplace sales</h3>
       <ul className="space-y-2">
-        {orders.map((o) => (
-          <li key={o.id} className={`border p-3 type text-xs ${o.status === 'needs_attention' ? 'border-amber-400/60 text-amber-200' : 'border-white/10 text-white/70'}`}>
-            <p>
-              <span className="text-white">{LABEL[o.channel] ?? o.channel} #{o.external_order_id}</span>
-              {' '}· {o.quantity} ticket{o.quantity === 1 ? '' : 's'} · {ORDER_STATUS[o.status]}
-              {o.sold_at ? ` · ${when(o.sold_at)}` : ''}
-            </p>
-            {o.attention_reason && <p className="mt-1">{o.attention_reason}</p>}
-            {o.delivery_plan?.kind === 'manual' && o.delivery_plan.reason && <p className="mt-1">{o.delivery_plan.reason}</p>}
-          </li>
-        ))}
+        {orders.map((o) => {
+          const act = marketplaceOrderActions(o);
+          const open = o.status === 'needs_attention' && !o.handled_at;
+          return (
+            <li key={o.id} className={`border p-3 type text-xs ${open ? 'border-amber-400/60 text-amber-200' : 'border-white/10 text-white/70'}`}>
+              <p>
+                <span className="text-white">{LABEL[o.channel] ?? o.channel} #{o.external_order_id}</span>
+                {' '}· {o.quantity} ticket{o.quantity === 1 ? '' : 's'} · {o.handled_at && o.status === 'needs_attention' ? 'handled' : ORDER_STATUS[o.status]}
+                {o.sold_at ? ` · ${when(o.sold_at)}` : ''}
+              </p>
+              {o.attention_reason && <p className="mt-1">{o.attention_reason}</p>}
+              {o.delivery_plan?.kind === 'manual' && o.delivery_plan.reason && <p className="mt-1">{o.delivery_plan.reason}</p>}
+              {o.handled_at && (
+                <p className="mt-1 text-white/50">Marked handled {when(o.handled_at)}{o.handled_note ? `: ${o.handled_note}` : ''}</p>
+              )}
+              {o.links_resent_at && <p className="mt-1 text-white/50">Claim links resent {when(o.links_resent_at)}</p>}
+              {(act.resend || act.markHandled) && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {act.resend && (
+                    <button type="button" disabled={busy === o.id} onClick={() => resend(o)}
+                      className="px-3 py-1.5 border border-white/20 text-white/80 text-[10px] uppercase tracking-widest disabled:opacity-50">
+                      Resend claim links to buyer email
+                    </button>
+                  )}
+                  {act.markHandled && (
+                    <button type="button" disabled={busy === o.id} onClick={() => handled(o)}
+                      className="px-3 py-1.5 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
+                      Mark handled
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

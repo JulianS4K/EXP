@@ -55,17 +55,51 @@ export interface MarketplaceOrder {
   attention_reason: string | null;
   sold_at: string | null;
   delivery_plan: { kind: 'planned' | 'manual'; reason?: string; claim_urls: string[] } | null;
+  buyer_email: string | null;
+  /** Tickets minted for it; their pending transfers are what a resend covers. */
+  transfer_ids: string[];
+  handled_at: string | null;
+  handled_note: string | null;
+  links_resent_at: string | null;
 }
 
 export async function getMarketplaceOrders(eventId: string): Promise<MarketplaceOrder[]> {
   const { data, error } = await supabase
     .from('exos_marketplace_orders')
-    .select('id, channel, external_order_id, quantity, status, attention_reason, sold_at, delivery_plan')
+    .select('id, channel, external_order_id, quantity, status, attention_reason, sold_at, delivery_plan, buyer_email, transfer_ids, handled_at, handled_note, links_resent_at')
     .eq('event_id', eventId)
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) throw error;
   return (data ?? []) as MarketplaceOrder[];
+}
+
+/**
+ * Mail the order's buyer their claim links again, one per still-unclaimed
+ * ticket (mig 20260929051000). Owner/manager; once per 10 minutes per order.
+ * Resolves to the number of links sent.
+ */
+export async function resendMarketplaceClaimLinks(orderId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('exos_resend_marketplace_claim_links', { p_order_id: orderId });
+  if (error) throw error;
+  return data as number;
+}
+
+/** A person took care of an order that needed attention; Exos stops retrying it. */
+export async function markMarketplaceOrderHandled(orderId: string, note: string | null): Promise<void> {
+  const { error } = await supabase.rpc('exos_mark_marketplace_order_handled', { p_order_id: orderId, p_note: note });
+  if (error) throw error;
+}
+
+/** What the organizer can do about one order, from its row. */
+export function marketplaceOrderActions(o: Pick<MarketplaceOrder, 'status' | 'buyer_email' | 'transfer_ids' | 'handled_at'>): {
+  resend: boolean;
+  markHandled: boolean;
+} {
+  return {
+    resend: !!o.buyer_email && (o.transfer_ids?.length ?? 0) > 0 && o.status !== 'cancelled',
+    markHandled: o.status === 'needs_attention' && !o.handled_at,
+  };
 }
 
 // Exos accounts holding more of an event's tickets than its max per account
