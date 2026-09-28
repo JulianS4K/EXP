@@ -1,9 +1,5 @@
 export type TicketType = 'paid' | 'free' | 'donation';
 
-// The old "distribution" blocks (exclusivity, the unsaved discount-token
-// editor) stay hidden.
-export const SHOW_DISTRIBUTION = false;
-
 // Marketplaces: omnichannel distribution of the event's own inventory. The
 // organizer picks marketplaces and sets seats per ticket type (GA on StubHub
 // only, VIP everywhere, ...). Listings are planned; nothing is sent to a
@@ -19,11 +15,6 @@ export const MARKETPLACE_NETWORKS = [
   { id: 'gotickets', name: 'GoTickets' },
   { id: 'evo', name: 'Ticket Evolution' },
 ] as const;
-
-// The old exos_discount_codes editor stays off: promo codes (% / $ off) are
-// vouchers now (mig 20260928060000, Edit event → Promo and access codes),
-// which checkout redeems. Saved discount codes were carried over.
-export const SHOW_DISCOUNT_CODES = false;
 
 /**
  * Keeps a tier's type in step with its price so a $0 tier doesn't fail

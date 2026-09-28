@@ -6,18 +6,35 @@ import {
   getTicketForScan,
   listEventTicketsForRegistry,
   checkInTicket,
+  checkInOffline,
+  undoCheckIn,
   recordScanReject,
   countEventCheckins,
   setCheckinTestWindow,
+  syncServerClock,
+  type CheckInResult,
   type ScanTicket,
 } from '../lib/tickets';
 import { Ticket, Event } from '../types';
 import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Html5Qrcode } from 'html5-qrcode';
+// html5-qrcode (~330KB) is loaded on demand when the scanner opens, so it
+// never ships on other routes or before the camera is actually needed.
+import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
-import { verifyBarcode, extractTicketIdFromAny } from '../lib/barcode';
+import { verifyBarcode, extractTicketIdFromAny, type VerifyResult } from '../lib/barcode';
+import { describeSkew, serverNow } from '../lib/serverClock';
+import {
+  deviceLabel,
+  enqueueScan,
+  isRegistryFresh,
+  newClientRef,
+  parseQueue,
+  removeRefs,
+  type QueuedScan,
+} from '../lib/offlineCheckins';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
 import { joinCheckinChannel } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
@@ -34,9 +51,10 @@ import {
 import { overlayPending } from '../lib/guestLists';
 import { indexTablesByTicket, tableSummary } from '../lib/tables';
 
-// Anything older than this is dropped from localStorage when the page mounts.
-// Set to a generous 7 days so a multi-day festival is still cached on day 3.
-const REGISTRY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// The cached roster holds every ticket's barcode secret, so it is dropped
+// 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
+// A multi-day event re-downloads it each day; opening the page online does
+// that automatically.
 
 interface OfflineTicketEntry {
   used: boolean;
@@ -65,6 +83,8 @@ function saveRegistry(eventId: string, data: StoredRegistry['data']) {
 
 function pruneStaleCheckInCaches() {
   const now = Date.now();
+  // Queued offline scans (pending_updates_*) are NOT dropped with their
+  // roster: they replay on their own, and the server answers for them.
   const toDelete: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -75,35 +95,53 @@ function pruneStaleCheckInCaches() {
       const parsed = JSON.parse(raw);
       // Legacy entries (no _savedAt wrapper) are old-format and considered
       // stale by definition — they predate this hygiene pass.
-      if (
-        !parsed ||
-        typeof parsed !== 'object' ||
-        typeof parsed._savedAt !== 'number' ||
-        now - parsed._savedAt > REGISTRY_TTL_MS
-      ) {
+      if (!parsed || typeof parsed !== 'object' || !isRegistryFresh(parsed._savedAt, now)) {
         toDelete.push(key);
       }
     } catch {
       toDelete.push(key);
     }
   }
-  // Also drop matching `pending_updates_*` for any registry we deleted —
-  // pending updates without a registry have no useful UX anyway.
-  for (const k of toDelete) {
-    localStorage.removeItem(k);
-    const eventId = k.slice('registry_'.length);
-    localStorage.removeItem(`pending_updates_${eventId}`);
+  for (const k of toDelete) localStorage.removeItem(k);
+}
+
+function savePending(eventId: string | undefined, queue: QueuedScan[]) {
+  if (!eventId) return;
+  try {
+    localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(queue));
+  } catch {
+    /* storage full / blocked: the in-memory queue still replays this session */
   }
 }
+
+// Door copy for server refusals that aren't barcode problems.
+const REFUSAL_TEXT: Record<string, string> = {
+  'needs-manager': 'Needs a manager. Typing a ticket in (no live code) is an override only an owner or manager can make.',
+  'reason-required': 'Give a reason for the override (at least 3 characters).',
+  'not-assigned': "You're not assigned to scan this event. Ask an owner or manager to add it to your events.",
+  'bad-scan-time': 'This offline scan is too old to upload (more than 24 hours).',
+};
+
+type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' };
 
 export default function OrganizerCheckIn() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const { orgs } = useOrganization();
   const { toast } = useToast();
   const [event, setEvent] = useState<Event | null>(null);
   const [searchId, setSearchId] = useState('');
-  const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode'>('idle');
+  const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode' | 'needs-reason'>('idle');
+  // "Already used": when (and on which device) the ticket was checked in.
+  const [usedInfo, setUsedInfo] = useState<{ at?: string; device?: string } | null>(null);
+  // A typed override waiting for its reason (owner / manager only).
+  const [overrideFor, setOverrideFor] = useState<{ ticketId: string; name: string } | null>(null);
+  const [overrideReason, setOverrideReason] = useState('');
+  // Undo a check-in from the scan log.
+  const [undoKey, setUndoKey] = useState<string | null>(null);
+  const [undoReason, setUndoReason] = useState('');
+  const [undoing, setUndoing] = useState(false);
   // A scan during the pre-doors test window: verified, but the ticket stays
   // unused (the server answers reason 'test-scan'), so don't mark it locally.
   const [testScan, setTestScan] = useState(false);
@@ -131,8 +169,19 @@ export default function OrganizerCheckIn() {
   const [offlineRegistry, setOfflineRegistry] = useState<Record<string, OfflineTicketEntry>>({});
   const [downloading, setDownloading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [pendingUpdates, setPendingUpdates] = useState<string[]>([]);
-  const [recentScans, setRecentScans] = useState<{ id: string, name: string, time: Date, status: string }[]>([]);
+  const [pendingUpdates, setPendingUpdates] = useState<QueuedScan[]>([]);
+  const [recentScans, setRecentScans] = useState<ScanRow[]>([]);
+  // This scanner's label, recorded on each check-in ("already used at Door 7F3A").
+  const device = React.useMemo(() => {
+    try {
+      return deviceLabel(window.localStorage);
+    } catch {
+      return deviceLabel(null);
+    }
+  }, []);
+  // Role in the event's org — a hint for the UI; the server enforces it.
+  const doorRole = orgs.find((o) => o.org.id === event?.orgId)?.membership.role ?? null;
+  const canOverride = isAdmin || doorRole === 'owner' || doorRole === 'manager';
   // "Inside venue" = tickets actually scanned in (exos_event_checkins count),
   // NOT tickets sold. Seeded on mount; refreshed by the realtime channel below
   // as scans land (this lane + others).
@@ -221,15 +270,16 @@ export default function OrganizerCheckIn() {
         }
       }
       setDoorExtras(loadCachedDoorExtras(eventId));
-      const pending = localStorage.getItem(`pending_updates_${eventId}`);
-      if (pending) {
-        try {
-          setPendingUpdates(JSON.parse(pending));
-        } catch {
-          localStorage.removeItem(`pending_updates_${eventId}`);
-        }
-      }
+      // Queued offline scans (older builds stored bare ids; parseQueue
+      // upgrades them to typed entries, which the server treats as overrides).
+      // Saved back so an upgraded entry keeps its ref across reloads.
+      const queued = parseQueue(localStorage.getItem(`pending_updates_${eventId}`), serverNow());
+      setPendingUpdates(queued);
+      if (queued.length > 0) savePending(eventId, queued);
     }
+    // Measure this device's clock against the server (offline scans record the
+    // corrected time, and the local code check uses it).
+    void syncServerClock();
 
     return () => {
       window.removeEventListener('online', handleSyncStatus);
@@ -245,41 +295,36 @@ export default function OrganizerCheckIn() {
   }, [isOffline, pendingUpdates.length]);
 
   const syncPendingUpdates = async () => {
-    if (pendingUpdates.length === 0 || syncing) return;
+    if (pendingUpdates.length === 0 || syncing || !eventId) return;
     setSyncing(true);
-    const successfulSyncs: string[] = [];
+    const answered: string[] = [];
     const conflicts: { id: string; reason: string }[] = [];
     try {
       // Per-item try/catch so one failing replay doesn't abort the rest of the
-      // queue. With a single outer catch the first failure silently skipped
-      // all subsequent IDs (they'd also miss the successfulSyncs push so they'd
-      // stay queued indefinitely even though they hadn't been tried yet).
-      for (const tId of pendingUpdates) {
+      // queue. Each scan replays with the code it read and when
+      // (exos_check_in_offline): the server re-checks the signature against the
+      // ticket's current owner + secret, so a ticket transferred after the
+      // roster sync comes back as a conflict. The same ref twice counts once,
+      // so a retry after a lost response is safe. Only a network / auth error
+      // throws and keeps the scan queued.
+      for (const scan of pendingUpdates) {
         try {
-          // Replay an offline check-in. checkInTicket is forgiving on replay:
-          // a second flip of an already-used ticket returns {ok:false,
-          // reason:'used'} (no throw), so we still drop it from the queue.
-          // Only a real network/auth error throws and keeps it queued.
-          // A refusal here means someone was admitted offline on a ticket the
-          // server says was already used / voided / in transfer — surface it.
-          const result = await checkInTicket(tId, 'manual', 'manual', undefined, eventId);
-          if (!result.ok) conflicts.push({ id: tId, reason: result.reason ?? 'unknown' });
-          successfulSyncs.push(tId);
+          const result = await checkInOffline(scan, eventId, device);
+          // The server logs refusals to the scan report itself.
+          if (!result.ok) conflicts.push({ id: scan.ticketId, reason: result.reason ?? 'unknown' });
+          answered.push(scan.ref);
         } catch (err) {
-          console.error(`Error syncing pending update ${tId}:`, err);
+          console.error(`Error syncing offline scan ${scan.ref}:`, err);
         }
       }
     } finally {
-      const remainingUpdates = pendingUpdates.filter(id => !successfulSyncs.includes(id));
-      setPendingUpdates(remainingUpdates);
-      localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(remainingUpdates));
+      // Functional update: scans queued while this ran must not be lost.
+      setPendingUpdates((prev) => {
+        const remaining = removeRefs(prev, answered);
+        savePending(eventId, remaining);
+        return remaining;
+      });
       setSyncing(false);
-      for (const c of conflicts) {
-        const reason = c.reason === 'used' || c.reason === 'voided' || c.reason === 'in-transfer' || c.reason === 'wrong-event'
-          ? c.reason
-          : 'not-found';
-        void writeScanReject(reason, 'manual', { ticketIdAttempted: c.id, reasonDetail: `offline-replay:${c.reason}` });
-      }
       if (conflicts.length > 0) {
         toast({
           kind: 'error',
@@ -326,6 +371,7 @@ export default function OrganizerCheckIn() {
     startScannerTimeoutRef.current = setTimeout(async () => {
       startScannerTimeoutRef.current = null;
       try {
+        const { Html5Qrcode } = await import('html5-qrcode');
         const html5Qr = new Html5Qrcode('reader');
         scannerRef.current = html5Qr;
         await html5Qr.start(
@@ -550,275 +596,237 @@ export default function OrganizerCheckIn() {
     }
   };
 
-  const handleCheckIn = async (e?: React.FormEvent, manualValue?: string) => {
+  const pushScan = (ticketId: string, name: string, scanStatus: ScanRow['status']) =>
+    setRecentScans((prev) =>
+      [{ key: newClientRef(), ticketId, name: name || '—', time: new Date(), status: scanStatus }, ...prev].slice(0, 8),
+    );
+
+  const queueScan = (scan: QueuedScan) =>
+    setPendingUpdates((prev) => {
+      const next = enqueueScan(prev, scan);
+      savePending(eventId, next);
+      return next;
+    });
+
+  const markLocal = (ticketId: string, patch: Partial<OfflineTicketEntry>) =>
+    setOfflineRegistry((prev) => {
+      const entry = prev[ticketId];
+      if (!entry) return prev;
+      const next = { ...prev, [ticketId]: { ...entry, ...patch } };
+      if (eventId) saveRegistry(eventId, next);
+      return next;
+    });
+
+  // Why the local signature check refused a code. A correctly signed code from
+  // the wrong time window is a clock problem (or a screenshot): say by how much.
+  const localRejectText = (v: VerifyResult, now: number): string => {
+    if (v.reason === 'bucket-expired' && v.signatureValid && v.bucket != null) return describeSkew(v.bucket, now);
+    const reasonText: Record<string, string> = {
+      'malformed': 'Could not read this code.',
+      'bad-bucket': 'Code is malformed.',
+      'bucket-expired': 'This code expired. Ask the attendee to refresh their ticket and rescan.',
+      'signature-mismatch':
+        "Signature didn't match this ticket — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded (re-download it).",
+      'legacy-no-secret':
+        'This is an old-format ticket. Ask the attendee to open the app and refresh their ticket, then rescan.',
+    };
+    return reasonText[v.reason || ''] || 'Code rejected.';
+  };
+
+  const denyLocal = (ticketId: string, name: string, v: VerifyResult, src: 'camera' | 'manual') => {
+    setStatus('invalid-barcode');
+    setInvalidReason(localRejectText(v, serverNow()));
+    pushScan(ticketId, name, 'DENIED');
+    void writeScanReject(v.reason === 'bucket-expired' ? 'expired-code' : 'invalid-barcode', src, {
+      ticketIdAttempted: ticketId,
+      reasonDetail: v.reason || undefined,
+    });
+  };
+
+  // A server refusal (online check-in).
+  const showRefusal = (result: CheckInResult, ticketId: string, name: string, src: 'camera' | 'manual') => {
+    setBuyerName(name);
+    if (result.reason === 'reason-required') {
+      // We always ask first; if the server still wants one, ask again.
+      setOverrideFor({ ticketId, name });
+      setStatus('needs-reason');
+      return;
+    }
+    pushScan(ticketId, name, 'DENIED');
+    if (result.reason === 'used') {
+      setUsedInfo({ at: result.check_in_at, device: result.device });
+      markLocal(ticketId, { used: true });
+      setStatus('already-used');
+      void writeScanReject('used', src, { ticketIdAttempted: ticketId });
+      return;
+    }
+    if (result.reason === 'voided') markLocal(ticketId, { voided: true });
+    const text: Record<string, string> = {
+      ...REFUSAL_TEXT,
+      'barcode-expired': 'This code expired. Ask the attendee to refresh their ticket and rescan.',
+      'barcode-rejected':
+        "Signature didn't match this ticket (server check) — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded.",
+      'doors-not-open': 'Doors are not open yet for this event. Check-in opens at the event’s doors time.',
+      'voided':
+        'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.',
+      'in-transfer':
+        'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
+      'wrong-event': 'This ticket is for a different event.',
+      'event-cancelled': 'This event was cancelled. Nobody can be checked in.',
+    };
+    setStatus('invalid-barcode');
+    setInvalidReason(text[result.reason] || 'The server did not accept this ticket. Re-download the offline list and retry.');
+    if (result.reason === 'doors-not-open') {
+      setDoorsBlocked(true);
+      return;
+    }
+    if (result.reason === 'needs-manager') return;
+    const audit =
+      result.reason === 'barcode-expired' ? 'expired-code'
+      : result.reason === 'barcode-rejected' ? 'invalid-barcode'
+      : result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event' ? result.reason
+      : 'not-found';
+    void writeScanReject(audit, src, { ticketIdAttempted: ticketId, reasonDetail: result.reason });
+  };
+
+  const admitted = (ticket: Ticket, name: string, test: boolean) => {
+    setTestScan(test);
+    setBuyerName(name || 'Anonymous attendee');
+    setFoundTicket(ticket);
+    if (!test) {
+      pushScan(ticket.id, name, 'SUCCESS');
+      markLocal(ticket.id, { used: true });
+    }
+    setStatus('success');
+    setSearchId('');
+    setOverrideFor(null);
+  };
+
+  const handleCheckIn = async (e?: React.FormEvent, manualValue?: string, reason?: string) => {
     if (e) e.preventDefault();
-    const probeValue = manualValue || searchId;
+    const probeValue = (manualValue || searchId).trim();
     if (!probeValue || !eventId) return;
+    const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
+    // A typed ticket id (no signed code). A CAMERA scan is never treated as
+    // one: a scanned bare UUID is a forgery downgrade and fails the signature
+    // check (and the server refuses it).
+    const isBareManualEntry = !scanning && !probeValue.startsWith('T-') && !probeValue.includes(':');
 
     setStatus('searching');
-    setManualEntry(!probeValue.includes(':'));
+    setManualEntry(isBareManualEntry);
     setFoundTicket(null);
     setInvalidReason('');
     setDoorsBlocked(false);
+    setUsedInfo(null);
+    setTestScan(false);
 
-    // Extract the ticket doc id from the QR payload regardless of format
-    // (legacy 3-segment, signed 4-segment, or bare id). HMAC verification
-    // happens later, after we've read the ticket doc and have its secret.
+    // The ticket id inside the QR payload (signed 4-segment, legacy, or bare).
     const docId = extractTicketIdFromAny(probeValue) || probeValue;
-
-    // Sanity-check the id length before a lookup so a manual-entry typo can't
-    // burn a staff-RLS read on junk. Ticket ids are UUIDs — anything over 128
-    // chars can't be a real ticket id.
+    // Ticket ids are UUIDs — anything over 128 chars can't be one.
     if (!docId || docId.length > 128) {
       setStatus('not-found');
       return;
     }
+    const cached = offlineRegistry[docId];
 
-    // Try offline registry first if offline or if we have it
-    if (offlineRegistry[docId]) {
-      const offlineTicket = offlineRegistry[docId];
-
-      // Detect manual entry. If door staff TYPED a bare doc id (no
-      // 'T-' prefix, no ':' separator, and not via the camera), we skip
-      // the HMAC verifier — there's no signature to check, and the docId
-      // hitting the offline registry is itself the verification (the
-      // registry was downloaded under organizer-only rule gating). A
-      // CAMERA scan is never treated as bare manual entry: a scanned bare
-      // UUID is a forgery downgrade and must fail the signature check.
-      const isBareManualEntry =
-        !scanning &&
-        typeof probeValue === 'string' &&
-        !probeValue.startsWith('T-') &&
-        !probeValue.includes(':');
-
-      // HMAC verification offline. The registry stores barcodeSecret
-      // alongside the ticket metadata at sync time, so we can run the
-      // full signature check without a network round-trip.
-      //
-      // Edge case: a transfer that completes after this registry was
-      // synced rotates the per-ticket secret server-side. The new
-      // owner's barcode will fail HMAC verification against our cached
-      // secret; we surface a clear "code rejected, please re-sync"
-      // error to the operator instead of silently admitting a screenshot.
-      if (offlineTicket.barcodeSecret && !isBareManualEntry) {
-        const verify = await verifyBarcode(probeValue, offlineTicket.barcodeSecret);
-        if (!verify.ok) {
-          setStatus('invalid-barcode');
-          const reasonText: Record<string, string> = {
-            'malformed': 'Could not read this code.',
-            'bad-bucket': 'Code is malformed.',
-            'bucket-expired':
-              'This code expired. Ask the attendee to refresh their ticket.',
-            'signature-mismatch':
-              "Signature didn't match this ticket. The ticket may have been transferred since the offline registry was synced — re-sync to refresh.",
-            'legacy-no-secret':
-              'This is an old-format ticket. Ask the attendee to open the app and refresh their ticket, then rescan.',
-          };
-          setInvalidReason(reasonText[verify.reason || ''] || 'Code rejected.');
-          setRecentScans((prev) =>
-            [
-              { id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' },
-              ...prev,
-            ].slice(0, 5),
-          );
-          const auditReason: 'expired-code' | 'invalid-barcode' =
-            verify.reason === 'bucket-expired' ? 'expired-code' : 'invalid-barcode';
-          void writeScanReject(auditReason, scanning ? 'camera' : 'manual', {
-            ticketIdAttempted: docId,
-            reasonDetail: verify.reason || undefined,
-          });
-          return;
-        }
-      }
-      // Legacy v1 cache (no barcodeSecret) — fall through with a
-      // console note. The operator should re-sync the registry.
-
-      if (offlineTicket.pendingTransferId) {
-        // Same lock as the online path — offline registry refresh
-        // (the auto-pull) propagates the flag, so within one refresh
-        // cycle staff sees the lock too.
+    // Typed override: owner / manager, with a reason (the server enforces both;
+    // this only saves a round trip).
+    if (isBareManualEntry && !reason) {
+      setBuyerName(cached?.name || '');
+      if (!canOverride) {
         setStatus('invalid-barcode');
-        setInvalidReason(
-          'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
-        );
-        setBuyerName(offlineTicket.name);
-        setRecentScans((prev) =>
-          [
-            { id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' },
-            ...prev,
-          ].slice(0, 5),
-        );
-        void writeScanReject('in-transfer', scanning ? 'camera' : 'manual', {
-          ticketIdAttempted: docId,
-        });
+        setInvalidReason(REFUSAL_TEXT['needs-manager']);
         return;
       }
-
-      if (offlineTicket.voided) {
-        // Voided == refunded. Stays unscannable forever. Door staff
-        // should direct the holder to event support.
-        setStatus('invalid-barcode');
-        setInvalidReason(
-          'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.',
-        );
-        setBuyerName(offlineTicket.name);
-        setRecentScans((prev) =>
-          [
-            { id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' },
-            ...prev,
-          ].slice(0, 5),
-        );
-        void writeScanReject('voided', scanning ? 'camera' : 'manual', {
-          ticketIdAttempted: docId,
-        });
-        return;
-      }
-
-      if (offlineTicket.used) {
-        setStatus('already-used');
-        setBuyerName(offlineTicket.name);
-        setRecentScans(prev => [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' }, ...prev].slice(0, 5));
-        void writeScanReject('used', scanning ? 'camera' : 'manual', {
-          ticketIdAttempted: docId,
-        });
-        return;
-      }
-      
-      // If we are online, flip the ticket server-side now; on failure
-      // (network) admit based on the offline registry and queue a replay.
-      // Fully offline → always queue.
-      if (!isOffline) {
-        try {
-          const result = await checkInTicket(
-            docId,
-            scanning ? 'camera' : 'manual',
-            offlineTicket.barcodeSecret ? 'verified' : 'manual',
-            probeValue,
-            eventId,
-          );
-          // Honor a server-side rejection (barcode secret rotated via a transfer,
-          // or doors not open yet) — do NOT admit locally.
-          if (!result.ok && (result.reason === 'barcode-rejected' || result.reason === 'barcode-expired' || result.reason === 'doors-not-open')) {
-            setStatus('invalid-barcode');
-            setInvalidReason(
-              result.reason === 'barcode-expired'
-                ? 'This code expired. Ask the attendee to refresh their ticket and rescan.'
-                : result.reason === 'doors-not-open'
-                ? 'Doors are not open yet for this event. Check-in opens at the event’s doors time.'
-                : "Signature didn't match this ticket (server check) — it may have been transferred since the offline registry was synced. Re-sync and retry.",
-            );
-            if (result.reason === 'doors-not-open') setDoorsBlocked(true);
-            setBuyerName(offlineTicket.name);
-            setRecentScans((prev) =>
-              [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' }, ...prev].slice(0, 5),
-            );
-            void writeScanReject(
-              result.reason === 'barcode-expired' ? 'expired-code' : 'invalid-barcode',
-              scanning ? 'camera' : 'manual',
-              { ticketIdAttempted: docId, reasonDetail: result.reason },
-            );
-            return;
-          }
-          // Any other server refusal (used / voided / in-transfer / wrong-event /
-          // not-found) means the offline registry is stale — never admit on it.
-          if (!result.ok) {
-            const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
-            if (result.reason === 'used' || result.reason === 'voided') {
-              const synced = {
-                ...offlineRegistry,
-                [docId]: { ...offlineTicket, used: result.reason === 'used' || offlineTicket.used, voided: result.reason === 'voided' || offlineTicket.voided },
-              };
-              setOfflineRegistry(synced);
-              if (eventId) saveRegistry(eventId, synced);
-            }
-            setBuyerName(offlineTicket.name);
-            setRecentScans((prev) =>
-              [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'DENIED' }, ...prev].slice(0, 5),
-            );
-            if (result.reason === 'used') {
-              setStatus('already-used');
-              void writeScanReject('used', src, { ticketIdAttempted: docId });
-              return;
-            }
-            setStatus('invalid-barcode');
-            setInvalidReason(
-              result.reason === 'voided'
-                ? 'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.'
-                : result.reason === 'in-transfer'
-                ? 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.'
-                : result.reason === 'wrong-event'
-                ? 'This ticket is for a different event.'
-                : result.reason === 'event-cancelled'
-                ? 'This event was cancelled. Nobody can be checked in.'
-                : 'The server did not accept this ticket. Re-sync the offline registry and retry.',
-            );
-            const rejectReason =
-              result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event'
-                ? result.reason
-                : 'not-found';
-            void writeScanReject(rejectReason, src, { ticketIdAttempted: docId, reasonDetail: result.reason });
-            return;
-          }
-          if (result.reason === 'test-scan') {
-            setTestScan(true);
-            setBuyerName(offlineTicket.name);
-            setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
-            setStatus('success');
-            setSearchId('');
-            return;
-          }
-        } catch (err) {
-          console.error('Server check-in failed; admitting on offline registry and queuing replay.', err);
-          const newPending = [...pendingUpdates, docId];
-          setPendingUpdates(newPending);
-          localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(newPending));
-        }
-      } else {
-         const newPending = [...pendingUpdates, docId];
-         setPendingUpdates(newPending);
-         localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(newPending));
-      }
-
-      // Mark locally as used
-      const updated = { ...offlineRegistry, [docId]: { ...offlineTicket, used: true } };
-      setOfflineRegistry(updated);
-      if (eventId) saveRegistry(eventId, updated);
-
-      setBuyerName(offlineTicket.name);
-      setFoundTicket({ id: docId, tierName: offlineTicket.tier } as any);
-      setTestScan(false);
-      setStatus('success');
-      setRecentScans(prev => [{ id: docId.slice(0, 8), name: offlineTicket.name, time: new Date(), status: 'SUCCESS' }, ...prev].slice(0, 5));
-      setSearchId('');
+      setOverrideFor({ ticketId: docId, name: cached?.name || '' });
+      setOverrideReason('');
+      setStatus('needs-reason');
       return;
     }
 
-    // Not in the offline registry and we're offline: supabase-js has no offline
-    // write queue (unlike the old Firestore SDK), so we can neither verify the
-    // ticket nor durably record the reject until the link returns. Surface
-    // "not found"; a re-scan once back online audits properly.
+    if (cached) {
+      // Local checks against the downloaded list: a fast fail online, and all
+      // there is offline. The signature is checked on the server-corrected clock.
+      if (cached.barcodeSecret && !isBareManualEntry) {
+        const verify = await verifyBarcode(probeValue, cached.barcodeSecret, { now: serverNow() });
+        if (!verify.ok) {
+          setBuyerName(cached.name);
+          denyLocal(docId, cached.name, verify, src);
+          return;
+        }
+      }
+      if (cached.pendingTransferId || cached.voided) {
+        setStatus('invalid-barcode');
+        setInvalidReason(
+          cached.voided
+            ? 'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.'
+            : 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
+        );
+        setBuyerName(cached.name);
+        pushScan(docId, cached.name, 'DENIED');
+        void writeScanReject(cached.voided ? 'voided' : 'in-transfer', src, { ticketIdAttempted: docId });
+        return;
+      }
+      if (cached.used && isOffline) {
+        // Online, the server answers with when it was used (below).
+        setStatus('already-used');
+        setBuyerName(cached.name);
+        pushScan(docId, cached.name, 'DENIED');
+        void writeScanReject('used', src, { ticketIdAttempted: docId });
+        return;
+      }
+
+      const localTicket = { id: docId, tierName: cached.tier } as Ticket;
+      if (!isOffline) {
+        try {
+          const result = await checkInTicket(
+            docId, src, isBareManualEntry ? 'manual' : 'verified',
+            isBareManualEntry ? undefined : probeValue, eventId, { reason, device },
+          );
+          if (!result.ok) {
+            showRefusal(result, docId, cached.name, src);
+            return;
+          }
+          admitted(localTicket, cached.name, result.reason === 'test-scan');
+          return;
+        } catch (err) {
+          console.error('Server check-in failed; admitting on the offline list and queuing the scan.', err);
+        }
+      }
+      // Offline (or the server was unreachable): admit on the downloaded list
+      // and queue the scan WITH its code and time. The upload re-checks the
+      // signature server-side, so a ticket transferred since the download
+      // comes back as a conflict.
+      queueScan({
+        ref: newClientRef(),
+        ticketId: docId,
+        payload: isBareManualEntry ? null : probeValue,
+        scannedAt: serverNow(),
+        source: src,
+        ...(reason ? { reason } : {}),
+      });
+      admitted(localTicket, cached.name, false);
+      return;
+    }
+
+    // Not on the downloaded list and offline: we can neither verify the ticket
+    // nor record the reject until the link returns.
     if (isOffline) {
       setStatus('not-found');
       return;
     }
 
     try {
-      // Staff-gated read (exos_tickets RLS). Returns null when the ticket
-      // doesn't exist OR the caller isn't staff of its org — both map to
-      // "not a valid ticket for this door", which also subsumes the old
-      // organizer-mismatch branch (RLS won't return a foreign-org ticket).
+      // Staff-gated read. null when the ticket doesn't exist OR the caller
+      // isn't staff of its org — both are "not a valid ticket for this door".
       const scanTicket = await getTicketForScan(docId);
-      const sourceTag: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
-
       if (!scanTicket) {
         setStatus('not-found');
-        void writeScanReject('not-found', sourceTag, { ticketIdAttempted: docId });
+        void writeScanReject('not-found', src, { ticketIdAttempted: docId });
         return;
       }
 
-      // Wrong-event detection — the ticket exists but belongs to another
-      // event. Best-effort fetch of that event's (public) title so door
-      // staff can route the holder; failures fall through to generic copy.
+      // Wrong event: best-effort title of the other event so staff can route the holder.
       if (scanTicket.eventId !== eventId) {
         let otherTitle: string | undefined;
         try {
@@ -833,13 +841,8 @@ export default function OrganizerCheckIn() {
             ? `Wrong event — this ticket is for "${otherTitle}". Direct the holder to that event's door.`
             : 'Wrong event — this ticket belongs to a different event. Direct the holder to the correct door.',
         );
-        setRecentScans((prev) =>
-          [
-            { id: docId.slice(0, 8), name: '—', time: new Date(), status: 'DENIED' },
-            ...prev,
-          ].slice(0, 5),
-        );
-        void writeScanReject('wrong-event', sourceTag, {
+        pushScan(docId, '—', 'DENIED');
+        void writeScanReject('wrong-event', src, {
           ticketIdAttempted: docId,
           wrongEventId: scanTicket.eventId,
           wrongEventTitle: otherTitle,
@@ -847,159 +850,84 @@ export default function OrganizerCheckIn() {
         return;
       }
 
-      // Bare TYPED id entry has no signature to verify — the staff RLS read
-      // is itself the gate, so we skip HMAC and process it as 'manual'. A
-      // camera scan (scanning) is never bare-manual: a scanned bare UUID is a
-      // forgery downgrade and must go through (and fail) the signature check.
-      const isBareManualEntry =
-        !scanning &&
-        typeof probeValue === 'string' &&
-        !probeValue.startsWith('T-') &&
-        !probeValue.includes(':');
-      if (isBareManualEntry) {
-        await processTicket(scanTicket, 'manual');
-        return;
+      // Local signature check (fast fail) when we could read the secret; the
+      // server re-checks it either way.
+      if (!isBareManualEntry && scanTicket.barcodeSecret) {
+        const verify = await verifyBarcode(probeValue, scanTicket.barcodeSecret, { now: serverNow() });
+        if (!verify.ok) {
+          setFoundTicket(scanTicket);
+          setBuyerName(scanTicket.ownerName);
+          denyLocal(scanTicket.id, scanTicket.ownerName, verify, src);
+          return;
+        }
       }
 
-      // HMAC verification path for actual barcode payloads. Legacy 3-segment
-      // shapes are REJECTED (verifyBarcode returns ok:false for them) — an
-      // unsigned code is forgeable from a screenshot.
-      const verify = await verifyBarcode(probeValue, scanTicket.barcodeSecret || '');
-      if (!verify.ok) {
-        setStatus('invalid-barcode');
-        const reasonText: Record<string, string> = {
-          'malformed': 'Could not read this code.',
-          'bad-bucket': 'Code is malformed.',
-          'bucket-expired':
-            'This code expired. Ask the attendee to refresh their ticket and try again.',
-          'signature-mismatch':
-            "Signature doesn't match this ticket. Possible screenshot or tampered code.",
-          'legacy-no-secret':
-            'This is an old-format ticket. Ask the attendee to open the app and refresh their ticket, then rescan.',
-        };
-        setInvalidReason(reasonText[verify.reason || ''] || 'Code rejected.');
-        setFoundTicket(scanTicket);
-        setRecentScans((prev) =>
-          [
-            { id: docId.slice(0, 8), name: '—', time: new Date(), status: 'DENIED' },
-            ...prev,
-          ].slice(0, 5),
-        );
-        const auditReason: 'expired-code' | 'invalid-barcode' =
-          verify.reason === 'bucket-expired' ? 'expired-code' : 'invalid-barcode';
-        void writeScanReject(auditReason, sourceTag, {
-          ticketIdAttempted: docId,
-          reasonDetail: verify.reason || undefined,
-        });
+      const result = await checkInTicket(
+        scanTicket.id, src, isBareManualEntry ? 'manual' : 'verified',
+        isBareManualEntry ? undefined : probeValue, eventId, { reason, device },
+      );
+      setFoundTicket(scanTicket);
+      if (!result.ok) {
+        showRefusal(result, scanTicket.id, scanTicket.ownerName, src);
         return;
       }
-
-      await processTicket(scanTicket, 'verified', probeValue);
+      admitted(scanTicket, scanTicket.ownerName, result.reason === 'test-scan');
     } catch (error) {
       console.error(error);
       setStatus('not-found');
     }
   };
 
-  const processTicket = async (
-    scanTicket: ScanTicket,
-    verification: 'verified' | 'legacy' | 'manual',
-    barcodePayload?: string,
-  ) => {
-    const name = scanTicket.ownerName || 'Anonymous attendee';
-    setBuyerName(name);
-    setFoundTicket(scanTicket);
+  const submitOverride = (e: React.FormEvent) => {
+    e.preventDefault();
+    const why = overrideReason.trim();
+    if (!overrideFor || why.length < 3) return;
+    void handleCheckIn(undefined, overrideFor.ticketId, why);
+  };
 
-    const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
-    const pushScan = (status: 'SUCCESS' | 'DENIED') =>
-      setRecentScans((prev) =>
-        [{ id: scanTicket.id.slice(0, 6), name, time: new Date(), status }, ...prev].slice(0, 5),
-      );
-
-    // The RPC does the atomic status flip (only if still 'active' — the
-    // double-scan guard) AND writes the append-only check-in audit row. For a
-    // signed payload it also RE-VERIFIES the HMAC server-side (D4-OPS-6), so a
-    // forged/replayed code is rejected even if the client check was bypassed.
-    const result = await checkInTicket(scanTicket.id, src, verification, barcodePayload, eventId);
-
-    if (result.ok) {
-      setTestScan(result.reason === 'test-scan');
-      setStatus('success');
-      if (result.reason !== 'test-scan') pushScan('SUCCESS');
-      setSearchId('');
-      return;
-    }
-
-    // Server-side barcode rejection (forged / stale / wrong-owner code).
-    if (result.reason === 'barcode-rejected' || result.reason === 'barcode-expired') {
-      setStatus('invalid-barcode');
-      setInvalidReason(
-        result.reason === 'barcode-expired'
-          ? 'This code expired. Ask the attendee to refresh their ticket and rescan.'
-          : "Signature didn't match this ticket (server check). Possible screenshot or tampered code.",
-      );
-      pushScan('DENIED');
-      void writeScanReject(
-        result.reason === 'barcode-expired' ? 'expired-code' : 'invalid-barcode',
-        src,
-        { ticketIdAttempted: scanTicket.id, reasonDetail: result.reason },
-      );
-      return;
-    }
-
-    if (result.reason === 'doors-not-open') {
-      setStatus('invalid-barcode');
-      setInvalidReason(
-        'Doors are not open yet for this event. Check-in opens at the event’s doors time.',
-      );
-      setDoorsBlocked(true);
-      pushScan('DENIED');
-      return;
-    }
-
-    if (result.reason === 'in-transfer') {
-      setStatus('invalid-barcode');
-      setInvalidReason(
-        'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
-      );
-      pushScan('DENIED');
-      void writeScanReject('in-transfer', src, { ticketIdAttempted: scanTicket.id });
-      return;
-    }
-    if (result.reason === 'voided') {
-      setStatus('invalid-barcode');
-      setInvalidReason(
-        'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.',
-      );
-      pushScan('DENIED');
-      void writeScanReject('voided', src, { ticketIdAttempted: scanTicket.id });
-      return;
-    }
-    if (result.reason === 'used') {
-      setStatus('already-used');
-      pushScan('DENIED');
-      void writeScanReject('used', src, { ticketIdAttempted: scanTicket.id });
-      return;
-    }
-
-    if (result.reason === 'event-cancelled' || result.reason === 'wrong-event') {
-      setStatus('invalid-barcode');
-      setInvalidReason(
-        result.reason === 'event-cancelled'
-          ? 'This event was cancelled. Nobody can be checked in.'
-          : 'This ticket is for a different event.',
-      );
-      pushScan('DENIED');
-      void writeScanReject(result.reason === 'wrong-event' ? 'wrong-event' : 'not-found', src, {
-        ticketIdAttempted: scanTicket.id,
-        reasonDetail: result.reason,
+  // Undo a check-in from the scan log (owner / manager, with a reason).
+  const confirmUndo = async (row: ScanRow) => {
+    if (!eventId) return;
+    const why = undoReason.trim();
+    if (why.length < 3) return;
+    const finish = (message: string) => {
+      setRecentScans((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'UNDONE' } : r)));
+      markLocal(row.ticketId, { used: false });
+      setUndoKey(null);
+      setUndoReason('');
+      toast({ kind: 'success', message });
+    };
+    // Still waiting to upload: just drop it from the queue.
+    const queued = pendingUpdates.find((q) => q.ticketId === row.ticketId);
+    if (queued) {
+      setPendingUpdates((prev) => {
+        const next = removeRefs(prev, [queued.ref]);
+        savePending(eventId, next);
+        return next;
       });
+      finish('Check-in removed before upload.');
       return;
     }
-
-    // not-found or any unexpected reason.
-    setStatus('not-found');
-    void writeScanReject('not-found', src, { ticketIdAttempted: scanTicket.id });
+    setUndoing(true);
+    try {
+      const result = await undoCheckIn(row.ticketId, eventId, why);
+      if (!result.ok) {
+        toast({
+          kind: 'error',
+          message:
+            REFUSAL_TEXT[result.reason] ??
+            (result.reason === 'not-checked-in' ? 'That ticket is not checked in.' : 'Could not undo that check-in.'),
+        });
+        return;
+      }
+      setInsideVenue((n) => Math.max(0, n - 1));
+      finish('Check-in undone. The ticket can be scanned again.');
+    } catch (err) {
+      console.error('undo check-in failed', err);
+      toast({ kind: 'error', message: 'Could not undo that check-in (network).' });
+    } finally {
+      setUndoing(false);
+    }
   };
 
   // Owner/manager: open a bounded test-scanning window so the doors gate is
@@ -1024,7 +952,7 @@ export default function OrganizerCheckIn() {
 
   if (!event) return null;
 
-  const rejectCount = recentScans.filter((s) => s.status !== 'SUCCESS').length;
+  const rejectCount = recentScans.filter((s) => s.status === 'DENIED').length;
 
   return (
     <div className="bg-[#f2f4f7] min-h-screen">
@@ -1191,7 +1119,7 @@ export default function OrganizerCheckIn() {
                   placeholder="Name, last 6 of pass ID, or full ID"
                   aria-label="Search by name or pass ID"
                   autoComplete="off"
-                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus:border-tm-blue transition-all"
+                  className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-all"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                 />
@@ -1227,14 +1155,19 @@ export default function OrganizerCheckIn() {
                          <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
                        ) : entry.used ? (
                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">In</span>
-                       ) : (
+                       ) : canOverride ? (
+                         // Admitting by name is a typed override: asks for a reason.
                          <button
                            type="button"
                            onClick={() => { setSearchId(''); void handleCheckIn(undefined, id); }}
                            className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
                          >
-                           Admit
+                           Admit…
                          </button>
+                       ) : (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title="Scan their live code, or ask a manager to override">
+                           Scan code
+                         </span>
                        )}
                      </li>
                    ))}
@@ -1308,7 +1241,51 @@ export default function OrganizerCheckIn() {
             </motion.div>
           )}
 
-          {status === 'already-used' && foundTicket && (
+          {status === 'needs-reason' && overrideFor && (
+            <motion.div
+              key="needs-reason"
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              className="bg-sky-50/60 p-8 rounded-[2.5rem] border border-sky-200 flex flex-col items-center text-center"
+            >
+              <h2 className="text-2xl font-bold text-sky-900 mb-1 leading-none uppercase tracking-tight">Manual override</h2>
+              <p className="text-sky-700 font-bold uppercase tracking-widest text-[10px] mb-4">
+                No live code was scanned{overrideFor.name ? ` · ${overrideFor.name}` : ''} · …{overrideFor.ticketId.slice(-6)}
+              </p>
+              <p className="text-slate-600 text-sm mb-4 max-w-sm">
+                Check the holder's ID. The reason is saved with the check-in and shows in the scan report.
+              </p>
+              <form onSubmit={submitOverride} className="w-full max-w-sm space-y-3">
+                <input
+                  type="text"
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  placeholder="Reason, e.g. phone died — checked photo ID"
+                  aria-label="Reason for the override"
+                  maxLength={300}
+                  autoFocus
+                  className="w-full bg-white border border-sky-200 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={overrideReason.trim().length < 3}
+                    className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-black disabled:opacity-40"
+                  >
+                    Admit with override
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setOverrideFor(null); setStatus('idle'); }}
+                    className="px-4 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          )}
+
+          {status === 'already-used' && (
             <motion.div 
               key="already-used"
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -1320,7 +1297,17 @@ export default function OrganizerCheckIn() {
               <h2 className="text-2xl font-bold text-orange-900 mb-1 leading-none uppercase tracking-tight">Already Used</h2>
               <p className="text-orange-600 font-bold uppercase tracking-widest text-[10px] mb-6">Ticket already checked in</p>
               
-              <p className="text-slate-500 text-sm font-medium mb-4">Checked in at: <br/><strong>{foundTicket.checkInDate ? foundTicket.checkInDate.toDate().toLocaleString() : 'Recent timestamp'}</strong></p>
+              <p className="text-slate-500 text-sm font-medium mb-4">
+                Checked in at: <br />
+                <strong>
+                  {usedInfo?.at
+                    ? new Date(usedInfo.at).toLocaleString()
+                    : foundTicket?.checkInDate && foundTicket.checkInDate.toMillis() > 0
+                    ? foundTicket.checkInDate.toDate().toLocaleString()
+                    : 'Earlier (time shows once online)'}
+                </strong>
+                {usedInfo?.device ? <><br />on <strong>{usedInfo.device}</strong></> : null}
+              </p>
               
               <div className="w-full p-4 bg-white rounded-2xl border border-orange-100 text-left">
                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Attendee Name</p>
@@ -1414,18 +1401,62 @@ export default function OrganizerCheckIn() {
               <p className="px-5 py-6 text-xs text-slate-400 font-bold uppercase tracking-widest">No scans yet.</p>
             ) : (
               <ul className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
-                {recentScans.map((scan, idx) => {
+                {recentScans.map((scan) => {
                   const ok = scan.status === 'SUCCESS';
+                  const undone = scan.status === 'UNDONE';
                   return (
-                    <li key={idx} className="flex items-center gap-3 px-5 py-3">
-                      <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : 'bg-rose-50 text-rose-500'}`}>
-                        {ok ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : 'Rejected'}</p>
-                        <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">{scan.id}</p>
+                    <li key={scan.key} className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : undone ? 'bg-slate-100 text-slate-400' : 'bg-rose-50 text-rose-500'}`}>
+                          {ok ? <CheckCircle2 className="w-4 h-4" /> : undone ? <RefreshCw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : undone ? `${scan.name} · undone` : 'Rejected'}</p>
+                          <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
+                        </div>
+                        {ok && canOverride && !isOffline && undoKey !== scan.key ? (
+                          <button
+                            type="button"
+                            onClick={() => { setUndoKey(scan.key); setUndoReason(''); }}
+                            className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900 shrink-0"
+                          >
+                            Undo
+                          </button>
+                        ) : null}
+                        <span className="text-[10px] font-mono text-slate-300 shrink-0">{scan.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <span className="text-[10px] font-mono text-slate-300 shrink-0">{scan.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      {undoKey === scan.key ? (
+                        <form
+                          className="mt-2 flex gap-2"
+                          onSubmit={(e) => { e.preventDefault(); void confirmUndo(scan); }}
+                        >
+                          <input
+                            type="text"
+                            value={undoReason}
+                            onChange={(e) => setUndoReason(e.target.value)}
+                            placeholder="Why undo? e.g. scanned the wrong pass"
+                            aria-label="Reason for undoing this check-in"
+                            maxLength={300}
+                            autoFocus
+                            className="min-w-0 flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
+                          />
+                          <button
+                            type="submit"
+                            disabled={undoing || undoReason.trim().length < 3}
+                            className="px-3 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                          >
+                            Undo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUndoKey(null)}
+                            aria-label="Keep this check-in"
+                            className="px-2 text-slate-400 hover:text-slate-700"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </form>
+                      ) : null}
                     </li>
                   );
                 })}

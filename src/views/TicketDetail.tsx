@@ -1,7 +1,7 @@
 import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getTicket, listMyTicketsForEvent, setTicketAttendee } from '../lib/tickets';
+import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
@@ -10,6 +10,7 @@ import { eventSharePath } from '../lib/events';
 import { ArrowLeft, Share2, ShieldCheck, RefreshCw, Ticket as TicketIcon, Calendar, Download, PlusCircle, Instagram, Send, ChevronLeft, ChevronRight, Smartphone, Lock } from 'lucide-react';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 import { signBarcode, currentBucket } from '../lib/barcode';
+import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { motion, AnimatePresence } from 'motion/react';
 import AddToCalendar from '../components/AddToCalendar';
 import { shareEventToStory } from '../lib/poster';
@@ -35,6 +36,9 @@ export default function TicketDetail() {
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
   const [barcode, setBarcode] = useState('');
+  // Signing failed (no secret / no Web Crypto). No unsigned fallback: the
+  // door refuses those, so the pass says so instead.
+  const [codeError, setCodeError] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
   const [showShare, setShowShare] = useState(false);
   // Attendee-name editor (mig 20260911060000): who this pass is FOR.
@@ -136,34 +140,45 @@ export default function TicketDetail() {
     let cancelled = false;
     let lastBucket = -1;
 
-    // Sign the barcode for the current 30-second bucket. The HMAC binds
-    // ticketId + ownerId + bucket against the per-ticket secret (lib/barcode.ts).
-    // Legacy tickets without a secret fall back to the unsigned 3-segment shape.
+    // Sign the barcode for the current 30-second bucket of the server-corrected
+    // clock. The HMAC binds ticketId + ownerId + bucket against the per-ticket
+    // secret (lib/barcode.ts). Without a secret there is no code to show.
     const refresh = async () => {
-      const bucket = currentBucket();
+      const bucket = currentBucket(serverNow());
       lastBucket = bucket;
       if (td_secret) {
         try {
           const signed = await signBarcode(td_id, td_uid, td_secret, bucket);
-          if (!cancelled) setBarcode(signed);
+          if (!cancelled) {
+            setBarcode(signed);
+            setCodeError(false);
+          }
           return;
         } catch (err) {
-          console.warn('Falling back to legacy unsigned barcode:', err);
+          console.warn('Could not sign the entry code:', err);
         }
       }
-      if (!cancelled) setBarcode(`T-${td_id}:${td_uid}:${bucket}`);
+      if (!cancelled) {
+        setBarcode('');
+        setCodeError(true);
+      }
     };
 
     const tick = () => {
       if (cancelled) return;
       // Wall-clock countdown — accurate across re-renders + background-tab
       // timer throttling (a naive decrement drifts when the tab is hidden).
-      const secs = 30 - (Math.floor(Date.now() / 1000) % 30);
-      setTimeLeft(secs === 0 ? 30 : secs);
-      if (currentBucket() !== lastBucket) void refresh();
+      setTimeLeft(secondsLeftInWindow());
+      if (currentBucket(serverNow()) !== lastBucket) void refresh();
     };
 
     void refresh();
+    // Once the server clock is known, re-sign for its window.
+    void syncServerClock().then(() => {
+      if (cancelled) return;
+      void refresh();
+      tick();
+    });
     const interval = setInterval(tick, 1000);
     // Re-issue immediately on tab-return so a throttled background timer never
     // leaves a stale (expired-bucket) QR on screen at the door.
@@ -260,7 +275,7 @@ export default function TicketDetail() {
                  <div className="flex justify-between items-start mb-10">
                     <div>
                       <p className="disp text-lg tracking-wide leading-none">PASS {currentIndex + 1} OF {tickets.length}</p>
-                      <p className="type text-[10px] uppercase tracking-[0.2em] mt-1 opacity-60">{currentTicket.tierName}</p>
+                      <p className="type text-[11px] uppercase tracking-[0.2em] mt-1 opacity-60">{currentTicket.tierName}</p>
                     </div>
                     <span className="w-2 h-2 bg-black rounded-full animate-pulse"></span>
                  </div>
@@ -272,29 +287,41 @@ export default function TicketDetail() {
                  <div className="bg-white p-8 md:p-10 flex flex-col items-center justify-center group mb-8 relative">
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
-                        <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" />
+                        barcode ? (
+                          <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" />
+                        ) : (
+                          <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20" role="status">
+                            <p className="type text-[11px] uppercase tracking-widest text-black/50">
+                              {codeError ? 'Entry code unavailable' : 'Loading entry code…'}
+                            </p>
+                            {codeError ? (
+                              <p className="type text-[11px] text-black/60 mt-1">Reload the page. If it still doesn't show, contact the organizer.</p>
+                            ) : null}
+                          </div>
+                        )
                       ) : (
                         <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20">
-                          <Lock className="w-8 h-8 text-black/30 mb-3" aria-hidden="true" />
-                          <p className="type text-[10px] uppercase tracking-widest text-black/50">{t('ticket.locked')}</p>
-                          <p className="type text-[10px] text-black/40 mt-1">
+                          <Lock className="w-8 h-8 text-black/60 mb-3" aria-hidden="true" />
+                          <p className="type text-[11px] uppercase tracking-widest text-black/50">{t('ticket.locked')}</p>
+                          <p className="type text-[11px] text-black/60 mt-1">
                             Unlocks 24h before{event.date ? ` · ${formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ' the event'}
                           </p>
                         </div>
                       )}
                       <div className="mt-5 w-full text-center border-t-[3px] border-dashed border-black/20 pt-5 space-y-3">
                         <div>
-                          <p className="type text-[9px] uppercase tracking-widest text-black/40">{t('ticket.event')}</p>
+                          <p className="type text-[11px] uppercase tracking-widest text-black/60">{t('ticket.event')}</p>
                           <p className="disp text-lg text-black tracking-tight leading-none mt-0.5">{event.title}</p>
                         </div>
                         <div className="flex justify-between items-end text-left pt-1">
                            <div>
-                             <p className="type text-[9px] uppercase tracking-widest text-black/40">{t('ticket.holder')}</p>
+                             <p className="type text-[11px] uppercase tracking-widest text-black/60">{t('ticket.holder')}</p>
                              <p className="disp text-base text-black tracking-tight leading-none mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap max-w-[120px]">{currentTicket.attendeeName || user.displayName || user.email || 'Guest'}</p>
                            </div>
                            <div className="text-right">
-                             <p className="type text-[9px] uppercase tracking-widest text-black/40">{t('ticket.passId')}</p>
-                             <p className="type text-[11px] text-black leading-none mt-0.5">{currentTicket.id}</p>
+                             <p className="type text-[11px] uppercase tracking-widest text-black/60">{t('ticket.passId')}</p>
+                             {/* Short non-secret reference (door search takes the last 6). */}
+                             <p className="type text-[11px] text-black leading-none mt-0.5">…{currentTicket.id.slice(-6).toUpperCase()}</p>
                            </div>
                         </div>
                       </div>
@@ -308,7 +335,7 @@ export default function TicketDetail() {
                           <div className="bg-red-600 text-white px-8 py-3 font-black text-2xl uppercase italic tracking-tighter -rotate-12 shadow-2xl skew-x-12">
                              ENTERED
                           </div>
-                          <p className="text-black font-black text-[10px] uppercase tracking-widest mt-4 bg-white px-3 py-1">
+                          <p className="text-black font-black text-[11px] uppercase tracking-widest mt-4 bg-white px-3 py-1">
                              {currentTicket.checkInDate ? `Scanned ${formatInTz(currentTicket.checkInDate.toDate(), event.timezone, { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}` : 'SCANNED'}
                           </p>
                        </div>
@@ -321,7 +348,7 @@ export default function TicketDetail() {
                           <div className="bg-rose-600 text-white px-8 py-3 font-black text-2xl uppercase italic tracking-tighter -rotate-12 shadow-2xl skew-x-12">
                              REFUNDED
                           </div>
-                          <p className="text-black font-black text-[10px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
+                          <p className="text-black font-black text-[11px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
                              {currentTicket.voidedReason || 'Refund issued by organizer'}
                           </p>
                        </div>
@@ -337,13 +364,13 @@ export default function TicketDetail() {
                           <div className="bg-amber-500 text-white px-8 py-3 font-black text-xl uppercase italic tracking-tighter -rotate-6 shadow-2xl skew-x-12">
                              IN TRANSFER
                           </div>
-                          <p className="text-black font-black text-[10px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center">
+                          <p className="text-black font-black text-[11px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center">
                              Cancel the transfer to use this ticket again
                           </p>
                        </div>
                     ) : (
                        <div className="mt-7 flex flex-col items-center">
-                          <p className="type text-[10px] text-black/40 uppercase tracking-widest">{t('ticket.expiresIn')}</p>
+                          <p className="type text-[11px] text-black/60 uppercase tracking-widest">{t('ticket.expiresIn')}</p>
                           <p className="disp text-4xl text-black tracking-tight leading-none mt-1">00:{timeLeft.toString().padStart(2, '0')}</p>
                           <div className="w-40 h-[3px] bg-black/10 mt-3">
                              <div className="h-full bg-brand-primary transition-all duration-1000" style={{ width: `${(timeLeft / 30) * 100}%` }}></div>
@@ -358,7 +385,7 @@ export default function TicketDetail() {
                         onClick={prevTicket}
                         disabled={currentIndex === 0}
                         aria-label="Previous ticket"
-                        className="type flex items-center gap-2 text-white/40 hover:text-white disabled:opacity-0 transition-all text-[10px] uppercase tracking-widest"
+                        className="type flex items-center gap-2 text-white/60 hover:text-white disabled:opacity-0 transition-all text-[11px] uppercase tracking-widest"
                       >
                          <ChevronLeft className="w-4 h-4" aria-hidden="true" />
                          <span>{t('ticket.prev')}</span>
@@ -372,7 +399,7 @@ export default function TicketDetail() {
                         onClick={nextTicket}
                         disabled={currentIndex === tickets.length - 1}
                         aria-label="Next ticket"
-                        className="type flex items-center gap-2 text-white/40 hover:text-white disabled:opacity-0 transition-all text-[10px] uppercase tracking-widest"
+                        className="type flex items-center gap-2 text-white/60 hover:text-white disabled:opacity-0 transition-all text-[11px] uppercase tracking-widest"
                       >
                          <span>{t('ticket.next')}</span>
                          <ChevronRight className="w-4 h-4" aria-hidden="true" />
@@ -385,16 +412,16 @@ export default function TicketDetail() {
                      control otherwise). Cleared server-side on transfer. */}
                  {currentTicket.status === 'active' && !currentTicket.pendingTransferId && (
                    <div className="border border-white/5 bg-black p-6 mb-3">
-                      <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-2">{t('ticket.attendee')}</p>
+                      <p className="type text-white/60 uppercase tracking-widest text-[11px] mb-2">{t('ticket.attendee')}</p>
                       {nameDraft === null ? (
                         <div className="flex items-center justify-between gap-4">
                           <p className="disp text-white text-2xl tracking-wide overflow-hidden text-ellipsis whitespace-nowrap">
-                            {currentTicket.attendeeName || <span className="text-white/35">{user.displayName || user.email || 'You'}</span>}
+                            {currentTicket.attendeeName || <span className="text-white/60">{user.displayName || user.email || 'You'}</span>}
                           </p>
                           <button
                             type="button"
                             onClick={() => setNameDraft(currentTicket.attendeeName || '')}
-                            className="type text-[10px] uppercase tracking-widest text-white/40 hover:text-brand-primary shrink-0"
+                            className="type text-[11px] uppercase tracking-widest text-white/60 hover:text-brand-primary shrink-0"
                           >
                             {currentTicket.attendeeName ? t('ticket.edit') : t('ticket.namePass')}
                           </button>
@@ -423,27 +450,27 @@ export default function TicketDetail() {
                             maxLength={80}
                             onChange={(e) => setNameDraft(e.target.value)}
                             placeholder={t('ticket.namePlaceholder')}
-                            className="type flex-1 min-w-0 bg-black border border-white/20 px-3 py-2 text-white text-sm placeholder-white/30 focus:border-brand-primary outline-none"
+                            className="type flex-1 min-w-0 bg-black border border-white/20 px-3 py-2 text-white text-sm placeholder-white/30 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                           />
-                          <button type="submit" disabled={savingName} className="type text-[10px] uppercase tracking-widest bg-brand-primary text-black px-3 py-2 disabled:opacity-40">
+                          <button type="submit" disabled={savingName} className="type text-[11px] uppercase tracking-widest bg-brand-primary text-black px-3 py-2 disabled:opacity-40">
                             {savingName ? '…' : t('ticket.save')}
                           </button>
-                          <button type="button" onClick={() => setNameDraft(null)} className="type text-[10px] uppercase tracking-widest text-white/40 px-2 py-2">
+                          <button type="button" onClick={() => setNameDraft(null)} className="type text-[11px] uppercase tracking-widest text-white/60 px-2 py-2">
                             {t('common.cancel')}
                           </button>
                         </form>
                       )}
-                      <p className="type text-[9px] text-white/25 mt-2">{t('ticket.nameHint')}</p>
+                      <p className="type text-[11px] text-white/60 mt-2">{t('ticket.nameHint')}</p>
                    </div>
                  )}
 
                  <div className="grid grid-cols-2 gap-px bg-white/5 border border-white/5 mb-10">
                     <div className="p-6 bg-black">
-                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">{t('ticket.level')}</p>
+                       <p className="type text-white/60 uppercase tracking-widest text-[11px] mb-1">{t('ticket.level')}</p>
                        <p className="disp neon text-2xl tracking-wide">{currentTicket.tierName || 'GENERAL'}</p>
                     </div>
                     <div className="p-6 bg-black text-right">
-                       <p className="type text-white/30 uppercase tracking-widest text-[9px] mb-1">{t('ticket.passNo')}</p>
+                       <p className="type text-white/60 uppercase tracking-widest text-[11px] mb-1">{t('ticket.passNo')}</p>
                        <p className="disp text-white text-2xl tracking-wide">{currentIndex + 1} / {tickets.length}</p>
                     </div>
                  </div>
@@ -516,7 +543,7 @@ export default function TicketDetail() {
                               ? "Refunded tickets can't be transferred"
                               : 'A transfer is already pending for this ticket'
                           }
-                          className="type flex items-center justify-center gap-2 bg-white/[0.02] border border-white/5 text-white/20 py-4 text-[11px] uppercase tracking-widest cursor-not-allowed"
+                          className="type flex items-center justify-center gap-2 bg-white/[0.02] border border-white/5 text-white/60 py-4 text-[11px] uppercase tracking-widest cursor-not-allowed"
                         >
                           <Send className="w-4 h-4 text-white/20" />
                           transfer
@@ -526,7 +553,7 @@ export default function TicketDetail() {
                  </div>
               </div>
 
-              <div className="p-7 bg-black border-t border-white/5 flex items-center justify-between type text-[10px] uppercase tracking-widest text-white/25">
+              <div className="p-7 bg-black border-t border-white/5 flex items-center justify-between type text-[11px] uppercase tracking-widest text-white/60">
                  <div className="flex items-center gap-3">
                     <div className="w-6 h-6 bg-brand-primary flex items-center justify-center">
                        <TicketIcon className="text-black w-3.5 h-3.5" />

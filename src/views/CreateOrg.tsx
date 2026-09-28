@@ -16,7 +16,7 @@ import { createOrganization, isValidOrgSlug, slugify } from '../lib/orgs';
 
 const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5';
 const INP =
-  'w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-300 focus:outline-none focus:border-tm-blue focus:ring-2 focus:ring-tm-blue/15 transition-colors';
+  'w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue focus:ring-2 focus:ring-tm-blue/15 transition-colors';
 
 export default function CreateOrg() {
   const { user, openAuthModal } = useAuth();

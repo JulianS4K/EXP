@@ -60,6 +60,11 @@ export interface TevoOrder {
   items?: TevoOrderItem[];
   shipments?: TevoShipment[];
   total?: number | string;
+  /**
+   * TEvo's seller fee on the order (e.g. "0.97" on a 32.48 order, ~3%), taken
+   * out of what the seller is paid. Not `service_fee`, which is the buyer's.
+   */
+  fee?: number | string | null;
   created_at?: string;
   event?: { id?: number; name?: string; occurs_at?: string };
   [key: string]: unknown;

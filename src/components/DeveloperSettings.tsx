@@ -141,7 +141,7 @@ export default function DeveloperSettings({ orgId, canEdit }: { orgId: string; c
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
               placeholder="Key name (e.g. Zapier)"
-              className="flex-1 bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none"
+              className="flex-1 bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
             />
             <button type="button" disabled={busy} onClick={genKey} className="flex items-center gap-1 px-3 py-2 bg-white/10 hover:bg-white/20 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50">
               <Plus className="w-3 h-3" /> New key
@@ -200,7 +200,7 @@ export default function DeveloperSettings({ orgId, canEdit }: { orgId: string; c
               value={hookUrl}
               onChange={(e) => setHookUrl(e.target.value)}
               placeholder="https://your-app.com/webhooks/exos"
-              className="w-full bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none"
+              className="w-full bg-white/5 border border-white/10 px-3 py-2 text-sm text-white focus:border-brand-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
             />
             <div className="flex flex-wrap gap-2">
               {WEBHOOK_EVENT_TYPES.map((t) => (

@@ -27,10 +27,11 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { ArrowLeft, Sun, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getTicket } from '../lib/tickets';
+import { getTicket, syncServerClock } from '../lib/tickets';
 import { Event, Ticket } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { signBarcode, currentBucket } from '../lib/barcode';
+import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 
 export default function WalletPass() {
@@ -40,6 +41,9 @@ export default function WalletPass() {
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [event, setEvent] = useState<Event | null>(null);
   const [barcode, setBarcode] = useState('');
+  // The code couldn't be signed (no secret on this ticket, or no Web Crypto).
+  // There is no unsigned fallback: the door refuses those, so say so instead.
+  const [codeError, setCodeError] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
 
   // Ticket + event load, polled every 15s so an organizer-side void / scan /
@@ -71,8 +75,8 @@ export default function WalletPass() {
 
   // Rotating barcode refresh — same model as TicketDetail. Re-derives
   // the signed payload at every bucket boundary using the per-ticket
-  // secret. Falls back to the legacy unsigned format for tickets that
-  // don't carry a secret (organizer scanner tolerates them as legacy).
+  // secret, on the server-corrected clock (a phone set a few minutes off
+  // would otherwise show a code the door calls expired).
   // Depend on the primitive ticket fields, NOT the whole `ticket` object: the
   // 15s poll above replaces `ticket` with a fresh (equal-id) object every tick,
   // which previously re-ran this effect and reset the countdown to 30 — the
@@ -86,29 +90,40 @@ export default function WalletPass() {
     let cancelled = false;
     let lastBucket = -1;
     const refresh = async () => {
-      const bucket = currentBucket();
+      const bucket = currentBucket(serverNow());
       lastBucket = bucket;
       if (barcodeSecret) {
         try {
           const signed = await signBarcode(ticketId2, uid, barcodeSecret, bucket);
-          if (!cancelled) setBarcode(signed);
+          if (!cancelled) {
+            setBarcode(signed);
+            setCodeError(false);
+          }
           return;
         } catch (err) {
-          console.warn('Falling back to legacy unsigned barcode:', err);
+          console.warn('Could not sign the entry code:', err);
         }
       }
-      if (!cancelled) setBarcode(`T-${ticketId2}:${uid}:${bucket}`);
+      if (!cancelled) {
+        setBarcode('');
+        setCodeError(true);
+      }
     };
     const tick = () => {
       if (cancelled) return;
       // Wall-clock countdown — accurate across re-renders and background-tab
       // timer throttling (a naive decrement drifts when the tab is hidden).
-      const secs = 30 - (Math.floor(Date.now() / 1000) % 30);
-      setTimeLeft(secs === 0 ? 30 : secs);
+      setTimeLeft(secondsLeftInWindow());
       // Re-sign when the 30s bucket actually rolls over.
-      if (currentBucket() !== lastBucket) void refresh();
+      if (currentBucket(serverNow()) !== lastBucket) void refresh();
     };
     void refresh();
+    // Once the server clock is known, re-sign for its window.
+    void syncServerClock().then(() => {
+      if (cancelled) return;
+      void refresh();
+      tick();
+    });
     const interval = setInterval(tick, 1000);
     // Re-issue immediately on return to the tab: a throttled background timer
     // can otherwise leave a stale (expired-bucket) QR on screen at the door.
@@ -233,7 +248,7 @@ export default function WalletPass() {
         >
           <ArrowLeft size={14} aria-hidden="true" /> back
         </button>
-        <div className="type text-[10px] uppercase tracking-widest text-white/30 flex items-center gap-2">
+        <div className="type text-[11px] uppercase tracking-widest text-white/60 flex items-center gap-2">
           <Sun size={12} aria-hidden="true" /> max brightness for best scan
         </div>
       </div>
@@ -261,12 +276,25 @@ export default function WalletPass() {
           <div className="relative flex flex-col items-center">
             <div className={`p-4 bg-white border-[3px] border-black rounded-2xl ${muted ? 'opacity-20 grayscale' : ''}`}>
               {qrUnlocked ? (
-                <QRCodeSVG value={barcode || ticket.id} size={260} level="H" includeMargin={false} fgColor="#000000" />
+                barcode ? (
+                  <QRCodeSVG value={barcode} size={260} level="H" includeMargin={false} fgColor="#000000" />
+                ) : (
+                  <div className="w-[260px] h-[260px] flex flex-col items-center justify-center text-center px-6" role="status">
+                    <p className="type text-[11px] uppercase tracking-widest text-black/50">
+                      {codeError ? 'Entry code unavailable' : 'Loading entry code…'}
+                    </p>
+                    {codeError ? (
+                      <p className="type text-[11px] text-black/60 mt-1">
+                        Reload this page. If it still doesn't show, contact the organizer — a code from here can't be scanned.
+                      </p>
+                    ) : null}
+                  </div>
+                )
               ) : (
                 <div className="w-[260px] h-[260px] flex flex-col items-center justify-center text-center px-6">
-                  <Lock className="w-10 h-10 text-black/30 mb-4" aria-hidden="true" />
+                  <Lock className="w-10 h-10 text-black/60 mb-4" aria-hidden="true" />
                   <p className="type text-[11px] uppercase tracking-widest text-black/50">Entry code locked</p>
-                  <p className="type text-[11px] text-black/40 mt-1">
+                  <p className="type text-[11px] text-black/60 mt-1">
                     Unlocks 24h before{event?.date ? ` · ${formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ' the event'}
                   </p>
                 </div>
@@ -280,7 +308,7 @@ export default function WalletPass() {
                 >
                   {stamp.text}
                 </div>
-                <p className="text-black font-black text-[10px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
+                <p className="text-black font-black text-[11px] uppercase tracking-widest mt-4 bg-white px-3 py-1 text-center max-w-[80%]">
                   {stamp.sub}
                 </p>
               </div>
@@ -289,20 +317,20 @@ export default function WalletPass() {
 
           <div className="mt-6 pt-6 border-t border-dashed border-black/20 flex justify-between items-end">
             <div className="text-left">
-              <p className="type text-[9px] uppercase tracking-widest text-black/40 mb-1">holder</p>
+              <p className="type text-[11px] uppercase tracking-widest text-black/60 mb-1">holder</p>
               <p className="disp text-lg tracking-tight leading-none">
                 {ticket.attendeeName || user.displayName || user.email || 'Guest'}
               </p>
             </div>
             <div className="text-right">
-              <p className="type text-[9px] uppercase tracking-widest text-black/40 mb-1">tier</p>
+              <p className="type text-[11px] uppercase tracking-widest text-black/60 mb-1">tier</p>
               <p className="disp text-lg tracking-tight leading-none">{ticket.tierName || 'GA'}</p>
             </div>
           </div>
 
           {!muted && qrUnlocked ? (
             <div className="mt-6 flex flex-col items-center">
-              <p className="type text-[9px] text-black/40 uppercase tracking-widest">code refreshes in</p>
+              <p className="type text-[11px] text-black/60 uppercase tracking-widest">code refreshes in</p>
               <p className="disp text-3xl text-black tracking-tight leading-none mt-1">
                 00:{timeLeft.toString().padStart(2, '0')}
               </p>
@@ -316,13 +344,15 @@ export default function WalletPass() {
           ) : null}
 
           <div className="mt-6 text-center">
-            <p className="type text-[9px] text-black/30 break-all">{ticket.id}</p>
+            {/* A short, non-secret reference (door staff can search the last 6).
+                The full id is never shown: it isn't an entry code. */}
+            <p className="type text-[11px] text-black/60">pass ref …{ticket.id.slice(-6).toUpperCase()}</p>
           </div>
         </div>
       </div>
 
       <div className="px-6 pb-6 text-center relative z-10">
-        <p className="type text-[9px] uppercase tracking-[0.3em] text-white/20">
+        <p className="type text-[11px] uppercase tracking-[0.3em] text-white/60">
           Exos · Scan-Only Pass
         </p>
       </div>

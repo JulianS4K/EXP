@@ -236,14 +236,14 @@ export default function OrganizerDashboard() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search by title, location, or category…"
                 aria-label="Search events"
-                className="w-full bg-white border border-slate-200 pl-12 pr-4 py-3 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-brand-primary"
+                className="w-full bg-white border border-slate-200 pl-12 pr-4 py-3 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
               />
             </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               aria-label="Filter by status"
-              className="bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-brand-primary"
+              className="bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
             >
               <option value="all">All statuses</option>
               <option value="published">Published</option>

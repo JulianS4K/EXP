@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Ticket, User, LogOut, PlusCircle, LayoutDashboard, Bell } from 'lucide-react';
-import { motion } from 'motion/react';
 import { useT } from '../context/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 

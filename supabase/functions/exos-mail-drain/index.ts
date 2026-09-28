@@ -25,6 +25,13 @@
 //                                 app (checkout-abandoned); such rows are held back
 //                                 (retried) while it's unset. _shared/mail-render.ts.
 //
+// Payload rows (mig 20260929071000): rows queued by exos_mail_enqueue carry a
+// JSON payload and no html. The claim passes p_render_payload => true so
+// they're handed out, and _shared/mail-templates.ts renders subject + html
+// here. A row that won't render (unknown template, bad payload, no app URL)
+// is marked failed and retried like a provider error. Scheduled follow-ups
+// are queued by exos_send_mail_followups(); its cron line is in docs/email.md.
+//
 // Cron (operator / A1 — cron.* is operator-gated):
 //   select cron.schedule('exos-mail-drain-2min', '*/2 * * * *', $cron$
 //     do $b$ begin
@@ -37,6 +44,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { normalizeAppUrl, renderMail } from "../_shared/mail-render.ts";
+import { renderTemplate } from "../_shared/mail-templates.ts";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -46,6 +54,8 @@ interface MailRow {
   subject: string;
   html: string;
   attempts: number;
+  template?: string;
+  payload?: unknown;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -77,6 +87,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { data: batch, error: claimErr } = await sb.rpc("exos_mail_claim_batch", {
     p_limit: limit,
     p_max_attempts: maxAttempts,
+    p_render_payload: true,
   });
   if (claimErr) {
     console.error("exos-mail-drain: claim failed", claimErr);
@@ -99,8 +110,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   for (const row of rows) {
-    const rendered = renderMail(row.html, unsubById.get(row.id), appUrl);
-    if (!rendered.ok) {
+    let subject = row.subject;
+    let html = row.html;
+    if (row.payload !== null && row.payload !== undefined) {
+      const t = renderTemplate(row.template ?? "", row.payload, appUrl);
+      if ("error" in t) {
+        await sb.rpc("exos_mail_mark", {
+          p_id: row.id, p_ok: false, p_error: t.error, p_max_attempts: maxAttempts,
+        });
+        failed++;
+        continue;
+      }
+      subject = t.subject;
+      html = t.html;
+    }
+    const rendered = renderMail(html, unsubById.get(row.id), appUrl);
+    // `in` narrows the union whatever the checker's strictness.
+    if ("error" in rendered) {
       await sb.rpc("exos_mail_mark", {
         p_id: row.id, p_ok: false, p_error: rendered.error, p_max_attempts: maxAttempts,
       });
@@ -117,7 +143,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         body: JSON.stringify({
           from,
           to: [row.to_email],
-          subject: row.subject,
+          subject,
           html: rendered.html,
           ...(Object.keys(rendered.headers).length > 0 ? { headers: rendered.headers } : {}),
         }),

@@ -119,7 +119,7 @@ export default function RefundPanel({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by buyer email or order id"
-          className="flex-1 min-w-[200px] border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-1.5 text-sm rounded-lg"
+          className="flex-1 min-w-[200px] border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-1.5 text-sm rounded-lg"
         />
         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
           {orders.length} paid order{orders.length === 1 ? '' : 's'} · {formatCents(totalRefundable, currency)} refundable
@@ -333,7 +333,7 @@ function OrderRefundForm({ sessionId, onChanged }: { sessionId: string; onChange
                         value={picked[t.ticketId]}
                         onChange={(e) => setPicked((p) => ({ ...p, [t.ticketId]: e.target.value }))}
                         placeholder="Full, or a partial amount"
-                        className="w-40 border-2 border-slate-200 focus:border-slate-900 outline-none px-2 py-1 rounded-lg"
+                        className="w-40 border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-2 py-1 rounded-lg"
                       />
                     )}
                   </li>
@@ -349,7 +349,7 @@ function OrderRefundForm({ sessionId, onChanged }: { sessionId: string; onChange
               value={amountText}
               onChange={(e) => setAmountText(e.target.value)}
               placeholder={`Amount, up to ${formatCents(preview.refundableCents, cur)}`}
-              className="w-56 border-2 border-slate-200 focus:border-slate-900 outline-none px-2 py-1.5 rounded-lg mb-3"
+              className="w-56 border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-2 py-1.5 rounded-lg mb-3"
             />
           )}
 
@@ -359,7 +359,7 @@ function OrderRefundForm({ sessionId, onChanged }: { sessionId: string; onChange
             rows={2}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Reason (optional, kept in the audit log)"
-            className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm rounded-lg resize-y mb-2"
+            className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm rounded-lg resize-y mb-2"
           />
           <div className="flex flex-wrap items-center gap-3">
             <span className={plan.ok ? 'text-slate-500' : 'text-red-500'}>
@@ -498,7 +498,7 @@ function RefundEveryone({
             rows={2}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Reason (optional), e.g. show cancelled"
-            className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm rounded-lg resize-y mb-2"
+            className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm rounded-lg resize-y mb-2"
           />
           <label className="block mb-2 text-slate-600">
             Type <span className="font-mono font-bold">{CONFIRM_WORD}</span> to confirm
@@ -506,7 +506,7 @@ function RefundEveryone({
               type="text"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              className="mt-1 w-full border-2 border-slate-200 focus:border-red-500 outline-none px-3 py-1.5 rounded-lg"
+              className="mt-1 w-full border-2 border-slate-200 focus:border-red-500 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-1.5 rounded-lg"
               autoComplete="off"
             />
           </label>

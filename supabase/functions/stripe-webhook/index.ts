@@ -13,8 +13,9 @@
 //        stranded charge. (Was: "operator refunds — TODO".)
 //   checkout.session.async_payment_failed -> mark the pending session failed.
 //   checkout.session.expired              -> mark the pending session expired.
-//   charge.refunded  -> record the refund(s) in the ledger; VOID tickets only on
-//                       a FULL refund. A partial refund is recorded (session ->
+//   charge.refunded, charge.refund.updated, refund.updated, refund.failed
+//                    -> record the refund(s) in the ledger; VOID tickets only
+//                       once SUCCEEDED refunds cover the charge. A partial refund is recorded (session ->
 //                       partially_refunded) but does NOT void the whole order —
 //                       which tickets to cancel is an operator decision, not
 //                       derivable from a Stripe amount.
@@ -60,6 +61,76 @@ const stripe = new Stripe(stripeKey, {
   apiVersion: "2024-06-20",
 });
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
+
+// Every refund on a PaymentIntent, settled: void the whole order once the
+// SUCCEEDED refunds cover the charge (a pending refund can still fail, and a
+// partial one leaves the tickets alone: cancelling specific ones is an
+// operator action), record each refund by its own id (idempotent), and
+// finalize Exos-initiated ones (exos-refund's request row) in case that
+// function died between the Stripe call and its own finalize. Returns a 500
+// Response for Stripe to retry, or null when everything landed.
+async function settleRefunds(
+  sb: SupabaseClient,
+  stripe: Stripe,
+  sessionId: string,
+  pi: string,
+  charge: Stripe.Charge,
+  providerEventId: string,
+): Promise<Response | null> {
+  // Since API 2022-11-15 the Charge no longer embeds `refunds`, so list them;
+  // never record a cumulative amount under a NULL id.
+  let refunds: Stripe.Refund[];
+  try {
+    refunds = [];
+    for await (const rf of stripe.refunds.list({ payment_intent: pi, limit: 100 })) refunds.push(rf);
+  } catch (e) {
+    console.error(`stripe-webhook: listing refunds for PI ${pi} failed`, e);
+    return new Response("refund lookup error", { status: 500 });
+  }
+  const chargeAmount = charge.amount ?? 0;
+  const succeeded = refunds.filter((rf) => rf.status === "succeeded").reduce((n, rf) => n + (rf.amount ?? 0), 0);
+  if (chargeAmount > 0 && succeeded >= chargeAmount) {
+    // exos_refund_checkout voids whatever is still active (idempotent).
+    const { error } = await sb.rpc("exos_refund_checkout", { p_session_id: sessionId, p_reason: "stripe refund" });
+    if (error) {
+      console.error(`stripe-webhook: refund void failed for ${sessionId}`, error);
+      return new Response("refund handling error", { status: 500 });
+    }
+  }
+  const allowed = new Set(["pending", "succeeded", "failed", "canceled"]);
+  for (const rf of refunds) {
+    const { error } = await sb.rpc("exos_record_refund", {
+      p_session_id: sessionId,
+      p_refund_id: rf.id,
+      p_amount_cents: rf.amount ?? 0,
+      p_status: allowed.has(rf.status ?? "") ? rf.status : "pending",
+      p_payment_intent: pi,
+      p_reason: rf.reason ?? "stripe refund",
+      p_currency: rf.currency ?? charge.currency ?? "usd",
+      p_provider_event_id: providerEventId,
+    });
+    if (error) {
+      console.error(`stripe-webhook: record_refund ${rf.id} failed for ${sessionId}`, error);
+      return new Response("refund record error", { status: 500 });
+    }
+    // Organizer refund (mig 20260926040000): its tickets are voided once the
+    // refund succeeds (mig 20260929030000); a failed one leaves them active.
+    const requestId = rf.metadata?.exos_refund_request_id;
+    if (requestId) {
+      const { error: fErr } = await sb.rpc("exos_refund_finalize", {
+        p_request_id: requestId,
+        p_stripe_refund_id: rf.id,
+        p_status: ledgerRefundStatus(rf.status),
+        p_error: rf.failure_reason ?? null,
+      });
+      if (fErr && fErr.code !== "P0002") {
+        console.error(`stripe-webhook: refund request ${requestId} finalize failed`, fErr);
+        return new Response("refund request error", { status: 500 });
+      }
+    }
+  }
+  return null;
+}
 
 // Resolve a Stripe PaymentIntent id back to our checkout session id. The ledger
 // (exos_order_payments) is the reliable source — exos_record_payment persists
@@ -279,88 +350,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
         break;
       }
 
-      case "charge.refunded": {
-        const charge = event.data.object as Stripe.Charge;
-        const pi = typeof charge.payment_intent === "string"
-          ? charge.payment_intent
-          : charge.payment_intent?.id;
+      // A refund created (charge.refunded) or changing state later: a pending
+      // refund that succeeds or fails (refund.updated / charge.refund.updated /
+      // refund.failed). Both settle every refund on the PaymentIntent the same way.
+      case "charge.refunded":
+      case "charge.refund.updated":
+      case "refund.updated":
+      case "refund.failed": {
+        const obj = event.data.object as Stripe.Charge | Stripe.Refund;
+        const pi = typeof obj.payment_intent === "string" ? obj.payment_intent : obj.payment_intent?.id;
         if (!pi) break;
         const sessionId = await sessionIdForPaymentIntent(sb, pi);
         if (!sessionId) {
-          console.error(`stripe-webhook: charge.refunded — no session for PI ${pi}`);
+          console.error(`stripe-webhook: ${event.type} — no session for PI ${pi}`);
           break;
         }
-
-        // charge.refunded fires for PARTIAL refunds too. Void the whole order
-        // ONLY when the charge is fully refunded; a partial refund is recorded in
-        // the ledger (reconciles session -> partially_refunded) but leaves the
-        // tickets alone (cancelling specific ones is an operator action, not
-        // derivable from a Stripe amount).
-        const chargeAmount = charge.amount ?? 0;
-        const fullyRefunded = chargeAmount > 0 && (charge.amount_refunded ?? 0) >= chargeAmount;
-
-        // Void on a full refund, then record. exos_refund_checkout voids whatever
-        // is still active regardless of session status (mig 20260924205115), so
-        // the order no longer matters for correctness; voiding first just keeps
-        // the session's failure_reason as the refund reason.
-        if (fullyRefunded) {
-          const { error } = await sb.rpc("exos_refund_checkout", {
-            p_session_id: sessionId,
-            p_reason: "stripe refund",
-          });
-          if (error) {
-            // 500 -> Stripe retries; exos_refund_checkout is idempotent.
-            console.error(`stripe-webhook: refund void failed for ${sessionId}`, error);
-            return new Response("refund handling error", { status: 500 });
-          }
-        }
-
-        // Record every refund on the PaymentIntent by its own id (idempotent on
-        // refund_id). Since API 2022-11-15 the Charge no longer embeds
-        // `refunds`, so list them; never record a cumulative amount under a NULL
-        // id (it double-counted and could mark a session refunded without a void).
-        // A failure returns 500 so Stripe retries instead of losing the refund.
-        const allowed = new Set(["pending", "succeeded", "failed", "canceled"]);
-        let refunds: Stripe.Refund[];
+        let charge: Stripe.Charge;
         try {
-          refunds = [];
-          for await (const rf of stripe.refunds.list({ payment_intent: pi, limit: 100 })) refunds.push(rf);
+          charge = obj.object === "charge"
+            ? obj as Stripe.Charge
+            : await stripe.charges.retrieve(typeof (obj as Stripe.Refund).charge === "string"
+              ? (obj as Stripe.Refund).charge as string
+              : ((obj as Stripe.Refund).charge as Stripe.Charge).id);
         } catch (e) {
-          console.error(`stripe-webhook: listing refunds for PI ${pi} failed`, e);
-          return new Response("refund lookup error", { status: 500 });
+          console.error(`stripe-webhook: ${event.type} — charge lookup failed for PI ${pi}`, e);
+          return new Response("charge lookup error", { status: 500 });
         }
-        for (const rf of refunds) {
-          const { error } = await sb.rpc("exos_record_refund", {
-            p_session_id: sessionId,
-            p_refund_id: rf.id,
-            p_amount_cents: rf.amount ?? 0,
-            p_status: allowed.has(rf.status ?? "") ? rf.status : "pending",
-            p_payment_intent: pi,
-            p_reason: rf.reason ?? "stripe refund",
-            p_currency: rf.currency ?? charge.currency ?? "usd",
-            p_provider_event_id: event.id,
-          });
-          if (error) {
-            console.error(`stripe-webhook: record_refund ${rf.id} failed for ${sessionId}`, error);
-            return new Response("refund record error", { status: 500 });
-          }
-          // Organizer refund from exos-refund (mig 20260926040000): settle its
-          // request row too, in case the function died between the Stripe call
-          // and its own finalize. Idempotent; a no-op when already settled.
-          const requestId = rf.metadata?.exos_refund_request_id;
-          if (requestId) {
-            const { error: fErr } = await sb.rpc("exos_refund_finalize", {
-              p_request_id: requestId,
-              p_stripe_refund_id: rf.id,
-              p_status: ledgerRefundStatus(rf.status),
-              p_error: rf.failure_reason ?? null,
-            });
-            if (fErr && fErr.code !== "P0002") {
-              console.error(`stripe-webhook: refund request ${requestId} finalize failed`, fErr);
-              return new Response("refund request error", { status: 500 });
-            }
-          }
-        }
+        const failed = await settleRefunds(sb, stripe, sessionId, pi, charge, event.id);
+        if (failed) return failed;
         break;
       }
 

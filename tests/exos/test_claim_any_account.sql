@@ -49,7 +49,7 @@ CREATE OR REPLACE FUNCTION pg_temp.as_user(p_uid text, p_email text) RETURNS voi
 $$;
 CREATE OR REPLACE FUNCTION pg_temp.claim_fails(p_tr uuid) RETURNS boolean LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM public.exos_claim_transfer(p_tr);
+  PERFORM public.exos_test_claim(p_tr);
   RETURN false;
 EXCEPTION WHEN raise_exception OR insufficient_privilege THEN RETURN true;
 END $$;
@@ -78,7 +78,7 @@ BEGIN
   SELECT barcode_secret INTO old_secret FROM public.exos_tickets WHERE id = tk;
 
   PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b1', 'real-me@x.com');
-  IF public.exos_claim_transfer(tr) <> tk THEN RAISE EXCEPTION 'L2 FAIL: wrong ticket id'; END IF;
+  IF public.exos_test_claim(tr) <> tk THEN RAISE EXCEPTION 'L2 FAIL: wrong ticket id'; END IF;
   SELECT * INTO t FROM public.exos_tickets WHERE id = tk;
   IF t.owner_id <> '7a000000-0000-0000-0000-0000000000b1' OR t.buyer_id <> t.owner_id
      OR t.pending_transfer_id IS NOT NULL OR t.barcode_secret = old_secret
@@ -124,7 +124,7 @@ BEGIN
   UPDATE public.exos_tickets SET pending_transfer_id = tr WHERE id = tk;
   -- The friend signs in with a different account of theirs.
   PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b5', 'friends-other@x.com');
-  PERFORM public.exos_claim_transfer(tr);
+  PERFORM public.exos_test_claim(tr);
   IF (SELECT owner_id FROM public.exos_tickets WHERE id = tk) <> '7a000000-0000-0000-0000-0000000000b5' THEN
     RAISE EXCEPTION 'L4 FAIL: a different account could not claim a friend transfer';
   END IF;
@@ -166,7 +166,7 @@ BEGIN
   FOR m, n IN
     SELECT ml.html, (SELECT count(*) FROM public.exos_transfers tr
                       WHERE tr.receiver_email = ml.to_email AND tr.status = 'pending'
-                        AND ml.html LIKE '%href="{{app_url}}/claim/' || tr.id || '"%')
+                        AND ml.html LIKE '%href="{{app_url}}/claim/' || tr.id || '?k=' || public.exos_test_claim_key(tr.id) || '"%')
       FROM public.exos_mail ml
      WHERE ml.to_email IN ('guest-a@x.com','guest-b@x.com','door@x.com') AND ml.template = 'transfer-initiated'
   LOOP
@@ -192,7 +192,7 @@ BEGIN
   tr := public.exos_create_transfer(tk, '  Pal@X.com ', '  <b>Pal</b>   O''Neil ');
   SELECT html INTO m FROM public.exos_mail WHERE template = 'transfer-sent' AND to_email = 'friends-other@x.com';
   IF m IS NULL OR m NOT LIKE '%&lt;b&gt;Pal&lt;/b&gt; O''Neil%' OR m NOT LIKE '%(pal@x.com)%'
-     OR m NOT LIKE '%href="{{app_url}}/claim/' || tr || '"%' OR m NOT LIKE '%Link Show%' OR m LIKE '%<b>Pal%' THEN
+     OR m NOT LIKE '%href="{{app_url}}/claim/' || tr || '?k=' || public.exos_test_claim_key(tr) || '"%' OR m NOT LIKE '%Link Show%' OR m LIKE '%<b>Pal%' THEN
     RAISE EXCEPTION 'L7 FAIL: sent receipt %', m;
   END IF;
   IF (SELECT notify_sender AND receiver_name = '<b>Pal</b> O''Neil' FROM public.exos_transfers WHERE id = tr) IS NOT TRUE THEN
@@ -201,7 +201,7 @@ BEGIN
 
   -- someone-else claims it from their own account
   PERFORM pg_temp.as_user('7a000000-0000-0000-0000-0000000000b2', 'someone-else@x.com');
-  PERFORM public.exos_claim_transfer(tr);
+  PERFORM public.exos_test_claim(tr);
   SELECT html INTO m FROM public.exos_mail WHERE template = 'transfer-claimed' AND to_email = 'friends-other@x.com';
   IF m IS NULL OR m NOT LIKE '%accepted on%' OR m NOT LIKE '%<strong>someone-else@x.com</strong>%'
      OR m NOT LIKE '%sent to &lt;b&gt;Pal&lt;/b&gt; O''Neil (pal@x.com)%' OR m NOT LIKE '%' || tr || '%' THEN

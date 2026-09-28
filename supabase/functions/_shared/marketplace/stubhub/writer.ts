@@ -14,12 +14,18 @@
 //                      approval is recorded, and which endpoints it covers.
 //                      An endpoint outside that list is refused.
 //
+// Exos listings only: the StubHub seller account also carries Terminal-2
+// broker inventory, so every listing write needs an Exos listing id
+// ("ex…", ../listingIds.ts) as its external_id, and every sale write needs
+// the sale read back with its listing's external id, which must be Exos's.
+//
 // Retries: writes retry only on 429 (StubHub didn't process the request).
 // A 5xx or network error on a create is ambiguous, so it is never retried
 // blindly; `createOrAdoptListing` resolves it on the next run by looking the
 // listing up by `external_id` first.
 
 import type { StubHubClient, StubHubScope } from './client.ts';
+import { isExosListingId } from '../listingIds.ts';
 import { StubHubError } from './client.ts';
 import { STUBHUB_ENDPOINTS, type EndpointName } from './endpoints.ts';
 import {
@@ -150,6 +156,24 @@ function validateAuthorization(auth: WriteAuthorization): string | null {
   return null;
 }
 
+/** A sale as read back from StubHub: its id and the external id of the listing it sold from. */
+export interface ExosSaleRef {
+  id: number;
+  external_listing_id?: string | null;
+}
+
+function assertExosListing(endpoint: string, externalId: string | null | undefined): void {
+  if (!isExosListingId(externalId)) {
+    throw new WriteNotAuthorizedError(endpoint, `"${String(externalId)}" is not an Exos listing; the account may carry broker listings`);
+  }
+}
+
+function saleIdOf(endpoint: string, sale: ExosSaleRef): number {
+  assertExosListing(endpoint, sale?.external_listing_id);
+  if (!Number.isInteger(sale.id) || sale.id <= 0) throw new WriteNotAuthorizedError(endpoint, `not a StubHub sale id: ${String(sale.id)}`);
+  return sale.id;
+}
+
 export class StubHubWriter {
   private readonly mode: WriterMode;
   private readonly cfg: TransportConfig | null;
@@ -215,6 +239,7 @@ export class StubHubWriter {
 
   /** POST /sellerlistings: StubHub maps (or creates) the event from the text we send. */
   createListingForRequestedEvent(req: CreateRequestedEventListingRequest) {
+    assertExosListing('createSellerListingForRequestedEvent', (req as { external_id?: string })?.external_id);
     return this.write<SellerListing>('createSellerListingForRequestedEvent', { body: req });
   }
 
@@ -241,6 +266,7 @@ export class StubHubWriter {
   }
 
   createSellerListing(eventId: number, req: CreateSellerListingRequest) {
+    assertExosListing('createSellerListing', req?.external_id);
     return this.write<SellerListing>('createSellerListing', { path: { eventId }, body: req });
   }
 
@@ -262,38 +288,42 @@ export class StubHubWriter {
   // ── 2. Listing management ──────────────────────────────────────────
 
   updateListing(externalId: string, req: UpdateSellerListingRequest) {
+    assertExosListing('updateSellerListingByExternalId', externalId);
     return this.write<SellerListing>('updateSellerListingByExternalId', { path: { externalId }, body: req });
   }
 
   delistListing(externalId: string) {
+    assertExosListing('deleteSellerListingByExternalId', externalId);
     return this.write<null>('deleteSellerListingByExternalId', { path: { externalId } });
   }
 
   // ── 3. Sale fulfilment ─────────────────────────────────────────────
 
-  updateSale(saleId: number, req: UpdateSaleRequest) {
+  /** Every sale write takes the sale as read back, so its listing can be checked. */
+  updateSale(sale: ExosSaleRef, req: UpdateSaleRequest) {
+    const saleId = saleIdOf('updateSale', sale);
     return this.write<Sale>('updateSale', { path: { saleId }, body: req });
   }
 
-  confirmSale(saleId: number) {
-    return this.updateSale(saleId, confirmSaleRequest());
+  confirmSale(sale: ExosSaleRef) {
+    return this.updateSale(sale, confirmSaleRequest());
   }
 
-  reportMobileTransfer(saleId: number, provider: MobileTransferProvider, confirmationNumber: string) {
-    return this.updateSale(saleId, mobileTransferRequest(provider, confirmationNumber));
+  reportMobileTransfer(sale: ExosSaleRef, provider: MobileTransferProvider, confirmationNumber: string) {
+    return this.updateSale(sale, mobileTransferRequest(provider, confirmationNumber));
   }
 
   /** Exos default delivery: one claim URL per ticket (see fulfilment.ts). */
-  deliverETicketUrls(saleId: number, urls: string[], ticketCount: number) {
-    return this.updateSale(saleId, eticketUrlsRequest(urls, ticketCount));
+  deliverETicketUrls(sale: ExosSaleRef, urls: string[], ticketCount: number) {
+    return this.updateSale(sale, eticketUrlsRequest(urls, ticketCount));
   }
 
-  attachETickets(saleId: number, eticketIds: number[]) {
-    return this.updateSale(saleId, attachETicketsRequest(eticketIds));
+  attachETickets(sale: ExosSaleRef, eticketIds: number[]) {
+    return this.updateSale(sale, attachETicketsRequest(eticketIds));
   }
 
   /** Report a problem with the sale. Irreversible on StubHub's side. */
-  rejectSale(saleId: number) {
-    return this.write<null>('rejectSale', { path: { saleId } });
+  rejectSale(sale: ExosSaleRef) {
+    return this.write<null>('rejectSale', { path: { saleId: saleIdOf('rejectSale', sale) } });
   }
 }

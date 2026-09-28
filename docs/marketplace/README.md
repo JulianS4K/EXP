@@ -24,8 +24,8 @@ charter's §6.1 carve-out process.
 
 ## StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats side by side
 
-StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats are wired; the rest come later, as
-adapters in the same layer. What each one offers, and what Exos standardized
+StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats are wired (Ticket
+Evolution too, in `tevo/`); the rest come later, as adapters in the same layer. What each one offers, and what Exos standardized
 on so that one Exos model fits all of them (mig `20260927050000`,
 `_shared/marketplace/exosListing.ts`):
 
@@ -38,7 +38,7 @@ on so that one Exos model fits all of them (mig `20260927050000`,
 | Our listing id | `external_id` | `seller_listing_id` (≤ 32 chars) | `TicketID` (examples numeric) | `externalTicketId` (≤ 100 chars) | `ticketId` (`internalTicketId` in queries) | `ex<base32 allocation id><n>`, stable across re-plans |
 | Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | no (CUSTOM splits only) | no | **listings of at most max per order** |
 | Seats | optional | required with a row | optional | optional (`lowSeat` / `highSeat`) | optional, can be hidden (`hideSeats`) | internal GA seat numbers per listing; row `GA` |
-| Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | ANY / NEVER_LEAVE_ONE / … | ANY / NEVERLEAVEONE / … | any, within the listing |
+| Split | Any / AvoidOne / Pairs / None | ANY / DONTLEAVEONE / CUSTOM (`splits`) | ANY / NEVERLEAVEONE / CUSTOM (`Splitvalue`) / NOSPLIT | ANY / NEVER_LEAVE_ONE / CUSTOM (`splitValuesSet`) / NO_SPLIT | ANY / NEVERLEAVEONE / CUSTOM (`splitValue`) | **one policy per ticket type** (any, don't leave one, pairs, all together), translated per marketplace (`listingStandard.ts`) |
 | Delivery type | `MobileTransfer`, else `ElectronicTransfer` (from the event's accepted types) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | `ELECTRONIC` + `electronicTransfer` | **mobile transfer, else electronic transfer, everywhere** (`EXOS_TRANSFER_STOCK`); the buyer gets an Exos claim link |
 | Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | full PUT / DELETE by external id (100 per call) | full PUT (Vivid id read back by our id) / DELETE by `internalTicketId` | one diff (create / update / delete) against what the marketplace has |
 | Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | webhooks (unsigned: read back) + `GET /rest/sales` | **polling only**: `GET /v1/getOrders` (XML), `getOrder` | normalized to one `MarketplaceSale` |
@@ -57,6 +57,69 @@ with the event as text (name, venue, venue-local date and time) and a stable
 only renames the fields (StubHub `listingPlan.ts`, SeatGeek `listingPlan.ts`,
 Gametime `inventory.ts`, GoTickets and Vivid Seats `listingPlan.ts`). Blocks are the one
 per-order cap that works on all of them, so StubHub moved from one display-capped listing to the same blocks.
+
+### Seller fees and net-equal pricing (`_shared/marketplace/fees.ts`, mig `20260929062000`)
+
+An organizer nets the same whichever store sells the ticket. Each marketplace takes a seller fee out of the price
+Exos lists at, so Exos lists at the smallest price whose payout is the Exos price after the fee, for every quantity (40.00
+nets 40.00). Whatever a marketplace adds on top for its buyers is its own markup: Exos can't
+see it and doesn't need it. An organizer's marketplace price in the grid still wins when it's higher.
+
+| Store | Seller fee | Evidence | Lists 40.00 at |
+|---|---|---|---|
+| Ticket Evolution | 3% of the order total, to the cent, half up (`order.fee`) | 4,371 of 4,371 S4K sales, May-Sep 2026 | 41.24 (fee 1.24, nets 40.00) |
+| SeatGeek | 5% of the subtotal, unrounded (`fees`; `total` = subtotal - fees) | 8,506 of 8,507 orders since March 2026 (one at 9.75%) | 42.11 (fee 2.1055, nets 40.00) |
+| StubHub, Gametime, GoTickets, Vivid | unknown: their sales report the payout only | S4K's list prices aren't in Terminal's data | 40.00 until measured |
+
+Every sale records the per-ticket price its listing carried (`exos_marketplace_orders.list_unit_price`, from the
+plan entry's `unit_price` by `listing_ref`, set once) and `marketplace_fee` = listed price x quantity - proceeds.
+The Exos fee applies here too: 3% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
+to Exos, like the 3% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
+organizer 38.80 on a marketplace and 37.34 on Exos; the marketplace's fee already covers its card processing.
+`exos_marketplace_fee_rates` shows each store's realized rate over 180 days: it confirms the known rates, and once
+a store with an unknown rate sells, its rate goes into `SELLER_FEES`. TEvo proceeds are net of `order.fee`, and
+SeatGeek's sub-cent `total` is rounded to the cent.
+
+### The listing standard (`_shared/marketplace/listingStandard.ts`)
+
+The event is standardized in `eventStandard.ts` (title, section, category); the
+listing in `listingStandard.ts`:
+
+**Split policy.** One per ticket type (`exos_ticket_tiers.market_split`, mig
+`20260929061000`, set in the Marketplaces grid), sent to every marketplace in its
+own words. A custom list always ends at the listing's quantity (SeatGeek falls
+back to DEFAULT otherwise).
+
+| Exos policy | Buyer can take (listing of 4) | StubHub | SeatGeek | Gametime | GoTickets | Vivid Seats | TEvo |
+|---|---|---|---|---|---|---|---|
+| `any` (default) | 1, 2, 3, 4 | Any | ANY | ANY | ANY | ANY | ANY |
+| `no_single` | 1, 2, 4 | AvoidOne | DONTLEAVEONE | NEVERLEAVEONE | NEVER_LEAVE_ONE | NEVERLEAVEONE | NEVERLEAVEONE |
+| `pairs` | 2, 4 | Pairs | CUSTOM `2,4` | CUSTOM `2:4` | CUSTOM `[2,4]` | CUSTOM `2,4` | CUSTOM `[2,4]` |
+| `together` | 4 | None | CUSTOM `4` | NOSPLIT | NO_SPLIT | CUSTOM `4` | NONE |
+
+Pairs listings are even: blocks are capped at the max per order rounded down to
+even, and the top seat of an odd run is held back (the plan's `notices` say how
+many) until it pairs up. Gametime's `Splitvalue` and Vivid's `splitValue` formats
+aren't documented beyond an example / "string", so a plan with a custom split says
+so in `notices`. Notices never block a writer; `unresolved` does.
+
+**Listing ids.** Every listing carries the Exos id `ex<base32 allocation id><n>`
+(30 to 32 characters, stable across re-plans) and every planner refuses anything
+else (`assertListingId`):
+
+| | Field | Documented limit | Comes back on the sale as |
+|---|---|---|---|
+| StubHub | `external_id` | none | `external_listing_id` |
+| SeatGeek | `seller_listing_id` | 32 | `listing.id` |
+| Gametime | `TicketID` | none (examples numeric) | `source_id` / `listing_reference_id` |
+| GoTickets | `externalTicketId` | 100 | `externalTicketId` |
+| Vivid Seats | `ticketId` | none | `brokerTicketId` |
+| TEvo | `internal_notes` (+ integer `remote_id`, `exos_tevo_remote_ids`) | remote_id: positive int | `remote_id` |
+
+**Fields.** `LISTING_FIELD_MAP` names, per marketplace, the field for each
+standard value (id, quantity, section, row, seats, price, split, split values,
+delivery type, in-hand date, notes); a test checks every planner fills exactly
+those.
 
 **Stored plans** share one shape: `{ channel, listings: [{ listing_id,
 seat_from, seat_thru, quantity, request: { endpoint, method, path, body } }],
@@ -351,18 +414,56 @@ Everything that would change something on StubHub is stored as a plan
 is not a StubHub write, so it goes out as soon as `exos-marketplace-sales`
 runs.
 
-Going live needs:
-- the migrations applied (`20260926190000`, `191000`, `192000`, `193000`, `194000`,
-  `20260927010000`, `020000`, `030000`);
-- `exos-distribute` and `exos-marketplace-sales` deployed with crons
-  (`exos-marketplace-sales` with `--no-verify-jwt`);
-- the secrets set: `EXOS_APP_BASE_URL`, `STUBHUB_*`, and
-  `STUBHUB_WEBHOOK_AUTHORIZATION`;
-- StubHub seller API access;
-- an operator `WriteAuthorization` for the specific endpoints;
-- a live branch that sends the planned request.
+Going live needs these, all operator-gated:
+- **The migrations applied**, in order. The marketplace chain is the second
+  loop of `tests/exos/run_p0.sh` (`scripts/check-migrations.sh` fails CI if a
+  newer `*exos*` migration is missing from it):
+  `20260926190000_exos_stubhub_event_request`, `…191000_exos_channel_event_links`,
+  `…192000_exos_marketplace_orders`, `…193000_exos_channel_allocations`,
+  `…194000_exos_listing_plan_account_flags`, `20260927010000_exos_claim_any_account`,
+  `…020000_exos_seatgeek_channel_label`, `…030000_exos_marketplace_sync`,
+  `…040000_exos_gametime_channel`, `…050000_exos_marketplace_standard`,
+  `20260928010000_exos_marketplace_pools`, `…020000_exos_gotickets_channel`,
+  `…030000_exos_vivid_channel`, `…040000_exos_marketplace_scarcity`,
+  `…070000_exos_tevo_channel`, `…080000_exos_tevo_inventory`,
+  `20260929010000_exos_security_hardening` (claim keys; cancellations void
+  issued tickets), `…020000_exos_pool_refill_order`,
+  `…050000_exos_marketplace_sale_note` (TEvo multi-listing orders go to a
+  person), `…051000_exos_marketplace_attention` (alerts, resend links, mark
+  handled), `…052000_exos_marketplace_pricing` (price per marketplace, never
+  below Exos).
+- **The functions deployed with crons:** `exos-distribute` (cron secret),
+  `exos-marketplace-sales` (cron plus the marketplace webhooks, deployed with
+  `--no-verify-jwt`), and `exos-mail-drain` (the buyer's claim-link mail and
+  the organizer's needs-attention alerts; needs `EXOS_APP_URL`).
+- **The secrets**, per marketplace used (the function headers are the
+  source of truth):
+  - all: `EXOS_APP_BASE_URL`; optional `SENTRY_DSN` (`docs/hosting.md`);
+  - StubHub: `STUBHUB_ENV`, `STUBHUB_CLIENT_ID`, `STUBHUB_CLIENT_SECRET`,
+    `STUBHUB_REFRESH_TOKEN`, `STUBHUB_WEBHOOK_AUTHORIZATION`;
+  - SeatGeek: `SEATGEEK_API_TOKEN`, `SEATGEEK_WEBHOOK_TOKEN`,
+    `SEATGEEK_CLIENT_ID` (event search);
+  - Gametime: `GAMETIME_API_KEY`, `GAMETIME_ENV`, `GAMETIME_WEBHOOK_AUTHORIZATION`;
+  - GoTickets: `GOTICKETS_ACCESS_ID`, `GOTICKETS_ACCESS_SECRET`,
+    `GOTICKETS_WEBHOOK_TOKEN` (register the webhook with it in the
+    `X-Exos-Webhook-Token` header if GoTickets allows headers; `?token=` in
+    the target URL is the fallback);
+  - Vivid Seats: `VIVID_API_TOKEN`, `VIVID_INTEGRATOR_TOKEN`;
+  - Ticket Evolution: `TEVO_API_TOKEN`, `TEVO_API_SECRET`, `TEVO_ENV`,
+    `TEVO_REVIEWER_ID`, `TEVO_OFFICE_ID`.
+- **Seller API access** on each marketplace.
+- **An operator `WriteAuthorization`** for the specific write endpoints.
+- **A live branch that sends the planned requests** (not built).
 
-All of these are operator-gated.
+Built and running dry-run today: event linking (search + staff review),
+per-ticket-type pools on StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats
+and Ticket Evolution with an optional organizer price per marketplace, the
+listing plans for all six, and sales in from all six (webhooks where the
+marketplace has them, polling for Vivid Seats and Ticket Evolution) turned
+into Exos transfers. Orders that need a person are mailed to the org's
+owners and managers and handled from Edit event → Marketplace sales
+(resend claim links, mark handled). Network errors and logs never carry a
+marketplace key or the request URL (`_shared/marketplace/netError.ts`).
 
 Not built yet:
 - **Sending listings:** sending the planned create / update / delete ops
@@ -370,4 +471,7 @@ Not built yet:
   `external_listing_id`, and marking a `delisting` row `delisted` once the
   marketplace confirms. The seats are already reserved and every op is
   already planned.
-- **Other marketplaces** (Vivid, TickPick, ...).
+- **Sending deliveries:** the planned fulfilment calls (`delivery_plan`) are
+  stored, not sent; the buyer already gets their Exos claim links by email.
+- **Other marketplaces:** TickPick (no adapter) and Automatiq (a scaffold in
+  `exos-distribute`, skipped until `AUTOMATIQ_API_KEY` is set).

@@ -73,8 +73,8 @@ deploying `exos-checkout`, `stripe-webhook` and `exos-reconcile-checkouts`, and 
 - **Check-in hardening.** The event scope is always enforced, HMAC is required, cancelled events
   are rejected, and `verification` is set by the server.
 - **Webhook drain.** Claim rows before delivery and sign the timestamp.
-- **Scanner roster.** Encrypt it at rest or keep it for a shorter time. Plaintext localStorage for
-  7 days is too long.
+- **Scanner roster.** Kept 24 hours now (was 7 days), and scanners can be limited to their events.
+  Encrypting it at rest is still open.
 - **Column reads.** Narrow what `authenticated` can read on events and orgs.
 - **Dead code.** Delete the unused `server.ts` `/api/*` routes.
 

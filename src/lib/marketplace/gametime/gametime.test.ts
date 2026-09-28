@@ -72,7 +72,7 @@ describe('inventory', () => {
       [exosListingId(ALLOC, 3), '9', '10', '2'],
     ]);
     expect(p.listings[0].request.body).toMatchObject({
-      Event: 'Late Night Jazz, Vol. 2', Venue: 'Blue Room', EventDate: '11/6/2026', EventTime: '9:00:00 PM', Row: 'GA', Section: 'GA',
+      Event: 'Late Night Jazz, Vol. 2', Venue: 'Blue Room', EventDate: '11/6/2026', EventTime: '9:00:00 PM', Row: 'GA', Section: 'General Admission',
       Cost: '45.00', FaceValue: '40.00', edelivery_ind: 'Y', Instant: 'N', Splittype: 'ANY', Stock: 'mobile_transfer', InHandDate: '2026-11-06',
     });
     expect(p.per_order_cap).toBe(4);
@@ -84,7 +84,7 @@ describe('inventory', () => {
     const lines = csv.trim().split('\r\n');
     expect(lines[0]).toBe(GAMETIME_CSV_COLUMNS.join(','));
     expect(lines).toHaveLength(4);
-    expect(lines[1]).toMatch(/^y,"Late Night Jazz, Vol\. 2",Blue Room,11\/6\/2026,9:00:00 PM,4,GA,GA,1,4,/);
+    expect(lines[1]).toMatch(/^y,"Late Night Jazz, Vol\. 2",Blue Room,11\/6\/2026,9:00:00 PM,4,General Admission,GA,1,4,/);
     expect(() => gametimeInventoryCsv([{ ...p.listings[0].request.body, TicketID: '1732272492' }])).toThrow(/not an Exos listing id/);
   });
 

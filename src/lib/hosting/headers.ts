@@ -43,7 +43,7 @@ export function bridgeCsp(path: string): string {
     "font-src 'self' https://fonts.gstatic.com; " +
     "img-src 'self' data: blob: https:; " +
     // checkout.stripe.com: Stripe Embedded Checkout (the /bridge/embed buy flow).
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com" +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://*.sentry.io" +
     (pixels ? PIXEL_CONNECT : '') +
     (maps ? MAPS_CONNECT : '') +
     '; ' +

@@ -247,8 +247,13 @@ BEGIN
   r := public.exos_check_in_ticket(tid2::uuid,'camera','manual',NULL,'aaaaaaaa-0000-0000-0000-0000000000e9');
   ASSERT r->>'reason'='barcode-rejected', 'bare camera scan must be rejected, got '||coalesce(r->>'reason','null');
 
-  -- (e) Manual typed entry (authorized staff, no payload) → admitted.
-  r := public.exos_check_in_ticket(tid2::uuid,'manual','manual',NULL,'aaaaaaaa-0000-0000-0000-0000000000e9');
+  -- (e) Manual typed entry (authorized staff, no payload) → admitted. Since
+  -- mig 20260929040000 a typed override also needs a reason.
+  IF to_regprocedure('public.exos_check_in_ticket(uuid,text,text,text,uuid,text,timestamptz,text)') IS NOT NULL THEN
+    r := public.exos_check_in_ticket(tid2::uuid,'manual','manual',NULL,'aaaaaaaa-0000-0000-0000-0000000000e9','checked photo ID');
+  ELSE
+    r := public.exos_check_in_ticket(tid2::uuid,'manual','manual',NULL,'aaaaaaaa-0000-0000-0000-0000000000e9');
+  END IF;
   ASSERT (r->>'ok')::boolean, 'manual staff override must be admitted, got '||coalesce(r->>'reason','null');
   RAISE NOTICE 'A9 check-in doors gate + barcode hardening OK (audit fix)';
 END $$;
@@ -268,7 +273,7 @@ SELECT set_config('app.jwt','{"email":"bob@x.com"}',false);
 DO $$
 DECLARE o uuid; b uuid; sec text; st text; ptid uuid;
 BEGIN
-  PERFORM public.exos_claim_transfer('aaaaaaaa-0000-0000-0000-0000000000c1');
+  PERFORM public.exos_test_claim('aaaaaaaa-0000-0000-0000-0000000000c1');
   SELECT owner_id,buyer_id,barcode_secret,status,pending_transfer_id
     INTO o,b,sec,st,ptid FROM public.exos_tickets WHERE id='aaaaaaaa-0000-0000-0000-0000000000f3';
   ASSERT o='44444444-4444-4444-4444-444444444444', 'owner reassigned to claimer';

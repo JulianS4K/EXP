@@ -27,6 +27,13 @@ arrive, Exos accepts them and delivers a mobile transfer. Nothing is sent to TEv
 | deleteInventory | `DELETE /v9/inventory/{inventory_id}` | write | 204 |
 | bulkUpdateInventory / bulkDeleteInventory | `PATCH` / `DELETE /v9/inventory` | forbidden | Up to 1,000 groups by TEvo id: one wrong id reaches broker inventory. Exos changes its listings one at a time |
 | listListings | `GET /v9/listings` | read | Buyer-side search; not used for selling |
+| listPayments | `GET /v9/payments?order_id=` | read | An order's payments (`order_id` required). For the payout ledger: did TEvo's EvoPay payment arrive |
+| showPayment | `GET /v9/payments/{payment_id}` | read | One payment |
+| paymentsStatus | `GET /v9/payments/status` | read | The office's payments across orders, filterable (`order_type`, `transaction_type`, `transaction_state`, `created_at.gte`, …). TEvo documents it as **POS only**: may be refused for an API token |
+| createPayment | `POST /v9/payments` | forbidden | Moves money on an order |
+| applyPayment | `GET /v9/payments/{id}/apply` | forbidden | **A GET that completes a pending payment.** Access is decided by the tag, never the method |
+| cancelPayment | `GET /v9/payments/{id}/cancel` | forbidden | **A GET that cancels a pending payment** |
+| refundPayment | `POST /v9/payments/{id}/refund` | forbidden | Reverses a payment (may void an unsettled card charge) |
 | createOrder | `POST /v9/orders` | forbidden | A purchase (substitutions too). Exos never buys |
 | add / finalize / remove etickets, deliver_etickets | `POST …/etickets` | forbidden | Static PDF/QR files can't carry a rotating Exos barcode |
 
@@ -51,7 +58,7 @@ order, internal seats, stable `ex…` ids), planned by `exos-distribute` into
 | `ticket.internal_notes` | The Exos listing id (`ex…`) |
 | `ticket.format` | `TM_mobile` (mobile transfer; the claim link, below) |
 | `section`, `row`, `seats` | Ticket type name (or section label), `GA`, the block's internal seats (`quantity` = seats) |
-| `split_type` | `ANY` within the block (the block is at most one order) |
+| `split_type` / `split_override` | the ticket type's split policy (`listingStandard.ts`): ANY, NEVERLEAVEONE, CUSTOM `[2,4…]` for pairs, NONE for all together; within the block (at most one order) |
 | `in_hand` / `in_hand_on` | `false` / the event day |
 | `price`, `face_value` | Marketplace price, ticket type price (USD only) |
 | `external_notes` | How delivery works (Exos claim link) |
@@ -93,6 +100,38 @@ office rules out any clash and keeps TEvo's own reports clean.
    ticket, so `updateShipment {mobile_transfer_type: TMMobile}`; TEvo answers with the
    recipient's email and name; Exos issues the order's transfers to that email; then
    `completeShipment`.
+
+## Payments (how TEvo pays Exos)
+
+TEvo pays the seller through EvoPay, after the event. Exos only **reads** payments (`tevo/payments.ts`,
+`TevoClient.listPayments` / `getPayment` / `paymentsStatus`); every payment write is forbidden, since the office's orders
+include Terminal-2's broker ones.
+
+- **A payment:** `id`, `order_link_id` (the order), `type` (`cash`, `check`, `credit_card`, `evopay`, `money_order`,
+  `offline`, `paypal`, `tbd`; Status says `EvopayTransaction`, …), `state` (`pending`, `completed`, `captured`, …),
+  `amount` (a decimal string), `is_refund`, `refunded_from_id`.
+- **Pending vs settled:** a pending payment only changes the order's *pending* balance; money has moved once it's
+  `completed` / `captured`. `summarizeTevoPayments` nets settled payments minus settled refunds, keeps pending apart,
+  and lists any state it doesn't know, so a person can look.
+- **The payment is the gross; TEvo's fee comes off it.** The seller's fee is the order's top-level `fee`, not
+  `service_fee`, which is the buyer's. On real order 8089940-19196777 (2026-09-26, office sale): `total` 32.48,
+  `fee` 0.97 (2.99%), `service_fee` 0.0, one `evopay` payment of 32.48. TEvo's order page shows net 31.51. So Exos's
+  sale proceeds (`normalizeTevoOrder`) are the items' price less `fee`. When broker items share the order, Exos's
+  part of the fee is prorated by price.
+- **TEvo's seller fee is 3% of the order total, rounded to the nearest cent, half up, per order** (not per ticket;
+  `TEVO_SELLER_FEE_BPS`, `tevoSellerFeeCents`). Checked 2026-09-28 against every stored order the S4K office sold:
+  4,371 of 4,371 match, May to September, to both Ticket Evolution and Victory Live, including all 41 half-cent cases
+  (21.50 → 0.65). Purchases and internal transfers carry fee 0. When an order has no `fee`, Exos uses the 3%.
+  `tevoFeeCheck` flags any order whose fee isn't 3%, for the payout ledger.
+- **`completed` isn't "cash received".** On that order the EvoPay payment was `completed` one second after the sale,
+  before the event. It means the payment is applied to the order. When EvoPay actually settles to the bank is
+  separate, and the payout ledger has to reconcile that on its own.
+- **Stored copies drop the personal fields:** `normalizeTevoPayment` keeps ids, type, state, direction and amount in
+  cents. It drops `credit_card`, the `avs_*` / `cvv_*` results and `performed_by`, and the Status list's buyer and
+  seller names, which can be a person's.
+- **Not built yet:** the payout ledger that polls these for Exos's TEvo orders and matches them to what the
+  organizer is owed. The operator decides that ledger's design, including whether Exos takes a fee on marketplace
+  sales.
 
 ## Open questions for TEvo integrations
 

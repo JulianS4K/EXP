@@ -244,7 +244,7 @@ export default function PromoteEvent() {
             onChange={(e) => setCampaignName(e.target.value)}
             placeholder="Campaign name — e.g. spring-launch, radio-spot, influencer-jane"
             aria-label="Campaign name"
-            className="w-full bg-black border border-white/20 px-4 py-3 text-sm font-bold text-white placeholder:font-normal placeholder:text-white/30 focus:outline-none focus:border-brand-primary mb-4"
+            className="w-full bg-black border border-white/20 px-4 py-3 text-sm font-bold text-white placeholder:font-normal placeholder:text-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary mb-4"
           />
           {campaignSlug ? (
             <div className="space-y-2">

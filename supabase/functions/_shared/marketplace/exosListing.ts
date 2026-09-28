@@ -17,8 +17,11 @@
 //   * a listing id "ex<base32 allocation id><n>" (./listingIds.ts), stable
 //     across re-plans, that comes back on the sale and maps it to its
 //     allocation and to the block's seats.
-//   * split "any" within the block, delivery by Exos claim link (a transfer
-//     the buyer accepts into any Exos account), in hand on the event day.
+//   * the ticket type's split policy within the block (any by default; don't
+//     leave one, pairs only, all together: ./listingStandard.ts says how
+//     each marketplace spells it). Pairs listings hold an even number of
+//     seats. Delivery by Exos claim link (a transfer the buyer accepts into
+//     any Exos account), in hand on the event day.
 //   * listed as a transfer everywhere: mobile transfer, else electronic
 //     transfer (EXOS_TRANSFER_STOCK), never e-ticket, paper or screenshot.
 //   * the event as text (name, venue, venue-local date and time): SeatGeek
@@ -30,8 +33,12 @@
 // exos_claim_internal_seat) and the sync (./sync.ts) read only the shared
 // fields.
 
+import { effectiveTierPrice } from '../pricing.ts';
 import { exosEventRef, localDate, type ExosEventRowForChannels } from './channel.ts';
+import { ageLimit, marketSection } from './eventStandard.ts';
 import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, stableListingNumbers } from './listingIds.ts';
+import { parseMarketSplit, splitBlockMax, type MarketSplit, type SplitChannel } from './listingStandard.ts';
+import { netEqualListPrice } from './fees.ts';
 import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
 
 export const EXOS_LISTING_NOTES =
@@ -66,7 +73,15 @@ export interface ExosAllocation {
   requested_qty: number | null;
   /** Listing price; the ticket type's price when unset. */
   unit_price: number | string | null;
-  tier: { name: string; price: number | string; section_label?: string | null } | null;
+  /** price_schedule: the ticket type's time steps (the Exos price now is effectiveTierPrice). */
+  tier: {
+    name: string;
+    price: number | string;
+    section_label?: string | null;
+    price_schedule?: unknown;
+    /** exos_ticket_tiers.market_split (mig 20260929061000); unset = any. */
+    market_split?: string | null;
+  } | null;
   event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
   /** exos_distribution_listings.internal_seats: one number per held seat. */
   internal_seats: string | SeatRun[] | null;
@@ -88,12 +103,15 @@ export interface ExosListing {
   quantity: number;
   section: string;
   row: 'GA';
+  /** The list price: net-equal to the Exos price (./fees.ts), or the organizer's higher marketplace price. */
   price: number;
+  /** What Exos charges for the ticket type now: what the organizer should net per ticket. */
+  exos_price: number;
   face_value: number | null;
   currency: string;
   event: { name: string; venue: string; starts_at: string; local_date: string; local_time: string | null };
   in_hand_date: string;
-  split: 'any';
+  split: MarketSplit;
   delivery: 'claim_link';
   notes: string;
 }
@@ -102,6 +120,9 @@ export interface ExosListingSet {
   allocation_id: string;
   listings: ExosListing[];
   per_order_cap: number;
+  split: MarketSplit;
+  /** For the organizer, not blockers (e.g. a seat held back to keep pairs even). */
+  notices: string[];
 }
 
 /** One planned marketplace listing, as stored: the shared fields plus the marketplace request. */
@@ -110,6 +131,8 @@ export interface PlannedListingEntry<B = unknown> {
   seat_from: number;
   seat_thru: number;
   quantity: number;
+  /** The per-ticket price listed (mig 20260929062000 reads it onto the sale, to measure the fee). */
+  unit_price?: number;
   request: { endpoint: string; method: string; path: string; body: B };
 }
 
@@ -119,6 +142,8 @@ export interface PlannedMarketplaceListings<B = unknown> {
   per_order_cap: number;
   /** Fields the plan couldn't fill without guessing. */
   unresolved: string[];
+  /** Worth knowing, not blocking (a writer never refuses on these). */
+  notices?: string[];
 }
 
 function maxPerOrder(limits: unknown): number | null {
@@ -147,8 +172,12 @@ export function plannedEntries(v: unknown): Array<{ listing_id: string; seat_fro
   return ls.filter((l): l is { listing_id: string } => !!l && typeof (l as { listing_id?: unknown }).listing_id === 'string');
 }
 
-/** The allocation's listings, the same for every marketplace. `label` names the marketplace in errors. */
-export function planExosListings(a: ExosAllocation, label: string): ExosListingSet {
+/**
+ * The allocation's listings, the same for every marketplace. `label` names the
+ * marketplace in errors; `channel` sets its seller fee, which the list price
+ * grosses up for (./fees.ts) so the organizer nets the Exos price there too.
+ */
+export function planExosListings(a: ExosAllocation, label: string, channel?: SplitChannel): ExosListingSet {
   if (!a.tier) throw new Error('the allocation has no ticket type');
   if (!a.event) throw new Error('event not found');
   const ref = exosEventRef({ ...a.event, id: a.event.id ?? a.id });
@@ -156,23 +185,43 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
   const held = a.requested_qty ?? 0;
   const qty = a.list_qty ?? held;
   if (!Number.isInteger(qty) || qty <= 0) throw new Error(`nothing allocated to ${label}`);
-  const price = Number(a.unit_price ?? a.tier.price);
-  if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
   const face = Number(a.tier.price);
-  const section = (a.tier.section_label || a.tier.name || '').trim().slice(0, 127);
+  // Net-equal: the price whose payout, after the marketplace's seller fee, is
+  // what Exos charges for the ticket type now (its scheduled price), so the
+  // organizer nets the same on every store. The organizer's marketplace price
+  // (exos_set_channel_price) wins when higher. Blank = net-equal.
+  const exosNow = effectiveTierPrice(face, a.tier.price_schedule ?? []);
+  const floor = channel ? netEqualListPrice(channel, exosNow) : exosNow;
+  const custom = a.unit_price === null || a.unit_price === undefined || a.unit_price === '' ? NaN : Number(a.unit_price);
+  const price = Number.isFinite(custom) && custom > floor ? custom : floor;
+  if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
+  // The marketplace-standard section (./eventStandard.ts): price phases list as
+  // General Admission, VIP as VIP, the organizer's section label wins.
+  const section = a.tier.name?.trim() || a.tier.section_label?.trim()
+    ? marketSection({ name: a.tier.name ?? '', section_label: a.tier.section_label }).slice(0, 127)
+    : '';
   if (!section) throw new Error('the ticket type has no name to use as the section');
   const all = parseSeatRanges(a.internal_seats);
   if (seatCount(all) !== held || qty > held) {
     throw new Error(`the allocation has ${seatCount(all)} internal seat numbers for ${held} seats: save it again`);
   }
   const runs = qty < held ? lowestSeats(all, qty) : all;
-  const blocks = seatBlocks(runs, maxPerOrder(a.event.purchase_limits));
+  const split = parseMarketSplit(a.tier.market_split);
+  const notices: string[] = [];
+  let blocks = seatBlocks(split === 'pairs' ? evenRuns(runs) : runs, splitBlockMax(split, maxPerOrder(a.event.purchase_limits)));
+  if (split === 'pairs') {
+    const left = qty - blocks.reduce((n, b) => n + b.thru - b.from + 1, 0);
+    if (left > 0) notices.push(`pairs only: ${left} seat${left === 1 ? '' : 's'} not listed (an odd one out); ${left === 1 ? 'it lists' : 'they list'} once ${left === 1 ? 'it pairs' : 'they pair'} up`);
+    blocks = blocks.filter((b) => b.thru > b.from);
+    if (!blocks.length) throw new Error(`pairs only: ${label} needs at least 2 seats next to each other`);
+  }
   const prev = plannedEntries(a.previous).map((e) => ({ seller_listing_id: e.listing_id, seat_from: e.seat_from, seat_thru: e.seat_thru }));
   const numbers = stableListingNumbers(a.id, blocks, prev);
   if (blocks.length > MAX_EXOS_LISTINGS_PER_ALLOCATION || Math.max(...numbers) > MAX_EXOS_LISTINGS_PER_ALLOCATION) {
     throw new Error(`that would be ${blocks.length} ${label} listings; raise the max per order`);
   }
   const date = localDate(ref);
+  const age = ageLimit(a.event.name);
   const event = { name: ref.name.slice(0, 255), venue: ref.venueName.slice(0, 255), starts_at: ref.startsAt, local_date: date, local_time: localTime(ref) };
   const listings = blocks
     .map((b, i) => ({ b, n: numbers[i] }))
@@ -186,20 +235,28 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
       section,
       row: 'GA',
       price: Math.round(price * 100) / 100,
+      exos_price: Math.round(exosNow * 100) / 100,
       face_value: Number.isFinite(face) && face > 0 ? Math.round(face * 100) / 100 : null,
       currency: (a.event!.currency || 'USD').toUpperCase(),
       event,
       in_hand_date: date,
-      split: 'any',
+      split,
       delivery: 'claim_link',
-      notes: EXOS_LISTING_NOTES,
+      notes: age ? `${EXOS_LISTING_NOTES} ${age} event: bring ID.` : EXOS_LISTING_NOTES,
     }));
-  return { allocation_id: a.id, listings, per_order_cap: Math.max(...listings.map((l) => l.quantity)) };
+  return { allocation_id: a.id, listings, per_order_cap: Math.max(...listings.map((l) => l.quantity)), split, notices };
+}
+
+/** Each run with an even number of seats (pairs): the top seat of an odd run is held back. */
+function evenRuns(runs: SeatRun[]): SeatRun[] {
+  return runs
+    .map((r) => ((r.thru - r.from + 1) % 2 === 0 ? { ...r } : { from: r.from, thru: r.thru - 1 }))
+    .filter((r) => r.thru >= r.from);
 }
 
 /** A shared entry for one listing and its marketplace request. */
 export function entryFor<B>(l: ExosListing, request: PlannedListingEntry<B>['request']): PlannedListingEntry<B> {
-  return { listing_id: l.listing_id, seat_from: l.seat_from, seat_thru: l.seat_thru, quantity: l.quantity, request };
+  return { listing_id: l.listing_id, seat_from: l.seat_from, seat_thru: l.seat_thru, quantity: l.quantity, unit_price: l.price, request };
 }
 
 /** Marketplaces that only take one currency. */

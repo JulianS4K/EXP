@@ -61,3 +61,37 @@ and deploying are Render writes.
    should serve the new build, with the signed-in session intact.
 6. **Retire the copy.** Once it's stable, delete Terminal-2's `static/bridge/`
    in a follow-up PR.
+
+## Error reporting (optional)
+
+Nothing is sent anywhere unless a DSN is set. Without one, errors are only
+logged, scrubbed, to the browser console / the function logs.
+
+**Browser** (`src/lib/errorReporting.ts`, used by `ErrorBoundary` and the
+`window` `error` / `unhandledrejection` handlers installed in `main.tsx`).
+Build-time env on `exos-web` (Vite inlines them, so set them before the build):
+
+| Var | What |
+|---|---|
+| `VITE_SENTRY_DSN` | The Sentry project's DSN (`https://<public key>@<org>.ingest.sentry.io/<project>`). Its key is public by design; it goes in the `X-Sentry-Auth` header, not the URL |
+| `VITE_SENTRY_ENVIRONMENT` | Optional, default `production` |
+| `VITE_SENTRY_RELEASE` | Optional, e.g. the commit sha |
+
+The page CSP allows `https://*.sentry.io` (`src/lib/hosting/headers.ts`); a
+self-hosted Sentry needs its host added to `connect-src` there.
+
+**Edge functions** (`supabase/functions/_shared/log.ts`: `reportError(fn, err)`
+and `redactError(err)`). Supabase function secrets:
+
+| Secret | What |
+|---|---|
+| `SENTRY_DSN` | Optional. When set, `reportError` also POSTs the event (3 s timeout, failures dropped) |
+| `SENTRY_ENVIRONMENT` | Optional, default `production` |
+
+What gets scrubbed, in both (`supabase/functions/_shared/scrub.ts`): email
+addresses, `Bearer` / `Basic` credentials, JWTs, prefixed keys (`sk_…`,
+`whsec_…`, …), long token-looking strings, secret-named `key=value` pairs, and
+every URL's query string and fragment (claim keys, the Gametime `?source=` key,
+Vivid's `apiToken`). The browser sends the page as origin + path only. The
+edge side also redacts the value of every secret-looking env var (`*_KEY`,
+`*_TOKEN`, `*_SECRET`, `*AUTHORIZATION`, `*_DSN`, `*PASSWORD`, `*_ACCESS_ID`).

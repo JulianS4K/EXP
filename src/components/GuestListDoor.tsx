@@ -187,7 +187,7 @@ export default function GuestListDoor({
           placeholder="Search a name…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-4 pl-12 pr-4 text-slate-900 focus:outline-none focus:border-tm-blue"
+          className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-4 pl-12 pr-4 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue"
           aria-label="Search guest list"
         />
         <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />

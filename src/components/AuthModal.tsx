@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useId } from 'react';
 import { Mail, Phone, X, ShieldCheck, Ticket, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { currentInAppBrowser, IN_APP_LABEL } from '../lib/inAppBrowser';
+import Dialog from './Dialog';
 
 // Send the buyer back to the page they signed in from (keeps the /bridge
 // base path and the event they were buying). The hash is dropped: Supabase
@@ -23,6 +23,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
   // Google blocks OAuth inside in-app webviews and Microsoft is unreliable
   // there; email and Apple sign-in work, so those stay.
   const [inApp] = useState(currentInAppBrowser);
+  const titleId = useId();
 
   useEffect(() => {
     if (isOpen) {
@@ -85,40 +86,29 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="absolute inset-0 bg-black/90 backdrop-blur-sm"
-          onClick={onClose}
-        />
-
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          className="relative bg-[#0e0e0e] border border-white/12 w-full max-w-md shadow-2xl overflow-hidden"
-        >
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      labelledBy={titleId}
+      backdropClassName="bg-black/90 backdrop-blur-sm"
+      className="bg-[#0e0e0e] border border-white/12 w-full max-w-md shadow-2xl overflow-hidden max-h-[calc(100dvh-2rem)] overflow-y-auto"
+    >
           <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black">
              <div className="flex items-center gap-3">
                 {method !== 'options' && (
-                  <button onClick={() => setMethod('options')} className="mr-1 text-white/50 hover:text-brand-primary transition-colors">
+                  <button onClick={() => setMethod('options')} aria-label="Back" className="mr-1 text-white/60 hover:text-brand-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary">
                     <ArrowLeft className="w-4 h-4" />
                   </button>
                 )}
                 <div className="w-9 h-9 bg-brand-primary flex items-center justify-center shrink-0">
                   <Ticket className="w-5 h-5 text-black" />
                 </div>
-                <h2 className="disp text-2xl uppercase tracking-tight leading-none pt-1" style={{ transform: 'skewX(-4deg)' }}>
+                <h2 id={titleId} className="disp text-2xl uppercase tracking-tight leading-none pt-1" style={{ transform: 'skewX(-4deg)' }}>
                   {method === 'options' ? 'Get On The List' : method === 'email-login' ? 'Sign In' : method === 'email-signup' ? 'Create Account' : method}
                 </h2>
              </div>
-             <button onClick={onClose} className="type text-white/40 hover:text-white text-[11px] uppercase tracking-widest transition-colors">close [x]</button>
+             <button onClick={onClose} className="type text-white/60 hover:text-white text-[11px] uppercase tracking-widest transition-colors">close [x]</button>
           </div>
 
           <div className="p-8">
@@ -136,7 +126,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
             {method === 'options' && (
               <div className="space-y-4">
                 {inApp && (
-                  <p className="type text-[10px] uppercase tracking-widest text-white/50 text-center">
+                  <p className="type text-[11px] uppercase tracking-widest text-white/60 text-center">
                     Google sign-in doesn't work inside {IN_APP_LABEL[inApp]}. Use email or Apple, or open this page in your browser.
                   </p>
                 )}
@@ -185,7 +175,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                     <div className="w-full border-t border-white/10"></div>
                   </div>
                   <div className="relative flex justify-center">
-                    <span className="bg-[#0e0e0e] px-4 type text-[10px] text-white/50 uppercase tracking-widest">or</span>
+                    <span className="bg-[#0e0e0e] px-4 type text-[11px] text-white/60 uppercase tracking-widest">or</span>
                   </div>
                 </div>
 
@@ -195,16 +185,16 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                     disabled={loading}
                     className="flex flex-col items-center justify-center p-4 border border-white/10 hover:border-brand-primary text-white hover:text-brand-primary transition-colors group"
                   >
-                     <Mail className="w-6 h-6 mb-2 text-white/50 group-hover:text-brand-primary transition-colors" />
-                     <span className="type text-[10px] uppercase tracking-widest">Email Login</span>
+                     <Mail className="w-6 h-6 mb-2 text-white/60 group-hover:text-brand-primary transition-colors" />
+                     <span className="type text-[11px] uppercase tracking-widest">Email Login</span>
                   </button>
                   <button
                     onClick={() => setMethod('email-signup')}
                     disabled={loading}
                     className="flex flex-col items-center justify-center p-4 border border-white/10 hover:border-brand-primary text-white hover:text-brand-primary transition-colors group"
                   >
-                     <ShieldCheck className="w-6 h-6 mb-2 text-white/50 group-hover:text-brand-primary transition-colors" />
-                     <span className="type text-[10px] uppercase tracking-widest">Sign Up</span>
+                     <ShieldCheck className="w-6 h-6 mb-2 text-white/60 group-hover:text-brand-primary transition-colors" />
+                     <span className="type text-[11px] uppercase tracking-widest">Sign Up</span>
                   </button>
                 </div>
 
@@ -215,10 +205,10 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
               <form onSubmit={handleEmailAuth} className="space-y-4">
                 {method === 'email-signup' && (
                    <div>
-                    <label className="block type text-[10px] uppercase tracking-widest text-white/50 mb-2">Display Name</label>
+                    <label className="block type text-[11px] uppercase tracking-widest text-white/60 mb-2">Display Name</label>
                     <input
                       type="text"
-                      className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none transition-colors"
+                      className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-colors"
                       placeholder="e.g. Satoshi Nakamoto"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -227,10 +217,10 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                   </div>
                 )}
                 <div>
-                  <label className="block type text-[10px] uppercase tracking-widest text-white/50 mb-2">Email Address</label>
+                  <label className="block type text-[11px] uppercase tracking-widest text-white/60 mb-2">Email Address</label>
                   <input
                     type="email"
-                    className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none transition-colors"
+                    className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-colors"
                     placeholder="you@domain.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -238,10 +228,10 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
                   />
                 </div>
                 <div>
-                  <label className="block type text-[10px] uppercase tracking-widest text-white/50 mb-2">Password</label>
+                  <label className="block type text-[11px] uppercase tracking-widest text-white/60 mb-2">Password</label>
                   <input
                     type="password"
-                    className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none transition-colors"
+                    className="w-full type bg-black border border-white/20 p-4 text-white placeholder-white/35 focus:border-brand-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-colors"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -259,12 +249,10 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClos
             )}
           </div>
           <div className="px-8 py-4 border-t border-white/10 bg-black text-center">
-            <p className="type text-[10px] text-white/30 uppercase tracking-widest leading-relaxed">
+            <p className="type text-[11px] text-white/60 uppercase tracking-widest leading-relaxed">
               By continuing, you agree to our Terms of Service and Privacy Policy.
             </p>
           </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+    </Dialog>
   );
 }

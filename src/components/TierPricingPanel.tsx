@@ -121,7 +121,7 @@ export default function TierPricingPanel({
                           nextSteps[i] = { ...step, startsAt: iso };
                           setSteps(tier.id, nextSteps);
                         }}
-                        className="flex-1 border-2 border-slate-200 focus:border-slate-900 outline-none px-2 py-1.5 text-xs rounded-lg"
+                        className="flex-1 border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-2 py-1.5 text-xs rounded-lg"
                       />
                       <div className="flex items-center border-2 border-slate-200 focus-within:border-slate-900 rounded-lg px-2">
                         <span className="text-slate-400 text-xs">$</span>
@@ -136,7 +136,7 @@ export default function TierPricingPanel({
                             nextSteps[i] = { ...step, price };
                             setSteps(tier.id, nextSteps);
                           }}
-                          className="w-20 outline-none px-1 py-1.5 text-xs font-bold"
+                          className="w-20 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-1 py-1.5 text-xs font-bold"
                         />
                       </div>
                       <button

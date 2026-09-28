@@ -120,3 +120,32 @@ CREATE TABLE public.exos_mail (
 ALTER TABLE public.exos_mail ADD CONSTRAINT exos_mail_template_check
   CHECK (template IN ('transfer-initiated','transfer-claimed','org-invite',
                       'event-cancelled','event-updated','event-announce','ticket-issued'));
+
+-- Test harness only (never a migration): the claim key a claim link carries
+-- (exos_transfers.claim_key, mig 20260929010000), which no client role can
+-- read, so tests can claim the way a clicked link does. plpgsql: the table
+-- doesn't exist yet when this runs.
+CREATE OR REPLACE FUNCTION public.exos_test_claim_key(p_transfer_id uuid)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE k text;
+BEGIN
+  EXECUTE 'SELECT claim_key FROM public.exos_transfers WHERE id = $1' INTO k USING p_transfer_id;
+  RETURN k;
+END $$;
+GRANT EXECUTE ON FUNCTION public.exos_test_claim_key(uuid) TO PUBLIC;
+
+-- Test harness only: claim a transfer the way the emailed link does (with its
+-- key where the chain has mig 20260929010000, else the one-argument claim).
+-- Runs as the caller, so auth.uid() is the test's signed-in user.
+CREATE OR REPLACE FUNCTION public.exos_test_claim(p_transfer_id uuid)
+RETURNS uuid LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+DECLARE r uuid;
+BEGIN
+  IF to_regprocedure('public.exos_claim_transfer(uuid,text)') IS NOT NULL THEN
+    EXECUTE 'SELECT public.exos_claim_transfer($1, public.exos_test_claim_key($1))' INTO r USING p_transfer_id;
+  ELSE
+    EXECUTE 'SELECT public.exos_claim_transfer($1)' INTO r USING p_transfer_id;
+  END IF;
+  RETURN r;
+END $$;
+GRANT EXECUTE ON FUNCTION public.exos_test_claim(uuid) TO PUBLIC;

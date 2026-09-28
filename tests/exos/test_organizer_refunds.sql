@@ -200,7 +200,8 @@ BEGIN
   c := public.exos_refund_claim('0f000000-0000-0000-0000-0000000000a1','cs_of3','nonce-m5',
          '[{"ticket_id":"0f000000-0000-0000-0000-000000030001"}]'::jsonb);
   PERFORM public.exos_refund_finalize(pg_temp.req_id(c), 're_of_m5', 'pending');
-  ASSERT (SELECT status FROM public.exos_tickets WHERE id='0f000000-0000-0000-0000-000000030001') = 'voided', 'M5: void once Stripe accepts';
+  -- Pending can still fail: the buyer keeps the ticket until it succeeds (mig 20260929030000).
+  ASSERT (SELECT status FROM public.exos_tickets WHERE id='0f000000-0000-0000-0000-000000030001') = 'active', 'M5: pending refund keeps the ticket';
   -- stripe-webhook charge.refunded: record every refund on the PI by id, then finalize by metadata. Twice.
   FOR i IN 1..2 LOOP
     PERFORM public.exos_record_refund('cs_of3','re_of_m5',2000,'succeeded','pi_of3','requested_by_customer','usd','evt_'||i);
@@ -210,6 +211,7 @@ BEGIN
   ASSERT (f->>'changed')::boolean = false, 'M5: second finalize is a no-op';
   ASSERT (SELECT status FROM public.exos_refund_requests WHERE id=pg_temp.req_id(c)) = 'succeeded', 'M5: pending -> succeeded';
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id='0f000000-0000-0000-0000-0000000000d1') = 7, 'M5: sold decremented once';
+  ASSERT (SELECT status FROM public.exos_tickets WHERE id='0f000000-0000-0000-0000-000000030001') = 'voided', 'M5: voided once it succeeded';
   -- A late 'pending' after 'succeeded' doesn't move it back.
   PERFORM public.exos_refund_finalize(pg_temp.req_id(c), 're_of_m5', 'pending');
   ASSERT (SELECT status FROM public.exos_refund_requests WHERE id=pg_temp.req_id(c)) = 'succeeded', 'M5: no downgrade';

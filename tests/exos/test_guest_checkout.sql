@@ -170,7 +170,7 @@ BEGIN
   SELECT pending_transfer_id INTO tr FROM public.exos_tickets WHERE id = ids[1];
   PERFORM set_config('app.uid', '9c000000-0000-0000-0000-0000000000b3', true);
   PERFORM set_config('app.jwt', '{"email":"9c-claimer@x.com"}', true);
-  PERFORM public.exos_claim_transfer(tr);
+  PERFORM public.exos_test_claim(tr);
   PERFORM set_config('app.uid', '', true);
   ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = '9c000000-0000-0000-0000-0000000000b3', 'G6: claimed';
   ASSERT (SELECT owner_id FROM public.exos_order_addons WHERE order_ref = '9c-g6') = '9c000000-0000-0000-0000-0000000000b3',

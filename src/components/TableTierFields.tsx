@@ -7,7 +7,7 @@
 import type { TableTierDraft } from '../lib/tables';
 
 const inputCls =
-  'w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors disabled:opacity-50';
+  'w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors disabled:opacity-50';
 const labelCls = 'type text-[9px] text-white/40 uppercase tracking-widest ml-1';
 
 export default function TableTierFields({

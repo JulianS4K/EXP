@@ -18,13 +18,15 @@
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY, EXOS_REDIRECT_ORIGINS (origins success/cancel URLs
-// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 500 = 5%),
+// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 300 = 3%, _shared/platformFee.ts),
 // EXOS_GUEST_IP_SALT (salt for the hashed guest IP; defaults to a server secret).
 // Needs mig 20260924223000 (promoter_id / attribution columns) applied first.
 //
-// TODO(operator) before go-live: confirm the application-fee model/%, the
-// charge model (destination vs direct), and that 'standard' Connect accounts
-// are the right type.
+// Fee: 3% of every transaction net after Stripe, from the organizer
+// (operator, 2026-09-28): the application fee is 3% + Stripe's card fee.
+// TODO(operator) before go-live: confirm the charge model (destination vs
+// direct) and that 'standard' Connect accounts are the right type.
+// Optional: EXOS_STRIPE_FEE_BPS / EXOS_STRIPE_FEE_FIXED_CENTS (default 290 / 30).
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -32,12 +34,14 @@ import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pri
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
+import { isCheckoutCurrency } from "../_shared/currency.ts";
+import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, exosFeeBpsAt } from "../_shared/platformFee.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
 
+  // Checked where a charge is made: a guest's free claim needs no Stripe.
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
 
   // Authenticate the buyer from their JWT; without one, a guest_email makes it
   // a guest checkout.
@@ -183,11 +187,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: secrets } = await sb.from("exos_org_secrets").select("payments").eq("org_id", ev.org_id).maybeSingle();
   const payments = (secrets?.payments ?? {}) as { connectedAccountId?: string; chargesEnabled?: boolean };
-  if (!payments.connectedAccountId || !payments.chargesEnabled) {
-    return json({ error: "organizer has not completed payment setup" }, 409);
-  }
 
   const currency = (ev.currency ?? "usd").toLowerCase();
+  // Amounts below are minor units = major x 100: two-decimal currencies only
+  // (a zero-decimal JPY price would be charged 100 times over).
+  if (!isCheckoutCurrency(currency)) {
+    return json({ error: `tickets can't be sold in ${currency.toUpperCase()} yet: pick another currency for this event` }, 409);
+  }
   // The tier's scheduled price as of now, the same price the storefront shows
   // (early-bird → regular → last-minute), then the voucher's rule: a pinned
   // price, a percent off or an amount off (voucherUnitPrice, shared with the SPA).
@@ -288,8 +294,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // addonTotal is already all-in; the exclusive tax sits inside both unit amounts.
   const amountCents = ticketAllIn * quantity + addonTotal;
-  const feeBps = Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? "500");
-  const applicationFee = Math.round((amountCents * feeBps) / 10000);
+  // The Exos fee: 3% net after Stripe, from the organizer's share. The
+  // platform pays Stripe's card fee under destination charges, so the
+  // application fee is 3% plus that fee (_shared/platformFee.ts).
+  // No Exos fee during the org's first 6 months (exos_org_billing); card processing still applies.
+  const { data: billing } = await sb.from("exos_org_billing").select("fee_free_until").eq("org_id", ev.org_id).maybeSingle();
+  const feeBps = exosFeeBpsAt(
+    (billing as { fee_free_until?: string } | null)?.fee_free_until,
+    new Date(),
+    Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
+  );
+  const applicationFee = checkoutApplicationFeeCents(amountCents, {
+    bps: feeBps,
+    card: {
+      bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
+      fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
+    },
+  });
 
   // Only PAID line items go to Stripe ($0 lines are rejected in payment mode), so
   // a free tier + paid add-ons charges just the add-ons. Ticket quantity is still
@@ -319,8 +340,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
   }
-  if (lineItems.length === 0) {
+  // Free: signed-in buyers use the app's free-claim path; a guest claims here
+  // with just an email (below), through the same guest hold and limits.
+  const freeGuest = lineItems.length === 0 && !buyerUid;
+  if (lineItems.length === 0 && buyerUid) {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
+  }
+  if (!freeGuest) {
+    if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
+    if (!payments.connectedAccountId || !payments.chargesEnabled) {
+      return json({ error: "organizer has not completed payment setup" }, 409);
+    }
   }
 
   // Reserve inventory with a cart hold BEFORE creating the Stripe session, so a
@@ -353,12 +383,52 @@ Deno.serve(async (req: Request): Promise<Response> => {
     holdId = hid as string;
   }
 
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  // A guest's free tickets: no Stripe. Record the order and fulfil it now;
+  // exos_fulfill_checkout parks the tickets on the organizer and mails the
+  // guest one keyed claim link per ticket, as for a paid guest order.
+  if (freeGuest) {
+    const sessionId = `free_${crypto.randomUUID()}`;
+    const { error: fInsErr } = await sb.from("exos_checkout_sessions").insert({
+      session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
+      buyer_uid: null, buyer_email: buyerEmail, guest: true,
+      quantity, amount_cents: 0, currency, status: "pending",
+      addons: addonsForSession.length > 0 ? addonsForSession : null,
+      voucher_id: voucherId, promoter_id: promoterId ?? null,
+      attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
+    });
+    if (fInsErr) {
+      console.error("exos-checkout: free guest order not recorded", fInsErr.message);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not record the order" }, 500);
+    }
+    if (holdId) {
+      const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
+      if (linkErr) console.error("exos-checkout: free hold link failed (non-fatal)", linkErr.message);
+    }
+    const { data: ids, error: fulErr } = await sb.rpc("exos_fulfill_checkout", { p_session_id: sessionId });
+    if (fulErr) {
+      console.error("exos-checkout: free guest fulfilment failed", fulErr.message);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not issue the tickets" }, 409);
+    }
+    const issued = Array.isArray(ids) ? ids.length : 0;
+    if (issued === 0) {
+      const { data: row } = await sb.from("exos_checkout_sessions").select("failure_reason").eq("session_id", sessionId).maybeSingle();
+      return json({ error: row?.failure_reason || "those tickets are no longer available" }, 409);
+    }
+    return json({ free: true, issued, email: buyerEmail });
+  }
+
+  const stripe = new Stripe(stripeKey!, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
 
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create({
       mode: "payment",
+      // Cards only (Apple Pay and Google Pay come with them). Bank debits and
+      // other delayed methods would complete "unpaid", outlive the 30-minute
+      // hold and settle days later into seats that may be gone.
+      payment_method_types: ["card"],
       line_items: lineItems,
       payment_intent_data: {
         application_fee_amount: applicationFee,

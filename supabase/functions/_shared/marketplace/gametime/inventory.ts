@@ -20,11 +20,13 @@
 // Exos: the Exos listings (../exosListing.ts: blocks of at most max per
 // order, internal seats as SeatFrom / SeatThru, row GA, TicketID the "ex…"
 // listing id) as CSV rows. Stock mobile_transfer (the buyer accepts an Exos
-// claim link), Splittype ANY within the block. Edit is "y" as in Gametime's
+// claim link), Splittype / Splitvalue from the ticket type's split policy
+// (../listingStandard.ts). Edit is "y" as in Gametime's
 // example file (not described there).
 
 import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 import { isExosListingId } from '../listingIds.ts';
+import { assertListingId, colonSplits, marketSplitFor, splitFormatNotice } from '../listingStandard.ts';
 
 export const GAMETIME_CSV_COLUMNS = [
   'Edit', 'Event', 'Venue', 'EventDate', 'EventTime', 'Quantity', 'Section', 'Row', 'SeatFrom', 'SeatThru', 'Notes', 'Cost',
@@ -48,10 +50,14 @@ function time12(t: string): string {
 const money = (n: number) => n.toFixed(2);
 
 export function planGametimeListings(a: GametimeAllocation): PlannedGametimeListings {
-  const set = planExosListings(a, 'Gametime');
+  const set = planExosListings(a, 'Gametime', 'gametime');
   requireCurrency(set, 'USD', 'Gametime');
+  const notices = [...set.notices];
   const listings = set.listings.map((l) => {
     if (!l.event.local_time) throw new Error("the event's local start time is unknown: set its time zone");
+    const split = marketSplitFor('gametime', l.split, l.quantity);
+    const fmt = splitFormatNotice('gametime', split);
+    if (fmt && !notices.includes(fmt)) notices.push(fmt);
     const [y, mo, d] = l.event.local_date.split('-');
     const body: GametimeCsvRow = {
       Edit: 'y',
@@ -66,12 +72,12 @@ export function planGametimeListings(a: GametimeAllocation): PlannedGametimeList
       SeatThru: String(l.seat_thru),
       Notes: l.notes,
       Cost: money(l.price),
-      TicketID: l.listing_id,
+      TicketID: assertListingId('gametime', l.listing_id),
       edelivery_ind: 'Y',
       InHandDate: l.in_hand_date,
       Instant: 'N',
-      Splittype: 'ANY',
-      Splitvalue: '',
+      Splittype: split.type,
+      Splitvalue: colonSplits(split.values),
       FaceValue: l.face_value != null ? money(l.face_value) : '',
       Stock: EXOS_TRANSFER_STOCK.gametime,
       Discount: '',
@@ -84,6 +90,7 @@ export function planGametimeListings(a: GametimeAllocation): PlannedGametimeList
     channel: 'gametime',
     listings,
     per_order_cap: set.per_order_cap,
+    notices,
     // Gametime's examples use numeric TicketIDs; it doesn't say others are refused.
     unresolved: ['TicketID: Exos ids are "ex…" strings; confirm Gametime accepts non-numeric ids'],
   };

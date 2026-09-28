@@ -16,7 +16,7 @@ import { useToast } from '../context/ToastContext';
 
 const inputCls =
   'bg-slate-50 border-2 border-transparent rounded-2xl py-3 px-5 text-slate-900 font-bold ' +
-  'focus:outline-none focus:border-brand-primary focus:bg-white transition-all shadow-inner';
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary focus:bg-white transition-all shadow-inner';
 
 export default function TaxRulesEditor({ eventId }: { eventId: string }) {
   const { toast } = useToast();
@@ -109,7 +109,7 @@ export default function TaxRulesEditor({ eventId }: { eventId: string }) {
               <select
                 value={p.taxRateId ?? ''}
                 onChange={(e) => assign(p, e.target.value)}
-                className="border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-slate-900 outline-none"
+                className="border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
               >
                 <option value="">No tax</option>
                 {rules.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}

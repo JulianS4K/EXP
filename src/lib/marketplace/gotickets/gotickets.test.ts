@@ -62,7 +62,7 @@ describe('listings', () => {
     expect(p.listings.map((l) => [l.listing_id, l.seat_from, l.seat_thru])).toEqual([[exosListingId(ALLOC, 1), 1, 4], [exosListingId(ALLOC, 2), 5, 6]]);
     expect(p.listings[1].request).toMatchObject({ endpoint: 'createListings', method: 'POST', path: '/rest/listings' });
     expect(p.listings[1].request.body).toEqual({
-      externalTicketId: exosListingId(ALLOC, 2), section: 'GA', row: 'GA', lowSeat: '5', highSeat: '6',
+      externalTicketId: exosListingId(ALLOC, 2), section: 'General Admission', row: 'GA', lowSeat: '5', highSeat: '6',
       notes: expect.stringContaining('Exos'), quantity: 2, instant: false, splitType: 'ANY', inHandDate: '2026-11-06',
       stockType: 'MOBILE_TICKETS', faceValue: 40, price: 45, eventName: 'Late Night Jazz', venueName: 'Blue Room',
       eventDateTime: '2026-11-07T02:00:00.000Z', seatgeekEventId: '6123456',

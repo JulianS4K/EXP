@@ -55,7 +55,7 @@ export default function DeleteAccountPanel() {
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         autoComplete="off"
-        className="w-full bg-black border border-white/20 px-3 py-2 text-sm font-bold focus:outline-none focus:border-red-400"
+        className="w-full bg-black border border-white/20 px-3 py-2 text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-red-400"
       />
       <div className="flex gap-3">
         <button

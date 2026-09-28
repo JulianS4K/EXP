@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -11,6 +12,12 @@ export default defineConfig(() => {
     // <BrowserRouter basename="/bridge"> in App.tsx.
     base: '/bridge/',
     plugins: [react(), tailwindcss()],
+    test: {
+      // .claude/** holds agent worktrees (full copies of the repo): without
+      // this, a local `npm test` runs every test once per worktree.
+      // vitest's defaults, spelled out so the build never loads vitest.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/.{idea,git,cache,output,temp}/**', '.claude/**'],
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -27,14 +34,25 @@ export default defineConfig(() => {
       // entry chunk size considerably.
       rollupOptions: {
         output: {
-          // Vite 8 / Rollup 4 type `manualChunks` as a function only — the
-          // object form no longer satisfies the type (TS2769). Function form
-          // below preserves the original split (stripe / qr / motion).
-          manualChunks: (id: string) => {
-            if (id.includes('node_modules/@stripe/stripe-js')) return 'stripe';
-            if (id.includes('node_modules/html5-qrcode') || id.includes('node_modules/qrcode.react')) return 'qr';
-            if (id.includes('node_modules/motion')) return 'motion';
-            return undefined;
+          // Vite 8 bundles with Rolldown, whose chunk groups (codeSplitting)
+          // replace the deprecated manualChunks. Each group also pulls in its
+          // modules' dependencies, so `priority` decides who owns a shared
+          // dep: react has to win, or it lands inside whichever library group
+          // reached it first (it used to ride in the "qr" chunk).
+          //
+          // react/react-dom get their own long-cached vendor chunk. The two QR
+          // libraries are split apart: qrcode.react (small, renders ticket
+          // codes) and html5-qrcode (the camera scanner, dynamically imported
+          // by the check-in view only). They used to share one "qr" chunk
+          // that was preloaded on every page.
+          codeSplitting: {
+            groups: [
+              { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 40 },
+              { name: 'stripe', test: /node_modules[\\/]@stripe[\\/]stripe-js[\\/]/, priority: 30 },
+              { name: 'qrcode', test: /node_modules[\\/]qrcode\.react[\\/]/, priority: 30 },
+              { name: 'scanner', test: /node_modules[\\/]html5-qrcode[\\/]/, priority: 30 },
+              { name: 'motion', test: /node_modules[\\/](motion|framer-motion|motion-dom|motion-utils)[\\/]/, priority: 20 },
+            ],
           },
         },
       },

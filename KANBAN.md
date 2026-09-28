@@ -25,6 +25,112 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Marketplace payout ledger 2026-09-29
+
+- 🟡 **Payout ledger** (`20260929070000_exos_payout_ledger`, `exos-payouts`, authored, not applied / deployed;
+  `docs/payouts.md`): remittances (what a marketplace paid, allocated to orders; payable only once confirmed),
+  per-order money states, one open payout per org of `organizer_net` less clawbacks, Stripe Connect transfers
+  dry-run unless `EXOS_PAYOUTS_LIVE=true`. TEvo payments are read automatically; other marketplaces are recorded
+  from statements until their payout-report APIs are wired.
+
+## Email templates for buyers and organizers 2026-09-29
+
+- 🟡 **Transactional + follow-up mail** (`20260929071000_exos_mail_templates`, `_shared/mail-templates.ts`,
+  `exos-mail-drain`; authored, not applied / deployed; `docs/email.md`): payload rows rendered and escaped in TS.
+  Buyer: event cancelled with each holder's refund status (trigger, any cancel path), event updated, refund issued
+  (per Stripe refund), after-show mail (thanks, follow, next events); receipt and reminder extended in place.
+  Organizer: event published, low inventory / sold out, payout sent / pending (`exos_queue_payout_mail`, for the
+  payout ledger), free months ending (14 days and 1 day before), daily sales digest, weekly summary, day 0/3/7
+  onboarding that stops when done. Once-only ledger (`exos_mail_dedupe`), follow-ups honour the opt-out, no buyer
+  PII in organizer mail. Operator: apply, deploy the drain, add the `exos_send_mail_followups` cron line
+  (`docs/email.md`). Next: settings toggle for `post_event_emails_enabled`, a separate organizer-digest opt-out,
+  move `event-rescheduled` and `waitlist-open` to payload templates (links, subject escaping).
+
+## Apple Wallet + Google Wallet passes 2026-09-29
+
+- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, authored, not
+  applied / deployed; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
+  ticket they own. Passes carry a `W-` door code the scanner accepts: Google renders a TOTP `rotatingBarcode` (key
+  derived from `barcode_secret`, never the secret), Apple a static code bound to the pass epoch. A transfer, refund
+  or release voids the pass (trigger) and queues an update; the PassKit web service (register / serials / latest
+  pass / log) and a cron push run deliver it. The holder can reissue to kill a screenshotted code. 503 "wallet not
+  configured" until the operator adds the Apple / Google credentials (no fake signatures). Next: SPA buttons
+  (TicketDetail), operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
+  APNs client certificates work on the edge runtime (pushes are a dry run until then), schedule the push cron.
+
+## Venue POS scaffold (Phase 3) 2026-09-29
+
+- 🟡 **POS scaffolding** (`20260929074000_exos_pos_scaffold`, `_shared/pos/`, `exos-pos`, authored, not applied /
+  not deployed; `docs/pos.md`): data model for devices, catalog (ticket / bar / merch, tax rule, 86, stock), tabs on a
+  ticket or wristband, orders + lines + split tenders (cash / card / comp, tips), cash drawers (expected vs counted)
+  and end-of-night settlement (`exos_pos_settlement_summary`, same math as `buildSettlement`). Door staff ring bar
+  and merch in cash / comp; card tenders and walk-up ticket lines are server-only. **No live payments**: Stripe
+  Terminal is an interface plus a `FakeTerminal`; `exos-pos` answers 501 for payment actions. No card data stored.
+  Open operator decisions in `docs/pos.md` (fee on POS sales, tip base, POS staff role, tab pre-auth, hardware).
+
+## Net-equal marketplace pricing 2026-09-29
+
+- 🟡 **Seller fees + net-equal list prices** (`fees.ts`, `20260929062000_exos_marketplace_fees`, authored, not
+  applied): each store lists grossed up for its seller fee so the organizer nets the Exos price everywhere
+  (TEvo 3%, SeatGeek 5%, both measured on real orders). Every sale records its listed price and the fee taken;
+  `exos_marketplace_fee_rates` gives the realized rate per store. Open: StubHub, Gametime, GoTickets and Vivid rates
+  (payout-only data), filled in from Exos's own sales.
+
+## Calendar feeds 2026-09-29
+
+- 🟡 **Subscribe in Google / Apple / Outlook Calendar** (`exos-calendar`, `_shared/calendar/`,
+  `20260929073000_exos_calendar_feeds`, authored, not applied or deployed; `docs/calendar.md`): `.ics` feeds for an
+  organizer (`/org/<slug>.ics`), a venue (`/venue/<key>.ics`, key = venue name + city, merged by Place ID) and one
+  event, plus a private "my events" feed (`/me/<token>.ics`: followed organizers + events I hold tickets for; token
+  hashed at rest, rotate / turn off from My Tickets). Cancellations stay in as `STATUS:CANCELLED`. SPA: Outlook added
+  to "Add to Calendar", "Subscribe to calendar" on organizer pages, "<venue> calendar" on the event page. Next: apply +
+  deploy (operator), then a "subscribe" line in the ticket email.
+
+## Events on Google (Search / Maps "Tickets") 2026-09-29
+
+- 🟡 **Google events feed** (`exos-google-feed`, `_shared/googleEvents/feed.ts`, authored, not deployed;
+  `docs/google-events.md`): a snapshot JSON feed of schema.org Events: all-in offers per public ticket type,
+  venue-local times, Place ID, cancelled events as EventCancelled, checkout links tagged `utm_source=google`.
+  Operator report of skipped events. Next: join Google's events ticketing program (business step), then map to their
+  partner spec and set up the upload they ask for.
+
+## Marketplace listing standard 2026-09-29
+
+- 🟡 **Split policy + listing ids** (`listingStandard.ts`, `20260929061000_exos_market_split`, authored, not
+  applied): one split per ticket type (any / don't leave one / pairs / all together) sent to StubHub, SeatGeek,
+  Gametime, GoTickets, Vivid and TEvo in their own enums (custom lists end at the quantity; pairs listings are even).
+  Every planner checks the `ex…` listing id against the marketplace's field and limit; `LISTING_FIELD_MAP` is the
+  per-marketplace field table, tested against every planner. Apply the migration before deploying exos-distribute.
+  Open: confirm Gametime `Splitvalue` and Vivid `splitValue` formats.
+
+## Exos for AI assistants (MCP) 2026-09-29
+
+- 🟡 **Remote MCP server** (`exos-mcp`, `20260929060000_exos_mcp`, authored, not deployed; `docs/mcp.md`): one
+  Streamable-HTTP server for Claude, ChatGPT and any MCP client. Public read-only tools (`search_events`,
+  `get_event`, `get_ticket_link`, plus ChatGPT's `search` / `fetch`); organizer tools with an Exos API key
+  (`my_events`, `event_sales`, `door_status`, `marketplace_attention`), scoped in SQL to the key's org. Nothing is
+  bought or changed: purchases are links. Next: OAuth for consumer connector screens, confirmed write tools,
+  Apps SDK widgets.
+
+## Build review fixes 2026-09-29 (six-area review, 2026-09-28)
+
+- 🟡 **Security hardening** (`20260929010000_exos_security_hardening`, authored, not applied; apply with
+  `20260928060000`, the quota fix): vouchers can't name another event's ticket type and a planted one holds
+  nothing (the cross-org sell-out); finance reads but can't delete vouchers; failed code lookups throttled (10 per
+  account, 60 per event anonymous, 10 min) and typed codes are 6+ characters; claim links carry a `claim_key`
+  staff can't read (`?k=`), without it only the addressed account claims; a marketplace cancellation voids the
+  order's unused tickets; offboarding revokes the member's API keys and webhooks; the payout account is
+  server-set only; add-on tax rates stay on their event. Code: StubHub writer refuses non-Exos listings and
+  sales, TEvo tickets wait for the fraud check, guest IP from the platform header, API limiter fails closed.
+  `test_security_hardening.sql` S1–S7.
+- 🟡 **Money path fixes** (`20260929030000`, authored, not applied): holds respect the event's house cap
+  (`exos_event_house_available`), organizer refunds void tickets only once the refund succeeds (webhook now
+  handles `refund.updated` / `charge.refund.updated` / `refund.failed`), receipts show amount + tax
+  (`exos_receipt_html`). Code: two-decimal currencies only (JPY was charged 100x), cards only, reconcile writes
+  the payment ledger, idempotent Connect account creation (`EXOS_CONNECT_ACCOUNT_TYPE`). **Waiting on operator:**
+  fee floor, Express vs Standard, chargeback policy.
+- 🟡 **Pool refill order** (`20260929020000`): deterministic, longest-idle shrinks first (fixed a flaky C2).
+
 ## Fan-first build (from reports/Organizer and fan ticketing needs.md, started 2026-09-28)
 
 Operator scope: everything on the report's build lists except same-day payout. Marketplaces are omnichannel
@@ -42,7 +148,8 @@ distribution of Exos's own inventory, not resale.
   event's org, so another org's owner could close a ticket type they don't own (reproduced; likely live in prod since
   `20260702123030`). Tests: `tests/exos/test_voucher_discounts_quotas.sql` (V1–V5, Q1–Q3), `voucherDiscounts.test.ts`.
 - ✅ **Marketplace seats per ticket type, visible** (UI only): the per-type backend (`exos_set_channel_allocation`,
-  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind `SHOW_DISTRIBUTION`.
+  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind a flag (the old
+  `SHOW_DISTRIBUTION` controls have since been removed).
   `SHOW_MARKETPLACES` now shows the Marketplaces section (Create + Edit event): tick marketplaces, then seats per ticket
   type per marketplace (GA on StubHub only, VIP everywhere), with a "Same on all" shortcut. The list is the five
   integrated marketplaces (Ticketmaster/AXS/Viagogo/TickPick/TEvo were listed but never integrated). Sending stays
@@ -80,7 +187,7 @@ distribution of Exos's own inventory, not resale.
 | 0 | Payments go-live + P1 audit fixes | 🟡 in progress: P0 live; P1 items below |
 | 1 | NYC indie wedge: Instagram/Facebook in-app checkout, Maps, SEO, promoter links, CRM, wallet passes | 🟡 in-app browser ✅, Maps ✅, checkout links ✅, promoter kit ✅, fan/promoter sharing + app Stories bridge ✅; next: prerendered SEO pages, CRM, wallet passes |
 | 2 | Face-value resale exchange + pricing intelligence (read-only from Terminal-2) | ⬜ |
-| 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | ⬜ |
+| 3 | Venue POS (Toast): Stripe Terminal box office, bar/merch, settlement | 🟡 scaffold authored (data model, pure money logic, 501 placeholder; `docs/pos.md`); terminal not wired |
 | 4 | Channel hub (Otter): one inventory across own channels, then authorized marketplaces (item 8) | ⬜ |
 | 5 | Platform: DB split, public API, plugins, new cities | ⬜ |
 
@@ -194,13 +301,13 @@ list)
 Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are on
 `claude/exos-p0`, in three stages (quick wins, buyer/door/organizer flow, create form and report).
 
-- [ ] **Percent / fixed discount codes don't work.** `exos_discount_codes` is written by the old
-  form but nothing redeems it: `exos-checkout` only consumes vouchers. The Create/Edit editors
-  are hidden (`SHOW_DISCOUNT_CODES`). Fix: add `percent_off` / `amount_off` to vouchers (migration
-  + `exos_check_voucher` + `exos-checkout`), then drop discount codes.
+- [x] **Percent / fixed discount codes don't work.** Done: vouchers take a percent or an amount
+  off (`20260928060000_exos_voucher_discounts_quota_editor`), and the old discount-code editors
+  (and their flag) were removed from Create / Edit event.
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
-- [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).
+- [~] Native Apple / Google Wallet passes (the "open pass" is still a web page). Backend authored
+  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons + operator credentials still to do.
 
 ## SeatGeek 2026-09-27
 
@@ -544,7 +651,13 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.
 - ✅ M — replayed offline check-ins dropped server refusals silently; now audited + surfaced.
 - ✅ H (partial) — scanner registry (every ticket's barcode secret) now wiped on sign-out. Still open: it
-  lives in plaintext localStorage for 7 days. (✅ Pixels no longer load on `/checkin`.)
+  lives in plaintext localStorage, now for 24 hours (was 7 days). (✅ Pixels no longer load on `/checkin`.)
+- ✅ H — door hardening (migs `20260929040000`, `20260929041000`): offline scans upload with their code + scan
+  time and are re-verified against the ticket's current owner/secret (a ticket transferred after the roster sync
+  is a conflict, not an admission), with a per-scan nonce; typed overrides need an owner/manager and a reason;
+  "already used" says when and on which device; managers can undo a check-in (reason, audited); scanners can be
+  limited to events (Members page); the pass signs on the server clock and the door says when a phone clock is
+  off; passes show a short reference, not the ticket id, and never an unsigned QR.
 - ✅ L — removed the `GEMINI_API_KEY` Vite `define` (a future reference would inline the key) and `@google/genai`.
 - ✅ H (correctness) — production CSP/XFO from Terminal-2 killed the embed, the org pixels and Google Fonts. Fixed
   with a `/bridge/*` policy in Terminal-2 `server.py` (https://github.com/JulianS4K/Terminal-2/pull/1003); live
@@ -683,8 +796,9 @@ indie-primary + secondary-market positioning. `[ ]` = not started,
   rideshare, in-app upgrades — SeatGeek **Rally**). We stop at ticket +
   add-ons.
 - `[~]` **Native Apple / Google Wallet passes.** *(TM, AXS, SeatGeek.)*
-  Browser-only `WalletPass` today; native `.pkpass` / Google Wallet
-  scaffolds still on the rebuild queue.
+  Browser-only `WalletPass` today; the native `.pkpass` / Google Wallet
+  backend is authored (`exos-wallet`, 2026-09-29, `docs/wallet.md`), SPA
+  buttons and credentials pending.
 - `[ ]` **Self-service upgrades + gift cards / gifting.** *(TM,
   SeatGeek.)* Upgrades depend on the seat-map work.
 

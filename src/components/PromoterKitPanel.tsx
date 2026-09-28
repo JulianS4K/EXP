@@ -79,7 +79,7 @@ export default function PromoterKitPanel({ event, promoter }: { event: Event; pr
     toast,
   );
 
-  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary';
+  const field = 'bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
 
   return (
     <div className="space-y-5">

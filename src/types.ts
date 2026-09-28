@@ -286,6 +286,9 @@ export interface Event {
     // "Wheelchair space + 1 companion seat".
     accessible?: boolean;
     accessibleNote?: string;
+    // How marketplace buyers may split this ticket type's listings
+    // (mig 20260929061000, listingStandard.ts). Default 'any'.
+    marketSplit?: 'any' | 'no_single' | 'pairs' | 'together';
   }[];
   // Promo code metadata. The redemption *count* lives in the
   // events/{id}/promoUses/{code} sub-collection so it can be

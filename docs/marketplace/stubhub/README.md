@@ -327,9 +327,12 @@ Added 2026-09-26 (mig `20260926190000_exos_stubhub_event_request`):
 - a live branch in `exos-distribute` that sends the planned request and
   stores the returned `SellerEvent` id in `external_event_id`.
 
-Every step is operator-gated, and the last one isn't built. The
-create/edit forms' distribution controls are still hidden
-(`SHOW_DISTRIBUTION` in `src/lib/tierType.ts`).
+Every step is operator-gated, and the last one isn't built. The full,
+current list (every migration, secret and function) is under "Going live" in
+[`../README.md`](../README.md). Organizers tick StubHub and set seats (and,
+optionally, a price) per ticket type in the Marketplaces section of Create /
+Edit event (`SHOW_MARKETPLACES` in `src/lib/tierType.ts`); the old
+`SHOW_DISTRIBUTION` controls were removed.
 
 ### Other mappings
 

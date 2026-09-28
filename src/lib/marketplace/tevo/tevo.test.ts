@@ -136,7 +136,7 @@ describe('orders', () => {
     const s = normalizeTevoOrder(officeOrder());
     expect(s).toMatchObject({
       channel: 'evo', externalOrderId: '190840', externalEventId: '1234', externalListingId: ALLOC, listingRef: LISTING,
-      quantity: 2, status: 'pending', buyerEmail: null, proceeds: { amount: 90, currency: 'USD' }, section: 'GA',
+      quantity: 2, status: 'pending', buyerEmail: null, proceeds: { amount: 87.3, currency: 'USD' }, section: 'GA',
     });
     const c = normalizeTevoOrder(officeOrder({ state: 'accepted', buyer: { type: 'Client', id: 1, email_address: { address: ' Fan@X.com ' } }, fraud_check_status: 'pending' }));
     expect(c.status).toBe('pending');
@@ -211,5 +211,53 @@ describe('TevoWriter', () => {
     const r = await w.acceptOrder(officeOrder(), { reviewer_id: 2487 });
     expect(r.dryRun).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('multi-item orders', () => {
+  const ALLOC2 = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const LISTING2 = exosListingId(ALLOC2, 1);
+  const item = (id: number, qty: number, ext: string, price = '45.00') =>
+    ({ id, order_item_id: id + 100, quantity: qty, price, ticket_group: { id: id + 1000, section: 'GA', row: 'GA', external_id: ext } });
+
+  it('items from one Exos listing: summed and fulfilled as usual', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 2, LISTING), item(2, 3, LISTING)] }));
+    expect(s).toMatchObject({ status: 'confirmed', quantity: 5, externalListingId: ALLOC, note: null, proceeds: { amount: 218.25 } }); // 225 less the standard 3%
+  });
+
+  it('items from different Exos listings: never the whole quantity from the first one', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 2, LISTING), item(2, 3, LISTING2)] }));
+    expect(s.status).toBe('unknown');
+    expect(s.note).toMatch(/2 different Exos listings/);
+    expect(s.note).toContain(LISTING2);
+  });
+
+  it('a cancelled multi-listing order is still a cancellation', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'cancelled', items: [item(1, 2, LISTING), item(2, 3, LISTING2)] }));
+    expect(s.status).toBe('cancelled');
+    expect(s.note).toBeNull();
+  });
+
+  it("proceeds are net of TEvo's seller fee (order 8089940-19196777: 32.48 - 0.97 = 31.51)", () => {
+    const one = normalizeTevoOrder(officeOrder({ state: 'completed', total: '32.48', fee: '0.97', service_fee: '0.0', items: [item(1, 1, LISTING, '32.48')] }));
+    expect(one.proceeds).toEqual({ amount: 31.51, currency: 'USD' });
+    // No fee field on the order: the standard 3% (90.00 -> 2.70).
+    expect(normalizeTevoOrder(officeOrder({ items: [item(1, 2, LISTING, '45.00')] })).proceeds).toEqual({ amount: 87.3, currency: 'USD' });
+    // Shared with broker items: Exos bears its price share of the fee (2 x 45 of 6 x 45 -> 1/3 of 3.00).
+    const mixed = normalizeTevoOrder(officeOrder({ state: 'accepted', fee: '3.00', items: [item(1, 4, 'BROKER-9'), item(2, 2, LISTING)] }));
+    expect(mixed.proceeds).toEqual({ amount: 89, currency: 'USD' });
+    // A fee TEvo reports is used as reported, even 0.
+    expect(normalizeTevoOrder(officeOrder({ fee: '0.0', items: [item(1, 2, LISTING, '45.00')] })).proceeds).toEqual({ amount: 90, currency: 'USD' });
+  });
+
+  it('Exos items next to broker items: only the Exos quantity counts, and a person delivers it', () => {
+    const s = normalizeTevoOrder(officeOrder({ state: 'accepted', items: [item(1, 4, 'BROKER-9'), item(2, 2, LISTING)] }));
+    expect(s).toMatchObject({ status: 'unknown', quantity: 2, externalListingId: ALLOC });
+    expect(s.note).toMatch(/broker items/);
+  });
+
+  it('the writer refuses to accept a multi-listing order', () => {
+    const w = new TevoWriter();
+    expect(() => w.acceptOrder(officeOrder({ items: [item(1, 2, LISTING), item(2, 1, LISTING2)] }), { reviewer_id: 1 })).toThrow(/several Exos listings/);
   });
 });

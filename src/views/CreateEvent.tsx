@@ -1,4 +1,5 @@
 import { useAccessColumns } from '../hooks/useAccessColumns';
+import { CHECKOUT_CURRENCIES } from '../lib/currency';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createEvent, getEventForEdit, type EventInput } from '../lib/events';
@@ -6,7 +7,7 @@ import { uploadEventImage, deleteStorageObject } from '../lib/storage';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Image as ImageIcon, Calendar as CalendarIcon, MapPin, Tag, DollarSign, ListOrdered, Upload, Globe, ShieldCheck, Loader2, Plus, X } from 'lucide-react';
+import { ArrowLeft, Calendar as CalendarIcon, MapPin, Tag, ListOrdered, Upload, ShieldCheck, Loader2, X } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import {
@@ -61,7 +62,7 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // Optional Automatiq integration. The endpoint is not implemented yet, so we
 // gate the call behind an env flag — otherwise every event creation 404s and
 // writes a misleading `syncStatus: 'failed'` to the doc.
-import { MARKETPLACE_NETWORKS, SHOW_DISCOUNT_CODES, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
@@ -69,35 +70,13 @@ import { slugify } from '../lib/orgs';
 const AUTOMATIQ_ENABLED =
   (import.meta as any).env?.VITE_AUTOMATIQ_ENABLED === 'true';
 
-interface PromoCodeDraft {
-  id: string;
-  code: string;
-  type: 'percentage' | 'fixed';
-  value: string;
-  usageLimit: string;
-  // Optional ISO date (yyyy-MM-dd) — empty means no expiry. Stored as a
-  // Firestore Timestamp on submit when present.
-  expiresAt: string;
-  // Tier ids that this code makes visible. Used for hidden / pre-sale
-  // tiers — applying the code in EventDetails reveals those rows.
-  unlocksTierIds: string[];
-  usedCount: number;
-}
 
 // ISO 4217 currency codes the UI exposes. Stripe processing for
 // non-USD currencies is wired up by the payments team — this just
 // stores the picker value alongside the event so prices render in
 // the right symbol everywhere.
-const SUPPORTED_CURRENCIES: { code: string; label: string }[] = [
-  { code: 'USD', label: 'USD — US Dollar' },
-  { code: 'EUR', label: 'EUR — Euro' },
-  { code: 'GBP', label: 'GBP — British Pound' },
-  { code: 'CAD', label: 'CAD — Canadian Dollar' },
-  { code: 'AUD', label: 'AUD — Australian Dollar' },
-  { code: 'JPY', label: 'JPY — Japanese Yen' },
-  { code: 'MXN', label: 'MXN — Mexican Peso' },
-  { code: 'BRL', label: 'BRL — Brazilian Real' },
-];
+// Two-decimal currencies only (lib/currency.ts): amounts are minor units x 100.
+const SUPPORTED_CURRENCIES: readonly { code: string; label: string }[] = CHECKOUT_CURRENCIES;
 
 // A unique violation (23505) on the events slug: the only failure a new
 // slug can fix. Anything else (including a later tier insert) is rethrown.
@@ -168,7 +147,6 @@ export default function CreateEvent() {
     distributionNetworks: [] as string[],
     accessibility: {} as EventAccessibility
   });
-  const [promoCodes, setPromoCodes] = useState<PromoCodeDraft[]>([]);
 
   // Tier draft shape carries the new fields as plain strings so empty
   // datetime/number inputs don't render "undefined" or "0" in the form.
@@ -251,7 +229,6 @@ export default function CreateEvent() {
         if (window.confirm('You have an unsaved event draft. Restore it?')) {
           setFormData((prev) => ({ ...prev, ...saved.formData }));
           setTicketTiers(saved.ticketTiers);
-          if (Array.isArray(saved.promoCodes)) setPromoCodes(saved.promoCodes);
           draftAppliedRef.current = true;  // only set when user confirmed
         } else {
           localStorage.removeItem(draftKey);
@@ -354,20 +331,6 @@ export default function CreateEvent() {
             ),
           );
         }
-        if (Array.isArray(src.discountCodes)) {
-          setPromoCodes(
-            src.discountCodes.map((d: any) => ({
-              id: crypto.randomUUID(),
-              code: d.code || '',
-              type: d.type || 'percentage',
-              value: String(d.value ?? ''),
-              usageLimit: d.usageLimit != null ? String(d.usageLimit) : '',
-              expiresAt: '',
-              unlocksTierIds: Array.isArray(d.unlocksTierIds) ? d.unlocksTierIds : [],
-              usedCount: 0,
-            })),
-          );
-        }
       } catch (err) {
         console.warn('Could not hydrate clone source:', err);
       } finally {
@@ -392,7 +355,6 @@ export default function CreateEvent() {
           JSON.stringify({
             formData,
             ticketTiers,
-            promoCodes,
             savedAt: Date.now(),
           }),
         );
@@ -403,7 +365,7 @@ export default function CreateEvent() {
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [autosaveReady, draftKey, formData, ticketTiers, promoCodes]);
+  }, [autosaveReady, draftKey, formData, ticketTiers]);
 
   const clearDraft = () => {
     try {
@@ -509,47 +471,6 @@ export default function CreateEvent() {
   // Categories + genre chips come from the taxonomy module so adding a
   // category in the future is a one-file change.
   const categories = EVENT_CATEGORIES;
-
-  // ---- Promo code editor helpers ---------------------------------------
-  // We keep the UI fields as strings (so empty inputs don't show "0") and
-  // coerce on submit, mirroring the tier editor below.
-  const addPromoCode = () => {
-    setPromoCodes((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        code: '',
-        type: 'percentage',
-        value: '',
-        usageLimit: '',
-        expiresAt: '',
-        unlocksTierIds: [],
-        usedCount: 0,
-      },
-    ]);
-  };
-  const removePromoCode = (id: string) => {
-    setPromoCodes((prev) => prev.filter((p) => p.id !== id));
-  };
-  const updatePromoCode = (
-    id: string,
-    field: keyof PromoCodeDraft,
-    value: string,
-  ) => {
-    setPromoCodes((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              [field]:
-                field === 'code'
-                  ? value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32)
-                  : value,
-            }
-          : p,
-      ),
-    );
-  };
 
   const handleGenreToggle = (genre: string) => {
     const current = formData.genres;
@@ -678,43 +599,6 @@ export default function CreateEvent() {
     // Currency: ISO 4217 three-letter code.
     if (!/^[A-Z]{3}$/.test(formData.currency)) {
       return 'Currency must be a 3-letter ISO code (e.g. USD, EUR).';
-    }
-
-    // Promo codes — keep the per-row validation tight so we don't write
-    // junk that will silently fail at redemption time.
-    const seenCodes = new Set<string>();
-    for (const p of SHOW_DISCOUNT_CODES ? promoCodes : []) {
-      const code = p.code.trim().toUpperCase();
-      if (!code) return 'Every promo code needs a value (e.g. EARLY30).';
-      if (!/^[A-Z0-9_-]+$/.test(code)) {
-        return `Promo code "${code}" can only contain A-Z, 0-9, underscore and hyphen.`;
-      }
-      if (seenCodes.has(code)) {
-        return `Promo code "${code}" is repeated. Use distinct codes.`;
-      }
-      seenCodes.add(code);
-      const v = parseFloat(p.value);
-      if (!Number.isFinite(v) || v < 0) {
-        return `Promo code "${code}" needs a non-negative discount value.`;
-      }
-      if (p.type === 'percentage' && v > 100) {
-        return `Promo code "${code}" can't be more than 100%.`;
-      }
-      if (p.usageLimit) {
-        const lim = parseInt(p.usageLimit, 10);
-        if (!Number.isInteger(lim) || lim < 1) {
-          return `Promo code "${code}" usage limit must be a positive integer.`;
-        }
-      }
-      if (p.expiresAt) {
-        const expMs = new Date(p.expiresAt).getTime();
-        if (!Number.isFinite(expMs)) {
-          return `Promo code "${code}" has an invalid expiry date.`;
-        }
-        if (expMs < Date.now()) {
-          return `Promo code "${code}" expires in the past.`;
-        }
-      }
     }
 
     return null;
@@ -874,19 +758,6 @@ export default function CreateEvent() {
           ...(accessOk && hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
             ? { accessibility: serializeAccessibility(formData.accessibility ?? {}) } : {}),
           tiers,
-          discountCodes: (SHOW_DISCOUNT_CODES ? promoCodes : [])
-            .filter((p) => p.code.trim())
-            .map((p) => {
-              const usage = parseInt(p.usageLimit, 10);
-              const expMs = p.expiresAt ? new Date(p.expiresAt).getTime() : NaN;
-              return {
-                code: p.code.trim().toUpperCase(),
-                type: p.type,
-                value: parseFloat(p.value),
-                usageLimit: Number.isInteger(usage) && usage > 0 ? usage : null,
-                expiresAt: Number.isFinite(expMs) ? new Date(expMs).toISOString() : null,
-              };
-            }),
         });
         let created: { eventId: string };
         try {
@@ -1040,7 +911,7 @@ export default function CreateEvent() {
                   type="text"
                   maxLength={TITLE_MAX}
                   placeholder="e.g. Midnight Horizon Festival"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 />
@@ -1051,7 +922,7 @@ export default function CreateEvent() {
               <label htmlFor="event-category" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Category</label>
               <select
                 id="event-category"
-                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
               >
@@ -1084,7 +955,7 @@ export default function CreateEvent() {
               <input aria-label="Subgenres"
                 type="text"
                 placeholder={`e.g. Ambient, Techno, Deep House (max ${SUBGENRES_MAX_COUNT}, comma-separated)`}
-                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={formData.subgenres.join(', ')}
                 onChange={(e) => {
                   const val = Array.from(
@@ -1112,7 +983,7 @@ export default function CreateEvent() {
               <input aria-label="Performers"
                 type="text"
                 placeholder={`e.g. Skrillex, Boys Noize, Boombox Cartel (max ${PERFORMERS_MAX_COUNT}, comma-separated)`}
-                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={formData.performers.join(', ')}
                 onChange={(e) => {
                   const val = e.target.value
@@ -1151,7 +1022,7 @@ export default function CreateEvent() {
                 />
                 <input aria-label="Doors open"
                   type="datetime-local"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                   value={formData.timing.doorsOpen}
                   onClick={(e) => {
                     // showPicker() opens the native calendar+time
@@ -1202,7 +1073,7 @@ export default function CreateEvent() {
                 <input aria-label="Show start"
                   required
                   type="datetime-local"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                   value={formData.timing.startTime || formData.date}
                   onClick={(e) => {
                     const el = e.currentTarget as HTMLInputElement;
@@ -1224,7 +1095,7 @@ export default function CreateEvent() {
                 />
                 <input aria-label="Show end"
                   type="datetime-local"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                   value={formData.timing.endTime}
                   onClick={(e) => {
                     const el = e.currentTarget as HTMLInputElement;
@@ -1244,7 +1115,7 @@ export default function CreateEvent() {
               </p>
               <select
                 id="event-timezone"
-                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                 value={formData.timezone}
                 onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
               >
@@ -1267,7 +1138,7 @@ export default function CreateEvent() {
                   type="number"
                   min="1"
                   placeholder="Blank = add up the ticket types"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.totalTickets}
                   onChange={(e) => setFormData({ ...formData, totalTickets: e.target.value })}
                 />
@@ -1283,7 +1154,7 @@ export default function CreateEvent() {
                   type="text"
                   maxLength={LOCATION_MAX}
                   placeholder="e.g. Brooklyn Steel"
-                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                 />
@@ -1303,7 +1174,7 @@ export default function CreateEvent() {
                     placeholder="Street"
                     aria-label="Street"
                     maxLength={120}
-                    className="md:col-span-6 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary"
+                    className="md:col-span-6 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={formData.address.street}
                     onChange={(e) => setFormData({ ...formData, address: { ...formData.address, street: e.target.value } })}
                   />
@@ -1312,7 +1183,7 @@ export default function CreateEvent() {
                     placeholder="City"
                     aria-label="City"
                     maxLength={80}
-                    className="md:col-span-3 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary"
+                    className="md:col-span-3 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={formData.address.city}
                     onChange={(e) => setFormData({ ...formData, address: { ...formData.address, city: e.target.value } })}
                   />
@@ -1321,7 +1192,7 @@ export default function CreateEvent() {
                     placeholder="State / Region"
                     aria-label="State or region"
                     maxLength={80}
-                    className="md:col-span-2 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary"
+                    className="md:col-span-2 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={formData.address.region}
                     onChange={(e) => setFormData({ ...formData, address: { ...formData.address, region: e.target.value } })}
                   />
@@ -1330,7 +1201,7 @@ export default function CreateEvent() {
                     placeholder="Postal"
                     aria-label="Postal code"
                     maxLength={20}
-                    className="md:col-span-1 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary"
+                    className="md:col-span-1 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={formData.address.postal}
                     onChange={(e) => setFormData({ ...formData, address: { ...formData.address, postal: e.target.value } })}
                   />
@@ -1339,7 +1210,7 @@ export default function CreateEvent() {
                     placeholder="Country"
                     aria-label="Country"
                     maxLength={80}
-                    className="md:col-span-6 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary"
+                    className="md:col-span-6 bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={formData.address.country}
                     onChange={(e) => setFormData({ ...formData, address: { ...formData.address, country: e.target.value } })}
                   />
@@ -1395,7 +1266,7 @@ export default function CreateEvent() {
                 rows={5}
                 maxLength={DESCRIPTION_MAX}
                 placeholder="What should people know? Lineup, dress code, age limit…"
-                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus:border-brand-primary transition-colors resize-none"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors resize-none"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
@@ -1440,7 +1311,7 @@ export default function CreateEvent() {
                            required 
                            type="text"
                            placeholder="e.g. General admission"
-                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.name}
                            onChange={(e) => updateTier(tier.id, 'name', e.target.value)}
                          />
@@ -1452,7 +1323,7 @@ export default function CreateEvent() {
                            type="number"
                            min="0"
                            step="0.01"
-                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.price}
                            onChange={(e) => updateTier(tier.id, 'price', e.target.value)}
                          />
@@ -1463,7 +1334,7 @@ export default function CreateEvent() {
                            required 
                            type="number"
                            min="1"
-                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.capacity}
                            onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)}
                          />
@@ -1473,7 +1344,7 @@ export default function CreateEvent() {
                          <input aria-label="What's included"
                            type="text"
                            placeholder="e.g. Entry before 11pm, one drink"
-                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-medium focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-3 px-5 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.description}
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
@@ -1498,7 +1369,7 @@ export default function CreateEvent() {
                             aria-label="What this accessible ticket includes"
                             maxLength={ACCESSIBLE_NOTE_MAX}
                             placeholder="e.g. Wheelchair space + 1 companion seat"
-                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                             value={tier.accessibleNote ?? ''}
                             onChange={(e) => updateTier(tier.id, 'accessibleNote', e.target.value)}
                           />
@@ -1528,7 +1399,7 @@ export default function CreateEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
                             <select aria-label="Type"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.ticketType}
                               onChange={(e) => updateTier(tier.id, 'ticketType', e.target.value)}
                             >
@@ -1540,7 +1411,7 @@ export default function CreateEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
                             <select aria-label="Visibility"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.visibility}
                               onChange={(e) => updateTier(tier.id, 'visibility', e.target.value)}
                             >
@@ -1552,7 +1423,7 @@ export default function CreateEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
                             <input aria-label="Sales open"
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.salesStart}
                               onChange={(e) => updateTier(tier.id, 'salesStart', e.target.value)}
                             />
@@ -1561,7 +1432,7 @@ export default function CreateEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
                             <input aria-label="Sales close"
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.salesEnd}
                               onChange={(e) => updateTier(tier.id, 'salesEnd', e.target.value)}
                             />
@@ -1595,133 +1466,14 @@ export default function CreateEvent() {
         </div>
         )}
 
-        {/* Promo codes: exos_discount_codes are never redeemed at checkout, so
-            the editor stays hidden until percent-off codes reach the server
-            (KANBAN). Presale / access codes are Vouchers, set after publish. */}
-        {SHOW_DISCOUNT_CODES ? (<>
-        {/* Promo Codes Section */}
-        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Promo Codes</h3>
-              <p className="type text-[9px] text-white/30 uppercase tracking-widest mt-1">
-                Optional. Buyers redeem at checkout.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={addPromoCode}
-              className="text-[10px] font-bold text-brand-primary uppercase tracking-widest hover:opacity-80 transition-opacity flex items-center gap-2"
-            >
-              <Plus className="w-3 h-3" aria-hidden="true" /> Add Code
-            </button>
-          </div>
-
-          {promoCodes.length === 0 ? (
-            <p className="type text-[10px] text-white/30 uppercase tracking-widest">
-              No promo codes defined.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {promoCodes.map((p) => (
-                <div
-                  key={p.id}
-                  className="p-6 bg-black/40 border border-white/10 grid grid-cols-1 md:grid-cols-12 gap-4 items-end"
-                >
-                  <div className="md:col-span-3 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Code</label>
-                    <input aria-label="Code"
-                      required
-                      type="text"
-                      placeholder="EARLY30"
-                      maxLength={32}
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold uppercase focus:outline-none focus:border-brand-primary transition-colors font-mono"
-                      value={p.code}
-                      onChange={(e) => updatePromoCode(p.id, 'code', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-3 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
-                    <select aria-label="Type"
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors appearance-none"
-                      value={p.type}
-                      onChange={(e) => updatePromoCode(p.id, 'type', e.target.value)}
-                    >
-                      <option value="percentage">Percentage</option>
-                      <option value="fixed">Fixed amount</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Value {p.type === 'percentage' ? '(%)' : '($)'}
-                    </label>
-                    <input aria-label="Discount value"
-                      required
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={p.type === 'percentage' ? 100 : undefined}
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
-                      value={p.value}
-                      onChange={(e) => updatePromoCode(p.id, 'value', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Usage Limit
-                    </label>
-                    <input aria-label="Usage limit"
-                      type="number"
-                      min="1"
-                      placeholder="Unlimited"
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
-                      value={p.usageLimit}
-                      onChange={(e) => updatePromoCode(p.id, 'usageLimit', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-1 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Expires
-                    </label>
-                    <input aria-label="Expires"
-                      type="date"
-                      className="w-full bg-black border border-white/20 py-3 px-3 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors text-xs"
-                      value={p.expiresAt}
-                      onChange={(e) => updatePromoCode(p.id, 'expiresAt', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-1 flex justify-end">
-                    <button
-                      type="button"
-                      aria-label={`Remove promo code ${p.code || '(empty)'}`}
-                      onClick={() => removePromoCode(p.id)}
-                      className="text-white/30 hover:text-brand-accent transition-colors p-2"
-                    >
-                      <X className="w-4 h-4" aria-hidden="true" />
-                    </button>
-                  </div>
-
-                  {/* Hidden tiers are sold through vouchers (Edit event → Vouchers),
-                      which checkout enforces; discount codes only discount. */}
-                  {ticketTiers.some((t) => t.visibility === 'hidden') && (
-                    <p className="md:col-span-12 mt-2 pt-3 border-t border-white/10 type text-[10px] text-white/40">
-                      To sell a hidden ticket type (a presale), save the event, then add a voucher for it under
-                      Edit event → Vouchers.
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </>) : (
+        {/* Presale / access codes are vouchers (Edit event → Vouchers), which
+            checkout redeems; the old discount-code editor is gone. */}
           <div className="bg-[#111] border border-white/10 p-6 md:p-8">
             <h3 className="disp text-lg uppercase tracking-wide text-white">Presale &amp; access codes</h3>
             <p className="type text-xs text-white/50 mt-2 leading-relaxed">
               After you publish, open Edit event → Vouchers to make codes that unlock a hidden ticket type, pin a price, or let someone buy when sold out.
             </p>
           </div>
-        )}
         {/* Rarely-needed settings stay folded so the form reads as name →
             when/where → tickets → publish. */}
         <details className="group bg-[#111] border border-white/10">
@@ -1746,7 +1498,7 @@ export default function CreateEvent() {
                     <input 
                       type="text"
                       aria-label="Primary color hex"
-                      className="flex-grow bg-black border border-white/20 py-3 px-4 text-white font-mono text-xs focus:outline-none focus:border-brand-primary"
+                      className="flex-grow bg-black border border-white/20 py-3 px-4 text-white font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                       value={formData.branding.primaryColor}
                       onChange={(e) => setFormData({ ...formData, branding: { ...formData.branding, primaryColor: e.target.value } })}
                     />
@@ -1764,7 +1516,7 @@ export default function CreateEvent() {
                     <input 
                       type="text"
                       aria-label="Accent color hex"
-                      className="flex-grow bg-black border border-white/20 py-3 px-4 text-white font-mono text-xs focus:outline-none focus:border-brand-primary"
+                      className="flex-grow bg-black border border-white/20 py-3 px-4 text-white font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                       value={formData.branding.accentColor}
                       onChange={(e) => setFormData({ ...formData, branding: { ...formData.branding, accentColor: e.target.value } })}
                     />
@@ -1778,7 +1530,7 @@ export default function CreateEvent() {
                       type="text"
                       maxLength={SLUG_MAX}
                       placeholder="Blank = made from the event name"
-                      className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary"
+                      className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                       value={formData.branding.customSlug}
                       onChange={(e) =>
                         setFormData({
@@ -1800,53 +1552,12 @@ export default function CreateEvent() {
            </div>
         </div>
 
-        {SHOW_DISTRIBUTION && (<>
-        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
-           <div className="flex items-center space-x-3 mb-2">
-              <Globe className="text-brand-primary w-5 h-5" />
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Exclusivity Logic</h3>
-           </div>
-           
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Primary Market Only</p>
-                    <p className="type text-[9px] text-white/40">Bypass distribution networks</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={formData.exclusivity.primaryMarketOnly}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      exclusivity: { ...formData.exclusivity, primaryMarketOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Custom URL Only</p>
-                    <p className="type text-[9px] text-white/40">Private listing logic</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={formData.exclusivity.customUrlOnly}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      exclusivity: { ...formData.exclusivity, customUrlOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-           </div>
-        </div>
-        </>)}
 
         {/* Distribution Networks */}
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <ShieldCheck className="text-brand-primary w-5 h-5" />
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Purchase Controls</h3>
+              <h3 className="disp text-lg uppercase tracking-wide text-white">Purchase limits</h3>
            </div>
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1855,7 +1566,7 @@ export default function CreateEvent() {
                 <input aria-label="Max tickets per order" 
                   type="number"
                   min="1"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.purchaseLimits.maxPerOrder}
                   onChange={(e) => setFormData({ ...formData, purchaseLimits: { ...formData.purchaseLimits, maxPerOrder: e.target.value } })}
                 />
@@ -1865,7 +1576,7 @@ export default function CreateEvent() {
                 <input aria-label="Max tickets per person" 
                   type="number"
                   min="1"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.purchaseLimits.maxPerAccount}
                   onChange={(e) => setFormData({ ...formData, purchaseLimits: { ...formData.purchaseLimits, maxPerAccount: e.target.value } })}
                 />
@@ -1882,6 +1593,10 @@ export default function CreateEvent() {
            </div>
 
            <p className="type text-xs text-white/50 leading-relaxed">Also sell this event's tickets on these marketplaces. After you save, Edit event lets you choose how many seats of each ticket type each one gets (for example GA on StubHub only, VIP everywhere).</p>
+           <p className="type text-xs text-white/60 leading-relaxed border-l-2 border-brand-secondary pl-3">
+             Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
+             per marketplace later, so nothing is listed or sold there today.
+           </p>
            
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (

@@ -157,13 +157,17 @@ BEGIN
   IF pg_temp.rec('{"channel":"stubhub","external_order_id":"557","external_listing_id":"SH-L-1","quantity":1,"sale_status":"cancelled"}') <> 'cancelled' THEN
     RAISE EXCEPTION 'M5 FAIL: cancel before tickets not cancelled';
   END IF;
-  IF pg_temp.rec('{"channel":"stubhub","external_order_id":"555","external_listing_id":"SH-L-1","quantity":2,"sale_status":"cancelled"}') <> 'needs_attention' THEN
-    RAISE EXCEPTION 'M5 FAIL: cancel after tickets not flagged';
+  -- After tickets were issued (mig 20260929010000): they're voided and their
+  -- claim links stop working; the order is cancelled.
+  IF pg_temp.rec('{"channel":"stubhub","external_order_id":"555","external_listing_id":"SH-L-1","quantity":2,"sale_status":"cancelled"}') <> 'cancelled' THEN
+    RAISE EXCEPTION 'M5 FAIL: cancel after tickets not cancelled';
   END IF;
-  IF (SELECT attention_reason FROM public.exos_marketplace_orders WHERE external_order_id = '555') NOT LIKE '%void them%' THEN
-    RAISE EXCEPTION 'M5 FAIL: reason missing';
+  IF EXISTS (SELECT 1 FROM public.exos_tickets WHERE order_ref = 'stubhub:555' AND status <> 'voided')
+     OR EXISTS (SELECT 1 FROM public.exos_transfers tr JOIN public.exos_tickets t ON t.id = tr.ticket_id
+                 WHERE t.order_ref = 'stubhub:555' AND tr.status = 'pending') THEN
+    RAISE EXCEPTION 'M5 FAIL: tickets of a cancelled order still live';
   END IF;
-  RAISE NOTICE 'M5 ok: cancellations handled';
+  RAISE NOTICE 'M5 ok: cancellations handled; issued tickets voided';
 END $$;
 
 -- M7 ---------------------------------------------------------------------------

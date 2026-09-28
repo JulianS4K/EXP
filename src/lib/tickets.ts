@@ -19,6 +19,8 @@ import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
 import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
+import { estimateOffset, setClockOffset } from './serverClock';
+import type { QueuedScan } from './offlineCheckins';
 
 const toTs = (iso?: string | null): Timestamp =>
   Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
@@ -83,6 +85,12 @@ export function mapTransfer(row: any): Transfer {
     orgId: row.org_id ?? undefined,
   };
 }
+
+// Transfer columns clients may read: every one except claim_key, the secret in
+// the emailed claim link (mig 20260929010000), so select('*') would fail.
+const TRANSFER_COLS =
+  'id, ticket_id, org_id, sender_id, sender_email, receiver_email, receiver_name, status, ' +
+  'created_at, updated_at, event_id, event_title, event_image, tier_name, organizer_id';
 
 // Explicit ticket column list (everything mapTicket needs) EXCEPT barcode_secret.
 // The secret was scoped out of the base-table read grant in migration
@@ -210,7 +218,7 @@ export async function listInboundTransfers(): Promise<Transfer[]> {
   if (!email) return [];
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('receiver_email', email)
     .eq('status', 'pending');
   if (error) throw error;
@@ -223,7 +231,7 @@ export async function listOutboundTransfers(): Promise<Transfer[]> {
   if (!uid) return [];
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('sender_id', uid)
     .eq('status', 'pending');
   if (error) throw error;
@@ -233,7 +241,7 @@ export async function listOutboundTransfers(): Promise<Transfer[]> {
 export async function getTransfer(transferId: string): Promise<Transfer | null> {
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('id', transferId)
     .maybeSingle();
   if (error) throw error;
@@ -431,6 +439,15 @@ export type ScanReason =
 export interface CheckInResult {
   ok: boolean;
   reason: string;
+  /** 'checked-in': when; 'used': when the ticket was used (mig 20260929040000). */
+  check_in_at?: string;
+  /** 'used': the device / source of the check-in that used it. */
+  device?: string;
+  source?: string;
+  /** Offline replay: the server refused a scan the door had admitted. */
+  conflict?: boolean;
+  /** Offline replay: this scan's ref was already answered. */
+  duplicate?: boolean;
 }
 
 /** Atomic check-in (status flip + audit). Returns {ok,reason}; reason is one
@@ -445,6 +462,7 @@ export async function checkInTicket(
   verification: 'verified' | 'legacy' | 'manual',
   barcodePayload?: string,
   eventId?: string,
+  opts: { reason?: string; device?: string } = {},
 ): Promise<CheckInResult> {
   const { data, error } = await supabase.rpc('exos_check_in_ticket', {
     p_ticket_id: ticketId,
@@ -455,9 +473,71 @@ export async function checkInTicket(
     // Event scoping (D4-OPS-18): server rejects a cross-event scan, and a
     // missing event id (mig 20260925021000).
     p_event_id: eventId ?? null,
+    // A typed override (no signed code) needs an owner / manager and a reason:
+    // 'needs-manager' / 'reason-required' otherwise (mig 20260929040000).
+    p_reason: opts.reason ?? null,
+    p_device: opts.device ?? null,
   });
   if (error) throw error;
   return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+/** Replay one scan the door admitted while offline. The server checks the
+ *  scanned code against the ticket's current owner + secret for the window it
+ *  was scanned in (at most 24h ago); a refusal comes back with conflict:true
+ *  and is already logged to the scan report. The same ref twice counts once
+ *  (duplicate:true). Throws only on network / auth errors (keep it queued). */
+export async function checkInOffline(
+  scan: QueuedScan,
+  eventId: string,
+  device?: string,
+): Promise<CheckInResult> {
+  const { data, error } = await supabase.rpc('exos_check_in_offline', {
+    p_client_ref: scan.ref,
+    p_ticket_id: scan.ticketId,
+    p_event_id: eventId,
+    p_scanned_at: new Date(scan.scannedAt).toISOString(),
+    p_barcode_payload: scan.payload,
+    p_source: scan.source,
+    p_reason: scan.reason ?? null,
+    p_device: device ?? null,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+/** Undo a check-in (owner / manager, with a reason; audited server-side in
+ *  exos_checkin_undos). Reasons: 'undone', 'needs-manager', 'reason-required',
+ *  'not-checked-in', 'wrong-event', 'not-found'. */
+export async function undoCheckIn(ticketId: string, eventId: string, reason: string): Promise<CheckInResult> {
+  const { data, error } = await supabase.rpc('exos_undo_check_in', {
+    p_ticket_id: ticketId,
+    p_event_id: eventId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+let clockSync: Promise<void> | null = null;
+/** Measure this device's clock against the server once per page load
+ *  (exos_server_time), so the rotating code and the door's check use the
+ *  server's 30-second window. Best-effort: on failure the device clock stands. */
+export function syncServerClock(): Promise<void> {
+  if (!clockSync) {
+    clockSync = (async () => {
+      try {
+        const t0 = Date.now();
+        const { data, error } = await supabase.rpc('exos_server_time');
+        const t1 = Date.now();
+        if (error || !data) throw error ?? new Error('no server time');
+        setClockOffset(estimateOffset(t0, new Date(data as string).getTime(), t1));
+      } catch {
+        clockSync = null; // try again next time
+      }
+    })();
+  }
+  return clockSync;
 }
 
 /** Open (or clear) a BOUNDED check-in test window that lifts the doors gate for
@@ -525,11 +605,27 @@ export async function cancelTransfer(transferId: string): Promise<void> {
 }
 
 /** Claim a transfer: take ownership + rotate the barcode secret. Returns the
- *  claimed ticket id. */
-export async function claimTransfer(transferId: string): Promise<string> {
-  const { data, error } = await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId });
+ *  claimed ticket id. With the key from the emailed link (?k=) any verified
+ *  account can claim; without it, only the address it was sent to. */
+export async function claimTransfer(transferId: string, key?: string | null): Promise<string> {
+  const k = key?.trim();
+  const { data, error } = k
+    ? await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId, p_key: k })
+    : await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId });
   if (error) throw error;
   return data as string;
+}
+
+/** The sender's own claim-link key, to forward the link (mig 20260929010000). */
+export async function getTransferClaimKey(transferId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('exos_transfer_claim_key', { p_transfer_id: transferId });
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
+/** The claim path for a transfer, with its key when known. */
+export function claimPath(transferId: string, key?: string | null): string {
+  return key ? `claim/${transferId}?k=${encodeURIComponent(key)}` : `claim/${transferId}`;
 }
 
 export async function voidTicket(ticketId: string, reason?: string): Promise<void> {

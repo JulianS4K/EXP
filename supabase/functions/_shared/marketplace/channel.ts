@@ -21,6 +21,8 @@
 //
 // No imports beyond sibling .ts files: loaded by Deno and by vitest.
 
+import { marketTitle } from './eventStandard.ts';
+
 export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
@@ -91,6 +93,12 @@ export interface MarketplaceSale {
   createdAt: string | null;
   section: string | null;
   row: string | null;
+  /**
+   * Why a human has to look at it, when the channel can tell (e.g. a TEvo
+   * order spanning several Exos listings; status is then 'unknown'). Stored
+   * as exos_marketplace_orders.sale_note and shown as the attention reason.
+   */
+  note?: string | null;
 }
 
 export interface ChannelCapabilities {
@@ -140,12 +148,14 @@ export interface ExosEventRowForChannels {
   venue_name: string | null;
   venue_location?: string | null;
   venue_address?: Record<string, unknown> | null;
+  primary_performer_name?: string | null;
 }
 
 const txt = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/** The event as marketplaces see it: the standard title (./eventStandard.ts), venue, local time. */
 export function exosEventRef(row: ExosEventRowForChannels): ExosEventRef | null {
-  const name = txt(row.name);
+  const name = marketTitle({ name: row.name, primary_performer_name: row.primary_performer_name, venue_name: row.venue_name });
   const venueName = txt(row.venue_name) || txt(row.venue_location);
   if (!name || !row.starts_at || !venueName) return null;
   const addr = row.venue_address ?? {};

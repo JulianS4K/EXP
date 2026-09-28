@@ -24,6 +24,8 @@ export function recordPayload(sale: MarketplaceSale, raw?: unknown): Record<stri
   if (sale.shipBy) p.ship_by = sale.shipBy;
   if (sale.createdAt) p.sold_at = sale.createdAt;
   if (sale.listingRef) p.listing_ref = sale.listingRef;
+  // Always sent, so a later report without a note clears an earlier one.
+  p.sale_note = sale.note ? sale.note.slice(0, 300) : null;
   if (raw !== undefined) p.raw = raw;
   return p;
 }
@@ -43,12 +45,13 @@ export type DeliveryPlan =
  */
 export function planDelivery(
   channel: MarketplaceChannel,
-  order: { external_order_id: string; quantity: number; transfer_ids: string[]; seats?: number[] },
+  order: { external_order_id: string; quantity: number; transfer_ids: string[]; seats?: number[]; claim_keys?: string[] },
   appBase: string | undefined,
 ): DeliveryPlan {
   const seats = order.seats ?? [];
   if (!appBase) return { kind: 'manual', reason: 'EXOS_APP_BASE_URL is not set, so there are no claim links', claim_urls: [], seats };
-  const urls = order.transfer_ids.map((t) => exosClaimUrl(appBase, t));
+  // claim_keys only when sending (see exosClaimUrl): a stored plan holds links without them.
+  const urls = order.transfer_ids.map((t, i) => exosClaimUrl(appBase, t, order.claim_keys?.[i]));
   if (!channel.capabilities.fulfilByUrls || !channel.planFulfilByUrls) {
     return { kind: 'manual', reason: `${channel.label} can't take ticket links through its API: send them by hand`, claim_urls: urls, seats };
   }

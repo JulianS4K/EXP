@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { getPublicOrg, followOrg, unfollowOrg, isFollowingOrg } from '../lib/orgs';
 import SocialLinks from '../components/SocialLinks';
+import SubscribeCalendar from '../components/SubscribeCalendar';
+import { orgFeedLinks } from '../lib/calendar';
 import { listPublicEventsForOrg } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'motion/react';
@@ -15,7 +17,7 @@ export default function OrganizerProfile() {
   const { id } = useParams();
   const { user } = useAuth();
   type Socials = NonNullable<Organization['marketing']>['socials'];
-  const [organizer, setOrganizer] = useState<{ displayName: string; photoURL?: string; description?: string; socials?: Socials } | null>(null);
+  const [organizer, setOrganizer] = useState<{ displayName: string; photoURL?: string; description?: string; socials?: Socials; slug?: string } | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -40,6 +42,7 @@ export default function OrganizerProfile() {
             photoURL: org.theme?.logoUrl,
             description: org.description || 'Creating unforgettable experiences.',
             socials: org.marketing?.socials,
+            slug: org.slug || undefined,
           });
           setFollowersCount(org.followersCount ?? 0);
         } else {
@@ -136,6 +139,9 @@ export default function OrganizerProfile() {
              <div>
                 <h3 className="type text-[10px] uppercase tracking-widest text-white/40 mb-2">notifications</h3>
                 <p className="type text-[11px] text-white/40 leading-relaxed">Follow to get alerts when this organizer announces events in your region.</p>
+                {organizer?.slug && (
+                  <SubscribeCalendar links={orgFeedLinks(organizer.slug)} className="mt-4" />
+                )}
              </div>
           </div>
 

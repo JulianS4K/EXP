@@ -130,6 +130,20 @@ export function initOrgPixels(orgId: string, pixels?: PixelConfig): void {
   // A late org lookup can resolve after the buyer has moved on to an
   // untracked page (My Tickets, the door scanner): never load pixels there.
   if (!isPixelRoute(currentRoutePath())) return;
+  register(orgId, pixels);
+}
+
+// The one exception to the route rule: the page a buyer lands on after paying
+// on Stripe (My Tickets ?checkout=success) reports that org's Purchase. Only
+// lib/purchasePixel.ts calls this, after the checkout params are stripped
+// from the URL. Leaving My Tickets for a ticket page reloads (see
+// leavePixelScope), so the pixels don't follow the buyer into their wallet.
+export function initOrgPixelsForPurchase(orgId: string, pixels?: PixelConfig): void {
+  if (typeof document === 'undefined' || reloading) return;
+  register(orgId, pixels);
+}
+
+function register(orgId: string, pixels?: PixelConfig): void {
   if (!enterScope(orgId)) return;
   if (!pixels || (!pixels.meta && !pixels.ga4 && !pixels.tiktok)) return;
   pending = pixels;

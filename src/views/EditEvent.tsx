@@ -1,4 +1,5 @@
 import { geocodeEvent } from '../lib/geo';
+import { CHECKOUT_CURRENCIES, isCheckoutCurrency } from '../lib/currency';
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
@@ -14,8 +15,7 @@ import {
 } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { Event } from '../types';
-import { ArrowLeft, Save, MapPin, Calendar as CalendarIcon, Music, Type, Image as ImageIcon, Palette, Globe, XCircle, ListOrdered, Tag, Plus, Upload, ShieldCheck, Loader2, AlertOctagon, Send } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ArrowLeft, Save, MapPin, Calendar as CalendarIcon, Type, Palette, Globe, XCircle, ListOrdered, Plus, Upload, ShieldCheck, AlertOctagon, Send } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import { EVENT_CATEGORIES, genresFor } from '../lib/eventTaxonomy';
@@ -73,13 +73,15 @@ const SUBGENRE_MAX_LEN = 40;
 const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-import { MARKETPLACE_NETWORKS, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
+import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
+import Dialog from '../components/Dialog';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -712,11 +714,11 @@ export default function EditEvent() {
       })()}
 
       <form onSubmit={handleSubmit} className="space-y-12">
-        {/* Core Identity */}
+        {/* Event details */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Type className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Core Identity</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Event details</h2>
            </div>
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -724,7 +726,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Title</label>
                 <input 
                   required
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.title}
                   onChange={(e) => setEventData({ ...eventData, title: e.target.value })}
                 />
@@ -732,7 +734,7 @@ export default function EditEvent() {
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Category</label>
                 <select 
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.category}
                   onChange={(e) => setEventData({ ...eventData, category: e.target.value })}
                 >
@@ -767,7 +769,7 @@ export default function EditEvent() {
                 <input
                   type="text"
                   placeholder="e.g. Ambient, Techno, Deep House (Comma separated)"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={(eventData.subgenres || []).join(', ')}
                   onChange={(e) => {
                     const val = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -786,7 +788,7 @@ export default function EditEvent() {
                 <input
                   type="text"
                   placeholder="e.g. Skrillex, Boys Noize, Boombox Cartel (max 10, comma-separated)"
-                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={(eventData.performers || []).join(', ')}
                   onChange={(e) => {
                     const val = e.target.value
@@ -819,7 +821,7 @@ export default function EditEvent() {
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Narrative Description</label>
               <textarea 
                 rows={4}
-                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.description}
                 onChange={(e) => setEventData({ ...eventData, description: e.target.value })}
               />
@@ -830,7 +832,7 @@ export default function EditEvent() {
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <MapPin className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Logistics & Seating Manifest</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Venue &amp; seating</h2>
            </div>
 
            {/* Timing controls — Date / Doors / Show Start / Show End.
@@ -852,7 +854,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.date as Timestamp | undefined, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -873,7 +875,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.doorsOpen, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -900,7 +902,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.startTime, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -928,7 +930,7 @@ export default function EditEvent() {
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
                   <input
                     type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.endTime, eventData.timezone)}
                     onClick={(e) => {
                       const el = e.currentTarget as HTMLInputElement;
@@ -955,7 +957,7 @@ export default function EditEvent() {
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Venue Destination</label>
                 <input
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.location || ''}
                   onChange={(e) => setEventData({ ...eventData, location: e.target.value })}
                 />
@@ -971,7 +973,7 @@ export default function EditEvent() {
                         placeholder={key.charAt(0).toUpperCase() + key.slice(1)}
                         aria-label={key}
                         maxLength={key === 'postal' ? 20 : key === 'street' || key === 'country' ? 120 : 80}
-                        className={`bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus:border-brand-primary ${
+                        className={`bg-black border border-white/20 py-3 px-4 text-white text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary ${
                           key === 'street' || key === 'country' ? 'md:col-span-6' :
                           key === 'city' ? 'md:col-span-3' :
                           key === 'region' ? 'md:col-span-2' : 'md:col-span-1'
@@ -995,7 +997,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total Venue Capacity</label>
                 <input
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.totalTickets}
                   onChange={(e) => setEventData({ ...eventData, totalTickets: parseInt(e.target.value) })}
                 />
@@ -1009,16 +1011,14 @@ export default function EditEvent() {
                 <label htmlFor="edit-event-currency" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Currency</label>
                 <select
                   id="edit-event-currency"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.currency || 'USD'}
                   onChange={(e) => setEventData({ ...eventData, currency: e.target.value })}
                 >
-                  {(['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'MXN', 'BRL'] as const).map((c) => (
+                  {CHECKOUT_CURRENCIES.map(({ code: c }) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
-                  {!['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'MXN', 'BRL'].includes(
-                    (eventData.currency || 'USD').toUpperCase(),
-                  ) && (
+                  {!isCheckoutCurrency(eventData.currency || 'USD') && (
                     <option value={(eventData.currency || 'USD').toUpperCase()}>
                       {(eventData.currency || 'USD').toUpperCase()}
                     </option>
@@ -1032,7 +1032,7 @@ export default function EditEvent() {
                 <label htmlFor="edit-event-timezone" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Timezone</label>
                 <select
                   id="edit-event-timezone"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors appearance-none"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.timezone || getBrowserTimezone()}
                   onChange={(e) => setEventData({ ...eventData, timezone: e.target.value })}
                 >
@@ -1050,7 +1050,7 @@ export default function EditEvent() {
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Seating Structure</label>
               <textarea 
                 placeholder="Section A: Row 1-10 (VIP), Section B: Row 1-20 (GA)..."
-                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus:border-brand-primary transition-colors"
+                className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.seatingManifest || ''}
                 onChange={(e) => setEventData({ ...eventData, seatingManifest: e.target.value })}
               />
@@ -1061,7 +1061,7 @@ export default function EditEvent() {
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <ShieldCheck className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Purchase Controls</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Purchase limits</h2>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1069,7 +1069,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per transaction</label>
                 <input 
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerOrder || 8}
                   onChange={(e) => setEventData({ 
                     ...eventData, 
@@ -1081,7 +1081,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per user account</label>
                 <input 
                   type="number"
-                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus:border-brand-primary transition-colors"
+                  className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerAccount || 8}
                   onChange={(e) => setEventData({ 
                     ...eventData, 
@@ -1115,7 +1115,7 @@ export default function EditEvent() {
            <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-3">
                  <ListOrdered className="text-brand-primary w-5 h-5" />
-                 <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Inventory Configuration</h2>
+                 <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Ticket types</h2>
               </div>
               <button 
                 type="button" 
@@ -1146,7 +1146,7 @@ export default function EditEvent() {
                            required 
                            type="text"
                            placeholder="Enter tier name..."
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.name}
                            onChange={(e) => updateTier(tier.id, 'name', e.target.value)}
                          />
@@ -1158,7 +1158,7 @@ export default function EditEvent() {
                            type="number"
                            min="0"
                            step="0.01"
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.price}
                            onChange={(e) => updateTier(tier.id, 'price', e.target.value)}
                          />
@@ -1169,7 +1169,7 @@ export default function EditEvent() {
                            required 
                            type="number"
                            min="1"
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.capacity}
                            onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)}
                          />
@@ -1179,7 +1179,7 @@ export default function EditEvent() {
                          <textarea
                            required
                            placeholder="Describe the exclusivity of this tier..."
-                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus:border-brand-primary transition-colors"
+                           className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.description}
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
@@ -1203,7 +1203,7 @@ export default function EditEvent() {
                             aria-label="What this accessible ticket includes"
                             maxLength={ACCESSIBLE_NOTE_MAX}
                             placeholder="e.g. Wheelchair space + 1 companion seat"
-                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus:border-brand-primary"
+                            className="w-full bg-black border border-white/20 py-3 px-4 text-white text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                             value={tier.accessibleNote ?? ''}
                             onChange={(e) => updateTier(tier.id, 'accessibleNote', e.target.value)}
                           />
@@ -1235,7 +1235,7 @@ export default function EditEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
                             <select
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).ticketType ?? 'paid'}
                               onChange={(e) => updateTier(tier.id, 'ticketType', e.target.value)}
                             >
@@ -1247,7 +1247,7 @@ export default function EditEvent() {
                           <div className="space-y-2">
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
                             <select
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).visibility ?? 'public'}
                               onChange={(e) => updateTier(tier.id, 'visibility', e.target.value)}
                             >
@@ -1259,7 +1259,7 @@ export default function EditEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
                             <input
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesStart, eventData.timezone)}
                               onClick={(e) => {
                                 const el = e.currentTarget as HTMLInputElement;
@@ -1280,7 +1280,7 @@ export default function EditEvent() {
                             <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
                             <input
                               type="datetime-local"
-                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus:border-brand-primary transition-colors cursor-pointer"
+                              className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesEnd, eventData.timezone)}
                               onClick={(e) => {
                                 const el = e.currentTarget as HTMLInputElement;
@@ -1340,266 +1340,12 @@ export default function EditEvent() {
         {/* Tax / VAT rules — self-contained CRUD (not part of the form submit). */}
         {eventId && <TaxRulesEditor eventId={eventId} />}
 
-        {SHOW_DISTRIBUTION && (<>
-        {/* Commercial Logic Section */}
-        <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-10">
-           <div className="flex items-center space-x-3 mb-2">
-              <Globe className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Commercial Exclusivity</h2>
-           </div>
-
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Primary Market Only</p>
-                    <p className="type text-[9px] text-white/40">Bypass all secondary distribution networks</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={eventData.exclusivity?.primaryMarketOnly || false}
-                    onChange={(e) => setEventData({ 
-                      ...eventData, 
-                      exclusivity: { ...(eventData.exclusivity || { primaryMarketOnly: false, customUrlOnly: false }), primaryMarketOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Custom URL Exclusivity</p>
-                    <p className="type text-[9px] text-white/40">Restricts visibility to private direct links</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={eventData.exclusivity?.customUrlOnly || false}
-                    onChange={(e) => setEventData({ 
-                      ...eventData, 
-                      exclusivity: { ...(eventData.exclusivity || { primaryMarketOnly: false, customUrlOnly: false }), customUrlOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-           </div>
-
-           <div>
-              <div className="flex items-center justify-between mb-4">
-                 <h3 className="type text-[10px] text-white/40 uppercase tracking-widest">Active Discount Tokens</h3>
-                 <button
-                   type="button"
-                   onClick={() => {
-                     const codes = [...(eventData.discountCodes || [])];
-                     // Pre-seed with empty fields so the organizer has to
-                     // type a real code; saves an extra clear step.
-                     codes.push({
-                       code: '',
-                       type: 'percentage',
-                       value: 10,
-                       usageLimit: null,
-                       expiresAt: null,
-                     });
-                     setEventData({ ...eventData, discountCodes: codes });
-                   }}
-                   className="text-[10px] font-bold text-brand-primary uppercase tracking-widest"
-                 >
-                   Deploy Token
-                 </button>
-              </div>
-              <div className="space-y-4">
-                 {(eventData.discountCodes || []).map((dc, idx) => {
-                   const codeStr = (dc.code || '').toUpperCase();
-                   const usage = promoUsesState[codeStr];
-                   const used = usage?.usedCount ?? 0;
-                   // Lock identity-changing fields for codes that have
-                   // already been redeemed — validate() will reject them
-                   // anyway, but disabling at the UI level makes it
-                   // obvious why.
-                   const identityLocked = used > 0;
-                   // The expiresAt input is `<input type="date">`, which
-                   // wants yyyy-MM-dd. Convert from Timestamp-or-string.
-                   const expIso = (() => {
-                     if (!dc.expiresAt) return '';
-                     const ts = dc.expiresAt as Timestamp | { toDate?: () => Date };
-                     try {
-                       const d = (ts as Timestamp).toDate
-                         ? (ts as Timestamp).toDate()
-                         : new Date(String(ts));
-                       if (Number.isNaN(d.getTime())) return '';
-                       return d.toISOString().slice(0, 10);
-                     } catch {
-                       return '';
-                     }
-                   })();
-                   return (
-                    <div key={idx} className="flex flex-wrap items-center gap-3 bg-black/40 p-4 border border-white/10">
-                       <input
-                          aria-label={`Discount code ${idx + 1}`}
-                          maxLength={32}
-                          disabled={identityLocked}
-                          className="flex-grow min-w-[120px] bg-black border border-white/20 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white disabled:opacity-60 disabled:cursor-not-allowed font-mono"
-                          value={dc.code}
-                          onChange={(e) => {
-                             const codes = [...(eventData.discountCodes || [])];
-                             codes[idx] = {
-                               ...codes[idx],
-                               code: e.target.value
-                                 .toUpperCase()
-                                 .replace(/[^A-Z0-9_-]/g, ''),
-                             };
-                             setEventData({ ...eventData, discountCodes: codes });
-                          }}
-                       />
-                       <select
-                          aria-label={`Discount type for code ${codeStr || idx + 1}`}
-                          disabled={identityLocked}
-                          className="bg-black border border-white/20 px-4 py-3 text-xs font-bold text-white/60 disabled:opacity-60 disabled:cursor-not-allowed"
-                          value={dc.type}
-                          onChange={(e) => {
-                             const codes = [...(eventData.discountCodes || [])];
-                             codes[idx] = { ...codes[idx], type: e.target.value as 'percentage' | 'fixed' };
-                             setEventData({ ...eventData, discountCodes: codes });
-                          }}
-                       >
-                          <option value="percentage">% Off</option>
-                          <option value="fixed">$ Off</option>
-                       </select>
-                       <input
-                          aria-label={`Discount value for code ${codeStr || idx + 1}`}
-                          type="number"
-                          min={0}
-                          max={dc.type === 'percentage' ? 100 : undefined}
-                          step="0.01"
-                          disabled={identityLocked}
-                          className="w-20 bg-black border border-white/20 px-4 py-3 text-xs font-bold text-white disabled:opacity-60 disabled:cursor-not-allowed"
-                          value={dc.value}
-                          onChange={(e) => {
-                             const codes = [...(eventData.discountCodes || [])];
-                             codes[idx] = { ...codes[idx], value: parseFloat(e.target.value) };
-                             setEventData({ ...eventData, discountCodes: codes });
-                          }}
-                       />
-                       <input
-                          aria-label={`Usage limit for code ${codeStr || idx + 1}`}
-                          type="number"
-                          min={1}
-                          placeholder="∞"
-                          className="w-24 bg-black border border-white/20 px-4 py-3 text-xs font-bold text-white"
-                          value={dc.usageLimit ?? ''}
-                          onChange={(e) => {
-                             const codes = [...(eventData.discountCodes || [])];
-                             const v = parseInt(e.target.value, 10);
-                             codes[idx] = {
-                               ...codes[idx],
-                               usageLimit: Number.isInteger(v) && v > 0 ? v : null,
-                             };
-                             setEventData({ ...eventData, discountCodes: codes });
-                          }}
-                       />
-                       <input
-                          aria-label={`Expiry date for code ${codeStr || idx + 1}`}
-                          type="date"
-                          className="w-36 bg-black border border-white/20 px-3 py-3 text-xs font-bold text-white"
-                          value={expIso}
-                          onChange={(e) => {
-                             const codes = [...(eventData.discountCodes || [])];
-                             const ms = e.target.value
-                               ? new Date(e.target.value).getTime()
-                               : NaN;
-                             codes[idx] = {
-                               ...codes[idx],
-                               expiresAt: Number.isFinite(ms)
-                                 ? Timestamp.fromDate(new Date(ms))
-                                 : null,
-                             };
-                             setEventData({ ...eventData, discountCodes: codes });
-                          }}
-                       />
-                       {used > 0 && (
-                         <span
-                           title="This code has redemptions. Identity fields are locked."
-                           className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-full"
-                         >
-                           {used} USED
-                         </span>
-                       )}
-                       <button
-                         type="button"
-                         aria-label={`Remove code ${codeStr || idx + 1}`}
-                         disabled={identityLocked}
-                         onClick={() => {
-                            const codes = (eventData.discountCodes || []).filter((_, i) => i !== idx);
-                            setEventData({ ...eventData, discountCodes: codes });
-                         }}
-                         className="p-2 text-white/30 hover:text-brand-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                       >
-                          <XCircle className="w-5 h-5" />
-                       </button>
-
-                      {/* Hidden-tier unlocks. Only renders when at least
-                          one hidden tier exists on the event. Locking
-                          mirrors the validate() guard: the multi-select
-                          is read-only once a code has redemptions. */}
-                      {(eventData.ticketTiers || []).some(
-                        (t) => (t as any).visibility === 'hidden',
-                      ) && (
-                        <div className="basis-full mt-2 pt-3 border-t border-white/10">
-                          <p className="type text-[9px] text-white/40 uppercase tracking-widest mb-2">
-                            Unlocks hidden tiers
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {(eventData.ticketTiers || [])
-                              .filter((t) => (t as any).visibility === 'hidden')
-                              .map((t) => {
-                                const checked = (dc.unlocksTierIds || []).includes(t.id);
-                                return (
-                                  <label
-                                    key={t.id}
-                                    className={`flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold uppercase tracking-widest ${
-                                      identityLocked
-                                        ? 'opacity-60 cursor-not-allowed'
-                                        : 'cursor-pointer'
-                                    } ${
-                                      checked
-                                        ? 'bg-brand-primary text-black border-brand-primary'
-                                        : 'bg-black text-white/60 border-white/20 hover:border-white/40'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="sr-only"
-                                      checked={checked}
-                                      disabled={identityLocked}
-                                      onChange={() => {
-                                        const codes = [...(eventData.discountCodes || [])];
-                                        const cur = codes[idx].unlocksTierIds || [];
-                                        codes[idx] = {
-                                          ...codes[idx],
-                                          unlocksTierIds: cur.includes(t.id)
-                                            ? cur.filter((id) => id !== t.id)
-                                            : [...cur, t.id],
-                                        };
-                                        setEventData({ ...eventData, discountCodes: codes });
-                                      }}
-                                    />
-                                    {t.name || '(unnamed tier)'}
-                                  </label>
-                                );
-                              })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                   );
-                 })}
-              </div>
-           </div>
-        </section>
-        </>)}
 
         {/* Distribution Hub Section (Already present but refined) */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Palette className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Branding Engine</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Look &amp; feel</h2>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1607,7 +1353,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Signature (HEX)</label>
                 <div className="flex space-x-4">
                   <input 
-                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus:border-brand-primary transition-colors"
+                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.primaryColor || ''}
                     onChange={(e) => setEventData({ 
                       ...eventData, 
@@ -1621,7 +1367,7 @@ export default function EditEvent() {
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Signature (HEX)</label>
                 <div className="flex space-x-4">
                   <input
-                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus:border-brand-primary transition-colors"
+                    className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.accentColor || ''}
                     onChange={(e) => setEventData({
                       ...eventData,
@@ -1654,7 +1400,7 @@ export default function EditEvent() {
                     type="text"
                     maxLength={SLUG_MAX}
                     placeholder="summer-horizon-2026"
-                    className="w-full bg-black border border-white/20 py-4 pl-32 pr-6 text-white font-bold focus:outline-none focus:border-brand-primary"
+                    className="w-full bg-black border border-white/20 py-4 pl-32 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={eventData.branding?.customSlug || ''}
                     onChange={(e) =>
                       setEventData({
@@ -1715,6 +1461,10 @@ export default function EditEvent() {
              Sell this event's own tickets on marketplaces too, at the price you set. Tick the ones to use, then choose how
              many seats of each ticket type each one gets below: GA on StubHub only, VIP everywhere, anything in between.
            </p>
+           <p className="type text-xs text-white/60 leading-relaxed -mt-4 border-l-2 border-brand-secondary pl-3">
+             Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
+             per marketplace later, so nothing is listed or sold there today.
+           </p>
 
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (
@@ -1752,11 +1502,11 @@ export default function EditEvent() {
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
-             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
+             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}:${r.unit_price ?? ''}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}
                channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
-               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
+               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity, price: effectiveTierPrice(Number(t.price) || 0, t.priceSchedule), split: t.marketSplit ?? 'any' }))}
                rows={marketRows}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
                onSaved={() => { void loadMarketRows(eventId); }}
@@ -1773,7 +1523,7 @@ export default function EditEvent() {
           disabled={saving}
           className="w-full bg-brand-primary text-black py-6 font-black uppercase italic tracking-tighter text-xs hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
         >
-          {saving ? 'Synchronizing Manifest...' : 'Commit Changes to Ledger'}
+          {saving ? 'Saving…' : 'Save changes'}
         </button>
 
         {/*
@@ -1839,16 +1589,14 @@ export default function EditEvent() {
       </form>
 
       {/* Cancellation confirmation modal. */}
-      {showCancelModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => !cancelling && setShowCancelModal(false)}
-        >
-          <div
-            className="w-full max-w-md bg-[#111] border border-white/10 p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">
+      <Dialog
+        open={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        dismissible={!cancelling}
+        labelledBy="cancel-event-title"
+        className="w-full max-w-md bg-[#111] border border-white/10 p-6"
+      >
+            <h2 id="cancel-event-title" className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">
               Cancel event?
             </h2>
             <p className="text-sm text-white/50 mb-4">
@@ -1865,7 +1613,7 @@ export default function EditEvent() {
               rows={3}
               maxLength={500}
               placeholder="Venue closure, artist illness, etc."
-              className="w-full bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-primary"
+              className="w-full bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
             />
             <div className="flex gap-2 mt-4 justify-end">
               <button
@@ -1885,9 +1633,7 @@ export default function EditEvent() {
                 {cancelling ? 'Cancelling…' : 'Cancel event'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Dialog>
     </div>
   );
 }

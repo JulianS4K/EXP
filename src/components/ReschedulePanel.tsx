@@ -114,7 +114,7 @@ export default function ReschedulePanel({
         type="datetime-local"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-2 py-1.5 text-xs rounded-lg"
+        className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-2 py-1.5 text-xs rounded-lg"
       />
     </label>
   );
@@ -141,7 +141,7 @@ export default function ReschedulePanel({
         rows={2}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Reason (optional) — shown to holders, e.g. venue conflict"
-        className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none px-3 py-2 text-sm rounded-lg resize-y mb-3"
+        className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm rounded-lg resize-y mb-3"
       />
       <div className="flex justify-end">
         <button

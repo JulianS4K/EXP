@@ -8,6 +8,7 @@ import {
   isExosTevoRemoteId,
   normalizeTevoOrder,
   planTevoListings,
+  tevoAwaitingFraudCheck,
   tevoRemoteIds,
   type TevoAllocation,
   type TevoOrder,
@@ -49,7 +50,7 @@ describe('planTevoListings', () => {
         event: { id: 2204331, name: 'Late Night Jazz', occurs_at_date: '2026-11-06', occurs_at_time: '21:00' },
         office: { id: 1234 },
         ticket: {
-          format: 'TM_mobile', price: 45, quantity: 4, remote_id: R1, row: 'GA', section: 'GA', type: 'EVENT',
+          format: 'TM_mobile', price: 45, quantity: 4, remote_id: R1, row: 'GA', section: 'General Admission', type: 'EVENT',
           seats: [{ seat: 1 }, { seat: 2 }, { seat: 3 }, { seat: 4 }], split_type: 'ANY', in_hand: false, in_hand_on: '2026-11-06',
           face_value: 40, external_notes: expect.stringContaining('Exos'), internal_notes: L1,
         },
@@ -167,5 +168,21 @@ describe('TevoWriter inventory', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body)).inventory.ticket.remote_id).toBe(R1);
     await expect(w.deleteInventory(ref)).rejects.toThrow(/authorization scope/);
+  });
+});
+
+describe('fraud gate before issuing', () => {
+  const client = (fraud: unknown): TevoOrder => ({
+    id: 190900, state: 'pending', buyer: { type: 'Client', id: 9 }, fraud_check_status: fraud as never,
+    items: [{ id: 1, quantity: 1, price: '45.00', ticket_group: { id: 7, remote_id: R1, exos_listing_id: L1 } }],
+  });
+  it('holds a Client sale while Riskified is pending, and a declined one is a cancellation', () => {
+    expect(tevoAwaitingFraudCheck(client('pending'))).toBe(true);
+    expect(tevoAwaitingFraudCheck(client('approved'))).toBe(false);
+    expect(tevoAwaitingFraudCheck(client(null))).toBe(false);
+    expect(normalizeTevoOrder(client('declined')).status).toBe('cancelled');
+    expect(normalizeTevoOrder(client('approved')).status).toBe('pending');
+    // A sale to TEvo itself is never screened.
+    expect(tevoAwaitingFraudCheck({ ...client('pending'), buyer: { type: 'Office', id: 6 } })).toBe(false);
   });
 });

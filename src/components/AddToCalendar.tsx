@@ -1,5 +1,6 @@
-// AddToCalendar — offers the two export paths (Google Calendar + Apple/Outlook
-// .ics) for an event. Pure frontend (lib/calendar.ts): no backend, no SDK.
+// AddToCalendar — offers the export paths (Google Calendar, Outlook.com, and an
+// Apple/Outlook .ics download) for an event. Pure frontend (lib/calendar.ts):
+// no backend, no SDK. Subscribable feeds are SubscribeCalendar's job.
 //
 // Two visual variants so it drops into different surfaces:
 //   • 'list'   — a flat action-list row that expands inline (event page action
@@ -10,7 +11,7 @@
 import { useState } from 'react';
 import { CalendarPlus, ExternalLink, Download } from 'lucide-react';
 import type { Event } from '../types';
-import { googleCalendarUrl, downloadEventIcs } from '../lib/calendar';
+import { googleCalendarUrl, outlookCalendarUrl, downloadEventIcs } from '../lib/calendar';
 
 interface Props {
   event: Event;
@@ -21,6 +22,7 @@ interface Props {
 export default function AddToCalendar({ event, variant = 'list', className }: Props) {
   const [open, setOpen] = useState(false);
   const gcalUrl = googleCalendarUrl(event);
+  const outlookUrl = outlookCalendarUrl(event);
 
   // No usable start instant → nothing to add. (Matches lib/calendar returning null.)
   if (!gcalUrl) return null;
@@ -41,6 +43,22 @@ export default function AddToCalendar({ event, variant = 'list', className }: Pr
         <ExternalLink className={variant === 'button' ? 'w-4 h-4 mr-3' : 'w-3.5 h-3.5 mr-3'} />
         Google Calendar
       </a>
+      {outlookUrl && (
+        <a
+          href={outlookUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => setOpen(false)}
+          className={
+            variant === 'button'
+              ? 'flex items-center px-4 py-3 text-white/70 hover:text-brand-primary hover:bg-white/5 transition-colors text-xs font-bold uppercase tracking-widest'
+              : 'flex items-center text-white/40 hover:text-brand-primary transition-colors'
+          }
+        >
+          <ExternalLink className={variant === 'button' ? 'w-4 h-4 mr-3' : 'w-3.5 h-3.5 mr-3'} />
+          Outlook.com
+        </a>
+      )}
       <button
         type="button"
         onClick={() => {

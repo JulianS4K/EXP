@@ -246,6 +246,33 @@ export async function enableOrgMember(orgId: string, uid: string): Promise<void>
   if (error) throw error;
 }
 
+// --- Scanner event scope (mig 20260929041000) ------------------------------
+
+/** Events each scanner is limited to, by user id. A member with no entry
+ *  scans every event of the org. Owner / manager read (RLS). */
+export async function listScannerEvents(orgId: string): Promise<Record<string, string[]>> {
+  const { data, error } = await supabase
+    .from('exos_event_staff')
+    .select('user_id, event_id')
+    .eq('org_id', orgId);
+  if (error) throw error;
+  const out: Record<string, string[]> = {};
+  for (const r of (data ?? []) as Array<{ user_id: string; event_id: string }>) {
+    (out[r.user_id] ??= []).push(r.event_id);
+  }
+  return out;
+}
+
+/** Limit a scanner to these events (empty = every event). Owner / manager. */
+export async function setScannerEvents(orgId: string, uid: string, eventIds: string[]): Promise<void> {
+  const { error } = await supabase.rpc('exos_set_scanner_events', {
+    p_org_id: orgId,
+    p_user_id: uid,
+    p_event_ids: eventIds,
+  });
+  if (error) throw error;
+}
+
 // --- Org updates (theme on the org row; payments/distribution in secrets) --
 
 export interface OrgUpdatePatch {

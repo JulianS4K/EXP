@@ -23,6 +23,7 @@ import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import DeveloperSettings from '../components/DeveloperSettings';
+import { paymentsEnabled } from '../lib/payments';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -32,7 +33,7 @@ const HEX_COLOR = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
 // Light "TM" form vocabulary (matches the OrgSettings mockup).
 const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2';
 const FLD =
-  'w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:outline-none focus:border-tm-blue transition-colors disabled:opacity-60 disabled:bg-slate-50';
+  'w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-colors disabled:opacity-60 disabled:bg-slate-50';
 const CARD = 'bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8';
 const SECTION = 'text-sm font-black text-slate-900 uppercase tracking-widest';
 
@@ -138,7 +139,7 @@ export default function OrgSettings() {
   const canEdit = isAdmin || activeRole === 'owner';
   // Paid ticketing is gated on the Stripe publishable key — the Connect
   // onboarding backend (exos-connect-onboard) is built but dormant until set.
-  const stripeEnabled = !!(import.meta as { env?: { VITE_STRIPE_PUBLISHABLE_KEY?: string } }).env?.VITE_STRIPE_PUBLISHABLE_KEY;
+  const stripeEnabled = paymentsEnabled();
 
   const handleSetupPayments = async () => {
     if (!orgId || !canEdit) return;
@@ -542,7 +543,7 @@ export default function OrgSettings() {
                 value={buildOrgEmbedSnippet()}
                 onClick={(e) => (e.target as HTMLTextAreaElement).select()}
                 rows={4}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-100 font-mono whitespace-pre-wrap break-all focus:outline-none focus:border-tm-blue"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-100 font-mono whitespace-pre-wrap break-all focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue"
               />
               <button
                 type="button"

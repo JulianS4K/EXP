@@ -85,6 +85,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
+import { redactError, reportError } from "../_shared/log.ts";
 import { ListingMappingError, planStubHubEventRequest, type ExosEventRow } from "../_shared/marketplace/stubhub/eventRequest.ts";
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planStubHubListing, type AllocationForListing } from "../_shared/marketplace/stubhub/listingPlan.ts";
@@ -146,8 +147,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const automatiq = await pushAutomatiq(sb);
     return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid, evo }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
-    console.error("exos-distribute failed", e);
-    return json({ error: String(e) }, 500);
+    await reportError("exos-distribute", e);
+    return json({ error: redactError(e) }, 500);
   }
 });
 
@@ -179,7 +180,7 @@ const MATCHED_ON: Record<MarketChannel, string> = {
 async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boolean>) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, channel, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
+    .select("id, event_id, channel, updated_at, exos_events(name, primary_performer_name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
     .in("channel", MARKET_CHANNELS)
     .is("tier_id", null)
     .eq("status", "pending")
@@ -239,7 +240,7 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
         patch = { status: "planned", planned_request: { ...plan, catalog_checked: !!link }, error: null };
         counts.planned++;
       } catch (e) {
-        const reason = e instanceof ListingMappingError ? e.message : `unexpected: ${String(e)}`;
+        const reason = e instanceof ListingMappingError ? e.message : `unexpected: ${redactError(e)}`;
         patch = { status: "failed", planned_request: null, error: `${label}: ${reason}`.slice(0, 500) };
         counts.failed++;
       }
@@ -283,7 +284,7 @@ function emptyPoolReason(state: string | null, label: string): string {
   return `nothing held: no free seats for ${label} right now`;
 }
 
-const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
+const EVENT_FIELDS = "name, primary_performer_name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
 
 async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };
@@ -292,7 +293,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
     .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, exos_pool_state, " +
-      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label)`)
+      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label, price_schedule, market_split)`)
     .eq("channel", channel)
     .not("tier_id", "is", null)
     // Holding seats, or allowed to (a pool at 0 while Exos has none free).
@@ -389,7 +390,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
         else if (action === "update") counts.update++;
         else counts.unchanged++;
       } catch (e) {
-        plan = { error: String(e instanceof Error ? e.message : e).slice(0, 300) };
+        plan = { error: redactError(e).slice(0, 300) };
         counts.failed++;
       }
       if (JSON.stringify(plan) === JSON.stringify(r.planned_listing)) continue;
@@ -496,7 +497,7 @@ async function pushAutomatiq(sb: SupabaseClient) {
       // listed++;
     } catch (e) {
       await sb.from("exos_distribution_listings")
-        .update({ status: "failed", error: String(e).slice(0, 500), last_synced_at: new Date().toISOString() })
+        .update({ status: "failed", error: redactError(e).slice(0, 500), last_synced_at: new Date().toISOString() })
         .eq("id", row.id);
       failed++;
     }

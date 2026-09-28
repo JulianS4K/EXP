@@ -72,12 +72,12 @@ DO $$
 BEGIN
   BEGIN
     INSERT INTO public.exos_vouchers(event_id, code, discount_percent, discount_amount)
-    VALUES ('9d000000-0000-0000-0000-0000000000e1', 'RAW1', 10, 5);
+    VALUES ('9d000000-0000-0000-0000-0000000000e1', 'RAWONE', 10, 5);
     RAISE EXCEPTION 'V2: two rules must be refused';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
   BEGIN
-    INSERT INTO public.exos_vouchers(event_id, code, discount_percent) VALUES ('9d000000-0000-0000-0000-0000000000e1', 'RAW2', 150);
+    INSERT INTO public.exos_vouchers(event_id, code, discount_percent) VALUES ('9d000000-0000-0000-0000-0000000000e1', 'RAWTWO', 150);
     RAISE EXCEPTION 'V2: 150%% must be refused';
   EXCEPTION WHEN check_violation THEN NULL;
   END;

@@ -112,7 +112,7 @@ describe('planSeatGeekListings', () => {
     expect(p.listings[2].request.body).toMatchObject({
       seller_listing_id: exosSellerListingId(ALLOC, 3),
       cost: 45,
-      section: 'GA',
+      section: 'General Admission',
       row: 'GA',
       stock_type: 'mobile',
       is_edelivery: true,

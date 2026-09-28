@@ -18,8 +18,8 @@
 // that allow it; their @handles go into the text wherever the platform takes
 // pre-filled text (X, WhatsApp, the share sheet), not Facebook's sharer.
 
-import { ReactNode, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { ReactNode, useId, useState } from 'react';
+import Dialog from './Dialog';
 import { Copy, Send, Twitter, Facebook, Link as LinkIcon, X } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { buildShareUrl, type ShareChannel, type ShareRole } from '../lib/shareLinks';
@@ -48,6 +48,7 @@ interface ShareModalProps {
 export default function ShareModal({ open, onClose, title, url, text, role = 'fan', promoterId, campaign, referralCode, tags = [] }: ShareModalProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+  const titleId = useId();
 
   const linkFor = (channel: ShareChannel) => buildShareUrl(url, { role, channel, promoter: promoterId, campaign, ref: referralCode });
   const shareUrl = linkFor('copy');
@@ -99,30 +100,15 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
   const whatsappHref = 'https://wa.me/?text=' + encodeURIComponent(`${textFor('whatsapp')} ${linkFor('whatsapp')}`);
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-4"
-        >
-          <motion.div
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-black border border-white/10 p-6"
-          >
+    <Dialog open={open} onClose={onClose} labelledBy={titleId} placement="sheet">
             <div className="flex items-start justify-between mb-6">
-              <h2 className="text-2xl font-black uppercase italic tracking-tighter text-white">
+              <h2 id={titleId} className="text-2xl font-black uppercase italic tracking-tighter text-white">
                 Share
               </h2>
               <button
                 onClick={onClose}
                 aria-label="Close"
-                className="p-1 text-white/40 hover:text-white transition-all"
+                className="p-1 text-white/60 hover:text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
               >
                 <X size={18} />
               </button>
@@ -130,7 +116,7 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
 
             <p className={`text-white/60 text-sm truncate ${shownTags.length ? 'mb-1' : 'mb-6'}`}>{title}</p>
             {shownTags.length > 0 && (
-              <p className="text-white/40 text-xs mb-6 truncate">Tags {shownTags.join(' ')}</p>
+              <p className="text-white/60 text-xs mb-6 truncate">Tags {shownTags.join(' ')}</p>
             )}
 
             <div className="grid grid-cols-2 gap-2 mb-2">
@@ -168,14 +154,11 @@ export default function ShareModal({ open, onClose, title, url, text, role = 'fa
               />
             </div>
 
-            <div className="mt-4 px-3 py-2 bg-white/5 border border-white/10 text-[11px] text-white/40 font-mono break-all flex items-center gap-2">
+            <div className="mt-4 px-3 py-2 bg-white/5 border border-white/10 text-[11px] text-white/60 font-mono break-all flex items-center gap-2">
               <LinkIcon size={12} className="flex-shrink-0" />
               <span className="truncate">{shareUrl}</span>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </Dialog>
   );
 }
 

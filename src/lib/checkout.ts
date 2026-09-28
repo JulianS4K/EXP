@@ -56,6 +56,36 @@ export async function startCheckout(input: {
   return url;
 }
 
+/** Free tickets for a signed-out buyer: issued now and emailed as claim links
+ *  (exos-checkout's guest free claim; same limits as a guest purchase). */
+export async function claimFreeAsGuest(input: {
+  eventId: string;
+  tierId: string;
+  quantity: number;
+  guestEmail: string;
+  successUrl: string;
+  cancelUrl: string;
+  voucherCode?: string;
+  attribution?: Attribution;
+}): Promise<{ issued: number; email: string }> {
+  const { data, error } = await supabase.functions.invoke('exos-checkout', {
+    body: {
+      event_id: input.eventId,
+      tier_id: input.tierId,
+      quantity: input.quantity,
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+      voucher_code: input.voucherCode || undefined,
+      attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+      guest_email: input.guestEmail.trim().toLowerCase(),
+    },
+  });
+  if (error) throw await functionError(error, 'Could not send your tickets.');
+  const d = data as { free?: boolean; issued?: number; email?: string } | null;
+  if (!d?.free || !d.issued) throw new Error('Could not send your tickets.');
+  return { issued: d.issued, email: d.email ?? input.guestEmail };
+}
+
 /** Create an Embedded Checkout Session (the venue-site iframe mounts it in
  *  place). returnUrl must be our /embed/return page (see lib/embed.ts). */
 export async function startEmbeddedCheckout(input: {

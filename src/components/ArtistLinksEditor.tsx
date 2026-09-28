@@ -64,7 +64,7 @@ export default function ArtistLinksEditor({ performers, value, onChange }: Props
                     inputMode="url"
                     placeholder={placeholder}
                     maxLength={ARTIST_LINK_MAX_LEN}
-                    className="w-full bg-white border-2 border-transparent rounded-xl py-2.5 px-4 text-sm text-slate-900 font-semibold focus:outline-none focus:border-brand-primary transition-all shadow-inner"
+                    className="w-full bg-white border-2 border-transparent rounded-xl py-2.5 px-4 text-sm text-slate-900 font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all shadow-inner"
                     value={row?.[key] ?? ''}
                     onChange={(e) => setField(name, key, e.target.value)}
                   />

@@ -250,7 +250,10 @@ END $$;
 --      (written as an array literal) and stays a no-op for the rest.
 DO $$
 BEGIN
-  DELETE FROM public.exos_mail WHERE template = 'checkout-abandoned';
+  -- Clear rows the narrow list below doesn't allow (checkout-abandoned, and
+  -- templates later migrations queue, e.g. event-published from fixtures).
+  DELETE FROM public.exos_mail WHERE template <> ALL (
+    '{transfer-initiated,transfer-claimed,org-invite,event-cancelled,event-updated,event-announce,ticket-issued,waitlist-open,event-announcement,event-rescheduled,event-reminder,order-failed,zz-foreign}'::text[]);
   ALTER TABLE public.exos_mail DROP CONSTRAINT exos_mail_template_check;
   ALTER TABLE public.exos_mail ADD CONSTRAINT exos_mail_template_check CHECK (template = ANY (
     '{transfer-initiated,transfer-claimed,org-invite,event-cancelled,event-updated,event-announce,ticket-issued,waitlist-open,event-announcement,event-rescheduled,event-reminder,order-failed,zz-foreign}'::text[]));

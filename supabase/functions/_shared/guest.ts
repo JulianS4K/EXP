@@ -13,14 +13,20 @@ export function normalizeGuestEmail(raw: unknown): string | null {
 }
 
 /**
- * The client IP as the edge sees it: the first x-forwarded-for hop, else
- * cf-connecting-ip / x-real-ip. Only ever hashed, never stored or logged.
+ * The client IP as the platform saw it, never as the client claims it:
+ * cf-connecting-ip (set by Cloudflare in front of Supabase, overwriting any
+ * value the client sent), else x-real-ip, else the LAST x-forwarded-for hop
+ * (the one our proxy appended; earlier hops are whatever the client wrote).
+ * With none, every such request shares one bucket ("unknown") rather than
+ * skipping the limit. Only ever hashed, never stored or logged.
  */
-export function clientIp(get: (name: string) => string | null): string | null {
-  const xff = get("x-forwarded-for");
-  const first = xff?.split(",")[0]?.trim();
-  const ip = first || get("cf-connecting-ip")?.trim() || get("x-real-ip")?.trim() || "";
-  return ip.length > 0 && ip.length <= 64 ? ip : null;
+export function clientIp(get: (name: string) => string | null): string {
+  const pick = (v: string | null | undefined) => {
+    const ip = v?.trim() ?? '';
+    return ip.length > 0 && ip.length <= 64 ? ip : null;
+  };
+  const hops = (get("x-forwarded-for") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  return pick(get("cf-connecting-ip")) ?? pick(get("x-real-ip")) ?? pick(hops[hops.length - 1]) ?? "unknown";
 }
 
 /** Salted SHA-256 hex of the IP, for the per-network guest hold limit. */

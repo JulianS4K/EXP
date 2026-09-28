@@ -2,7 +2,7 @@
 // organizers (or anyone who lands at /onboarding).
 //
 // Steps:
-//   1. Welcome — what Bridge is, what an org gets.
+//   1. Welcome — what Exos is, what an org gets.
 //   2. Create org — name + slug. Atomic batch via lib/orgs.
 //   3. Brand — logo + primary/accent. Optional, can defer.
 //   4. First event — explanatory copy + CTA into /create-event.
@@ -38,7 +38,7 @@ import { uploadOrgLogo } from '../lib/orgLogo';
 
 type Step = 1 | 2 | 3 | 4 | 5;
 const STEPS: { n: Step; title: string; subtitle: string }[] = [
-  { n: 1, title: 'Welcome', subtitle: 'What Bridge does for your venue' },
+  { n: 1, title: 'Welcome', subtitle: 'What Exos does for your venue' },
   { n: 2, title: 'Org', subtitle: 'Name your venue or promoter brand' },
   { n: 3, title: 'Brand', subtitle: 'Logo and colors for your storefront' },
   { n: 4, title: 'Event', subtitle: 'Create your first listing' },
@@ -97,7 +97,7 @@ export default function OrganizerOnboarding() {
           Sign in to get started
         </h2>
         <p className="text-slate-500 mb-6">
-          Bridge organizers need an account to manage events and track sales.
+          Exos organizers need an account to manage events and track sales.
         </p>
         <button
           onClick={openAuthModal}
@@ -243,16 +243,16 @@ export default function OrganizerOnboarding() {
         {step === 1 && (
           <div className="space-y-5 text-slate-600">
             <p>
-              Bridge is a primary ticketing layer plus simultaneous distribution to
-              the major secondary marketplaces — StubHub, SeatGeek, AXS, Gametime,
-              and more — without exclusivity. The venue keeps pricing control and
-              owns every buyer record.
+              Exos is your ticketing platform: you list events, sell tickets on your
+              own page, and scan them at the door. You set the prices and own every
+              buyer record, with no exclusivity.
             </p>
             <p className="text-slate-500 text-sm">
               You'll set up an organization (your venue or promoter brand), give it
               a name and color, then list your first event. The whole thing takes
-              under five minutes. Distribution and payouts wire in later — for
-              now, the platform handles primary sales and check-in end-to-end.
+              under five minutes. Selling on marketplaces such as StubHub and
+              SeatGeek is planned but not live yet: today Exos handles your own
+              ticket sales and check-in end-to-end.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3">
               <Tile icon={<Globe size={16} />} title="White-label storefront" body="Your /o/your-slug page with your colors and logo." />
@@ -290,7 +290,7 @@ export default function OrganizerOnboarding() {
                 maxLength={100}
                 required
                 placeholder="e.g. Mister Saturday Night, Public Records, Brooklyn Steel"
-                className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                className="w-full bg-white border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
               />
               <p className="text-slate-400 text-xs mt-1">
                 The name buyers see on tickets and the storefront.
@@ -315,7 +315,7 @@ export default function OrganizerOnboarding() {
                   maxLength={80}
                   required
                   placeholder="brooklyn-steel"
-                  className="flex-1 py-3 text-sm text-slate-900 focus:outline-none"
+                  className="flex-1 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                 />
               </div>
               <p className="text-slate-400 text-xs mt-1">
@@ -395,7 +395,7 @@ export default function OrganizerOnboarding() {
                         value={primary}
                         onChange={(e) => setPrimary(e.target.value)}
                         maxLength={7}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
                       <div className="w-10 h-10 rounded border border-slate-200" style={{ background: primary }} aria-hidden />
                     </div>
@@ -411,7 +411,7 @@ export default function OrganizerOnboarding() {
                         value={accent}
                         onChange={(e) => setAccent(e.target.value)}
                         maxLength={7}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none transition-all"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
                       <div className="w-10 h-10 rounded border border-slate-200" style={{ background: accent }} aria-hidden />
                     </div>

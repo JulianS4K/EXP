@@ -56,12 +56,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (!acctId) {
-      const acct = await stripe.accounts.create({ type: "standard", metadata: { exos_org_id: org_id } });
+      // One account per org even on a double click or a retry: Stripe returns
+      // the first result for the same idempotency key (24 h).
+      const type = Deno.env.get("EXOS_CONNECT_ACCOUNT_TYPE") === "express" ? "express" : "standard";
+      const acct = await stripe.accounts.create(
+        { type, metadata: { exos_org_id: org_id } },
+        { idempotencyKey: `exos-connect-onboard:${org_id}` },
+      );
       acctId = acct.id;
-      await sb.rpc("exos_record_org_stripe", {
+      const { error: recErr } = await sb.rpc("exos_record_org_stripe", {
         p_org_id: org_id, p_account_id: acctId,
         p_charges_enabled: false, p_payouts_enabled: false,
       });
+      // Not recorded means the next click would look it up again; say so rather
+      // than sending the owner into onboarding for an account Exos can't find.
+      if (recErr) {
+        console.error("exos-connect-onboard: account not recorded", org_id, recErr.message);
+        return json({ error: "could not save the payment account; try again" }, 500);
+      }
     }
     const link = await stripe.accountLinks.create({
       account: acctId,

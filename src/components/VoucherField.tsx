@@ -88,7 +88,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
           onKeyDown={(e) => { if (e.key === 'Enter') apply(); }}
           placeholder="Promo or access code"
           aria-label="Promo or access code"
-          className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none pl-9 pr-3 py-2 text-sm font-bold uppercase"
+          className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 pl-9 pr-3 py-2 text-sm font-bold uppercase"
         />
       </div>
       <button
