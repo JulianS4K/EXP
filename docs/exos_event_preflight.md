@@ -75,11 +75,16 @@ A green PR on `main` protects nothing until two separate steps happen.
 - [ ] **Gate connectivity.** The scanner is offline-first: the "already scanned"
       lock only holds **online**. On flaky wifi the same ticket can be admitted
       at two lanes, and a transfer after the offline registry synced will reject
-      the new owner. Ensure solid connectivity at the gate; sync the registry as
-      late as possible; freeze/avoid transfers close to doors.
-- [ ] **Clock-skew fallback briefed.** A buyer with a badly-set phone clock fails
-      the ~±90s barcode window ("code expired"). Staff recovery is **manual
-      ticket-ID entry**, not turning the holder away.
+      the new owner (and the old holder's offline scan uploads as a conflict in
+      the scan report). Ensure solid connectivity at the gate; sync the registry
+      as late as possible (it expires after 24h); freeze/avoid transfers close to doors.
+- [ ] **Scanner accounts scoped.** Door staff hired for one show: limit them to
+      that event on the Members page ("Door access").
+- [ ] **Clock-skew fallback briefed.** Passes sign on the server clock, so a
+      badly-set phone clock only matters when the pass never got online; the
+      scanner then says "the attendee's phone clock is about N min fast/slow".
+      Staff recovery is a **manager override** (typed ID + reason), not turning
+      the holder away. Scanners can't override; have a manager on each door.
 
 ## 4. On-sale watch
 

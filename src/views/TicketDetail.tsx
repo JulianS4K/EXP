@@ -1,7 +1,7 @@
 import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getTicket, listMyTicketsForEvent, setTicketAttendee } from '../lib/tickets';
+import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
@@ -10,6 +10,7 @@ import { eventSharePath } from '../lib/events';
 import { ArrowLeft, Share2, ShieldCheck, RefreshCw, Ticket as TicketIcon, Calendar, Download, PlusCircle, Instagram, Send, ChevronLeft, ChevronRight, Smartphone, Lock } from 'lucide-react';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 import { signBarcode, currentBucket } from '../lib/barcode';
+import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { motion, AnimatePresence } from 'motion/react';
 import AddToCalendar from '../components/AddToCalendar';
 import { shareEventToStory } from '../lib/poster';
@@ -35,6 +36,9 @@ export default function TicketDetail() {
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
   const [barcode, setBarcode] = useState('');
+  // Signing failed (no secret / no Web Crypto). No unsigned fallback: the
+  // door refuses those, so the pass says so instead.
+  const [codeError, setCodeError] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
   const [showShare, setShowShare] = useState(false);
   // Attendee-name editor (mig 20260911060000): who this pass is FOR.
@@ -136,34 +140,45 @@ export default function TicketDetail() {
     let cancelled = false;
     let lastBucket = -1;
 
-    // Sign the barcode for the current 30-second bucket. The HMAC binds
-    // ticketId + ownerId + bucket against the per-ticket secret (lib/barcode.ts).
-    // Legacy tickets without a secret fall back to the unsigned 3-segment shape.
+    // Sign the barcode for the current 30-second bucket of the server-corrected
+    // clock. The HMAC binds ticketId + ownerId + bucket against the per-ticket
+    // secret (lib/barcode.ts). Without a secret there is no code to show.
     const refresh = async () => {
-      const bucket = currentBucket();
+      const bucket = currentBucket(serverNow());
       lastBucket = bucket;
       if (td_secret) {
         try {
           const signed = await signBarcode(td_id, td_uid, td_secret, bucket);
-          if (!cancelled) setBarcode(signed);
+          if (!cancelled) {
+            setBarcode(signed);
+            setCodeError(false);
+          }
           return;
         } catch (err) {
-          console.warn('Falling back to legacy unsigned barcode:', err);
+          console.warn('Could not sign the entry code:', err);
         }
       }
-      if (!cancelled) setBarcode(`T-${td_id}:${td_uid}:${bucket}`);
+      if (!cancelled) {
+        setBarcode('');
+        setCodeError(true);
+      }
     };
 
     const tick = () => {
       if (cancelled) return;
       // Wall-clock countdown — accurate across re-renders + background-tab
       // timer throttling (a naive decrement drifts when the tab is hidden).
-      const secs = 30 - (Math.floor(Date.now() / 1000) % 30);
-      setTimeLeft(secs === 0 ? 30 : secs);
-      if (currentBucket() !== lastBucket) void refresh();
+      setTimeLeft(secondsLeftInWindow());
+      if (currentBucket(serverNow()) !== lastBucket) void refresh();
     };
 
     void refresh();
+    // Once the server clock is known, re-sign for its window.
+    void syncServerClock().then(() => {
+      if (cancelled) return;
+      void refresh();
+      tick();
+    });
     const interval = setInterval(tick, 1000);
     // Re-issue immediately on tab-return so a throttled background timer never
     // leaves a stale (expired-bucket) QR on screen at the door.
@@ -272,7 +287,18 @@ export default function TicketDetail() {
                  <div className="bg-white p-8 md:p-10 flex flex-col items-center justify-center group mb-8 relative">
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
-                        <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" />
+                        barcode ? (
+                          <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" />
+                        ) : (
+                          <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20" role="status">
+                            <p className="type text-[11px] uppercase tracking-widest text-black/50">
+                              {codeError ? 'Entry code unavailable' : 'Loading entry code…'}
+                            </p>
+                            {codeError ? (
+                              <p className="type text-[11px] text-black/60 mt-1">Reload the page. If it still doesn't show, contact the organizer.</p>
+                            ) : null}
+                          </div>
+                        )
                       ) : (
                         <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20">
                           <Lock className="w-8 h-8 text-black/60 mb-3" aria-hidden="true" />
@@ -294,7 +320,8 @@ export default function TicketDetail() {
                            </div>
                            <div className="text-right">
                              <p className="type text-[11px] uppercase tracking-widest text-black/60">{t('ticket.passId')}</p>
-                             <p className="type text-[11px] text-black leading-none mt-0.5">{currentTicket.id}</p>
+                             {/* Short non-secret reference (door search takes the last 6). */}
+                             <p className="type text-[11px] text-black leading-none mt-0.5">…{currentTicket.id.slice(-6).toUpperCase()}</p>
                            </div>
                         </div>
                       </div>

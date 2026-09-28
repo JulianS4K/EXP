@@ -44,7 +44,16 @@ describe('signBarcode / verifyBarcode', () => {
       const res = await verifyBarcode(payload, SECRET, { now: NOW + skew * BUCKET_MS });
       expect(res.ok, `skew ${skew}`).toBe(false);
       expect(res.reason).toBe('bucket-expired');
+      expect(res.signatureValid).toBe(true);
     }
+  });
+
+  it('tells a wrong-clock code from a forged one when it is out of window', async () => {
+    const bucket = currentBucket(NOW);
+    const payload = await signBarcode(TICKET, OWNER, 'someone-else', bucket);
+    const res = await verifyBarcode(payload, SECRET, { now: NOW + 10 * BUCKET_MS });
+    expect(res.reason).toBe('bucket-expired');
+    expect(res.signatureValid).toBe(false);
   });
 
   it('rejects a barcode signed with a different secret (rotated on transfer)', async () => {

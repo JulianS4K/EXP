@@ -212,6 +212,8 @@ export function arrivalReasonText(reason: string, remaining?: number): string {
       return 'Doors are not open yet.';
     case 'not-found':
       return 'Guest not found. Sync and try again.';
+    case 'not-assigned':
+      return "You're not assigned to scan this event.";
     default:
       return 'Could not check this guest in.';
   }

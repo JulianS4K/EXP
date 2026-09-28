@@ -19,6 +19,8 @@ import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
 import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
+import { estimateOffset, setClockOffset } from './serverClock';
+import type { QueuedScan } from './offlineCheckins';
 
 const toTs = (iso?: string | null): Timestamp =>
   Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
@@ -437,6 +439,15 @@ export type ScanReason =
 export interface CheckInResult {
   ok: boolean;
   reason: string;
+  /** 'checked-in': when; 'used': when the ticket was used (mig 20260929040000). */
+  check_in_at?: string;
+  /** 'used': the device / source of the check-in that used it. */
+  device?: string;
+  source?: string;
+  /** Offline replay: the server refused a scan the door had admitted. */
+  conflict?: boolean;
+  /** Offline replay: this scan's ref was already answered. */
+  duplicate?: boolean;
 }
 
 /** Atomic check-in (status flip + audit). Returns {ok,reason}; reason is one
@@ -451,6 +462,7 @@ export async function checkInTicket(
   verification: 'verified' | 'legacy' | 'manual',
   barcodePayload?: string,
   eventId?: string,
+  opts: { reason?: string; device?: string } = {},
 ): Promise<CheckInResult> {
   const { data, error } = await supabase.rpc('exos_check_in_ticket', {
     p_ticket_id: ticketId,
@@ -461,9 +473,71 @@ export async function checkInTicket(
     // Event scoping (D4-OPS-18): server rejects a cross-event scan, and a
     // missing event id (mig 20260925021000).
     p_event_id: eventId ?? null,
+    // A typed override (no signed code) needs an owner / manager and a reason:
+    // 'needs-manager' / 'reason-required' otherwise (mig 20260929040000).
+    p_reason: opts.reason ?? null,
+    p_device: opts.device ?? null,
   });
   if (error) throw error;
   return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+/** Replay one scan the door admitted while offline. The server checks the
+ *  scanned code against the ticket's current owner + secret for the window it
+ *  was scanned in (at most 24h ago); a refusal comes back with conflict:true
+ *  and is already logged to the scan report. The same ref twice counts once
+ *  (duplicate:true). Throws only on network / auth errors (keep it queued). */
+export async function checkInOffline(
+  scan: QueuedScan,
+  eventId: string,
+  device?: string,
+): Promise<CheckInResult> {
+  const { data, error } = await supabase.rpc('exos_check_in_offline', {
+    p_client_ref: scan.ref,
+    p_ticket_id: scan.ticketId,
+    p_event_id: eventId,
+    p_scanned_at: new Date(scan.scannedAt).toISOString(),
+    p_barcode_payload: scan.payload,
+    p_source: scan.source,
+    p_reason: scan.reason ?? null,
+    p_device: device ?? null,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+/** Undo a check-in (owner / manager, with a reason; audited server-side in
+ *  exos_checkin_undos). Reasons: 'undone', 'needs-manager', 'reason-required',
+ *  'not-checked-in', 'wrong-event', 'not-found'. */
+export async function undoCheckIn(ticketId: string, eventId: string, reason: string): Promise<CheckInResult> {
+  const { data, error } = await supabase.rpc('exos_undo_check_in', {
+    p_ticket_id: ticketId,
+    p_event_id: eventId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+let clockSync: Promise<void> | null = null;
+/** Measure this device's clock against the server once per page load
+ *  (exos_server_time), so the rotating code and the door's check use the
+ *  server's 30-second window. Best-effort: on failure the device clock stands. */
+export function syncServerClock(): Promise<void> {
+  if (!clockSync) {
+    clockSync = (async () => {
+      try {
+        const t0 = Date.now();
+        const { data, error } = await supabase.rpc('exos_server_time');
+        const t1 = Date.now();
+        if (error || !data) throw error ?? new Error('no server time');
+        setClockOffset(estimateOffset(t0, new Date(data as string).getTime(), t1));
+      } catch {
+        clockSync = null; // try again next time
+      }
+    })();
+  }
+  return clockSync;
 }
 
 /** Open (or clear) a BOUNDED check-in test window that lifts the doors gate for

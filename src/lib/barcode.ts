@@ -36,10 +36,13 @@
 //
 // What this still doesn't give us:
 //   * Full defense against a malicious organizer. The camera scan is now
-//     server-verified, but a door operator can still force a MANUAL
-//     override. That path is an explicit, audited check-in (source +
-//     verification are recorded in exos_event_checkins), not a silent
-//     bypass — but it does trust the operator.
+//     server-verified, but an owner or manager can still force a MANUAL
+//     override (scanners can't; mig 20260929040000). That path needs a
+//     reason and is recorded with it in exos_event_checkins, not a silent
+//     bypass — but it does trust the manager.
+//   * Offline scans are re-verified on upload against the ticket's current
+//     owner + secret for the window they were scanned in (at most 24h back),
+//     so a ticket transferred after the roster download is a conflict.
 //   * Replay across stations. Two organizers scanning the same barcode in
 //     the same 30-second bucket both pass HMAC; the atomic status flip in
 //     the check-in RPC (UPDATE ... WHERE status='active') then lets only
@@ -166,6 +169,9 @@ export interface VerifyResult {
   ticketId?: string;
   ownerId?: string;
   bucket?: number;
+  /** On 'bucket-expired': the signature itself is right, only the time
+   *  window is off (a phone clock set wrong, or a screenshot). */
+  signatureValid?: boolean;
 }
 
 /**
@@ -212,10 +218,18 @@ export async function verifyBarcode(
   }
   const now = options.now ?? Date.now();
   const cur = currentBucket(now);
-  if (Math.abs(cur - bucket) > BUCKET_TOLERANCE) {
-    return { ok: false, reason: 'bucket-expired', legacy: false, ticketId, ownerId, bucket };
-  }
   const expected = await hmacSha256(secret, `${ticketId}:${ownerId}:${bucket}`);
+  if (Math.abs(cur - bucket) > BUCKET_TOLERANCE) {
+    return {
+      ok: false,
+      reason: 'bucket-expired',
+      legacy: false,
+      ticketId,
+      ownerId,
+      bucket,
+      signatureValid: timingSafeEqual(expected, hmac),
+    };
+  }
   if (!timingSafeEqual(expected, hmac)) {
     return {
       ok: false,

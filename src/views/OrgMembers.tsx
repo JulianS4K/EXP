@@ -20,8 +20,11 @@ import {
   enableOrgMember,
   listOrgInvites,
   listOrgMembers,
+  listScannerEvents,
   updateOrgMemberRole,
 } from '../lib/orgs';
+import { listOrgEvents } from '../lib/events';
+import ScannerEventScope, { type ScopeEvent } from '../components/ScannerEventScope';
 import { queueEmail } from '../lib/mail';
 import { OrgMembership, OrgRole } from '../types';
 
@@ -53,7 +56,8 @@ const PERM_MATRIX: Array<[string, number[]]> = [
   ['Publish / cancel events', [1, 1, 0, 0, 0]],
   ['View sales & financials', [1, 1, 1, 0, 0]],
   ['Refund / void tickets', [1, 1, 1, 0, 0]],
-  ['Scan at the door', [1, 1, 0, 1, 0]],
+  ['Scan at the door (scanners: all or chosen events)', [1, 1, 0, 1, 0]],
+  ['Door override / undo a check-in', [1, 1, 0, 0, 0]],
   ['Send announcements', [1, 1, 0, 0, 1]],
   ['Promo codes & promote', [1, 1, 0, 0, 1]],
   ['Edit storefront & branding', [1, 1, 0, 0, 1]],
@@ -73,6 +77,9 @@ export default function OrgMembers() {
     Array<{ token: string; email: string; role: OrgRole; status: string }>
   >([]);
   const [loading, setLoading] = useState(true);
+  // Per-event door access for scanners (mig 20260929041000).
+  const [orgEvents, setOrgEvents] = useState<ScopeEvent[]>([]);
+  const [scannerScopes, setScannerScopes] = useState<Record<string, string[]>>({});
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<OrgRole>('manager');
   const [inviting, setInviting] = useState(false);
@@ -83,11 +90,15 @@ export default function OrgMembers() {
     if (!orgId) return;
     setLoading(true);
     try {
-      const [m, i] = await Promise.all([
+      const [m, i, evs, scopes] = await Promise.all([
         listOrgMembers(orgId),
         listOrgInvites(orgId).catch(() => []),
+        listOrgEvents(orgId).catch(() => []),
+        listScannerEvents(orgId).catch(() => ({} as Record<string, string[]>)),
       ]);
       setMembers(m);
+      setOrgEvents(evs.map((e) => ({ id: e.id, title: e.title })));
+      setScannerScopes(scopes);
       // Only surface pending invites in the UI; completed/cancelled
       // are kept in Firestore for audit but not shown here.
       setPendingInvites(
@@ -355,6 +366,15 @@ export default function OrgMembers() {
                                   {isYou && <span className="ml-2 text-[10px] text-tm-blue font-black uppercase tracking-widest">(you)</span>}
                                 </p>
                                 <p className="text-[11px] text-slate-400 capitalize">{m.role}</p>
+                                {canManage && m.role === 'scanner' && orgId ? (
+                                  <ScannerEventScope
+                                    orgId={orgId}
+                                    uid={m.uid}
+                                    events={orgEvents}
+                                    assigned={scannerScopes[m.uid] ?? []}
+                                    onSaved={(ids) => setScannerScopes((prev) => ({ ...prev, [m.uid]: ids }))}
+                                  />
+                                ) : null}
                               </div>
                             </div>
                           </td>

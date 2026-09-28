@@ -563,7 +563,13 @@ Terminal-2 https://github.com/JulianS4K/Terminal-2/pull/1001). Everything else i
 - ✅ H — door scanner admitted on the offline registry after the server said `used`/`voided`/`in-transfer`.
 - ✅ M — replayed offline check-ins dropped server refusals silently; now audited + surfaced.
 - ✅ H (partial) — scanner registry (every ticket's barcode secret) now wiped on sign-out. Still open: it
-  lives in plaintext localStorage for 7 days. (✅ Pixels no longer load on `/checkin`.)
+  lives in plaintext localStorage, now for 24 hours (was 7 days). (✅ Pixels no longer load on `/checkin`.)
+- ✅ H — door hardening (migs `20260929040000`, `20260929041000`): offline scans upload with their code + scan
+  time and are re-verified against the ticket's current owner/secret (a ticket transferred after the roster sync
+  is a conflict, not an admission), with a per-scan nonce; typed overrides need an owner/manager and a reason;
+  "already used" says when and on which device; managers can undo a check-in (reason, audited); scanners can be
+  limited to events (Members page); the pass signs on the server clock and the door says when a phone clock is
+  off; passes show a short reference, not the ticket id, and never an unsigned QR.
 - ✅ L — removed the `GEMINI_API_KEY` Vite `define` (a future reference would inline the key) and `@google/genai`.
 - ✅ H (correctness) — production CSP/XFO from Terminal-2 killed the embed, the org pixels and Google Fonts. Fixed
   with a `/bridge/*` policy in Terminal-2 `server.py` (https://github.com/JulianS4K/Terminal-2/pull/1003); live
