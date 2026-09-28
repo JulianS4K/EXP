@@ -118,6 +118,11 @@ include Terminal-2's broker ones.
   `fee` 0.97 (2.99%), `service_fee` 0.0, one `evopay` payment of 32.48. TEvo's order page shows net 31.51. So Exos's
   sale proceeds (`normalizeTevoOrder`) are the items' price less `fee`. When broker items share the order, Exos's
   part of the fee is prorated by price.
+- **TEvo's seller fee is 3% of the order total, rounded to the nearest cent, half up, per order** (not per ticket;
+  `TEVO_SELLER_FEE_BPS`, `tevoSellerFeeCents`). Checked 2026-09-28 against every stored order the S4K office sold:
+  4,371 of 4,371 match, May to September, to both Ticket Evolution and Victory Live, including all 41 half-cent cases
+  (21.50 → 0.65). Purchases and internal transfers carry fee 0. When an order has no `fee`, Exos uses the 3%.
+  `tevoFeeCheck` flags any order whose fee isn't 3%, for the payout ledger.
 - **`completed` isn't "cash received".** On that order the EvoPay payment was `completed` one second after the sale,
   before the event. It means the payment is applied to the order. When EvoPay actually settles to the bank is
   separate, and the payout ledger has to reconcile that on its own.

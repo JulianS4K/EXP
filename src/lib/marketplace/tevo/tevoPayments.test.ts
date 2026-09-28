@@ -8,6 +8,9 @@ import {
   normalizeTevoPaymentStatus,
   summarizeTevoPayments,
   tevoAmountCents,
+  tevoFeeCheck,
+  tevoSellerFeeCents,
+  TEVO_SELLER_FEE_BPS,
   type TevoWriteAuthorization,
 } from '.';
 
@@ -75,5 +78,32 @@ describe('TEvo payments: normalized', () => {
       n({}), n({ state: 'captured', amount: '50' }), n({ is_refund: true, amount: '20.00' }), n({ state: 'pending', amount: '30' }),
       n({ state: 'cancelled', amount: '999' }), n({ state: 'disputed', amount: '5' }),
     ])).toEqual({ paid_cents: 13000, pending_cents: 3000, refunded_cents: 2000, unknown_states: ['disputed'] });
+  });
+});
+
+describe("TEvo's seller fee: 3% of the order total, nearest cent, half up", () => {
+  it('matches the five real S4K orders and the half-cent case', () => {
+    expect(TEVO_SELLER_FEE_BPS).toBe(300);
+    // [oid, total, fee] from TEvo (2026-09-26).
+    const real: Array<[string, string, string]> = [
+      ['8089940-19196777', '32.48', '0.97'],
+      ['8090084-19197170', '957.6', '28.73'],
+      ['8090220-19197528', '225.56', '6.77'],
+      ['8090321-19197809', '464.96', '13.95'],
+      ['8090482-19198241', '4.48', '0.13'],
+    ];
+    for (const [oid, total, fee] of real) {
+      expect(tevoSellerFeeCents(tevoAmountCents(total)!), oid).toBe(tevoAmountCents(fee));
+      expect(tevoFeeCheck({ total, fee }), oid).toMatchObject({ matches_standard: true, used_fee_cents: tevoAmountCents(fee) });
+    }
+    expect(tevoSellerFeeCents(2150)).toBe(65); // 0.645 -> 0.65
+    expect(tevoSellerFeeCents(0)).toBe(0);
+  });
+
+  it('flags a fee that is not 3%, and falls back to 3% when the order has none', () => {
+    expect(tevoFeeCheck({ total: '100.00', fee: '5.00' })).toEqual({
+      total_cents: 10000, fee_cents: 500, expected_fee_cents: 300, used_fee_cents: 500, matches_standard: false,
+    });
+    expect(tevoFeeCheck({ total: '100.00' })).toMatchObject({ fee_cents: null, used_fee_cents: 300, matches_standard: true });
   });
 });

@@ -127,3 +127,44 @@ export function summarizeTevoPayments(payments: ReadonlyArray<ExosTevoPayment>):
   }
   return out;
 }
+
+// ── TEvo's seller fee ───────────────────────────────────────────────
+//
+// TEvo takes 3% of the order total from the seller (order.fee), rounded to
+// the nearest cent, half up, per order (not per ticket). Checked on
+// 2026-09-28 against every stored order the S4K office sold: 4,371 of 4,371
+// match, May to September, to both buyers (Ticket Evolution, Victory Live),
+// including 41 exact half-cent cases (21.50 -> 0.65). Purchases carry fee
+// 0. `service_fee` is a different thing: the buyer's fee.
+
+export const TEVO_SELLER_FEE_BPS = 300;
+
+/** 3% of the order total in cents, rounded half up: 3248 -> 97, 95760 -> 2873, 2150 -> 65. */
+export function tevoSellerFeeCents(totalCents: number): number {
+  if (!Number.isInteger(totalCents) || totalCents <= 0) return 0;
+  return Math.floor((totalCents * TEVO_SELLER_FEE_BPS + 5000) / 10000);
+}
+
+export interface TevoFeeCheck {
+  total_cents: number | null;
+  /** order.fee as TEvo reported it; null if the order didn't carry one. */
+  fee_cents: number | null;
+  expected_fee_cents: number | null;
+  /** The fee Exos uses: TEvo's when present, else the standard 3%. */
+  used_fee_cents: number;
+  /** false when TEvo's fee differs from 3%: the payout ledger flags it for a person. */
+  matches_standard: boolean;
+}
+
+export function tevoFeeCheck(order: { total?: unknown; fee?: unknown }): TevoFeeCheck {
+  const total = tevoAmountCents(order.total);
+  const fee = tevoAmountCents(order.fee);
+  const expected = total == null ? null : tevoSellerFeeCents(total);
+  return {
+    total_cents: total,
+    fee_cents: fee,
+    expected_fee_cents: expected,
+    used_fee_cents: Math.max(0, fee ?? expected ?? 0),
+    matches_standard: fee == null || expected == null || fee === expected,
+  };
+}

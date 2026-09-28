@@ -18,7 +18,7 @@ import { allocationIdFromListingId } from '../listingIds.ts';
 import { planTevoDelivery } from './fulfilment.ts';
 import { exosListingRef, fraudGate, orderEmail, orderKind } from './orders.ts';
 import type { TevoOrder } from './types.ts';
-import { tevoAmountCents } from './payments.ts';
+import { tevoAmountCents, tevoFeeCheck, tevoSellerFeeCents } from './payments.ts';
 
 const STATUS: Record<string, SaleStatus> = {
   pending: 'pending',
@@ -44,7 +44,7 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
   const listing = refs[0] ?? exosListingRef(first);
   const qty = counted.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
   // Proceeds are what the seller is paid: the items' price less TEvo's seller
-  // fee (order.fee, ~3%; the EvoPay payment is the gross). In cents. The fee
+  // fee (order.fee, 3% of the total; the EvoPay payment is the gross). In cents. The fee
   // is per order: when broker items share the order, Exos's part of it is
   // prorated by price.
   const lineCents = (it: (typeof items)[number]) => {
@@ -58,8 +58,11 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
     if (c == null) priced = false;
     else grossCents += c;
   }
-  const feeCents = Math.max(0, tevoAmountCents(o.fee) ?? 0);
   const orderCents = items.reduce((s, it) => s + (lineCents(it) ?? 0), 0);
+  // TEvo's own figure; if an order ever comes without one, the standard 3%
+  // of its total (payments.ts), or of its items when the total is missing too.
+  const check = tevoFeeCheck(o);
+  const feeCents = check.fee_cents != null || check.total_cents != null ? check.used_fee_cents : tevoSellerFeeCents(orderCents);
   const exosFeeCents = counted.length === items.length || orderCents <= 0
     ? feeCents
     : Math.round((feeCents * grossCents) / orderCents);
