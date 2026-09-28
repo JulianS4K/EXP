@@ -133,8 +133,14 @@ BEGIN
 END $$;
 
 -- 4c. a paid order that fails at fulfillment tells the buyer -----------------------
+-- Re-run safe: once 'order-failed' is allowed, leave the live list alone (later
+-- migrations extend it; rebuilding it from this fixed list would drop theirs).
 DO $$
 BEGIN
+  IF position('order-failed' in coalesce((SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+       WHERE c.conrelid = 'public.exos_mail'::regclass AND c.conname = 'exos_mail_template_check'), '')) > 0 THEN
+    RETURN;
+  END IF;
   ALTER TABLE public.exos_mail DROP CONSTRAINT IF EXISTS exos_mail_template_check;
   ALTER TABLE public.exos_mail ADD CONSTRAINT exos_mail_template_check CHECK (template = ANY (ARRAY[
     'transfer-initiated', 'transfer-claimed', 'org-invite', 'event-cancelled', 'event-updated',
