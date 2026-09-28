@@ -40,15 +40,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // Per-key rate limit: RATE_LIMIT requests per clock minute (fixed window,
   // exos_api_rate_hit, mig 20260925020000). Over the limit → 429 + Retry-After
-  // (seconds to the next window). If the counter itself errors we let the
-  // request through — the API is read-only and an outage of the limiter
-  // shouldn't take the API down with it.
+  // (seconds to the next window). If the counter itself errors the request is
+  // refused (503): the API returns attendee PII, so no limiter, no answer.
   const { data: allowed, error: rlErr } = await sb.rpc("exos_api_rate_hit", {
     p_key_id: keyRow.id, p_limit: RATE_LIMIT,
   });
   if (rlErr) {
-    console.error("exos-api: rate limiter error (allowing request)", rlErr);
-  } else if (allowed === false) {
+    console.error("exos-api: rate limiter error (refusing request)", rlErr.message);
+    return json({ error: "temporarily unavailable" }, 503, { "retry-after": "30" });
+  }
+  if (allowed === false) {
     const retryAfter = Math.max(1, 60 - new Date().getUTCSeconds());
     return json({ error: "rate limit exceeded", limit_per_minute: RATE_LIMIT }, 429, {
       "retry-after": String(retryAfter),

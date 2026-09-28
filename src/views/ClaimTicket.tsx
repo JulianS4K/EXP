@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTransfer, claimTransfer } from '../lib/tickets';
 import { getPublicEvent } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +31,9 @@ import { useT } from '../context/LanguageContext';
 
 export default function ClaimTicket() {
   const { transferId } = useParams();
+  // The key from the emailed link (mig 20260929010000): lets any account claim.
+  const [search] = useSearchParams();
+  const claimKey = search.get('k');
   const { user, openAuthModal } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -83,7 +86,7 @@ export default function ClaimTicket() {
       // transferId, and clears the pending-transfer lock. It re-verifies the
       // caller has a confirmed email (any account) and refuses if the ticket
       // was used/voided in the meantime.
-      const claimedTicketId = await claimTransfer(transfer.id);
+      const claimedTicketId = await claimTransfer(transfer.id, claimKey);
 
       // Notify the sender that their transfer was claimed. Recipient + body
       // are server-derived by the exos_queue_mail RPC (mig 20260520160000).

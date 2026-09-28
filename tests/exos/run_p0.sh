@@ -57,7 +57,9 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260928050000_exos_guest_checkout \
          20260928060000_exos_voucher_discounts_quota_editor \
          20260928070000_exos_tevo_channel \
-         20260928080000_exos_tevo_inventory; do
+         20260928080000_exos_tevo_inventory \
+         20260929010000_exos_security_hardening \
+         20260929020000_exos_pool_refill_order; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -97,6 +99,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_tevo_orde
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketplace_scarcity.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_guest_checkout.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_voucher_discounts_quotas.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_security_hardening.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout_attribution \
   20260924230000_exos_event_geo 20260924233000_exos_promoters 20260924234500_exos_fan_referrals \
@@ -121,7 +124,9 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260928050000_exos_guest_checkout \
          20260928060000_exos_voucher_discounts_quota_editor \
          20260928070000_exos_tevo_channel \
-         20260928080000_exos_tevo_inventory; do
+         20260928080000_exos_tevo_inventory \
+         20260929010000_exos_security_hardening \
+         20260929020000_exos_pool_refill_order; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

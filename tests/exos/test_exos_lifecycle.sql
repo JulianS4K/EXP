@@ -166,7 +166,7 @@ BEGIN
   -- buyer accepts
   PERFORM set_config('app.uid','22222222-2222-2222-2222-222222222222', true);
   PERFORM set_config('app.jwt','{"email":"buyer@x"}', true);
-  PERFORM public.exos_claim_transfer(tr);
+  PERFORM public.exos_test_claim(tr);
 
   SELECT owner_id, buyer_id, barcode_secret, status, voided_at
     INTO new_owner, new_buyer, new_sec, st, vd

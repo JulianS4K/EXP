@@ -84,6 +84,12 @@ export function mapTransfer(row: any): Transfer {
   };
 }
 
+// Transfer columns clients may read: every one except claim_key, the secret in
+// the emailed claim link (mig 20260929010000), so select('*') would fail.
+const TRANSFER_COLS =
+  'id, ticket_id, org_id, sender_id, sender_email, receiver_email, receiver_name, status, ' +
+  'created_at, updated_at, event_id, event_title, event_image, tier_name, organizer_id';
+
 // Explicit ticket column list (everything mapTicket needs) EXCEPT barcode_secret.
 // The secret was scoped out of the base-table read grant in migration
 // 20260702123000 (finance/content org roles must not read it), so `select('*')`
@@ -210,7 +216,7 @@ export async function listInboundTransfers(): Promise<Transfer[]> {
   if (!email) return [];
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('receiver_email', email)
     .eq('status', 'pending');
   if (error) throw error;
@@ -223,7 +229,7 @@ export async function listOutboundTransfers(): Promise<Transfer[]> {
   if (!uid) return [];
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('sender_id', uid)
     .eq('status', 'pending');
   if (error) throw error;
@@ -233,7 +239,7 @@ export async function listOutboundTransfers(): Promise<Transfer[]> {
 export async function getTransfer(transferId: string): Promise<Transfer | null> {
   const { data, error } = await supabase
     .from('exos_transfers')
-    .select('*')
+    .select(TRANSFER_COLS)
     .eq('id', transferId)
     .maybeSingle();
   if (error) throw error;
@@ -525,11 +531,27 @@ export async function cancelTransfer(transferId: string): Promise<void> {
 }
 
 /** Claim a transfer: take ownership + rotate the barcode secret. Returns the
- *  claimed ticket id. */
-export async function claimTransfer(transferId: string): Promise<string> {
-  const { data, error } = await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId });
+ *  claimed ticket id. With the key from the emailed link (?k=) any verified
+ *  account can claim; without it, only the address it was sent to. */
+export async function claimTransfer(transferId: string, key?: string | null): Promise<string> {
+  const k = key?.trim();
+  const { data, error } = k
+    ? await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId, p_key: k })
+    : await supabase.rpc('exos_claim_transfer', { p_transfer_id: transferId });
   if (error) throw error;
   return data as string;
+}
+
+/** The sender's own claim-link key, to forward the link (mig 20260929010000). */
+export async function getTransferClaimKey(transferId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('exos_transfer_claim_key', { p_transfer_id: transferId });
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
+/** The claim path for a transfer, with its key when known. */
+export function claimPath(transferId: string, key?: string | null): string {
+  return key ? `claim/${transferId}?k=${encodeURIComponent(key)}` : `claim/${transferId}`;
 }
 
 export async function voidTicket(ticketId: string, reason?: string): Promise<void> {

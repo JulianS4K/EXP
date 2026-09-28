@@ -79,6 +79,7 @@ import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookT
 import { VividClient } from "../_shared/marketplace/vivid/client.ts";
 import type { VividOrder } from "../_shared/marketplace/vivid/types.ts";
 import { TevoClient } from "../_shared/marketplace/tevo/client.ts";
+import { tevoAwaitingFraudCheck } from "../_shared/marketplace/tevo/channel.ts";
 import { annotateTevoOrder, stripTevoOrder, tevoRemoteIds } from "../_shared/marketplace/tevo/orders.ts";
 import type { TevoOrder } from "../_shared/marketplace/tevo/types.ts";
 
@@ -108,7 +109,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(await ingest(sb, channels.get("gotickets")!, [sale], undefined));
     } catch (e) {
       console.error("exos-marketplace-sales: GoTickets webhook failed", e);
-      return json({ error: String(e) }, 500);
+      return json({ error: "internal error" }, 500);
     }
   }
 
@@ -126,7 +127,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(await ingest(sb, channels.get("gametime")!, [{ ...n, ...(p ?? {}) }], undefined));
     } catch (e) {
       console.error("exos-marketplace-sales: Gametime webhook failed", e);
-      return json({ error: String(e) }, 500);
+      return json({ error: "internal error" }, 500);
     }
   }
 
@@ -150,7 +151,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       console.error("exos-marketplace-sales: SeatGeek webhook failed", e);
       // 500 so SeatGeek retries; ingest is idempotent per order.
-      return json({ error: String(e) }, 500);
+      return json({ error: "internal error" }, 500);
     }
   }
 
@@ -170,7 +171,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       console.error("exos-marketplace-sales: webhook failed", e);
       // 500 so StubHub retries; ingest is idempotent per sale.
-      return json({ error: String(e) }, 500);
+      return json({ error: "internal error" }, 500);
     }
   }
 
@@ -235,14 +236,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const orders = await openTevoOrders(te);
       const seen = new Set(orders.map((o) => String(o.id)));
       orders.push(...await recheckTevoOrders(sb, te, seen));
-      result.evo = await ingest(sb, channels.get("evo")!, await withTevoListingIds(sb, orders), undefined);
+      // Tickets are only issued once a Client sale's fraud check clears.
+      const ready = orders.filter((o) => !tevoAwaitingFraudCheck(o));
+      result.evo = { ...(await ingest(sb, channels.get("evo")!, await withTevoListingIds(sb, ready), undefined)), awaiting_fraud_check: orders.length - ready.length };
     } else {
       result.evo = { skipped: "no TEVO_API_TOKEN / TEVO_API_SECRET" };
     }
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
-    return json({ error: String(e) }, 500);
+    return json({ error: "internal error" }, 500);
   }
 });
 

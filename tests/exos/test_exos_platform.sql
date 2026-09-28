@@ -268,7 +268,7 @@ SELECT set_config('app.jwt','{"email":"bob@x.com"}',false);
 DO $$
 DECLARE o uuid; b uuid; sec text; st text; ptid uuid;
 BEGIN
-  PERFORM public.exos_claim_transfer('aaaaaaaa-0000-0000-0000-0000000000c1');
+  PERFORM public.exos_test_claim('aaaaaaaa-0000-0000-0000-0000000000c1');
   SELECT owner_id,buyer_id,barcode_secret,status,pending_transfer_id
     INTO o,b,sec,st,ptid FROM public.exos_tickets WHERE id='aaaaaaaa-0000-0000-0000-0000000000f3';
   ASSERT o='44444444-4444-4444-4444-444444444444', 'owner reassigned to claimer';

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { exosListingId } from '..';
 import { StubHubClient } from '.';
 import { STUBHUB_ENDPOINTS } from '.';
 import { buildCreateListingRequest, buildRequestedEvent, buildRequestedEventListingRequest } from '.';
@@ -10,8 +11,10 @@ import {
   type WriteAuthorization,
 } from '.';
 
+const EX = exosListingId('0f8fad5b-d9cb-469f-a165-70867728950e', 1);
+const SALE = { id: 9, external_listing_id: EX };
 const REQ = buildCreateListingRequest(
-  { id: 'row-1', channel: 'stubhub', requested_qty: 2, unit_price: 40 },
+  { id: EX, channel: 'stubhub', requested_qty: 2, unit_price: 40 },
   { ticketType: 'ETicket', splitType: 'Any', section: 'GA', currency: 'USD' },
 );
 
@@ -58,19 +61,19 @@ describe('StubHubWriter dry-run (default)', () => {
 
     const results = [
       await w.createSellerListing(123, REQ),
-      await w.updateListing('row-1', { number_of_tickets: 1 }),
-      await w.delistListing('row-1'),
-      await w.confirmSale(9),
-      await w.reportMobileTransfer(9, 'AXS', 'AXS-1'),
-      await w.attachETickets(9, [5]),
-      await w.deliverETicketUrls(9, ['https://exos.example.test/claim/0b6f1c2e-1111-4a2b-9c3d-000000000001'], 1),
-      await w.rejectSale(9),
+      await w.updateListing(EX, { number_of_tickets: 1 }),
+      await w.delistListing(EX),
+      await w.confirmSale(SALE),
+      await w.reportMobileTransfer(SALE, 'AXS', 'AXS-1'),
+      await w.attachETickets(SALE, [5]),
+      await w.deliverETicketUrls(SALE, ['https://exos.example.test/claim/0b6f1c2e-1111-4a2b-9c3d-000000000001'], 1),
+      await w.rejectSale(SALE),
     ];
     expect(results.every((r) => r.dryRun)).toBe(true);
     expect(plans.map((p) => `${p.method} ${p.url}`)).toEqual([
       'POST /v2/events/123/sellerlistings',
-      'PATCH /v2/externalsellerlistings/row-1',
-      'DELETE /v2/externalsellerlistings/row-1',
+      `PATCH /v2/externalsellerlistings/${EX}`,
+      `DELETE /v2/externalsellerlistings/${EX}`,
       'PATCH /v2/sales/9',
       'PATCH /v2/sales/9',
       'PATCH /v2/sales/9',
@@ -113,8 +116,8 @@ describe('StubHubWriter live mode gate', () => {
   it('refuses endpoints outside the authorized scope before calling fetch', async () => {
     const fetchImpl = vi.fn();
     const w = liveWriter(fetchImpl);
-    await expect(w.rejectSale(1)).rejects.toBeInstanceOf(WriteNotAuthorizedError);
-    await expect(w.confirmSale(1)).rejects.toThrow(/authorization scope/);
+    await expect(w.rejectSale({ ...SALE, id: 1 })).rejects.toBeInstanceOf(WriteNotAuthorizedError);
+    await expect(w.confirmSale({ ...SALE, id: 1 })).rejects.toThrow(/authorization scope/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -150,7 +153,7 @@ describe('StubHubWriter live mode gate', () => {
   it('handles 204 No Content', async () => {
     const auth = { ...AUTH, endpoints: ['rejectSale'] as const };
     const w = liveWriter(async () => new Response(null, { status: 204 }), auth);
-    expect(await w.rejectSale(5)).toMatchObject({ dryRun: false, response: null });
+    expect(await w.rejectSale({ ...SALE, id: 5 })).toMatchObject({ dryRun: false, response: null });
   });
 });
 
@@ -159,11 +162,11 @@ describe('createOrAdoptListing', () => {
     new StubHubClient({ baseUrl: 'https://api.example.test', accessToken: () => 't', fetch: fetchImpl, sleep: async () => {} });
 
   it('adopts an existing listing with the same external_id instead of creating', async () => {
-    const readFetch = vi.fn(async (_url: string) => json({ id: 55, external_id: 'row-1', created_at: '', number_of_tickets: 2 }));
+    const readFetch = vi.fn(async (_url: string) => json({ id: 55, external_id: EX, created_at: '', number_of_tickets: 2 }));
     const writeFetch = vi.fn();
     const w = liveWriter(writeFetch, AUTH, { reader: reader(readFetch) });
     expect(await w.createOrAdoptListing(1, REQ)).toMatchObject({ adopted: true, listing: { id: 55 } });
-    expect(readFetch.mock.calls[0][0]).toBe('https://api.example.test/v2/externalsellerlistings/row-1');
+    expect(readFetch.mock.calls[0][0]).toBe(`https://api.example.test/v2/externalsellerlistings/${EX}`);
     expect(writeFetch).not.toHaveBeenCalled();
   });
 
@@ -180,7 +183,7 @@ describe('createOrAdoptListing', () => {
 
 describe('requested-event listings', () => {
   const REQ2 = buildRequestedEventListingRequest(
-    { id: 'row-2', channel: 'stubhub', requested_qty: 2, unit_price: 40 },
+    { id: exosListingId('0f8fad5b-d9cb-469f-a165-70867728950e', 2), channel: 'stubhub', requested_qty: 2, unit_price: 40 },
     { ticketType: 'ETicket', splitType: 'Any', section: 'GA', currency: 'USD' },
     { name: 'Exos Show', startsAt: '2026-11-01T02:00:00Z', venueName: 'The Hall', venueCity: 'Austin', countryCode: 'US' },
   );
@@ -222,5 +225,16 @@ describe('requestEvent', () => {
       dryRun: true,
       planned: { endpoint: 'createSellerEvent', method: 'PUT', url: '/v2/sellerevents', body },
     });
+  });
+});
+
+describe('StubHubWriter touches Exos listings and sales only', () => {
+  it('refuses broker listing ids and sales on broker listings, even dry-run', () => {
+    const w = new StubHubWriter();
+    expect(() => w.updateListing('BROKER-77', { number_of_tickets: 1 })).toThrow(WriteNotAuthorizedError);
+    expect(() => w.delistListing('row-1')).toThrow(/not an Exos listing/);
+    expect(() => w.createSellerListing(1, { ...REQ, external_id: 'BROKER-1' })).toThrow(/not an Exos listing/);
+    expect(() => w.rejectSale({ id: 9, external_listing_id: 'BROKER-1' })).toThrow(/not an Exos listing/);
+    expect(() => w.confirmSale({ id: 9 })).toThrow(/not an Exos listing/);
   });
 });

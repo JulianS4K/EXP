@@ -8,6 +8,7 @@ import {
   isExosTevoRemoteId,
   normalizeTevoOrder,
   planTevoListings,
+  tevoAwaitingFraudCheck,
   tevoRemoteIds,
   type TevoAllocation,
   type TevoOrder,
@@ -167,5 +168,21 @@ describe('TevoWriter inventory', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(String(init.body)).inventory.ticket.remote_id).toBe(R1);
     await expect(w.deleteInventory(ref)).rejects.toThrow(/authorization scope/);
+  });
+});
+
+describe('fraud gate before issuing', () => {
+  const client = (fraud: unknown): TevoOrder => ({
+    id: 190900, state: 'pending', buyer: { type: 'Client', id: 9 }, fraud_check_status: fraud as never,
+    items: [{ id: 1, quantity: 1, price: '45.00', ticket_group: { id: 7, remote_id: R1, exos_listing_id: L1 } }],
+  });
+  it('holds a Client sale while Riskified is pending, and a declined one is a cancellation', () => {
+    expect(tevoAwaitingFraudCheck(client('pending'))).toBe(true);
+    expect(tevoAwaitingFraudCheck(client('approved'))).toBe(false);
+    expect(tevoAwaitingFraudCheck(client(null))).toBe(false);
+    expect(normalizeTevoOrder(client('declined')).status).toBe('cancelled');
+    expect(normalizeTevoOrder(client('approved')).status).toBe('pending');
+    // A sale to TEvo itself is never screened.
+    expect(tevoAwaitingFraudCheck({ ...client('pending'), buyer: { type: 'Office', id: 6 } })).toBe(false);
   });
 });

@@ -78,12 +78,12 @@ BEGIN
 
   PERFORM set_config('app.uid','33333333-3333-3333-3333-333333333333', true);
   PERFORM set_config('app.jwt','{"email":"buyer@x"}', true);
-  PERFORM public.exos_claim_transfer(tr_buyer);
+  PERFORM public.exos_test_claim(tr_buyer);
 
   PERFORM set_config('app.uid','44444444-4444-4444-4444-444444444444', true);
   PERFORM set_config('app.jwt','{"email":"alt@x"}', true);
   BEGIN
-    PERFORM public.exos_claim_transfer(tr_alt);
+    PERFORM public.exos_test_claim(tr_alt);
   EXCEPTION WHEN raise_exception THEN raised := true;
   END;
   ASSERT raised, 'a sibling transfer must not claim a ticket the sender no longer owns';

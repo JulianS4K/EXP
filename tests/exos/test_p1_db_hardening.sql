@@ -80,10 +80,10 @@ DECLARE e1 uuid := 'f7000000-0000-0000-0000-0000000000e1'; org uuid := 'f7000000
   fcfs boolean := position('first redeemer wins' in pg_get_functiondef('public.exos_fulfill_checkout(text)'::regprocedure)) > 0;
 BEGIN
   INSERT INTO public.exos_vouchers(id,event_id,code,tier_id,max_uses,used_count,bypass_capacity,reserved_email,valid_until) VALUES
-    ('f7000000-0000-0000-0000-0000000000f1',e1,'P1RES',NULL,5,0,false,'p1hold@x.com',NULL),
-    ('f7000000-0000-0000-0000-0000000000f2',e1,'P1EXP',NULL,5,0,false,NULL,now() - interval '1 minute'),
+    ('f7000000-0000-0000-0000-0000000000f1',e1,'P1RESV',NULL,5,0,false,'p1hold@x.com',NULL),
+    ('f7000000-0000-0000-0000-0000000000f2',e1,'P1EXPD',NULL,5,0,false,NULL,now() - interval '1 minute'),
     ('f7000000-0000-0000-0000-0000000000f3',e1,'P1TIER','f7000000-0000-0000-0000-0000000000d2',5,0,false,NULL,NULL),
-    ('f7000000-0000-0000-0000-0000000000f4',e1,'P1OK',NULL,5,0,false,'p1hold@x.com',now() + interval '1 day'),
+    ('f7000000-0000-0000-0000-0000000000f4',e1,'P1OKAY',NULL,5,0,false,'p1hold@x.com',now() + interval '1 day'),
     ('f7000000-0000-0000-0000-0000000000f5',e1,'P1GRACE',NULL,5,0,false,NULL,now() - interval '1 minute');
   INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,status,voucher_id) VALUES
     ('p1-cs1',e1,'f7000000-0000-0000-0000-0000000000d1',org,'f7000000-0000-0000-0000-0000000000a4','other@x.com',1,2500,'pending','f7000000-0000-0000-0000-0000000000f1'),

@@ -165,7 +165,7 @@ ok "refused: in-transfer (nothing handed to StubHub scans before the buyer claim
 
 step "9. Bob claims both tickets"
 for t in $(q "SELECT id FROM exos_transfers WHERE receiver_email='bob@e2e.test' AND status='pending'"); do
-  as $BOB bob@e2e.test "SELECT public.exos_claim_transfer('$t')" >/dev/null
+  as $BOB bob@e2e.test "SELECT public.exos_test_claim('$t')" >/dev/null
 done
 need "$(q "SELECT count(*) FROM exos_tickets WHERE order_ref='stubhub:SH-9001' AND owner_id='$BOB' AND pending_transfer_id IS NULL")" 2 "bob owns both"
 need "$(scan $BT "$OLD")" barcode-rejected "the pre-claim barcode"
@@ -183,10 +183,10 @@ need "$(q "SELECT count(*) FROM exos_mail WHERE to_email='$RELAY' AND html LIKE 
 FIRST=$(q "SELECT id FROM exos_transfers WHERE receiver_email='$RELAY' AND status='pending' ORDER BY id LIMIT 1")
 need "$(as $ALICE alice@e2e.test "SELECT event_title FROM public.exos_transfer_claim_preview('$FIRST')")" "Late Night Jazz" "claim page preview for someone RLS hides the row from"
 for t in $(q "SELECT id FROM exos_transfers WHERE receiver_email='$RELAY' AND status='pending'"); do
-  as $CAROL carol@e2e.test "SELECT public.exos_claim_transfer('$t')" >/dev/null
+  as $CAROL carol@e2e.test "SELECT public.exos_test_claim('$t')" >/dev/null
 done
 need "$(q "SELECT count(*) FROM exos_tickets WHERE owner_id='$CAROL'")" 3 "carol owns 3"
-if as $ALICE alice@e2e.test "SELECT public.exos_claim_transfer('$FIRST')" >/dev/null 2>&1; then
+if as $ALICE alice@e2e.test "SELECT public.exos_test_claim('$FIRST')" >/dev/null 2>&1; then
   echo "   FAIL: a claimed link was claimed again"; exit 1
 fi
 need "$(q "SELECT count(*) FROM exos_tickets WHERE owner_id='$CAROL'")" 3 "carol keeps all 3"
@@ -200,7 +200,7 @@ done
 need "$(q "SELECT count(*) FROM exos_account_limit_flags WHERE org_id='$ORG'")" 0 "no flag for sales alone"
 ok "both sales went through; no flag yet (tickets are only on their way)"
 for t in $(q "SELECT id FROM exos_transfers WHERE receiver_email='dave@e2e.test' AND status='pending'"); do
-  as $DAVE dave@e2e.test "SELECT public.exos_claim_transfer('$t')" >/dev/null
+  as $DAVE dave@e2e.test "SELECT public.exos_test_claim('$t')" >/dev/null
 done
 need "$(q "SELECT held||'/'||max_per_account FROM exos_account_limit_flags WHERE user_id='$DAVE'")" "6/4" "dave flagged"
 ok "dave's account holds 6 of max 4: flagged in the org's Limit flags tab"
@@ -227,12 +227,13 @@ need "$(q "SELECT status FROM exos_marketplace_orders WHERE external_order_id='S
 need "$(q "SELECT sold||'/'||capacity||' '||exos_channel_allocated(id) FROM exos_ticket_tiers WHERE id='$GA'")" "94/100 6" "never over capacity"
 ok "Exos: sold out. StubHub: sale fulfilled from its own pool (8 -> 6; no free seats left to top it up). GA 94/100, never over"
 
-step "14. StubHub sells 8 when it holds 6, and cancels one it already delivered"
+step "14. StubHub sells 8 when it holds 6, and cancels one it already delivered (its tickets are voided)"
 q "SELECT exos_record_marketplace_order('{\"channel\":\"stubhub\",\"external_order_id\":\"SH-9006\",\"external_listing_id\":\"SH-L-1\",\"quantity\":8,\"sale_status\":\"confirmed\",\"buyer_email\":\"frank@e2e.test\"}');
    SELECT exos_fulfil_marketplace_order((SELECT id FROM exos_marketplace_orders WHERE external_order_id='SH-9006'),'$APP');
    SELECT exos_record_marketplace_order('{\"channel\":\"stubhub\",\"external_order_id\":\"SH-9005\",\"external_listing_id\":\"SH-L-1\",\"quantity\":2,\"sale_status\":\"cancelled\"}')" >/dev/null
 q "SELECT '   '||external_order_id||': '||status||' ('||coalesce(attention_reason,'-')||')' FROM exos_marketplace_orders WHERE external_order_id IN ('SH-9005','SH-9006') ORDER BY 1"
-need "$(q "SELECT count(*) FROM exos_marketplace_orders WHERE external_order_id IN ('SH-9005','SH-9006') AND status='needs_attention'")" 2 "both to a human"
+need "$(q "SELECT status FROM exos_marketplace_orders WHERE external_order_id='SH-9006'")" needs_attention "the oversold one goes to a human"
+need "$(q "SELECT status||' '||(SELECT count(*) FROM exos_tickets WHERE order_ref='stubhub:SH-9005' AND status='voided') FROM exos_marketplace_orders WHERE external_order_id='SH-9005'")" "cancelled 2" "the cancelled one's tickets are voided"
 need "$(q "SELECT exos_channel_allocated('$GA')")" 6 "pool untouched by the refused sale"
 ok "both go to a human; nothing oversold, nothing silently undone"
 
@@ -283,8 +284,8 @@ DV=$(q "SELECT id FROM exos_tickets WHERE owner_id='$DAVE' AND status='voided' L
 need "$(scan $DV "$(barcode $DV)")" voided "voided"
 ok "one of dave's extra tickets voided by the organizer: refused, voided"
 EVE=$(q "SELECT id FROM exos_tickets WHERE order_ref='stubhub:SH-9005' LIMIT 1")
-need "$(scan $EVE "$(barcode $EVE)")" in-transfer "eve never claimed"
-ok "eve (cancelled StubHub order, never claimed): refused, in-transfer"
+need "$(scan $EVE "$(barcode $EVE)")" voided "eve's StubHub order was cancelled"
+ok "eve (cancelled StubHub order, never claimed): refused, voided"
 
 step "16. Where it ended"
 q "SELECT '   '||name||' sold '||sold||'/'||capacity||', marketplaces hold '||exos_channel_allocated(id)||', Exos can sell '||coalesce(exos_tier_available(id),0) FROM exos_ticket_tiers WHERE event_id='$EV' ORDER BY name"

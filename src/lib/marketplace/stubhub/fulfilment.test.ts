@@ -81,6 +81,12 @@ describe('e-ticket URL route', () => {
     expect(() => exosClaimUrl('https://exos.example.test', '../admin')).toThrow(/uuid/);
   });
 
+  it('adds the claim key when sending (any account can then claim)', () => {
+    const k = 'A1B2c3d4e5f60718293a4b5c6d7e8f90';
+    expect(exosClaimUrl('https://exos.example.test/bridge', T1, k)).toBe(`https://exos.example.test/bridge/claim/${T1}?k=${k.toLowerCase()}`);
+    expect(() => exosClaimUrl('https://exos.example.test', T1, 'x"><script>')).toThrow(/not hex/);
+  });
+
   it('confirms the sale with one url per ticket', () => {
     const urls = [T1, T2].map((t) => exosClaimUrl('https://exos.example.test', t));
     expect(eticketUrlsRequest(urls, 2)).toEqual({

@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getTicket, createTransfer } from '../lib/tickets';
+import { getTicket, createTransfer, getTransferClaimKey, claimPath } from '../lib/tickets';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { ArrowLeft, UserPlus, ShieldAlert, Send, Check, Copy } from 'lucide-react';
@@ -29,6 +29,7 @@ export default function TransferTicket() {
   const [completedTransferId, setCompletedTransferId] = useState<string | null>(null);
   const [completedReceiverEmail, setCompletedReceiverEmail] = useState<string>('');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [completedKey, setCompletedKey] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -84,6 +85,9 @@ export default function TransferTicket() {
       // straight to /my-tickets. The sender can stay on the page,
       // copy the claim URL, and forward it through whatever channel
       // they want.
+      // The link carries the transfer's claim key so a forwarded link works
+      // for any account (mig 20260929010000).
+      setCompletedKey(await getTransferClaimKey(transferId).catch(() => null));
       setCompletedTransferId(transferId);
       setCompletedReceiverEmail(normalisedEmail);
       toast({
@@ -114,7 +118,7 @@ export default function TransferTicket() {
   // instead of the form. The sender keeps the page open, copies the
   // claim link, and pastes it into whatever messaging app they prefer.
   if (completedTransferId) {
-    const claimUrl = publicUrl(`claim/${completedTransferId}`);
+    const claimUrl = publicUrl(claimPath(completedTransferId, completedKey));
     const handleCopy = async () => {
       try {
         await navigator.clipboard.writeText(claimUrl);

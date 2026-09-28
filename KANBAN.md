@@ -25,6 +25,19 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Build review fixes 2026-09-29 (six-area review, 2026-09-28)
+
+- 🟡 **Security hardening** (`20260929010000_exos_security_hardening`, authored, not applied; apply with
+  `20260928060000`, the quota fix): vouchers can't name another event's ticket type and a planted one holds
+  nothing (the cross-org sell-out); finance reads but can't delete vouchers; failed code lookups throttled (10 per
+  account, 60 per event anonymous, 10 min) and typed codes are 6+ characters; claim links carry a `claim_key`
+  staff can't read (`?k=`), without it only the addressed account claims; a marketplace cancellation voids the
+  order's unused tickets; offboarding revokes the member's API keys and webhooks; the payout account is
+  server-set only; add-on tax rates stay on their event. Code: StubHub writer refuses non-Exos listings and
+  sales, TEvo tickets wait for the fraud check, guest IP from the platform header, API limiter fails closed.
+  `test_security_hardening.sql` S1–S7.
+- 🟡 **Pool refill order** (`20260929020000`): deterministic, longest-idle shrinks first (fixed a flaky C2).
+
 ## Fan-first build (from reports/Organizer and fan ticketing needs.md, started 2026-09-28)
 
 Operator scope: everything on the report's build lists except same-day payout. Marketplaces are omnichannel

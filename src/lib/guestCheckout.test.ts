@@ -14,16 +14,16 @@ describe('normalizeGuestEmail', () => {
 
 describe('clientIp', () => {
   const h = (m: Record<string, string>) => (k: string) => m[k] ?? null;
-  it('takes the first forwarded hop', () => {
-    expect(clientIp(h({ 'x-forwarded-for': ' 203.0.113.7 , 10.0.0.1' }))).toBe('203.0.113.7');
+  it('trusts the platform, not the client: cf-connecting-ip, then x-real-ip', () => {
+    expect(clientIp(h({ 'cf-connecting-ip': '198.51.100.2', 'x-forwarded-for': '6.6.6.6' }))).toBe('198.51.100.2');
+    expect(clientIp(h({ 'x-real-ip': '2001:db8::1', 'x-forwarded-for': '6.6.6.6' }))).toBe('2001:db8::1');
   });
-  it('falls back to cf-connecting-ip, then x-real-ip', () => {
-    expect(clientIp(h({ 'cf-connecting-ip': '198.51.100.2' }))).toBe('198.51.100.2');
-    expect(clientIp(h({ 'x-real-ip': '2001:db8::1' }))).toBe('2001:db8::1');
+  it('takes the last forwarded hop (ours), never the first (the client\'s)', () => {
+    expect(clientIp(h({ 'x-forwarded-for': ' 6.6.6.6 , 203.0.113.7' }))).toBe('203.0.113.7');
   });
-  it('is null when nothing usable', () => {
-    expect(clientIp(h({}))).toBeNull();
-    expect(clientIp(h({ 'x-forwarded-for': 'x'.repeat(65) }))).toBeNull();
+  it('shares one bucket when nothing usable, instead of skipping the limit', () => {
+    expect(clientIp(h({}))).toBe('unknown');
+    expect(clientIp(h({ 'x-forwarded-for': 'x'.repeat(65) }))).toBe('unknown');
   });
 });
 

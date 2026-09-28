@@ -91,8 +91,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * SPA base URL, path included: the app is served under /bridge/, so
  * "https://vibepass-storefront-test.onrender.com/bridge" gives
  * ".../bridge/claim/<id>". https only: claim links carry ticket ownership.
+ * `claimKey` (exos_transfers.claim_key, mig 20260929010000) lets any account
+ * claim; without it only the address the transfer was sent to can. Stored
+ * plans leave it out (org finance can read them); whatever sends the links
+ * adds each transfer's key at send time.
  */
-export function exosClaimUrl(appBase: string, transferId: string): string {
+export function exosClaimUrl(appBase: string, transferId: string, claimKey?: string | null): string {
   let base: URL;
   try {
     base = new URL(appBase);
@@ -101,7 +105,10 @@ export function exosClaimUrl(appBase: string, transferId: string): string {
   }
   if (base.protocol !== 'https:') throw new FulfilmentError('claim links must use https');
   if (!UUID_RE.test(transferId)) throw new FulfilmentError(`transfer id "${transferId}" is not a uuid`);
-  return `${base.origin}${base.pathname.replace(/\/+$/, '')}/claim/${transferId.toLowerCase()}`;
+  const url = `${base.origin}${base.pathname.replace(/\/+$/, '')}/claim/${transferId.toLowerCase()}`;
+  if (claimKey == null) return url;
+  if (!/^[0-9a-f]{32,128}$/i.test(claimKey)) throw new FulfilmentError('claim key is not hex');
+  return `${url}?k=${claimKey.toLowerCase()}`;
 }
 
 /**

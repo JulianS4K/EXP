@@ -16,7 +16,7 @@
 import type { MarketplaceChannel, MarketplaceSale, PlannedRequest, SaleStatus } from '../channel.ts';
 import { allocationIdFromListingId } from '../listingIds.ts';
 import { planTevoDelivery } from './fulfilment.ts';
-import { exosListingRef, fraudGate, orderEmail } from './orders.ts';
+import { exosListingRef, fraudGate, orderEmail, orderKind } from './orders.ts';
 import type { TevoOrder } from './types.ts';
 
 const STATUS: Record<string, SaleStatus> = {
@@ -49,8 +49,12 @@ export function normalizeTevoOrder(raw: unknown): MarketplaceSale {
     else proceeds += p * (Number(it.quantity) || 0);
   }
   const gate = fraudGate(o);
+  // A Client sale Riskified hasn't cleared: exos-marketplace-sales doesn't
+  // ingest it yet (tevoAwaitingFraudCheck), so no tickets exist before it
+  // clears; one it declined is a cancellation.
   const waiting = 'wait' in gate && gate.wait;
-  const status: SaleStatus = waiting ? 'pending' : STATUS[String(o.state ?? '').toLowerCase()] ?? 'unknown';
+  const declined = orderKind(o) === 'sale_to_client' && 'reason' in gate && !waiting;
+  const status: SaleStatus = declined ? 'cancelled' : waiting ? 'pending' : STATUS[String(o.state ?? '').toLowerCase()] ?? 'unknown';
   return {
     channel: 'evo',
     externalOrderId: String(o.id),
@@ -79,4 +83,10 @@ export function evoChannel(opts: { reviewerId?: number | null } = {}): Marketpla
       return planTevoDelivery({ orderId: sale.externalOrderId, quantity: sale.quantity, claimUrls, reviewerId: opts.reviewerId, seats });
     },
   };
+}
+
+/** A Client sale waiting on its Riskified check: nothing is issued until it clears. */
+export function tevoAwaitingFraudCheck(raw: unknown): boolean {
+  const gate = fraudGate(raw as TevoOrder);
+  return 'wait' in gate && gate.wait;
 }
