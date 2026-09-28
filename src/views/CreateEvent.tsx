@@ -6,7 +6,7 @@ import { uploadEventImage, deleteStorageObject } from '../lib/storage';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Image as ImageIcon, Calendar as CalendarIcon, MapPin, Tag, DollarSign, ListOrdered, Upload, Globe, ShieldCheck, Loader2, Plus, X } from 'lucide-react';
+import { ArrowLeft, Calendar as CalendarIcon, MapPin, Tag, ListOrdered, Upload, ShieldCheck, Loader2, X } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import {
@@ -61,7 +61,7 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // Optional Automatiq integration. The endpoint is not implemented yet, so we
 // gate the call behind an env flag — otherwise every event creation 404s and
 // writes a misleading `syncStatus: 'failed'` to the doc.
-import { MARKETPLACE_NETWORKS, SHOW_DISCOUNT_CODES, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
@@ -69,20 +69,6 @@ import { slugify } from '../lib/orgs';
 const AUTOMATIQ_ENABLED =
   (import.meta as any).env?.VITE_AUTOMATIQ_ENABLED === 'true';
 
-interface PromoCodeDraft {
-  id: string;
-  code: string;
-  type: 'percentage' | 'fixed';
-  value: string;
-  usageLimit: string;
-  // Optional ISO date (yyyy-MM-dd) — empty means no expiry. Stored as a
-  // Firestore Timestamp on submit when present.
-  expiresAt: string;
-  // Tier ids that this code makes visible. Used for hidden / pre-sale
-  // tiers — applying the code in EventDetails reveals those rows.
-  unlocksTierIds: string[];
-  usedCount: number;
-}
 
 // ISO 4217 currency codes the UI exposes. Stripe processing for
 // non-USD currencies is wired up by the payments team — this just
@@ -168,7 +154,6 @@ export default function CreateEvent() {
     distributionNetworks: [] as string[],
     accessibility: {} as EventAccessibility
   });
-  const [promoCodes, setPromoCodes] = useState<PromoCodeDraft[]>([]);
 
   // Tier draft shape carries the new fields as plain strings so empty
   // datetime/number inputs don't render "undefined" or "0" in the form.
@@ -251,7 +236,6 @@ export default function CreateEvent() {
         if (window.confirm('You have an unsaved event draft. Restore it?')) {
           setFormData((prev) => ({ ...prev, ...saved.formData }));
           setTicketTiers(saved.ticketTiers);
-          if (Array.isArray(saved.promoCodes)) setPromoCodes(saved.promoCodes);
           draftAppliedRef.current = true;  // only set when user confirmed
         } else {
           localStorage.removeItem(draftKey);
@@ -354,20 +338,6 @@ export default function CreateEvent() {
             ),
           );
         }
-        if (Array.isArray(src.discountCodes)) {
-          setPromoCodes(
-            src.discountCodes.map((d: any) => ({
-              id: crypto.randomUUID(),
-              code: d.code || '',
-              type: d.type || 'percentage',
-              value: String(d.value ?? ''),
-              usageLimit: d.usageLimit != null ? String(d.usageLimit) : '',
-              expiresAt: '',
-              unlocksTierIds: Array.isArray(d.unlocksTierIds) ? d.unlocksTierIds : [],
-              usedCount: 0,
-            })),
-          );
-        }
       } catch (err) {
         console.warn('Could not hydrate clone source:', err);
       } finally {
@@ -392,7 +362,6 @@ export default function CreateEvent() {
           JSON.stringify({
             formData,
             ticketTiers,
-            promoCodes,
             savedAt: Date.now(),
           }),
         );
@@ -403,7 +372,7 @@ export default function CreateEvent() {
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [autosaveReady, draftKey, formData, ticketTiers, promoCodes]);
+  }, [autosaveReady, draftKey, formData, ticketTiers]);
 
   const clearDraft = () => {
     try {
@@ -509,47 +478,6 @@ export default function CreateEvent() {
   // Categories + genre chips come from the taxonomy module so adding a
   // category in the future is a one-file change.
   const categories = EVENT_CATEGORIES;
-
-  // ---- Promo code editor helpers ---------------------------------------
-  // We keep the UI fields as strings (so empty inputs don't show "0") and
-  // coerce on submit, mirroring the tier editor below.
-  const addPromoCode = () => {
-    setPromoCodes((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        code: '',
-        type: 'percentage',
-        value: '',
-        usageLimit: '',
-        expiresAt: '',
-        unlocksTierIds: [],
-        usedCount: 0,
-      },
-    ]);
-  };
-  const removePromoCode = (id: string) => {
-    setPromoCodes((prev) => prev.filter((p) => p.id !== id));
-  };
-  const updatePromoCode = (
-    id: string,
-    field: keyof PromoCodeDraft,
-    value: string,
-  ) => {
-    setPromoCodes((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              [field]:
-                field === 'code'
-                  ? value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32)
-                  : value,
-            }
-          : p,
-      ),
-    );
-  };
 
   const handleGenreToggle = (genre: string) => {
     const current = formData.genres;
@@ -678,43 +606,6 @@ export default function CreateEvent() {
     // Currency: ISO 4217 three-letter code.
     if (!/^[A-Z]{3}$/.test(formData.currency)) {
       return 'Currency must be a 3-letter ISO code (e.g. USD, EUR).';
-    }
-
-    // Promo codes — keep the per-row validation tight so we don't write
-    // junk that will silently fail at redemption time.
-    const seenCodes = new Set<string>();
-    for (const p of SHOW_DISCOUNT_CODES ? promoCodes : []) {
-      const code = p.code.trim().toUpperCase();
-      if (!code) return 'Every promo code needs a value (e.g. EARLY30).';
-      if (!/^[A-Z0-9_-]+$/.test(code)) {
-        return `Promo code "${code}" can only contain A-Z, 0-9, underscore and hyphen.`;
-      }
-      if (seenCodes.has(code)) {
-        return `Promo code "${code}" is repeated. Use distinct codes.`;
-      }
-      seenCodes.add(code);
-      const v = parseFloat(p.value);
-      if (!Number.isFinite(v) || v < 0) {
-        return `Promo code "${code}" needs a non-negative discount value.`;
-      }
-      if (p.type === 'percentage' && v > 100) {
-        return `Promo code "${code}" can't be more than 100%.`;
-      }
-      if (p.usageLimit) {
-        const lim = parseInt(p.usageLimit, 10);
-        if (!Number.isInteger(lim) || lim < 1) {
-          return `Promo code "${code}" usage limit must be a positive integer.`;
-        }
-      }
-      if (p.expiresAt) {
-        const expMs = new Date(p.expiresAt).getTime();
-        if (!Number.isFinite(expMs)) {
-          return `Promo code "${code}" has an invalid expiry date.`;
-        }
-        if (expMs < Date.now()) {
-          return `Promo code "${code}" expires in the past.`;
-        }
-      }
     }
 
     return null;
@@ -874,19 +765,6 @@ export default function CreateEvent() {
           ...(accessOk && hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
             ? { accessibility: serializeAccessibility(formData.accessibility ?? {}) } : {}),
           tiers,
-          discountCodes: (SHOW_DISCOUNT_CODES ? promoCodes : [])
-            .filter((p) => p.code.trim())
-            .map((p) => {
-              const usage = parseInt(p.usageLimit, 10);
-              const expMs = p.expiresAt ? new Date(p.expiresAt).getTime() : NaN;
-              return {
-                code: p.code.trim().toUpperCase(),
-                type: p.type,
-                value: parseFloat(p.value),
-                usageLimit: Number.isInteger(usage) && usage > 0 ? usage : null,
-                expiresAt: Number.isFinite(expMs) ? new Date(expMs).toISOString() : null,
-              };
-            }),
         });
         let created: { eventId: string };
         try {
@@ -1595,133 +1473,14 @@ export default function CreateEvent() {
         </div>
         )}
 
-        {/* Promo codes: exos_discount_codes are never redeemed at checkout, so
-            the editor stays hidden until percent-off codes reach the server
-            (KANBAN). Presale / access codes are Vouchers, set after publish. */}
-        {SHOW_DISCOUNT_CODES ? (<>
-        {/* Promo Codes Section */}
-        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Promo Codes</h3>
-              <p className="type text-[9px] text-white/30 uppercase tracking-widest mt-1">
-                Optional. Buyers redeem at checkout.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={addPromoCode}
-              className="text-[10px] font-bold text-brand-primary uppercase tracking-widest hover:opacity-80 transition-opacity flex items-center gap-2"
-            >
-              <Plus className="w-3 h-3" aria-hidden="true" /> Add Code
-            </button>
-          </div>
-
-          {promoCodes.length === 0 ? (
-            <p className="type text-[10px] text-white/30 uppercase tracking-widest">
-              No promo codes defined.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {promoCodes.map((p) => (
-                <div
-                  key={p.id}
-                  className="p-6 bg-black/40 border border-white/10 grid grid-cols-1 md:grid-cols-12 gap-4 items-end"
-                >
-                  <div className="md:col-span-3 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Code</label>
-                    <input aria-label="Code"
-                      required
-                      type="text"
-                      placeholder="EARLY30"
-                      maxLength={32}
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold uppercase focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors font-mono"
-                      value={p.code}
-                      onChange={(e) => updatePromoCode(p.id, 'code', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-3 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
-                    <select aria-label="Type"
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
-                      value={p.type}
-                      onChange={(e) => updatePromoCode(p.id, 'type', e.target.value)}
-                    >
-                      <option value="percentage">Percentage</option>
-                      <option value="fixed">Fixed amount</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Value {p.type === 'percentage' ? '(%)' : '($)'}
-                    </label>
-                    <input aria-label="Discount value"
-                      required
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={p.type === 'percentage' ? 100 : undefined}
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
-                      value={p.value}
-                      onChange={(e) => updatePromoCode(p.id, 'value', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Usage Limit
-                    </label>
-                    <input aria-label="Usage limit"
-                      type="number"
-                      min="1"
-                      placeholder="Unlimited"
-                      className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
-                      value={p.usageLimit}
-                      onChange={(e) => updatePromoCode(p.id, 'usageLimit', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-1 space-y-2">
-                    <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">
-                      Expires
-                    </label>
-                    <input aria-label="Expires"
-                      type="date"
-                      className="w-full bg-black border border-white/20 py-3 px-3 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors text-xs"
-                      value={p.expiresAt}
-                      onChange={(e) => updatePromoCode(p.id, 'expiresAt', e.target.value)}
-                    />
-                  </div>
-                  <div className="md:col-span-1 flex justify-end">
-                    <button
-                      type="button"
-                      aria-label={`Remove promo code ${p.code || '(empty)'}`}
-                      onClick={() => removePromoCode(p.id)}
-                      className="text-white/30 hover:text-brand-accent transition-colors p-2"
-                    >
-                      <X className="w-4 h-4" aria-hidden="true" />
-                    </button>
-                  </div>
-
-                  {/* Hidden tiers are sold through vouchers (Edit event → Vouchers),
-                      which checkout enforces; discount codes only discount. */}
-                  {ticketTiers.some((t) => t.visibility === 'hidden') && (
-                    <p className="md:col-span-12 mt-2 pt-3 border-t border-white/10 type text-[10px] text-white/40">
-                      To sell a hidden ticket type (a presale), save the event, then add a voucher for it under
-                      Edit event → Vouchers.
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </>) : (
+        {/* Presale / access codes are vouchers (Edit event → Vouchers), which
+            checkout redeems; the old discount-code editor is gone. */}
           <div className="bg-[#111] border border-white/10 p-6 md:p-8">
             <h3 className="disp text-lg uppercase tracking-wide text-white">Presale &amp; access codes</h3>
             <p className="type text-xs text-white/50 mt-2 leading-relaxed">
               After you publish, open Edit event → Vouchers to make codes that unlock a hidden ticket type, pin a price, or let someone buy when sold out.
             </p>
           </div>
-        )}
         {/* Rarely-needed settings stay folded so the form reads as name →
             when/where → tickets → publish. */}
         <details className="group bg-[#111] border border-white/10">
@@ -1800,47 +1559,6 @@ export default function CreateEvent() {
            </div>
         </div>
 
-        {SHOW_DISTRIBUTION && (<>
-        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
-           <div className="flex items-center space-x-3 mb-2">
-              <Globe className="text-brand-primary w-5 h-5" />
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Exclusivity Logic</h3>
-           </div>
-           
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Primary Market Only</p>
-                    <p className="type text-[9px] text-white/40">Bypass distribution networks</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={formData.exclusivity.primaryMarketOnly}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      exclusivity: { ...formData.exclusivity, primaryMarketOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-              <div className="flex items-center justify-between p-6 bg-black/40 border border-white/10 hover:border-brand-primary/40 transition-all">
-                 <div>
-                    <p className="type text-[10px] text-white uppercase tracking-widest mb-1">Custom URL Only</p>
-                    <p className="type text-[9px] text-white/40">Private listing logic</p>
-                 </div>
-                 <input 
-                    type="checkbox" 
-                    className="w-5 h-5 accent-[#00FF00]"
-                    checked={formData.exclusivity.customUrlOnly}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      exclusivity: { ...formData.exclusivity, customUrlOnly: e.target.checked } 
-                    })}
-                 />
-              </div>
-           </div>
-        </div>
-        </>)}
 
         {/* Distribution Networks */}
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">

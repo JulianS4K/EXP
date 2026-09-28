@@ -23,6 +23,7 @@ import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import DeveloperSettings from '../components/DeveloperSettings';
+import { paymentsEnabled } from '../lib/payments';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -138,7 +139,7 @@ export default function OrgSettings() {
   const canEdit = isAdmin || activeRole === 'owner';
   // Paid ticketing is gated on the Stripe publishable key — the Connect
   // onboarding backend (exos-connect-onboard) is built but dormant until set.
-  const stripeEnabled = !!(import.meta as { env?: { VITE_STRIPE_PUBLISHABLE_KEY?: string } }).env?.VITE_STRIPE_PUBLISHABLE_KEY;
+  const stripeEnabled = paymentsEnabled();
 
   const handleSetupPayments = async () => {
     if (!orgId || !canEdit) return;

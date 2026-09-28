@@ -43,6 +43,7 @@ import AddonSelector, { type AddonSelection } from '../components/AddonSelector'
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
+import { paymentsEnabled } from '../lib/payments';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -272,7 +273,7 @@ export default function EventDetails() {
   // Paid checkout is gated on the Stripe publishable key — the backend
   // (exos-checkout + exos_fulfill_checkout) is built but stays dormant until
   // payments are switched on. No key → paid tiers show "Coming soon".
-  const stripeEnabled = !!(import.meta as { env?: { VITE_STRIPE_PUBLISHABLE_KEY?: string } }).env?.VITE_STRIPE_PUBLISHABLE_KEY;
+  const stripeEnabled = paymentsEnabled();
   // Same routing rule as handlePurchase: anything priced needs checkout.
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   const paidNotOnSale = !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
