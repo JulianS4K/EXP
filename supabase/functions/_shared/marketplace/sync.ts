@@ -19,7 +19,11 @@ export type SyncAction = 'create' | 'update' | 'none' | 'delist';
 
 export interface ListingOps {
   create: string[];
-  /** The changed request fields per listing (StubHub PATCH, SeatGeek PATCH, Gametime: the next file or POST /listings/{id}). */
+  /**
+   * The changed request fields per listing (StubHub PATCH, SeatGeek PATCH,
+   * Gametime: the next file or POST /listings/{id}; Ticket Evolution PATCH
+   * /v9/inventory/{id}: {inventory: {ticket: changed fields}}).
+   */
   update: Array<{ listing_id: string; patch: Record<string, unknown> }>;
   delete: string[];
 }
@@ -28,13 +32,17 @@ export type SyncedListings<P extends PlannedMarketplaceListings> = P & { action:
 
 export interface DelistPlan {
   action: 'delist';
-  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
-  /** One request per listing (StubHub, Gametime, Vivid Seats), or in bulk (SeatGeek; GoTickets 100 at a time). */
+  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid' | 'evo';
+  /** One request per listing (StubHub, Gametime, Vivid Seats, Ticket Evolution), or in bulk (SeatGeek; GoTickets 100 at a time). */
   requests: Array<{ endpoint: string; method: 'POST' | 'DELETE'; path: string; body?: unknown }>;
 }
 
-// Fields that describe the event, not the listing: fixed once listed.
-const FIXED = new Set(['external_id', 'seller_listing_id', 'TicketID', 'event', 'venue', 'country', 'event_id']);
+// Fields that describe the event (or whose listing it is), not the listing: fixed once listed.
+const FIXED = new Set(['external_id', 'seller_listing_id', 'TicketID', 'event', 'venue', 'country', 'event_id', 'office', 'remote_id', 'internal_notes']);
+// Wrappers diffed field by field (Ticket Evolution's {inventory: {ticket: …}}).
+const NESTED = new Set(['inventory', 'ticket']);
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 function changed(before: unknown, after: unknown): Record<string, unknown> {
   const b = (before ?? {}) as Record<string, unknown>;
@@ -42,7 +50,10 @@ function changed(before: unknown, after: unknown): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   for (const k of Object.keys(a)) {
     if (FIXED.has(k)) continue;
-    if (JSON.stringify(b[k]) !== JSON.stringify(a[k])) patch[k] = a[k];
+    if (NESTED.has(k) && isObj(a[k]) && isObj(b[k])) {
+      const inner = changed(b[k], a[k]);
+      if (Object.keys(inner).length) patch[k] = inner;
+    } else if (JSON.stringify(b[k]) !== JSON.stringify(a[k])) patch[k] = a[k];
   }
   return patch;
 }
@@ -68,10 +79,35 @@ export function syncListings<P extends PlannedMarketplaceListings>(plan: P, snap
   return { ...plan, action, ops };
 }
 
+/**
+ * TEvo's id for an Exos listing it has: the live sender records it on the
+ * snapshot entry (tevo_inventory_id, from Inventory / Create's 201).
+ */
+function tevoInventoryId(e: unknown): string | null {
+  const v = (e as { tevo_inventory_id?: unknown } | null)?.tevo_inventory_id;
+  const s = typeof v === 'number' || typeof v === 'string' ? String(v).trim() : '';
+  return /^[1-9]\d*$/.test(s) ? s : null;
+}
+
 /** Take down every Exos listing the marketplace has; null when it has none. */
 export function planDelist(channel: DelistPlan['channel'], snapshot: unknown): DelistPlan | null {
-  const ids = plannedEntries(snapshot).map((e) => e.listing_id).filter(isExosListingId);
+  const entries = plannedEntries(snapshot).filter((e) => isExosListingId(e.listing_id));
+  const ids = entries.map((e) => e.listing_id);
   if (!ids.length) return null;
+  if (channel === 'evo') {
+    // By TEvo id, one at a time (bulk delete is forbidden); an entry without
+    // one can't be addressed safely and waits for a person.
+    return {
+      action: 'delist',
+      channel,
+      requests: entries.map((e) => {
+        const id = tevoInventoryId(e);
+        return id
+          ? { endpoint: 'deleteInventory', method: 'DELETE' as const, path: `/v9/inventory/${id}` }
+          : { endpoint: 'deleteInventory', method: 'DELETE' as const, path: `/v9/inventory/{no TEvo id recorded for ${e.listing_id}: take it down by hand}` };
+      }),
+    };
+  }
   const enc = encodeURIComponent;
   const chunks = (n: number) => Array.from({ length: Math.ceil(ids.length / n) }, (_, i) => ids.slice(i * n, i * n + n));
   const requests: DelistPlan['requests'] = channel === 'seatgeek'

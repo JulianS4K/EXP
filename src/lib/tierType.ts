@@ -17,6 +17,7 @@ export const MARKETPLACE_NETWORKS = [
   { id: 'vivid', name: 'Vivid Seats' },
   { id: 'gametime', name: 'Gametime' },
   { id: 'gotickets', name: 'GoTickets' },
+  { id: 'evo', name: 'Ticket Evolution' },
 ] as const;
 
 // The old exos_discount_codes editor stays off: promo codes (% / $ off) are

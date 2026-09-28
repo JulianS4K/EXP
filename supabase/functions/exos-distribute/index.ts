@@ -10,7 +10,7 @@
 //
 // 1. Marketplace event rows (migs 20260926190000 / 20260927030000 / 040000).
 //    Publishing an event with StubHub / SeatGeek / Gametime / GoTickets /
-//    Vivid Seats ticked queues an event row
+//    Vivid Seats / Ticket Evolution ticked queues an event row
 //    (no ticket type) per marketplace.
 //    StubHub: if the event is already linked to a StubHub event, the plan just
 //    records that: nothing to create. If a possible match waits on staff, the
@@ -25,7 +25,9 @@
 //    id goes on the listings as productionId, else Vivid's mapping team
 //    matches them from the event name, venue and venue-local time. Gametime
 //    has neither creation nor search: its listings always carry the event
-//    name, venue and date.
+//    name, venue and date. Ticket Evolution needs its own event id on every
+//    ticket group and has no event search here yet: the row waits for staff
+//    to link the event.
 //
 // 1b. Listings, per allocation (a ticket type's seats set aside for a
 //    marketplace with exos_set_channel_allocation). For published events,
@@ -52,6 +54,9 @@
 //    the account's whole inventory (FTP), re-sent at least every six hours.
 //    Every run plans the complete file; it is never sent (see below).
 //
+//    Ticket Evolution listings also get a numeric remote_id each
+//    (exos_tevo_remote_ids, mig 20260928080000), which its orders echo.
+//
 //    DRY-RUN ONLY: plans go in planned_request / planned_listing and nothing
 //    is sent to a marketplace. Sending needs an operator WriteAuthorization
 //    (Hard Rule #2) and seller credentials; see EXP docs/marketplace/.
@@ -73,7 +78,8 @@
 // SUPABASE_SERVICE_ROLE_KEY. Optional: STUBHUB_ENV / STUBHUB_CLIENT_ID /
 // STUBHUB_CLIENT_SECRET (catalog reads, pass 0), SEATGEEK_CLIENT_ID
 // (SeatGeek Platform event search, pass 0), VIVID_API_TOKEN /
-// VIVID_INTEGRATOR_TOKEN (Vivid Seats event search, pass 0),
+// VIVID_INTEGRATOR_TOKEN (Vivid Seats event search, pass 0), TEVO_OFFICE_ID
+// (the Ticket Evolution office its inventory is planned in),
 // AUTOMATIQ_API_KEY (pass 2). Per-org distribution creds (e.g.
 // lystedSellerId) live in exos_org_secrets.distribution.
 
@@ -88,13 +94,14 @@ import { planGametimeListings, type GametimeCsvRow } from "../_shared/marketplac
 import { GametimeWriter } from "../_shared/marketplace/gametime/writer.ts";
 import { planGoTicketsListings } from "../_shared/marketplace/gotickets/listingPlan.ts";
 import { planVividListings } from "../_shared/marketplace/vivid/listingPlan.ts";
+import { planTevoListings } from "../_shared/marketplace/tevo/listingPlan.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
 
-type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets" | "vivid";
-const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets", "vivid"];
-const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets", vivid: "Vivid Seats" };
+type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets" | "vivid" | "evo";
+const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets", "vivid", "evo"];
+const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets", vivid: "Vivid Seats", evo: "Ticket Evolution" };
 
 interface DistRow {
   id: string;
@@ -123,6 +130,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       gametime: false,
       gotickets: false,
       vivid: !!channels.get("vivid")?.findEvents,
+      evo: false,
     });
     // Top every marketplace pool back up to its size, with free seats only
     // (mig 20260928010000): picks up seats freed since the last sale.
@@ -133,9 +141,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const gametime = await syncChannel(sb, "gametime");
     const gotickets = await syncChannel(sb, "gotickets");
     const vivid = await syncChannel(sb, "vivid");
+    const evo = await syncChannel(sb, "evo");
     const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid }, gametime_file: gametimeFile, automatiq });
+    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid, evo }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -161,6 +170,7 @@ const MATCHED_ON: Record<MarketChannel, string> = {
   gametime: "event name + venue + date",
   gotickets: "GoTickets maps it (event name + venue + time, StubHub / SeatGeek ids)",
   vivid: "Vivid's mapping team (event name + venue + venue-local time)",
+  evo: "nothing: Ticket Evolution needs the event linked by hand (its event id)",
 };
 
 // canSearch: the marketplace's event search is configured, so an event with
@@ -205,6 +215,10 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
           ? "StubHub may already have this event: confirm the match or reject it before a new one is requested"
           : `${label} may already have this event: confirm the match or reject it so the listings attach to the right event`,
       };
+      counts.waiting++;
+    } else if (!link && row.channel === "evo") {
+      // TEvo inventory needs TEvo's event id and there's no event search yet: staff link it.
+      patch = { status: "failed", planned_request: null, error: "Ticket Evolution: waiting for Exos staff to link this event to its Ticket Evolution event" };
       counts.waiting++;
     } else if (!link && canSearch[row.channel]) {
       counts.waiting++;
@@ -337,6 +351,20 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
             previous: r.listed_snapshot ?? r.planned_listing,
           });
           plan = syncListings(p, r.listed_snapshot);
+        } else if (channel === "evo") {
+          const prev = r.listed_snapshot ?? r.planned_listing;
+          // Plan once to learn the listing ids, number them (mig 20260928080000), plan again.
+          const base = {
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events, tevoEventId: linked.get(r.event_id) ?? null,
+            officeId: Deno.env.get("TEVO_OFFICE_ID") ?? null,
+            internal_seats: r.internal_seats, list_qty: r.list_qty, previous: prev,
+          };
+          const ids = planTevoListings(base).listings.map((l) => l.listing_id);
+          const { data: nums, error: nErr } = await sb.rpc("exos_tevo_remote_ids", { p_allocation_id: r.id, p_listing_ids: ids });
+          if (nErr) throw new Error(`number the Ticket Evolution listings: ${nErr.message}`);
+          const remoteIds = Object.fromEntries(((nums ?? []) as Array<{ listing_id: string; remote_id: number }>).map((n) => [n.listing_id, Number(n.remote_id)]));
+          plan = syncListings(planTevoListings({ ...base, remoteIds }), r.listed_snapshot);
         } else if (channel === "gotickets") {
           const x = crossLinks.get(r.event_id) ?? {};
           const p = planGoTicketsListings({
@@ -440,8 +468,8 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .from("exos_distribution_listings")
     .select("id, event_id, org_id, channel, requested_qty, unit_price")
     .eq("status", "pending")
-    // StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats are listed directly (passes 1b / 1c), not via Automatiq.
-    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets,vivid)")
+    // StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats and Ticket Evolution are listed directly (passes 1b / 1c), not via Automatiq.
+    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets,vivid,evo)")
     .is("tier_id", null)
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);

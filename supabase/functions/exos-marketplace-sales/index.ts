@@ -1,11 +1,13 @@
 // exos-marketplace-sales — marketplace sales become Exos tickets
 // (mig 20260926192000; the marketplace layer is _shared/marketplace).
 //
-// StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats. Ways in:
+// StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats and Ticket Evolution. Ways in:
 //   * POST with x-cron-secret (pg_cron): poll StubHub GET /sales/recentupdates,
 //     SeatGeek GET /orders, Gametime GET /purchases, GoTickets GET /rest/sales
-//     and Vivid Seats GET /v1/getOrders (read-only). Vivid Seats has no
-//     webhooks, so polling is the only way in for it.
+//     Vivid Seats GET /v1/getOrders and Ticket Evolution GET /v9/orders
+//     (read-only). Vivid Seats has no webhooks, so polling is the only way
+//     in for it; TEvo's webhooks and Order Integration come later (their
+//     payloads weren't supplied), polling is TEvo's documented fail-safe.
 //   * POST from StubHub's Sales webhook: Authorization must equal
 //     STUBHUB_WEBHOOK_AUTHORIZATION (the value registered with the webhook).
 //   * POST from SeatGeek's Seller Direct webhook (X-Sellerdirect-* headers):
@@ -42,6 +44,9 @@
 // GOTICKETS_WEBHOOK_TOKEN (in the webhook target URL: ?channel=gotickets&token=).
 // Vivid Seats (optional): VIVID_API_TOKEN (never in a logged URL: the
 // transport redacts it), VIVID_INTEGRATOR_TOKEN.
+// Ticket Evolution (optional): TEVO_API_TOKEN, TEVO_API_SECRET (signs every
+// request; never logged), TEVO_ENV ('production' | sandbox), TEVO_REVIEWER_ID
+// (the TEvo user id that accepts orders; delivery plans need it).
 // Gametime (optional): GAMETIME_API_KEY (the `source` key), GAMETIME_ENV
 // ('staging' | production), GAMETIME_WEBHOOK_AUTHORIZATION.
 // Deploy with --no-verify-jwt (the webhook
@@ -73,6 +78,9 @@ import type { GoTicketsSale } from "../_shared/marketplace/gotickets/types.ts";
 import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookToken } from "../_shared/marketplace/gotickets/webhook.ts";
 import { VividClient } from "../_shared/marketplace/vivid/client.ts";
 import type { VividOrder } from "../_shared/marketplace/vivid/types.ts";
+import { TevoClient } from "../_shared/marketplace/tevo/client.ts";
+import { annotateTevoOrder, stripTevoOrder, tevoRemoteIds } from "../_shared/marketplace/tevo/orders.ts";
+import type { TevoOrder } from "../_shared/marketplace/tevo/types.ts";
 
 const LOOKBACK_HOURS = 6;
 const env = (k: string) => Deno.env.get(k);
@@ -221,6 +229,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else {
       result.vivid = { skipped: "no VIVID_API_TOKEN" };
     }
+
+    const te = tevoClient();
+    if (te) {
+      const orders = await openTevoOrders(te);
+      const seen = new Set(orders.map((o) => String(o.id)));
+      orders.push(...await recheckTevoOrders(sb, te, seen));
+      result.evo = await ingest(sb, channels.get("evo")!, await withTevoListingIds(sb, orders), undefined);
+    } else {
+      result.evo = { skipped: "no TEVO_API_TOKEN / TEVO_API_SECRET" };
+    }
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
@@ -272,6 +290,67 @@ function vividClient(): VividClient | undefined {
   const token = env("VIVID_API_TOKEN")?.trim();
   const integrator = env("VIVID_INTEGRATOR_TOKEN")?.trim() || null;
   return token ? new VividClient({ credentials: () => ({ apiToken: token, integratorToken: integrator }) }) : undefined;
+}
+
+function tevoClient(): TevoClient | undefined {
+  const token = env("TEVO_API_TOKEN")?.trim(), secret = env("TEVO_API_SECRET")?.trim();
+  return token && secret
+    ? new TevoClient({ credentials: () => ({ token, secret }), environment: env("TEVO_ENV") === "production" ? "production" : "sandbox" })
+    : undefined;
+}
+
+// Pending TEvo orders (the filter name is assumed until the Orders / Index
+// page is supplied: an unknown filter just returns more orders, and only
+// orders on Exos listings are recorded).
+async function openTevoOrders(te: TevoClient): Promise<TevoOrder[]> {
+  try {
+    return await te.listOrders({ state: "pending" });
+  } catch (e) {
+    console.error("exos-marketplace-sales: TEvo listOrders failed", String(e));
+    return [];
+  }
+}
+
+// The Exos listing id on each ticket group TEvo hands back with an Exos
+// remote_id (exos_tevo_remote_ids, mig 20260928080000); broker groups are
+// left as they are and ignored downstream.
+async function withTevoListingIds(sb: SupabaseClient, orders: TevoOrder[]): Promise<TevoOrder[]> {
+  const ids = tevoRemoteIds(orders);
+  if (!ids.length) return orders;
+  const { data, error } = await sb.from("exos_tevo_remote_ids").select("remote_id, listing_id").in("remote_id", ids);
+  if (error) {
+    console.error("exos-marketplace-sales: TEvo remote_id lookup failed", error.message);
+    return orders;
+  }
+  const byRemoteId = new Map(((data ?? []) as Array<{ remote_id: number; listing_id: string }>).map((r) => [Number(r.remote_id), r.listing_id]));
+  return orders.map((o) => annotateTevoOrder(o, byRemoteId));
+}
+
+// Orders Exos already has, re-read by id, so an acceptance, a completion or
+// a fraud decision still arrives without webhooks.
+async function recheckTevoOrders(sb: SupabaseClient, te: TevoClient, skip: Set<string>): Promise<TevoOrder[]> {
+  const { data, error } = await sb.from("exos_marketplace_orders")
+    .select("external_order_id")
+    .eq("channel", "evo")
+    .in("status", ["received", "fulfilled", "needs_attention"])
+    .gt("created_at", new Date(Date.now() - 60 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(SG_RECHECK_PER_RUN);
+  if (error) {
+    console.error("exos-marketplace-sales: TEvo recheck list failed", error.message);
+    return [];
+  }
+  const out: TevoOrder[] = [];
+  for (const r of (data ?? []) as Array<{ external_order_id: string }>) {
+    if (skip.has(r.external_order_id)) continue;
+    try {
+      const o = await te.getOrder(r.external_order_id);
+      if (o) out.push(o);
+    } catch (e) {
+      console.error("exos-marketplace-sales: TEvo order recheck failed", r.external_order_id, String(e));
+    }
+  }
+  return out;
 }
 
 // Every order waiting on the seller: UNCONFIRMED (to confirm) and
@@ -493,7 +572,8 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
         p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale)
           : channel.id === "gametime" ? stripGametimePurchase(raw as GametimePurchase)
           : channel.id === "gotickets" ? stripGoTicketsSale(raw as GoTicketsSale)
-          : channel.id === "vivid" ? stripVividOrder(raw as VividOrder) : raw),
+          : channel.id === "vivid" ? stripVividOrder(raw as VividOrder)
+          : channel.id === "evo" ? stripTevoOrder(raw as TevoOrder) : raw),
       });
       if (rErr) throw new Error(`record: ${rErr.message}`);
       const row = (rec as Array<{ order_id: string; status: string }> | null)?.[0];

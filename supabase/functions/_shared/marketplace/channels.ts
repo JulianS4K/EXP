@@ -1,5 +1,5 @@
 // The channel registry: which marketplaces are wired, built from secrets.
-// StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats; the rest plug in here later. A channel without
+// StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats and Ticket Evolution; the rest plug in here later. A channel without
 // credentials still exists (it can plan requests); it just can't search its
 // catalog.
 //
@@ -10,6 +10,8 @@
 //   VIVID_API_TOKEN        Vivid Seats Broker Portal token (event search here;
 //   VIVID_INTEGRATOR_TOKEN orders in exos-marketplace-sales), + the optional
 //                          X-Integrator-Token
+//   TEVO_REVIEWER_ID       the Ticket Evolution user id that accepts orders
+//                          (TEvo delivery plans; its reads are in exos-marketplace-sales)
 
 import type { ChannelId, MarketplaceChannel } from './channel.ts';
 import { StubHubClient, clientCredentialsToken } from './stubhub/client.ts';
@@ -21,6 +23,7 @@ import { gametimeChannel } from './gametime/channel.ts';
 import { goTicketsChannel } from './gotickets/channel.ts';
 import { vividChannel } from './vivid/channel.ts';
 import { VividClient } from './vivid/client.ts';
+import { evoChannel } from './tevo/channel.ts';
 
 export type Env = (key: string) => string | undefined;
 
@@ -57,6 +60,9 @@ export function channelsFromEnv(env: Env, fetchImpl?: typeof fetch): Map<Channel
   out.set('vivid', vividChannel(vividToken
     ? new VividClient({ credentials: () => ({ apiToken: vividToken, integratorToken: vividIntegrator }), ...(fetchImpl ? { fetch: fetchImpl } : {}) })
     : undefined));
+
+  const reviewer = Number.parseInt(env('TEVO_REVIEWER_ID') ?? '', 10);
+  out.set('evo', evoChannel({ reviewerId: Number.isInteger(reviewer) && reviewer > 0 ? reviewer : null }));
 
   return out;
 }
