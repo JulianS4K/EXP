@@ -9,7 +9,8 @@
 //    'review'. Writes exos_channel_event_links only.
 //
 // 1. Marketplace event rows (migs 20260926190000 / 20260927030000 / 040000).
-//    Publishing an event with StubHub / SeatGeek / Gametime / GoTickets ticked queues an event row
+//    Publishing an event with StubHub / SeatGeek / Gametime / GoTickets /
+//    Vivid Seats ticked queues an event row
 //    (no ticket type) per marketplace.
 //    StubHub: if the event is already linked to a StubHub event, the plan just
 //    records that: nothing to create. If a possible match waits on staff, the
@@ -20,8 +21,11 @@
 //    with the reason, which the event editor shows the organizer.
 //    SeatGeek has no event creation: the row records which SeatGeek event the
 //    listings attach to (the link), or that they carry the event name and
-//    venue for SeatGeek to match. Gametime has neither creation nor search:
-//    its listings always carry the event name, venue and date.
+//    venue for SeatGeek to match. Vivid Seats is the same: a linked event's
+//    id goes on the listings as productionId, else Vivid's mapping team
+//    matches them from the event name, venue and venue-local time. Gametime
+//    has neither creation nor search: its listings always carry the event
+//    name, venue and date.
 //
 // 1b. Listings, per allocation (a ticket type's seats set aside for a
 //    marketplace with exos_set_channel_allocation). For published events,
@@ -64,7 +68,8 @@
 // Required secrets (operator, when activated): CRON_SECRET, SUPABASE_URL,
 // SUPABASE_SERVICE_ROLE_KEY. Optional: STUBHUB_ENV / STUBHUB_CLIENT_ID /
 // STUBHUB_CLIENT_SECRET (catalog reads, pass 0), SEATGEEK_CLIENT_ID
-// (SeatGeek Platform event search, pass 0),
+// (SeatGeek Platform event search, pass 0), VIVID_API_TOKEN /
+// VIVID_INTEGRATOR_TOKEN (Vivid Seats event search, pass 0),
 // AUTOMATIQ_API_KEY (pass 2). Per-org distribution creds (e.g.
 // lystedSellerId) live in exos_org_secrets.distribution.
 
@@ -78,13 +83,14 @@ import { planDelist, syncListings } from "../_shared/marketplace/sync.ts";
 import { planGametimeListings, type GametimeCsvRow } from "../_shared/marketplace/gametime/inventory.ts";
 import { GametimeWriter } from "../_shared/marketplace/gametime/writer.ts";
 import { planGoTicketsListings } from "../_shared/marketplace/gotickets/listingPlan.ts";
+import { planVividListings } from "../_shared/marketplace/vivid/listingPlan.ts";
 import { linkEvents } from "./link.ts";
 
 const BATCH = 25;
 
-type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets";
-const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets"];
-const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets" };
+type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets" | "vivid";
+const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets", "vivid"];
+const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets", vivid: "Vivid Seats" };
 
 interface DistRow {
   id: string;
@@ -112,6 +118,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seatgeek: !!channels.get("seatgeek")?.findEvents,
       gametime: false,
       gotickets: false,
+      vivid: !!channels.get("vivid")?.findEvents,
     });
     // Top every marketplace pool back up to its size, with free seats only
     // (mig 20260928010000): picks up seats freed since the last sale.
@@ -121,9 +128,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const seatgeek = await syncChannel(sb, "seatgeek");
     const gametime = await syncChannel(sb, "gametime");
     const gotickets = await syncChannel(sb, "gotickets");
+    const vivid = await syncChannel(sb, "vivid");
     const gametimeFile = await planGametimeInventory(sb);
     const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets }, gametime_file: gametimeFile, automatiq });
+    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid }, gametime_file: gametimeFile, automatiq });
   } catch (e) {
     console.error("exos-distribute failed", e);
     return json({ error: String(e) }, 500);
@@ -141,6 +149,15 @@ interface EventRow {
 }
 
 type Link = { event_id: string; channel: string; status: string; external_event_id: string | null };
+
+// How an unlinked marketplace finds the event from a listing.
+const MATCHED_ON: Record<MarketChannel, string> = {
+  stubhub: "event name + venue",
+  seatgeek: "event name + venue",
+  gametime: "event name + venue + date",
+  gotickets: "GoTickets maps it (event name + venue + time, StubHub / SeatGeek ids)",
+  vivid: "Vivid's mapping team (event name + venue + venue-local time)",
+};
 
 // canSearch: the marketplace's event search is configured, so an event with
 // no link row yet hasn't been searched: it waits for pass 0 instead of
@@ -182,17 +199,17 @@ async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boole
         planned_request: null,
         error: row.channel === "stubhub"
           ? "StubHub may already have this event: confirm the match or reject it before a new one is requested"
-          : "SeatGeek may already have this event: confirm the match or reject it so the listings attach to the right event",
+          : `${label} may already have this event: confirm the match or reject it so the listings attach to the right event`,
       };
       counts.waiting++;
     } else if (!link && canSearch[row.channel]) {
       counts.waiting++;
       continue; // not searched yet: leave it pending for the next run's pass 0
     } else if (row.channel !== "stubhub") {
-      // No event creation on SeatGeek or Gametime: listings carry the event as text.
+      // No event creation on the others: listings carry the event as text.
       patch = {
         status: "planned",
-        planned_request: { linked: false, catalog_checked: !!link, matched_on: row.channel === "gotickets" ? "GoTickets maps it (event name + venue + time, StubHub / SeatGeek ids)" : row.channel === "gametime" ? "event name + venue + date" : "event name + venue" },
+        planned_request: { linked: false, catalog_checked: !!link, matched_on: MATCHED_ON[row.channel] },
         error: null,
       };
       counts.planned++;
@@ -295,6 +312,14 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
           const p = planSeatGeekListings({
             id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
             tier: r.exos_ticket_tiers, event: r.exos_events, seatgeekEventId: linked.get(r.event_id) ?? null,
+            internal_seats: r.internal_seats, list_qty: r.list_qty,
+            previous: r.listed_snapshot ?? r.planned_listing,
+          });
+          plan = syncListings(p, r.listed_snapshot);
+        } else if (channel === "vivid") {
+          const p = planVividListings({
+            id: r.id, requested_qty: r.requested_qty, unit_price: r.unit_price,
+            tier: r.exos_ticket_tiers, event: r.exos_events, vividProductionId: linked.get(r.event_id) ?? null,
             internal_seats: r.internal_seats, list_qty: r.list_qty,
             previous: r.listed_snapshot ?? r.planned_listing,
           });
@@ -402,8 +427,8 @@ async function pushAutomatiq(sb: SupabaseClient) {
     .from("exos_distribution_listings")
     .select("id, event_id, org_id, channel, requested_qty, unit_price")
     .eq("status", "pending")
-    // StubHub, SeatGeek, Gametime and GoTickets are listed directly (passes 1b / 1c), not via Automatiq.
-    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets)")
+    // StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats are listed directly (passes 1b / 1c), not via Automatiq.
+    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets,vivid)")
     .is("tier_id", null)
     .limit(BATCH);
   if (error) throw new Error(`read pending automatiq rows: ${error.message}`);

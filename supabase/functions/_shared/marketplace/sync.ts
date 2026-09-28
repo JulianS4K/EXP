@@ -28,8 +28,8 @@ export type SyncedListings<P extends PlannedMarketplaceListings> = P & { action:
 
 export interface DelistPlan {
   action: 'delist';
-  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets';
-  /** One request per listing (StubHub, Gametime) or one bulk request (SeatGeek). */
+  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
+  /** One request per listing (StubHub, Gametime, Vivid Seats), or in bulk (SeatGeek; GoTickets 100 at a time). */
   requests: Array<{ endpoint: string; method: 'POST' | 'DELETE'; path: string; body?: unknown }>;
 }
 
@@ -79,6 +79,9 @@ export function planDelist(channel: DelistPlan['channel'], snapshot: unknown): D
     : channel === 'gotickets'
       // By external id only, 100 per request.
       ? chunks(100).map((c) => ({ endpoint: 'deleteListingsByExternalIds', method: 'DELETE' as const, path: '/rest/listings/external-id', body: c }))
+    : channel === 'vivid'
+      // By our ticketId only, never Vivid's listingId.
+      ? ids.map((id) => ({ endpoint: 'deleteListing', method: 'DELETE' as const, path: `/listings/v2/delete?internalTicketId=${enc(id)}` }))
     : channel === 'stubhub'
       ? ids.map((id) => ({ endpoint: 'deleteSellerListingByExternalId', method: 'DELETE' as const, path: `/externalsellerlistings/${enc(id)}` }))
       : ids.map((id) => ({ endpoint: 'deleteListing', method: 'DELETE' as const, path: `/listings/${enc(id)}/delete` }));

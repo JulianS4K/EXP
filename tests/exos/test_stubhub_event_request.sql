@@ -39,7 +39,7 @@ INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,venue_
   ('5b000000-0000-0000-0000-0000000000e2','5b000000-0000-0000-0000-000000000001','Draft','draft','2027-01-01T02:00:00Z',
    'Hall',NULL,ARRAY['stubhub'],NULL),
   ('5b000000-0000-0000-0000-0000000000e3','5b000000-0000-0000-0000-000000000001','Other nets','published','2027-01-01T02:00:00Z',
-   'Hall',NULL,ARRAY['seatgeek','vivid'],NULL),
+   'Hall',NULL,ARRAY['seatgeek','tickpick'],NULL),
   ('5b000000-0000-0000-0000-0000000000e4','5b000000-0000-0000-0000-000000000001','Primary only','published','2027-01-01T02:00:00Z',
    'Hall',NULL,ARRAY['stubhub'],'{"primaryMarketOnly":true}'),
   ('5b000000-0000-0000-0000-0000000000e5','5b000000-0000-0000-0000-000000000001','No nets','published','2027-01-01T02:00:00Z',
@@ -68,9 +68,9 @@ BEGIN
        WHERE event_id = '5b000000-0000-0000-0000-0000000000e1' AND tier_id IS NULL AND status = 'pending') <> ARRAY['seatgeek','stubhub'] THEN
     RAISE EXCEPTION 'S1 FAIL: expected one pending event row for stubhub and seatgeek';
   END IF;
-  -- vivid is ticked on e3 but isn't synced this way.
-  IF EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE channel = 'vivid') THEN
-    RAISE EXCEPTION 'S1 FAIL: a row for vivid';
+  -- tickpick is ticked on e3 but isn't synced this way.
+  IF EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE channel = 'tickpick') THEN
+    RAISE EXCEPTION 'S1 FAIL: a row for tickpick';
   END IF;
   RAISE NOTICE 'S1 ok: publish queues an event row per ticked marketplace, as the organizer';
 END $$;

@@ -1,9 +1,11 @@
 // exos-marketplace-sales — marketplace sales become Exos tickets
 // (mig 20260926192000; the marketplace layer is _shared/marketplace).
 //
-// StubHub, SeatGeek and Gametime. Ways in:
+// StubHub, SeatGeek, Gametime, GoTickets and Vivid Seats. Ways in:
 //   * POST with x-cron-secret (pg_cron): poll StubHub GET /sales/recentupdates,
-//     SeatGeek GET /orders and Gametime GET /purchases (read-only)
+//     SeatGeek GET /orders, Gametime GET /purchases, GoTickets GET /rest/sales
+//     and Vivid Seats GET /v1/getOrders (read-only). Vivid Seats has no
+//     webhooks, so polling is the only way in for it.
 //   * POST from StubHub's Sales webhook: Authorization must equal
 //     STUBHUB_WEBHOOK_AUTHORIZATION (the value registered with the webhook).
 //   * POST from SeatGeek's Seller Direct webhook (X-Sellerdirect-* headers):
@@ -38,6 +40,8 @@
 // (Seller Direct seller token; orders + customer reads), SEATGEEK_WEBHOOK_TOKEN.
 // GoTickets (optional): GOTICKETS_ACCESS_ID, GOTICKETS_ACCESS_SECRET,
 // GOTICKETS_WEBHOOK_TOKEN (in the webhook target URL: ?channel=gotickets&token=).
+// Vivid Seats (optional): VIVID_API_TOKEN (never in a logged URL: the
+// transport redacts it), VIVID_INTEGRATOR_TOKEN.
 // Gametime (optional): GAMETIME_API_KEY (the `source` key), GAMETIME_ENV
 // ('staging' | production), GAMETIME_WEBHOOK_AUTHORIZATION.
 // Deploy with --no-verify-jwt (the webhook
@@ -67,6 +71,8 @@ import { parseGametimeSaleNotification, verifyGametimeWebhook } from "../_shared
 import { GoTicketsClient } from "../_shared/marketplace/gotickets/client.ts";
 import type { GoTicketsSale } from "../_shared/marketplace/gotickets/types.ts";
 import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookToken } from "../_shared/marketplace/gotickets/webhook.ts";
+import { VividClient } from "../_shared/marketplace/vivid/client.ts";
+import type { VividOrder } from "../_shared/marketplace/vivid/types.ts";
 
 const LOOKBACK_HOURS = 6;
 const env = (k: string) => Deno.env.get(k);
@@ -205,6 +211,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else {
       result.gotickets = { skipped: "no GOTICKETS_ACCESS_ID / GOTICKETS_ACCESS_SECRET" };
     }
+
+    const vs = vividClient();
+    if (vs) {
+      const orders = await openVividOrders(vs);
+      const seen = new Set(orders.map((o) => String(o.orderId)));
+      orders.push(...await recheckVividOrders(sb, vs, seen));
+      result.vivid = await ingest(sb, channels.get("vivid")!, orders, undefined);
+    } else {
+      result.vivid = { skipped: "no VIVID_API_TOKEN" };
+    }
     return json(result);
   } catch (e) {
     console.error("exos-marketplace-sales failed", e);
@@ -250,6 +266,58 @@ function gametimeClient(): GametimeClient | undefined {
 function goticketsClient(): GoTicketsClient | undefined {
   const id = env("GOTICKETS_ACCESS_ID")?.trim(), secret = env("GOTICKETS_ACCESS_SECRET")?.trim();
   return id && secret ? new GoTicketsClient({ credentials: () => ({ accessId: id, accessSecret: secret }) }) : undefined;
+}
+
+function vividClient(): VividClient | undefined {
+  const token = env("VIVID_API_TOKEN")?.trim();
+  const integrator = env("VIVID_INTEGRATOR_TOKEN")?.trim() || null;
+  return token ? new VividClient({ credentials: () => ({ apiToken: token, integratorToken: integrator }) }) : undefined;
+}
+
+// Every order waiting on the seller: UNCONFIRMED (to confirm) and
+// PENDING_SHIPMENT (confirmed, to deliver). Vivid allows one call every 10 s
+// per status (60 s for PENDING_SHIPMENT), so a failure of one (a 429 when
+// runs bunch up) doesn't stop the other; the next run picks it up.
+async function openVividOrders(vs: VividClient): Promise<VividOrder[]> {
+  const out: VividOrder[] = [];
+  for (const status of ["UNCONFIRMED", "PENDING_SHIPMENT"] as const) {
+    try {
+      out.push(...await vs.getOrders(status));
+    } catch (e) {
+      console.error("exos-marketplace-sales: Vivid Seats getOrders failed", status, String(e));
+    }
+  }
+  const seen = new Set<string>();
+  return out.filter((o) => (seen.has(String(o.orderId)) ? false : (seen.add(String(o.orderId)), true)));
+}
+
+// Orders Exos already has, re-read by id (getOrder isn't rate-limited), so a
+// completion or a status Exos doesn't know still arrives. Vivid documents no
+// cancelled status: an order that comes back empty is logged for a human.
+async function recheckVividOrders(sb: SupabaseClient, vs: VividClient, skip: Set<string>): Promise<VividOrder[]> {
+  const { data, error } = await sb.from("exos_marketplace_orders")
+    .select("external_order_id")
+    .eq("channel", "vivid")
+    .in("status", ["received", "fulfilled", "needs_attention"])
+    .gt("created_at", new Date(Date.now() - 60 * 86_400_000).toISOString())
+    .order("updated_at", { ascending: true })
+    .limit(SG_RECHECK_PER_RUN);
+  if (error) {
+    console.error("exos-marketplace-sales: Vivid Seats recheck list failed", error.message);
+    return [];
+  }
+  const out: VividOrder[] = [];
+  for (const r of (data ?? []) as Array<{ external_order_id: string }>) {
+    if (skip.has(r.external_order_id)) continue;
+    try {
+      const o = await vs.getOrder(r.external_order_id);
+      if (o) out.push(o);
+      else console.warn("exos-marketplace-sales: Vivid Seats order not returned on recheck", r.external_order_id);
+    } catch (e) {
+      console.error("exos-marketplace-sales: Vivid Seats order recheck failed", r.external_order_id, String(e));
+    }
+  }
+  return out;
 }
 
 // Sales Exos already has, re-read by order id, so a later cancellation still arrives. A few per run.
@@ -424,7 +492,8 @@ async function ingest(sb: SupabaseClient, channel: MarketplaceChannel, raws: unk
       const { data: rec, error: rErr } = await sb.rpc("exos_record_marketplace_order", {
         p_sale: recordPayload(sale, channel.id === "stubhub" ? stripStubHubSale(raw as Sale)
           : channel.id === "gametime" ? stripGametimePurchase(raw as GametimePurchase)
-          : channel.id === "gotickets" ? stripGoTicketsSale(raw as GoTicketsSale) : raw),
+          : channel.id === "gotickets" ? stripGoTicketsSale(raw as GoTicketsSale)
+          : channel.id === "vivid" ? stripVividOrder(raw as VividOrder) : raw),
       });
       if (rErr) throw new Error(`record: ${rErr.message}`);
       const row = (rec as Array<{ order_id: string; status: string }> | null)?.[0];
@@ -491,6 +560,14 @@ function stripGoTicketsSale(s: GoTicketsSale): unknown {
     customerFirstName: _f, customerLastName: _l, customerEmailAddress: _e, customerPhoneNumber: _p,
     shippingLabel: _s, transferFiles: _t, pickupFiles: _k, supportDocumentationFiles: _d, ...rest
   } = s ?? ({} as GoTicketsSale);
+  return rest;
+}
+
+/** The order minus the buyer's name, email and phone numbers (the email has its own column). */
+function stripVividOrder(o: VividOrder): unknown {
+  const {
+    firstName: _f, lastName: _l, emailAddress: _e, mobilePhoneNumber: _p, retransferEmail: _re, retransferPhone: _rp, ...rest
+  } = o ?? ({} as VividOrder);
   return rest;
 }
 

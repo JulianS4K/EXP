@@ -1,0 +1,3675 @@
+{
+ "openapi": "3.0.1",
+ "info": {
+  "version": "1.0.0",
+  "title": "Broker Portal API",
+  "description": "This documentation serves as a guide to integrate with Vivid Seats' Broker Portal API"
+ },
+ "servers": [
+  {
+   "url": "https://brokers.vividseats.com/webservices",
+   "description": "Production server"
+  }
+ ],
+ "paths": {
+  "/events/search": {
+   "get": {
+    "tags": [
+     "/events"
+    ],
+    "summary": "/search",
+    "description": "This will return a list of Vivid Seats matching events. The value for eventId returned is analogous to productionId in the listings API. Every call will return up to 1000 entries. Pagination with 'page' parameter can be used to get more results. If 'eventKeyword' or 'venueKeyword' are specified, only a MAX of 1000 entries (only one page) will be returned. Otherwise ALL events will be returned thru pagination. If there is no element for the specified 'page', it will return no entries. If request is using fromDate, it must also have a toDate, otherwise error will return. <br />Rate limit: one request every 5 seconds.",
+    "operationId": "get",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "eventKeyword",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "venueKeyword",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "fromDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "toDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "page",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "integrationType",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "NONE",
+        "MLB",
+        "CBC"
+       ]
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Event"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/events/inventory/search": {
+   "get": {
+    "tags": [
+     "/events"
+    ],
+    "summary": "/inventory/search",
+    "description": "This will return all matching events associated with your listed inventory. The value for eventId returned is analogous to productionId in the listings api.</br>Rate Limit: One request every 5 seconds",
+    "operationId": "getByBroker",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "eventKeyword",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "venueKeyword",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "fromDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "toDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Event"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v1/deleteListing": {
+   "get": {
+    "tags": [
+     "/listings/v1"
+    ],
+    "summary": "/deleteListing",
+    "description": "XML or JSON response. <br />The deleteListing method allows you to delete a listing in real-time.<br />Not rate limited",
+    "operationId": "deleteListing",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "ticketId",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       },
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "deprecated": true,
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v1/getListings": {
+   "get": {
+    "tags": [
+     "/listings/v1"
+    ],
+    "summary": "/getListings",
+    "description": "XML response <br />The getListings method will return active listings in your broker account.<br />Rate limit: 1 request per ticketId every 2 minutes.",
+    "operationId": "getListings",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "ticketId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/BrokerListing"
+         }
+        }
+       }
+      }
+     }
+    },
+    "deprecated": true,
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v1/updateListing": {
+   "post": {
+    "tags": [
+     "/listings/v1"
+    ],
+    "summary": "/updateListing",
+    "description": "XML or JSON responses. <br />The updateListing method allows you to update a listing in real-time. <br /> Only parameters you pass in to the method will be updated. The ticketId is your internal unique ID associated with the listing.<br />Not rate limited",
+    "operationId": "updateListing",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "ticketId": {
+          "type": "string"
+         },
+         "quantity": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "section": {
+          "type": "string"
+         },
+         "row": {
+          "type": "string"
+         },
+         "seatFrom": {
+          "type": "string"
+         },
+         "seatThru": {
+          "type": "string"
+         },
+         "notes": {
+          "type": "string"
+         },
+         "price": {
+          "type": "number"
+         },
+         "electronic": {
+          "type": "boolean"
+         },
+         "inHandDate": {
+          "type": "string"
+         },
+         "splitType": {
+          "type": "string",
+          "enum": [
+           "DEFAULT",
+           "ANY",
+           "CUSTOM",
+           "NEVERLEAVEONE"
+          ]
+         },
+         "splitValue": {
+          "type": "string"
+         },
+         "barcode": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "faceValue": {
+          "type": "number"
+         },
+         "unitTaxedCost": {
+          "type": "number"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "ticketId": {
+          "type": "string"
+         },
+         "quantity": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "section": {
+          "type": "string"
+         },
+         "row": {
+          "type": "string"
+         },
+         "seatFrom": {
+          "type": "string"
+         },
+         "seatThru": {
+          "type": "string"
+         },
+         "notes": {
+          "type": "string"
+         },
+         "price": {
+          "type": "number"
+         },
+         "electronic": {
+          "type": "boolean"
+         },
+         "inHandDate": {
+          "type": "string"
+         },
+         "splitType": {
+          "type": "string",
+          "enum": [
+           "DEFAULT",
+           "ANY",
+           "CUSTOM",
+           "NEVERLEAVEONE"
+          ]
+         },
+         "splitValue": {
+          "type": "string"
+         },
+         "barcode": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "faceValue": {
+          "type": "number"
+         },
+         "unitTaxedCost": {
+          "type": "number"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       },
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "deprecated": true,
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v2/create": {
+   "post": {
+    "tags": [
+     "/listings/v2"
+    ],
+    "summary": "/create",
+    "description": "This endpoint creates a new listing in the Vivid Seats Marketplace. <br /><br />eventName, venue, eventDate fields are required. productionId is optional. <br /><br />If the productionId is not included, the create listing request may be sent to our mapping team, and there may be a delay adding the listing to the Marketplace. <br />Rate limit: 50 requests per second.",
+    "operationId": "create",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ManagedBrokerListingDoc"
+       },
+       "examples": {
+        "default": {
+         "value": {
+          "eventName": "Example Event",
+          "venue": "Example Venue",
+          "eventDate": "2019-08-24T14:15:22",
+          "quantity": 2,
+          "price": 100,
+          "section": "101",
+          "row": "A",
+          "inHandDate": "2019-08-24T14:15:22",
+          "listDate": "2019-08-24T14:15:22"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/InsertListingsResponse"
+        },
+        "examples": {
+         "default": {
+          "value": {
+           "success": true,
+           "message": null,
+           "listing": {
+            "eventName": "Example Event",
+            "venue": "Example Venue",
+            "eventDate": "2019-08-24T14:15:22",
+            "quantity": 2,
+            "price": 100,
+            "section": "101",
+            "row": "A",
+            "inHandDate": "2019-08-24T14:15:22",
+            "listDate": "2019-08-24T14:15:22",
+            "lastUpdate": "2019-08-24T14:15:22"
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v2/delete": {
+   "delete": {
+    "tags": [
+     "/listings/v2"
+    ],
+    "summary": "/delete",
+    "description": "Either the ticketId or listingId is required.<br />Rate limit: 50 requests per second.",
+    "operationId": "delete",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "listingId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      }
+     },
+     {
+      "name": "internalTicketId",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v2/get": {
+   "get": {
+    "tags": [
+     "/listings/v2"
+    ],
+    "summary": "/get",
+    "description": "Retrieves listings. <br />Rate limit: 10 requests per second",
+    "operationId": "get_1",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "listingId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      }
+     },
+     {
+      "name": "internalTicketId",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "productionId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "includeFiles",
+      "in": "query",
+      "schema": {
+       "type": "boolean",
+       "default": false
+      }
+     },
+     {
+      "name": "fromEventDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "toEventDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "headlinerId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/CoreListingsResponse"
+        },
+        "examples": {
+         "default": {
+          "value": {
+           "success": true,
+           "message": null,
+           "listings": [
+            {
+             "eventName": "Example Event",
+             "venue": "Example Venue",
+             "eventDate": "2019-08-24T14:15:22",
+             "quantity": 2,
+             "price": 100,
+             "section": "101",
+             "row": "A",
+             "inHandDate": "2019-08-24T14:15:22",
+             "listDate": "2019-08-24T14:15:22",
+             "lastUpdate": "2019-08-24T14:15:22"
+            }
+           ]
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/listings/v2/update": {
+   "put": {
+    "tags": [
+     "/listings/v2"
+    ],
+    "summary": "/update",
+    "description": "All the fields including attributes and tickets will be updated with the object passed in. This method will only work if the Content-Type header is set to application/json. An alternative version is /listings/v1/updateListing as it only requires you to supply your internal ticketID. If you want to use v2 and you only have a ticketId then you need to get the listing by ticket id first. <br />Rate limit: 50 requests per second.",
+    "operationId": "update",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ManagedBrokerListingDoc"
+       },
+       "examples": {
+        "default": {
+         "value": {
+          "eventName": "Example Event",
+          "venue": "Example Venue",
+          "eventDate": "2019-08-24T14:15:22",
+          "quantity": 2,
+          "price": 100,
+          "section": "101",
+          "row": "A",
+          "inHandDate": "2019-08-24T14:15:22",
+          "listDate": "2019-08-24T14:15:22"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/confirmOrder": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/confirmOrder",
+    "description": "XML response. <br />OrderId or OrderToken are required.<br />This method will generate a purchase order if successful. Depending on the input parameters, this method may also generate an airbill, see parameter descriptions.<br />Not rate limited <br />If an error is thrown, the status code will be 200, the success field will be false, and the message field will show the error",
+    "operationId": "confirmOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "seatNumbers": {
+          "type": "string"
+         },
+         "shipNow": {
+          "type": "boolean"
+         },
+         "ticketFile": {
+          "type": "string"
+         },
+         "barCode": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "barcodes": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "seatNumbers": {
+          "type": "string"
+         },
+         "shipNow": {
+          "type": "boolean"
+         },
+         "ticketFile": {
+          "type": "string"
+         },
+         "barCode": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "barcodes": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/ConfirmResponse"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/downloadAirbill": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/downloadAirbill",
+    "description": "PDF response. <br />OrderId or purchaseOrderId is required.<br />Downloads the raw airbill pdf file associated with an order.<br/> Rate limit: 1 request every 2 seconds.",
+    "operationId": "downloadAirbill",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "purchaseOrderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/pdf": {
+        "schema": {
+         "type": "string",
+         "format": "binary"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/downloadPurchaseOrder": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/downloadPurchaseOrder",
+    "description": "PDF response. <br />Retrieves the raw purchase order pdf file associated with a shipped order. <br />Rate limit: 1 request every 5 seconds.",
+    "operationId": "downloadPurchaseOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "purchaseOrderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/pdf": {
+        "schema": {
+         "type": "string",
+         "format": "binary"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getAirbill": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getAirbill",
+    "description": "XML Response <br />Retrieves the airbill associated with a shipped order.<br />Rate limit: 1 request every 2 seconds.",
+    "operationId": "getAirbill",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "purchaseOrderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/AirbillResponse"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getCompletedOrders": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getCompletedOrders",
+    "description": "XML response. <br />Only orders that are completed will be returned. This method will return up to 5000 results, ordered by the descending order date. Rate limit: 1 request every 10 seconds.",
+    "operationId": "getCompletedOrders",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "startDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "endDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "limit",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32",
+       "default": 1000
+      }
+     },
+     {
+      "name": "offset",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32",
+       "default": 0
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/CompletedOrder"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getOrder": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getOrder",
+    "description": "XML response. <br />Returns a single order by order id. This method is not rate limited. <br />'seats' field is an array and follows this format: &lt;seats&gt;&lt;seat&gt;1&lt;/seat&gt;&lt;seat&gt;2&lt;/seat&gt;&lt;/seats&gt;",
+    "operationId": "getOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Order"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getOrders": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getOrders",
+    "description": "XML response. <br />Only orders that are unconfirmed or pending shipment can be returned. <br />Rate limit: 1 request every 10 seconds per status. For PENDING_SHIPMENT, the rate limit is 1 request every 60 seconds. <br />'seats' field is an array and follows this format: &lt;seats&gt;&lt;seat&gt;1&lt;/seat&gt;&lt;seat&gt;2&lt;/seat&gt;&lt;/seats&gt;",
+    "operationId": "getOrders",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "enum": [
+        "UNCONFIRMED",
+        "PENDING_SHIPMENT",
+        "COMPLETED",
+        "VERIFICATION",
+        "PENDING_RESERVATION"
+       ]
+      }
+     },
+     {
+      "name": "pageSize",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "description": "(Optional) Number of orders per page (max 10000). Default 10000.",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "bookmark",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "description": "(Optional) orderId of the last order returned on the previous page. Omit for the first page",
+       "format": "int64"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Order"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/payments/{id}": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/payments/{id}",
+    "description": "XML or JSON response <br />Get a specific payment <br />Not rate limited",
+    "operationId": "getPayment",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "useSigns",
+      "in": "query",
+      "schema": {
+       "type": "boolean"
+      }
+     },
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/PaymentWithLedger"
+        }
+       },
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PaymentWithLedger"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/payments": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/payments",
+    "description": "XML or JSON response <br />Get a list of payments <br />Not rate limited",
+    "operationId": "getPayments",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "startDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "endDate",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Payment"
+         }
+        }
+       },
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Payment"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getPendingRetransferOrders": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getPendingRetransferOrders",
+    "description": "XML response. <br />Only orders that are pending retransfer can be returned. <br />Rate limit: 1 request every 60 seconds.",
+    "operationId": "getPendingRetransferOrders",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Order"
+         }
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/getPurchaseOrder": {
+   "get": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/getPurchaseOrder",
+    "description": "XML response. <br />OrderId or purchaseOrderID are required. <br/>Retrieves the purchase order associated with a confirmed order.<br />Rate limit: 1 request every 5 seconds.",
+    "operationId": "getPurchaseOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "apiToken",
+      "in": "query",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     {
+      "name": "purchaseOrderId",
+      "in": "query",
+      "schema": {
+       "type": "integer",
+       "format": "int32"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/PurchaseOrderResponse"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/orders/{orderId}/integratedTransfer": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/orders/{orderId}/integratedTransfer",
+    "description": "JSON Response <br />Ticket token or barcode is required. <br />Initiates integrated transfer of an order. <br />Not rate limited",
+    "operationId": "integratedTransfer",
+    "parameters": [
+     {
+      "name": "Api-token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "orderId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "format": "int64"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "*/*": {
+       "schema": {
+        "$ref": "#/components/schemas/IntegratedTransferRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "202": {
+      "description": "Accepted, processing integrated transfer of order",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/IntegratedTransferResponse"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "Bad request",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Forbidden",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "Conflict",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     },
+     "500": {
+      "description": "Internal server error, could not process integrated transfer of order",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/moveMobileOrderToElectronicTransfer": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/moveMobileOrderToElectronicTransfer",
+    "description": "XML response. <br />OrderId or OrderToken are required.<br />This method will move a mobile order to electronic transfer, if the order has already been confirmed but not shipped, the order status will also be moved to pending TMX.<br />If an error is thrown, the status code will be 200, the success field will be false, and the message field will show the error",
+    "operationId": "moveMobileOrderToElectronicTransfer",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/rejectOrder": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/rejectOrder",
+    "description": "XML response <br />Order id or orderToken are required. <br />Rejects a pending order. <br />Not rate limited",
+    "operationId": "rejectOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/shipOrder": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/shipOrder",
+    "description": "XML Response <br />Order id or orderToken are required. <br />Ships an order that has been confirmed<br />Not rate limited",
+    "operationId": "shipOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "ticketFile": {
+          "type": "string"
+         },
+         "purchaseOrderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "seatNumbers": {
+          "type": "string"
+         },
+         "barCode": {
+          "type": "array",
+          "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale",
+          "items": {
+           "type": "string",
+           "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale"
+          }
+         },
+         "barcodes": {
+          "type": "string",
+          "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "ticketFile": {
+          "type": "string"
+         },
+         "purchaseOrderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "seatNumbers": {
+          "type": "string"
+         },
+         "barCode": {
+          "type": "array",
+          "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale",
+          "items": {
+           "type": "string",
+           "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale"
+          }
+         },
+         "barcodes": {
+          "type": "string",
+          "description": "Cannot be used to fill integrated MLB orders. Use POST /orders/{orderId}/integratedTransfer to integrate your listing after sale"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/AirbillResponse"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/transferOrder": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/transferOrder",
+    "description": "XML Response <br />OrderId or order token are required. If the tickets are Flash Seats, Flash Seats transfer invoice ID is required. <br />Transfer Flash Seats or other Electronic Transfer type tickets. <br />Not rate limited",
+    "operationId": "transferOrder",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "invoiceNumber": {
+          "type": "string"
+         },
+         "transferProofFiles": {
+          "type": "string"
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         },
+         "transferByText": {
+          "type": "boolean"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "invoiceNumber": {
+          "type": "string"
+         },
+         "transferProofFiles": {
+          "type": "string"
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         },
+         "transferByText": {
+          "type": "boolean"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/transferOrderViaURL": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/transferOrderViaURL",
+    "description": "XML response<br />Order id or orderToken are required <br />Transfers Electronic Transfer tickets via URL<br />Not rate limited",
+    "operationId": "transferOrderViaURL",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "transferURLList": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "transferURLList": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  },
+  "/v1/transferOrderWithMobileQR": {
+   "post": {
+    "tags": [
+     "/v1"
+    ],
+    "summary": "/transferOrderWithMobileQR",
+    "description": "XML response<br />Order id or orderToken are required <br />Transfers Electronic Transfer by uploading a mobile QR<br />Not rate limited",
+    "operationId": "transferOrderWithMobileQR",
+    "parameters": [
+     {
+      "name": "X-Integrator-Token",
+      "in": "header",
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/x-www-form-urlencoded": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "mobileQRFiles": {
+          "type": "string"
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         }
+        }
+       }
+      },
+      "*/*": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "apiToken": {
+          "type": "string"
+         },
+         "orderId": {
+          "type": "integer",
+          "format": "int32"
+         },
+         "orderToken": {
+          "type": "string"
+         },
+         "mobileQRFiles": {
+          "type": "string"
+         },
+         "transferSource": {
+          "type": "string"
+         },
+         "transferSourceURL": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful operation",
+      "content": {
+       "application/xml": {
+        "schema": {
+         "$ref": "#/components/schemas/Response"
+        }
+       }
+      }
+     }
+    },
+    "servers": [
+     {
+      "url": "https://brokers.vividseats.com/webservices",
+      "description": "Production server"
+     }
+    ]
+   }
+  }
+ },
+ "tags": [
+  {
+   "name": "/events",
+   "description": "Operations to query events"
+  },
+  {
+   "name": "/listings/v1",
+   "description": "Operations to manage listings"
+  },
+  {
+   "name": "/listings/v2",
+   "description": "Operations to manage listings"
+  },
+  {
+   "name": "/v1",
+   "description": "Operations to manage orders"
+  }
+ ],
+ "components": {
+  "schemas": {
+   "Event": {
+    "type": "object",
+    "properties": {
+     "eventId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "eventDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "eventName": {
+      "type": "string"
+     },
+     "venue": {
+      "$ref": "#/components/schemas/Venue"
+     },
+     "performers": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Performer"
+      }
+     },
+     "minPrice": {
+      "type": "number",
+      "format": "double"
+     },
+     "maxPrice": {
+      "type": "number",
+      "format": "double"
+     },
+     "chartUrl": {
+      "type": "string"
+     },
+     "canSell": {
+      "type": "boolean"
+     },
+     "url": {
+      "type": "string"
+     },
+     "eventDateString": {
+      "type": "string"
+     },
+     "listingCount": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "ticketCount": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "eventType": {
+      "type": "string",
+      "enum": [
+       "CONCERT",
+       "SPORT",
+       "THEATER"
+      ]
+     },
+     "categoryId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "webPath": {
+      "type": "string"
+     },
+     "integrationType": {
+      "type": "string",
+      "enum": [
+       "NONE",
+       "MLB",
+       "CBC"
+      ]
+     },
+     "minAip": {
+      "type": "number",
+      "format": "double"
+     },
+     "maxAip": {
+      "type": "number",
+      "format": "double"
+     }
+    }
+   },
+   "Venue": {
+    "type": "object",
+    "properties": {
+     "venueId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "name": {
+      "type": "string"
+     },
+     "address1": {
+      "type": "string"
+     },
+     "address2": {
+      "type": "string"
+     },
+     "city": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string"
+     },
+     "postalCode": {
+      "type": "string"
+     },
+     "phone": {
+      "type": "string"
+     },
+     "countryCode": {
+      "type": "string"
+     },
+     "url": {
+      "type": "string"
+     },
+     "regionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "timezone": {
+      "type": "string"
+     }
+    }
+   },
+   "Performer": {
+    "type": "object",
+    "properties": {
+     "performerId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "name": {
+      "type": "string"
+     },
+     "category": {
+      "$ref": "#/components/schemas/Category"
+     },
+     "eventType": {
+      "type": "string",
+      "enum": [
+       "CONCERT",
+       "SPORT",
+       "THEATER"
+      ]
+     },
+     "url": {
+      "type": "string"
+     },
+     "priority": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "slug": {
+      "type": "string"
+     },
+     "cmsPath": {
+      "type": "string"
+     },
+     "master": {
+      "type": "boolean"
+     }
+    }
+   },
+   "Category": {
+    "type": "object",
+    "properties": {
+     "categoryId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "name": {
+      "type": "string"
+     },
+     "eventType": {
+      "type": "string",
+      "enum": [
+       "CONCERT",
+       "SPORT",
+       "THEATER"
+      ]
+     },
+     "mobileHeroImage": {
+      "type": "string"
+     },
+     "heroImage": {
+      "type": "string"
+     }
+    }
+   },
+   "Response": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     }
+    }
+   },
+   "BrokerListing": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "productionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "seatFrom": {
+      "type": "string"
+     },
+     "seatThru": {
+      "type": "string"
+     },
+     "notes": {
+      "type": "string"
+     },
+     "price": {
+      "type": "number"
+     },
+     "ticketId": {
+      "type": "string"
+     },
+     "electronic": {
+      "type": "boolean"
+     },
+     "electronicTransfer": {
+      "type": "boolean"
+     },
+     "inHandDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "listDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "splitType": {
+      "type": "string",
+      "enum": [
+       "DEFAULT",
+       "ANY",
+       "CUSTOM",
+       "NEVERLEAVEONE"
+      ]
+     },
+     "splitValue": {
+      "type": "string"
+     },
+     "spec": {
+      "type": "boolean"
+     },
+     "instantDownload": {
+      "type": "boolean"
+     },
+     "passThrough": {
+      "type": "string"
+     },
+     "stockType": {
+      "type": "string",
+      "enum": [
+       "ELECTRONIC",
+       "FLASH",
+       "TMET",
+       "MOBILE_SCREENCAP",
+       "HARD",
+       "PAPERLESS",
+       "PAPERLESS_CARD",
+       "PAPERLESS_WALKIN"
+      ]
+     },
+     "seatNumbers": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     "faceValue": {
+      "type": "number"
+     },
+     "unitTaxedCost": {
+      "type": "number"
+     },
+     "instantTransfer": {
+      "type": "boolean"
+     },
+     "hideSeats": {
+      "type": "boolean"
+     },
+     "ownerEmail": {
+      "type": "string"
+     }
+    }
+   },
+   "ManagedBrokerListingDoc": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "productionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "seatFrom": {
+      "type": "string"
+     },
+     "seatThru": {
+      "type": "string"
+     },
+     "notes": {
+      "type": "string"
+     },
+     "price": {
+      "type": "number"
+     },
+     "ticketId": {
+      "type": "string"
+     },
+     "electronic": {
+      "type": "boolean"
+     },
+     "electronicTransfer": {
+      "type": "boolean"
+     },
+     "inHandDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "listDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "splitType": {
+      "type": "string",
+      "enum": [
+       "DEFAULT",
+       "ANY",
+       "CUSTOM",
+       "NEVERLEAVEONE"
+      ]
+     },
+     "splitValue": {
+      "type": "string"
+     },
+     "spec": {
+      "type": "boolean"
+     },
+     "instantDownload": {
+      "type": "boolean"
+     },
+     "passThrough": {
+      "type": "string"
+     },
+     "stockType": {
+      "type": "string",
+      "enum": [
+       "ELECTRONIC",
+       "FLASH",
+       "TMET",
+       "MOBILE_SCREENCAP",
+       "HARD",
+       "PAPERLESS",
+       "PAPERLESS_CARD",
+       "PAPERLESS_WALKIN"
+      ]
+     },
+     "seatNumbers": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     "faceValue": {
+      "type": "number"
+     },
+     "unitTaxedCost": {
+      "type": "number"
+     },
+     "instantTransfer": {
+      "type": "boolean"
+     },
+     "hideSeats": {
+      "type": "boolean"
+     },
+     "ownerEmail": {
+      "type": "string"
+     },
+     "attributes": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "ADA",
+        "AISLE",
+        "ALCOHOLFREE",
+        "BEHINDSTANGE",
+        "FULLSUITE",
+        "OBSTRUCTED",
+        "OVER21",
+        "PARKING",
+        "PARTIALSUITE",
+        "PARTIALSUITESRO",
+        "PARTIALVIEW",
+        "PIGGYBACK",
+        "POSSIBLEOBSTRUCTION",
+        "REARSTAGE",
+        "RESTRICTEDLEGROOM",
+        "SENIOR",
+        "SIDESTAGE",
+        "WHEELCHAIR"
+       ]
+      }
+     },
+     "tickets": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ManagedTicket"
+      }
+     },
+     "internalNotes": {
+      "type": "string"
+     },
+     "eventName": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "venueStreetAddress": {
+      "type": "string"
+     },
+     "venuePostalCode": {
+      "type": "string"
+     },
+     "venueCity": {
+      "type": "string"
+     },
+     "venueRegion": {
+      "type": "string"
+     },
+     "venueCountryCode": {
+      "type": "string"
+     },
+     "eventDate": {
+      "type": "string",
+      "description": "The eventDate timezone is the Venue local timezone.",
+      "format": "date-time"
+     },
+     "city": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string"
+     },
+     "shipDate": {
+      "type": "string"
+     },
+     "cost": {
+      "type": "number"
+     },
+     "hasFiles": {
+      "type": "boolean"
+     },
+     "hasBarcodes": {
+      "type": "boolean"
+     },
+     "lastUpdate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "localCurrencyPrice": {
+      "type": "number"
+     },
+     "priceCurrency": {
+      "type": "string"
+     },
+     "localFaceValue": {
+      "type": "number"
+     },
+     "faceValueCurrency": {
+      "type": "string"
+     },
+     "localUnitTaxedCost": {
+      "type": "number"
+     },
+     "unitTaxedCostCurrency": {
+      "type": "string"
+     },
+     "localCost": {
+      "type": "number"
+     },
+     "costCurrency": {
+      "type": "string"
+     }
+    },
+    "xml": {
+     "name": "Listing"
+    }
+   },
+   "ManagedTicket": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "seatNumber": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "fileName": {
+      "type": "string"
+     },
+     "barCode": {
+      "type": "string"
+     },
+     "ticketToken": {
+      "type": "string"
+     },
+     "listingId": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "fileData": {
+      "type": "string"
+     }
+    },
+    "xml": {
+     "name": "Ticket"
+    }
+   },
+   "InsertListingsResponse": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "listing": {
+      "$ref": "#/components/schemas/ManagedBrokerListing"
+     }
+    }
+   },
+   "ManagedBrokerListing": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "productionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "seatFrom": {
+      "type": "string"
+     },
+     "seatThru": {
+      "type": "string"
+     },
+     "notes": {
+      "type": "string"
+     },
+     "price": {
+      "type": "number"
+     },
+     "ticketId": {
+      "type": "string"
+     },
+     "electronic": {
+      "type": "boolean"
+     },
+     "electronicTransfer": {
+      "type": "boolean"
+     },
+     "inHandDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "listDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "splitType": {
+      "type": "string",
+      "enum": [
+       "DEFAULT",
+       "ANY",
+       "CUSTOM",
+       "NEVERLEAVEONE"
+      ]
+     },
+     "splitValue": {
+      "type": "string"
+     },
+     "spec": {
+      "type": "boolean"
+     },
+     "instantDownload": {
+      "type": "boolean"
+     },
+     "passThrough": {
+      "type": "string"
+     },
+     "stockType": {
+      "type": "string",
+      "enum": [
+       "ELECTRONIC",
+       "FLASH",
+       "TMET",
+       "MOBILE_SCREENCAP",
+       "HARD",
+       "PAPERLESS",
+       "PAPERLESS_CARD",
+       "PAPERLESS_WALKIN"
+      ]
+     },
+     "seatNumbers": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     "faceValue": {
+      "type": "number"
+     },
+     "unitTaxedCost": {
+      "type": "number"
+     },
+     "instantTransfer": {
+      "type": "boolean"
+     },
+     "hideSeats": {
+      "type": "boolean"
+     },
+     "ownerEmail": {
+      "type": "string"
+     },
+     "attributes": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "ADA",
+        "AISLE",
+        "ALCOHOLFREE",
+        "BEHINDSTANGE",
+        "FULLSUITE",
+        "OBSTRUCTED",
+        "OVER21",
+        "PARKING",
+        "PARTIALSUITE",
+        "PARTIALSUITESRO",
+        "PARTIALVIEW",
+        "PIGGYBACK",
+        "POSSIBLEOBSTRUCTION",
+        "REARSTAGE",
+        "RESTRICTEDLEGROOM",
+        "SENIOR",
+        "SIDESTAGE",
+        "WHEELCHAIR"
+       ]
+      }
+     },
+     "tickets": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ManagedTicket"
+      }
+     },
+     "internalNotes": {
+      "type": "string"
+     },
+     "eventName": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "venueStreetAddress": {
+      "type": "string"
+     },
+     "venuePostalCode": {
+      "type": "string"
+     },
+     "venueCity": {
+      "type": "string"
+     },
+     "venueRegion": {
+      "type": "string"
+     },
+     "venueCountryCode": {
+      "type": "string"
+     },
+     "eventDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "city": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string"
+     },
+     "shipDate": {
+      "type": "string"
+     },
+     "cost": {
+      "type": "number"
+     },
+     "hasFiles": {
+      "type": "boolean"
+     },
+     "hasBarcodes": {
+      "type": "boolean"
+     },
+     "lastUpdate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "localCurrencyPrice": {
+      "type": "number"
+     },
+     "priceCurrency": {
+      "type": "string"
+     },
+     "localFaceValue": {
+      "type": "number"
+     },
+     "faceValueCurrency": {
+      "type": "string"
+     },
+     "localUnitTaxedCost": {
+      "type": "number"
+     },
+     "unitTaxedCostCurrency": {
+      "type": "string"
+     },
+     "localCost": {
+      "type": "number"
+     },
+     "costCurrency": {
+      "type": "string"
+     }
+    },
+    "xml": {
+     "name": "Listing"
+    }
+   },
+   "CoreListingsResponse": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "listings": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ManagedBrokerListing"
+      }
+     },
+     "attribute": {
+      "type": "string",
+      "enum": [
+       "ADA",
+       "AISLE",
+       "ALCOHOLFREE",
+       "BEHINDSTANGE",
+       "FULLSUITE",
+       "OBSTRUCTED",
+       "OVER21",
+       "PARKING",
+       "PARTIALSUITE",
+       "PARTIALSUITESRO",
+       "PARTIALVIEW",
+       "PIGGYBACK",
+       "POSSIBLEOBSTRUCTION",
+       "REARSTAGE",
+       "RESTRICTEDLEGROOM",
+       "SENIOR",
+       "SIDESTAGE",
+       "WHEELCHAIR"
+      ]
+     }
+    }
+   },
+   "ConfirmResponse": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "trackingNumber": {
+      "type": "string"
+     },
+     "purchaseOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "firstName": {
+      "type": "string"
+     },
+     "lastName": {
+      "type": "string"
+     },
+     "emailAddress": {
+      "type": "string"
+     },
+     "mobilePhoneNumber": {
+      "type": "string"
+     }
+    }
+   },
+   "AirbillResponse": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "airbillBase64String": {
+      "type": "string"
+     },
+     "trackingNumber": {
+      "type": "string"
+     },
+     "orderId": {
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
+   "CompletedOrder": {
+    "type": "object",
+    "properties": {
+     "orderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "orderToken": {
+      "type": "string"
+     },
+     "brokerTicketId": {
+      "type": "string"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "seats": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "xml": {
+        "name": "seat"
+       }
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "notes": {
+      "type": "string"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "cost": {
+      "type": "number",
+      "description": "Cost is per ticket and the amount the seller will be paid"
+     },
+     "event": {
+      "type": "string"
+     },
+     "eventDate": {
+      "type": "string"
+     },
+     "orderDate": {
+      "type": "string"
+     },
+     "expectedShipDate": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "COMPLETED"
+      ]
+     },
+     "mercuryOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "purchaseOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "electronicDelivery": {
+      "type": "boolean"
+     },
+     "passThrough": {
+      "type": "string"
+     },
+     "listingId": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "productionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "eventId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "zone": {
+      "type": "boolean"
+     },
+     "firstName": {
+      "type": "string"
+     },
+     "lastName": {
+      "type": "string"
+     },
+     "emailAddress": {
+      "type": "string"
+     },
+     "mobilePhoneNumber": {
+      "type": "string"
+     },
+     "retransferEmail": {
+      "type": "string"
+     },
+     "retransferPhone": {
+      "type": "string"
+     },
+     "barCodesRequired": {
+      "type": "boolean"
+     },
+     "transferViaURL": {
+      "type": "boolean"
+     },
+     "instantTransfer": {
+      "type": "boolean"
+     },
+     "instantFlashSeats": {
+      "type": "boolean"
+     },
+     "productionIntegrationType": {
+      "type": "string",
+      "enum": [
+       "NONE",
+       "MLB",
+       "CBC"
+      ]
+     },
+     "soldAsIntegrated": {
+      "type": "boolean"
+     }
+    }
+   },
+   "Order": {
+    "type": "object",
+    "properties": {
+     "orderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "orderToken": {
+      "type": "string"
+     },
+     "brokerTicketId": {
+      "type": "string"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "seats": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "xml": {
+        "name": "seat"
+       }
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "notes": {
+      "type": "string"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "cost": {
+      "type": "number",
+      "description": "Cost is per ticket and the amount the seller will be paid"
+     },
+     "event": {
+      "type": "string"
+     },
+     "eventDate": {
+      "type": "string"
+     },
+     "orderDate": {
+      "type": "string"
+     },
+     "expectedShipDate": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "UNCONFIRMED",
+       "PENDING_SHIPMENT",
+       "COMPLETED",
+       "VERIFICATION",
+       "PENDING_RESERVATION"
+      ]
+     },
+     "mercuryOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "purchaseOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "electronicDelivery": {
+      "type": "boolean"
+     },
+     "passThrough": {
+      "type": "string"
+     },
+     "listingId": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "productionId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "eventId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "zone": {
+      "type": "boolean"
+     },
+     "firstName": {
+      "type": "string"
+     },
+     "lastName": {
+      "type": "string"
+     },
+     "emailAddress": {
+      "type": "string"
+     },
+     "mobilePhoneNumber": {
+      "type": "string"
+     },
+     "retransferEmail": {
+      "type": "string"
+     },
+     "retransferPhone": {
+      "type": "string"
+     },
+     "barCodesRequired": {
+      "type": "boolean"
+     },
+     "transferViaURL": {
+      "type": "boolean"
+     },
+     "instantTransfer": {
+      "type": "boolean"
+     },
+     "instantFlashSeats": {
+      "type": "boolean"
+     },
+     "productionIntegrationType": {
+      "type": "string",
+      "enum": [
+       "NONE",
+       "MLB",
+       "CBC"
+      ]
+     },
+     "soldAsIntegrated": {
+      "type": "boolean"
+     }
+    }
+   },
+   "PaymentWithLedger": {
+    "type": "object",
+    "properties": {
+     "paymentHeader": {
+      "$ref": "#/components/schemas/Header"
+     },
+     "debitItems": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/DebitItem"
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "creditItems": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/CreditItem"
+      },
+      "xml": {
+       "wrapped": true
+      }
+     }
+    }
+   },
+   "Header": {
+    "type": "object",
+    "properties": {
+     "paymentId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "referenceNumber": {
+      "type": "string"
+     },
+     "paymentDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "amount": {
+      "type": "number"
+     },
+     "adjustment": {
+      "type": "number"
+     },
+     "total": {
+      "type": "number"
+     }
+    }
+   },
+   "DebitItem": {
+    "type": "object",
+    "properties": {
+     "purchaseOrderNumber": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "orderNumber": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     "purchaseOrderDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "descriptions": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Description"
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "amount": {
+      "type": "number"
+     },
+     "description": {
+      "type": "array",
+      "writeOnly": true,
+      "items": {
+       "$ref": "#/components/schemas/Description"
+      }
+     }
+    },
+    "xml": {
+     "name": "debitItem"
+    }
+   },
+   "Description": {
+    "type": "object",
+    "properties": {
+     "eventName": {
+      "type": "string"
+     },
+     "eventDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "quantity": {
+      "type": "integer",
+      "format": "int32"
+     }
+    }
+   },
+   "CreditItem": {
+    "type": "object",
+    "properties": {
+     "purchaseOrderNumber": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "orderNumber": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32"
+      }
+     },
+     "purchaseOrderDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "descriptions": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Description"
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "amount": {
+      "type": "number"
+     },
+     "description": {
+      "type": "array",
+      "writeOnly": true,
+      "items": {
+       "$ref": "#/components/schemas/Description"
+      }
+     }
+    },
+    "xml": {
+     "name": "creditItem"
+    }
+   },
+   "Payment": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "referenceNumber": {
+      "type": "string"
+     },
+     "paymentDate": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "amount": {
+      "type": "number"
+     }
+    }
+   },
+   "PurchaseOrderResponse": {
+    "type": "object",
+    "properties": {
+     "success": {
+      "type": "boolean"
+     },
+     "message": {
+      "type": "string"
+     },
+     "poBase64String": {
+      "type": "string"
+     },
+     "purchaseOrderId": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "orderIds": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32",
+       "xml": {
+        "name": "orderId"
+       }
+      },
+      "xml": {
+       "wrapped": true
+      }
+     },
+     "brokerTicketIds": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int32",
+       "xml": {
+        "name": "brokerTicketId"
+       }
+      },
+      "xml": {
+       "wrapped": true
+      }
+     }
+    }
+   },
+   "IntegratedTransferRequest": {
+    "type": "object",
+    "properties": {
+     "section": {
+      "type": "string"
+     },
+     "row": {
+      "type": "string"
+     },
+     "tickets": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/IntegratedTransferTicket"
+      }
+     }
+    }
+   },
+   "IntegratedTransferTicket": {
+    "type": "object",
+    "properties": {
+     "seatNumber": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "ticketToken": {
+      "type": "string"
+     },
+     "barcode": {
+      "type": "string"
+     }
+    }
+   },
+   "IntegratedTransferResponse": {
+    "type": "object",
+    "properties": {
+     "orderId": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "status": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ }
+}

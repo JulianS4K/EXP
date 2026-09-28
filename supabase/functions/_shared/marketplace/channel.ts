@@ -115,6 +115,8 @@ export interface MarketplaceChannel {
   readonly id: ChannelId;
   readonly label: string;
   readonly capabilities: ChannelCapabilities;
+  /** Catalog searches per exos-distribute run, when the marketplace rate-limits them harder than the default. */
+  readonly searchesPerRun?: number;
   findEvents?(ev: ExosEventRef): Promise<EventCandidate[]>;
   planCreateEvent?(ev: ExosEventRef): PlannedRequest;
   normalizeSale?(raw: unknown): MarketplaceSale;
