@@ -2,12 +2,24 @@
 //
 // Thin wrappers over the edge functions (exos-checkout / exos-connect-onboard).
 // supabase.functions.invoke forwards the signed-in user's JWT automatically, so
-// both calls run as the authenticated buyer / org owner. UI wiring (a "Buy"
+// both calls run as the authenticated buyer / org owner. A signed-out buyer
+// passes guestEmail instead (guest checkout, mig 20260928050000). UI wiring (a "Buy"
 // button on the event page, a "Set up payments" button in org settings) calls
 // these and redirects to the returned Stripe-hosted URL.
 
 import { supabase } from './supabase';
 import type { Attribution } from './attribution';
+
+/** The function's own error message ("sold out", "purchase limit…"), if any. */
+async function functionError(error: unknown, fallback: string): Promise<Error> {
+  let payload: { error?: string } | null = null;
+  try {
+    payload = await (error as { context?: Response }).context?.json();
+  } catch {
+    /* not JSON */
+  }
+  return new Error(payload?.error || (error as { message?: string })?.message || fallback);
+}
 
 /** Create a Checkout Session for an event/tier; returns the Stripe-hosted URL. */
 export async function startCheckout(input: {
@@ -22,6 +34,8 @@ export async function startCheckout(input: {
   voucherCode?: string;
   /** Promoter + campaign tags the buyer arrived with (see lib/attribution.ts). */
   attribution?: Attribution;
+  /** Signed out: pay as a guest; tickets go to this email. */
+  guestEmail?: string;
 }): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -33,9 +47,10 @@ export async function startCheckout(input: {
       addons: input.addons && input.addons.length > 0 ? input.addons : undefined,
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+      guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
     },
   });
-  if (error) throw error;
+  if (error) throw await functionError(error, 'Could not start checkout.');
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');
   return url;
@@ -60,16 +75,7 @@ export async function startEmbeddedCheckout(input: {
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
     },
   });
-  if (error) {
-    // Surface the function's own message ("sold out", "purchase limit…").
-    let payload: { error?: string } | null = null;
-    try {
-      payload = await (error as { context?: Response }).context?.json();
-    } catch {
-      /* not JSON */
-    }
-    throw new Error(payload?.error || error.message || 'Could not start checkout.');
-  }
+  if (error) throw await functionError(error, 'Could not start checkout.');
   const d = data as { client_secret?: string; session_id?: string } | null;
   if (!d?.client_secret || !d.session_id) throw new Error('startEmbeddedCheckout: no client secret returned');
   return { clientSecret: d.client_secret, sessionId: d.session_id };

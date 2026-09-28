@@ -1,7 +1,11 @@
 // exos-checkout — create a Stripe Checkout Session for an event/tier (D4-OPS-7 SCAFFOLD).
 //
-// Buyer must be AUTHENTICATED (they need a uid to own the minted tickets +
-// see them in-app). Destination charge to the org's connected account + an
+// Signed in, or a GUEST (mig 20260928050000): no JWT plus a guest_email in the
+// body. Guest tickets go to the confirmed account with that email, else they're
+// parked with a claim link mailed to it (see the migration). Guests get a
+// service-role hold with its own anti-bot limits (per-email cart, hashed-IP rate
+// limit, a ceiling on live guest holds); organizers can switch guests off per
+// event with purchase_limits.guestCheckout = false. Destination charge to the org's connected account + an
 // application fee. Records a 'pending' row in exos_checkout_sessions keyed on
 // the Stripe session id; the stripe-webhook fulfills it on completion.
 //
@@ -14,7 +18,8 @@
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY, EXOS_REDIRECT_ORIGINS (origins success/cancel URLs
-// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 500 = 5%).
+// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 500 = 5%),
+// EXOS_GUEST_IP_SALT (salt for the hashed guest IP; defaults to a server secret).
 // Needs mig 20260924223000 (promoter_id / attribution columns) applied first.
 //
 // TODO(operator) before go-live: confirm the application-fee model/%, the
@@ -26,6 +31,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { allInCents, effectiveTierPrice } from "../_shared/pricing.ts";
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
+import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -33,7 +39,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
   if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
 
-  // Authenticate the buyer from their JWT.
+  // Authenticate the buyer from their JWT; without one, a guest_email makes it
+  // a guest checkout.
   const authHeader = req.headers.get("Authorization") ?? "";
   const sbUser = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -41,7 +48,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     { global: { headers: { Authorization: authHeader } } },
   );
   const { data: { user } } = await sbUser.auth.getUser();
-  if (!user) return json({ error: "unauthorized" }, 401);
 
   let p: {
     event_id?: string; tier_id?: string; quantity?: number;
@@ -52,8 +58,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     voucher_code?: string;
     // Promoter code + UTM / fbclid / cart_origin from the landing URL.
     attribution?: Record<string, unknown>;
+    // Guest checkout: the email the tickets (or their claim links) go to.
+    guest_email?: string;
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
+  if (!user && p.guest_email === undefined) return json({ error: "unauthorized" }, 401);
+  if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
+  const buyerUid = user?.id ?? null;
+  const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
   const { event_id, tier_id, success_url, cancel_url } = p;
   const embedded = p.ui_mode === "embedded";
   const returnUrl = p.return_url;
@@ -105,7 +118,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let voucherUnlocksTier = false;
   if (voucherCode) {
     const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
-      p_event_id: event_id, p_code: voucherCode, p_email: user.email ?? null,
+      p_event_id: event_id, p_code: voucherCode, p_email: buyerEmail || null,
     });
     const v = Array.isArray(vRows) ? vRows[0] : vRows;
     if (vErr || !v?.is_valid) {
@@ -125,6 +138,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     voucherId = v.voucher_id;
     voucherUnlocksTier = v.restrict_tier_id === tier_id;
     bypassCapacity = v.can_bypass === true;
+    // A capacity-bypass code is an organizer's personal offer (waitlist, comp
+    // upgrade); it stays tied to an account.
+    if (bypassCapacity && !buyerUid) {
+      return json({ error: "sign in to use this code" }, 409);
+    }
     overridePrice = v.override_price != null ? Number(v.override_price) : null;
   }
 
@@ -143,11 +161,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Per-person buy limit (maxPerOrder + cumulative maxPerAccount). Same check as
   // the comp path; counts tickets this buyer already holds, so a SECOND purchase
   // that would exceed the limit is refused before a Stripe session is created.
-  const { error: limitErr } = await sb.rpc("exos_assert_purchase_limit", {
-    p_event_id: event_id,
-    p_buyer: user.id,
-    p_qty: quantity,
-  });
+  // A guest's "account" is their email (exos_assert_purchase_limit_email).
+  const { error: limitErr } = buyerUid
+    ? await sb.rpc("exos_assert_purchase_limit", { p_event_id: event_id, p_buyer: buyerUid, p_qty: quantity })
+    : await sb.rpc("exos_assert_purchase_limit_email", { p_event_id: event_id, p_email: buyerEmail, p_qty: quantity });
   if (limitErr) {
     return json({ error: limitErr.message || "purchase limit exceeded" }, 409);
   }
@@ -299,10 +316,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!bypassCapacity) {
     // A hidden tier's hold re-checks the voucher (mig 20260925003000). Only
     // sent when needed, so public tiers work before that migration is applied.
-    const { data: hid, error: holdErr } = await sbUser.rpc("exos_create_hold", {
-      p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
-      ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
-    });
+    // A guest hold is also where the guest rate limits and the organizer's
+    // guestCheckout switch are enforced (guests never bypass, see above).
+    const { data: hid, error: holdErr } = buyerUid
+      ? await sbUser.rpc("exos_create_hold", {
+        p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
+        ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
+      })
+      : await sb.rpc("exos_create_guest_hold", {
+        p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
+        p_ip_hash: await hashIp(
+          clientIp((h) => req.headers.get(h)),
+          Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        ),
+        p_voucher_code: voucherUnlocksTier ? voucherCode : null,
+      });
     if (holdErr) {
       return json({ error: holdErr.message || "not enough tickets available" }, 409);
     }
@@ -328,8 +356,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Match the 30-minute seat hold (Stripe's minimum) so nobody can pay after
       // their seats went back to the pool and trigger a refund.
       expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-      customer_email: user.email ?? undefined,
-      metadata: { exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: user.id, exos_promoter: promoterId ?? "" },
+      customer_email: buyerEmail || undefined,
+      metadata: {
+        exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
+        exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
+      },
     });
   } catch (e) {
     console.error("exos-checkout: stripe session create failed", e);
@@ -340,7 +371,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ledgerRow: Record<string, unknown> = {
     session_id: session.id,
     event_id, tier_id, org_id: ev.org_id,
-    buyer_uid: user.id, buyer_email: (user.email ?? "").toLowerCase(),
+    buyer_uid: buyerUid, buyer_email: buyerEmail,
+    ...(buyerUid ? {} : { guest: true }),
     quantity, amount_cents: amountCents, currency, status: "pending",
     addons: addonsForSession.length > 0 ? addonsForSession : null,
     voucher_id: voucherId,

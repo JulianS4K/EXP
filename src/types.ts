@@ -326,6 +326,8 @@ export interface Event {
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;
+    // Guest checkout (mig 20260928050000); on unless set to false.
+    guestCheckout?: boolean;
   };
 }
 

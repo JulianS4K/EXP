@@ -25,6 +25,17 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Fan-first build (from reports/Organizer and fan ticketing needs.md, started 2026-09-28)
+
+Operator scope: everything on the report's build lists except same-day payout. Marketplaces are omnichannel
+distribution of Exos's own inventory, not resale.
+
+- ✅ **Guest checkout** (`20260928050000_exos_guest_checkout`, authored, not applied): pay with just an email; tickets
+  go to the confirmed account with that email or arrive as claim links. Anti-bot limits per email, per network
+  (hashed IP) and a ceiling on live guest holds; organizer switch per event. Tests: `tests/exos/test_guest_checkout.sql`
+  (G1–G11), `src/lib/guestCheckout.test.ts`. Follow-ups: guest mode for the embedded iframe checkout; a CAPTCHA
+  (Turnstile) on the email step if the network limit isn't enough; door lookup of unclaimed guest orders by email.
+
 ## All-in pricing (operator decision 2026-09-24)
 
 ✅ **Every buyer-facing price is all-in.**

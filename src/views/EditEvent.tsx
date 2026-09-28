@@ -1089,6 +1089,24 @@ export default function EditEvent() {
                 />
               </div>
            </div>
+           <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 accent-brand-primary"
+                checked={eventData.purchaseLimits?.guestCheckout !== false}
+                onChange={(e) => setEventData({
+                  ...eventData,
+                  purchaseLimits: { ...(eventData.purchaseLimits || { maxPerOrder: 8, maxPerAccount: 8 }), guestCheckout: e.target.checked },
+                })}
+              />
+              <span>
+                <span className="block font-bold text-white">Guest checkout</span>
+                <span className="block text-sm text-white/60">
+                  Fans pay with just an email, no account. Max per account then counts per email. Turn off for
+                  high-demand drops where you want every buyer signed in.
+                </span>
+              </span>
+           </label>
         </section>
 
         {/* Inventory Tiers Section */}
