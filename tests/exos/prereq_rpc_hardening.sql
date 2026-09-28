@@ -1,6 +1,6 @@
 -- ============================================================================
--- Harness prereq for mig 20260929080000 (RPC hardening): the two mail RPCs it
--- patches predate the Exos migration chain (Terminal-2's 20260520160000 /
+-- Harness prereq for mig 20260929080000 (RPC hardening): the RPCs it patches
+-- (exos_queue_mail, exos_queue_ticket_issued, exos_create_org) predate the Exos migration chain (Terminal-2's 20260520160000 /
 -- 20260523210000 plus later prod-only edits), so the scratch schema doesn't
 -- have them. These are prod's bodies as of 2026-09-28 (read with
 -- pg_get_functiondef), verbatim, so the migration's patches run against the
@@ -174,8 +174,44 @@ BEGIN
   RETURN v_id;
 END $function$;
 
+-- exos_create_org writes the membership's added_by (prod has the column; the
+-- stub table in prereq.sql doesn't).
+ALTER TABLE public.exos_org_memberships ADD COLUMN IF NOT EXISTS added_by uuid;
+
+CREATE OR REPLACE FUNCTION public.exos_create_org(p_name text, p_slug text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_org_id uuid;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'exos_create_org: not authenticated' USING ERRCODE = '42501';
+  END IF;
+  IF p_name IS NULL OR length(btrim(p_name)) = 0 OR length(p_name) > 100 THEN
+    RAISE EXCEPTION 'exos_create_org: name must be 1-100 chars';
+  END IF;
+  IF p_slug !~ '^[a-z0-9][a-z0-9-]{0,79}$' THEN
+    RAISE EXCEPTION 'exos_create_org: invalid slug %', p_slug;
+  END IF;
+
+  INSERT INTO public.exos_orgs (name, slug, owner_uid)
+  VALUES (p_name, p_slug, v_uid)
+  RETURNING id INTO v_org_id;
+
+  INSERT INTO public.exos_org_memberships (org_id, user_id, role, added_by)
+  VALUES (v_org_id, v_uid, 'owner', v_uid);
+
+  RETURN v_org_id;
+END $function$;
+
 -- Prod's grants: signed-in callers only.
 REVOKE ALL ON FUNCTION public.exos_queue_mail(text, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.exos_queue_ticket_issued(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_queue_mail(text, uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.exos_queue_ticket_issued(uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exos_create_org(text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_create_org(text, text) TO authenticated, service_role;

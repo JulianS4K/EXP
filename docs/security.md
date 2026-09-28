@@ -66,7 +66,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_channel_allocated`, `exos_event_house_available` | Revoked | Unscoped inventory counts for any tier or event (drafts included); only definer functions use them |
 | `exos_redeem_discount_code` (prod only, legacy) | Revoked | Unthrottled code-guessing oracle on the old `exos_discount_codes`; nothing calls it |
 | `exos_check_in_offline` | Fixed | Wrote the client ref (and, for another org's ticket, a scan-reject row in that org's door log) before the staff check, and read another device's cached result by client ref. Now requires owner / manager / scanner on the event's org first |
-| `exos_queue_mail` | Fixed | Mail-bombing: a sender could re-queue the "someone sent you a ticket" or invite mail to an arbitrary address without limit. Now the same mail to the same address within 10 min returns the queued one, and a caller queues at most 10 a minute |
+| `exos_queue_mail` | Fixed | Mail-bombing: a sender could re-queue the "someone sent you a ticket" or invite mail to an arbitrary address without limit. Now the same mail to the same address within 10 min returns the queued one, and a caller queues at most 10 a minute. The transfer mail's link also carries `?k=<claim_key>` now, so any account can claim from it as the mail says (before, only the addressed account could); who may queue it is unchanged |
+| `exos_create_org` | Fixed | No cap: any account could create organizations and claim slugs without limit. Now at most 3 per 24 hours and 20 in all per account (orgs it created or owns); platform admins are exempt |
 | `exos_queue_ticket_issued` | Fixed | Same: one "ticket ready" mail per event and address per 10 min, shared 10/min per-caller limit |
 | `exos_has_org_role`, `exos_holds_ticket`, `exos_pos_can_ring`, `_exos_guest_list_can_edit` | OK | RLS policy predicates, scoped to `auth.uid()`; policies evaluate them as the caller, so authenticated keeps EXECUTE |
 | `exos_can_door_event`, `exos_can_read_ticket_secret`, `exos_ticket_access_needs`, `exos_transfer_claim_key` | OK | Self-scoped: answer only about the caller (door access, own ticket, own transfer's key) |
@@ -86,7 +87,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_claim_invite` | OK | UUIDv4 invite token, expiry, verified email; never demotes an owner |
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
-| `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account`, `exos_create_org` | OK | Self-service on the caller's own rows. See operator decision 4 for org creation |
+| `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
@@ -136,10 +137,6 @@ These can't be set from a migration. Project: the shared Supabase project
    are to key the anon bucket on the client IP from `request.headers` (only
    safe if the gateway's forwarded-for header can't be spoofed) or to require
    sign-in to apply a code.
-3. **The emailed transfer link has no claim key.** `exos_queue_mail`
-   (`transfer-initiated`) links to `/claim/<id>` without `?k=`, so it only
-   works for the addressed account, but the copy says "sign in with any Exos
-   account". Either add the key (then the email is a bearer link, as the share
-   link already is) or change the copy.
-4. **Org creation has no limit.** `exos_create_org` lets any signed-in account
-   create organizations (and claim slugs) without a cap.
+3. **Org creation caps** (3 a day, 20 per account, admins exempt) are a
+   judgement call. Raising them is a one-line change in `exos_create_org`;
+   anyone who hits them sees a message asking them to contact support.

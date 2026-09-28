@@ -14,6 +14,10 @@
 --      caller; someone else's transfer is still refused
 --   H7 exos_queue_ticket_issued: the same "ticket ready" mail twice is one
 --      row; a stranger is still refused
+--   H8 the transfer-initiated mail's claim link carries the claim key, and
+--      that key lets any account claim
+--   H9 exos_create_org: first org (onboarding) works; 3 a day and 20 per
+--      account; platform admins exempt
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -247,6 +251,91 @@ BEGIN
   END;
   ASSERT refused, 'H7: a stranger can''t mail a ticket holder';
   RAISE NOTICE 'OK  H7 queue_ticket_issued dedupe';
+END $$;
+
+-- H8 -------------------------------------------------------------------------
+INSERT INTO public.exos_tickets(id,event_id,org_id,tier_id,tier_name,buyer_id,owner_id,status,barcode_secret,price_paid,order_ref)
+VALUES ('a8000000-0000-0000-0000-0000000000c2','a8000000-0000-0000-0000-0000000000e1','a8000000-0000-0000-0000-000000000001',
+        'a8000000-0000-0000-0000-0000000000d1','GA','a8000000-0000-0000-0000-0000000000b1','a8000000-0000-0000-0000-0000000000b1',
+        'active','sek-a8-2',25,'a8-order-2');
+INSERT INTO public.exos_transfers(id,ticket_id,org_id,sender_id,receiver_email,status) VALUES
+  ('a8000000-0000-0000-0000-0000000000f8','a8000000-0000-0000-0000-0000000000c2',
+   'a8000000-0000-0000-0000-000000000001','a8000000-0000-0000-0000-0000000000b1','friend@x.com','pending');
+UPDATE public.exos_tickets SET pending_transfer_id = 'a8000000-0000-0000-0000-0000000000f8'
+ WHERE id = 'a8000000-0000-0000-0000-0000000000c2';
+SELECT pg_temp.act('a8000000-0000-0000-0000-0000000000b1', 'a8-fan@x.com');
+DO $$
+DECLARE v_id uuid; v_html text; v_key text; v_link_key text; v_ticket uuid;
+BEGIN
+  v_id := public.exos_queue_mail('transfer-initiated', 'a8000000-0000-0000-0000-0000000000f8');
+  SELECT html INTO v_html FROM public.exos_mail WHERE id = v_id;
+  SELECT claim_key INTO v_key FROM public.exos_transfers WHERE id = 'a8000000-0000-0000-0000-0000000000f8';
+  v_link_key := substring(v_html FROM '/claim/a8000000-0000-0000-0000-0000000000f8\?k=([0-9a-f]+)"');
+  ASSERT v_link_key IS NOT NULL AND v_link_key = v_key, 'H8: the mailed link carries the claim key, got ' || v_html;
+  -- A different account (not the addressed one) claims with the link's key.
+  PERFORM pg_temp.act('a8000000-0000-0000-0000-0000000000b2', 'a8-stranger@x.com');
+  v_ticket := public.exos_claim_transfer('a8000000-0000-0000-0000-0000000000f8', v_link_key);
+  ASSERT v_ticket = 'a8000000-0000-0000-0000-0000000000c2'
+     AND (SELECT owner_id FROM public.exos_tickets WHERE id = v_ticket) = 'a8000000-0000-0000-0000-0000000000b2',
+         'H8: any account claims with the mailed link';
+  RAISE NOTICE 'OK  H8 transfer mail carries the claim key';
+END $$;
+
+-- H9 -------------------------------------------------------------------------
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
+  ('a8000000-0000-0000-0000-0000000000c9','a8-founder@x.com',now()),
+  ('a8000000-0000-0000-0000-0000000000ca','a8-veteran@x.com',now()),
+  ('a8000000-0000-0000-0000-0000000000cb','a8-admin@x.com',now());
+SELECT pg_temp.act('a8000000-0000-0000-0000-0000000000c9', 'a8-founder@x.com');
+DO $$
+DECLARE v_org uuid; refused boolean := false; msg text;
+BEGIN
+  v_org := public.exos_create_org('Founder One', 'a8-founder-1');
+  ASSERT (SELECT role FROM public.exos_org_memberships
+           WHERE org_id = v_org AND user_id = 'a8000000-0000-0000-0000-0000000000c9') = 'owner',
+         'H9: onboarding still creates the org with the caller as owner';
+  PERFORM public.exos_create_org('Founder Two', 'a8-founder-2');
+  PERFORM public.exos_create_org('Founder Three', 'a8-founder-3');
+  BEGIN
+    PERFORM public.exos_create_org('Founder Four', 'a8-founder-4');
+  EXCEPTION WHEN program_limit_exceeded THEN refused := true; msg := SQLERRM;
+  END;
+  ASSERT refused AND msg LIKE '%3 a day%', 'H9: the 4th org in a day is refused';
+  ASSERT (SELECT count(*) FROM public.exos_orgs WHERE owner_uid = 'a8000000-0000-0000-0000-0000000000c9') = 3,
+         'H9: nothing created by the refused call';
+  -- A day later the daily cap is clear again.
+  UPDATE public.exos_orgs SET created_at = now() - interval '25 hours'
+   WHERE owner_uid = 'a8000000-0000-0000-0000-0000000000c9';
+  PERFORM public.exos_create_org('Founder Four', 'a8-founder-4');
+END $$;
+-- 20 in all: a veteran owning 20 old orgs can't create a 21st.
+INSERT INTO public.exos_orgs(id,name,slug,owner_uid,created_at)
+SELECT ('a8000000-0000-0000-0000-0000000010' || lpad(n::text, 2, '0'))::uuid, 'Old ' || n, 'a8-old-' || n,
+       'a8000000-0000-0000-0000-0000000000ca', now() - interval '30 days'
+  FROM generate_series(1, 20) n;
+SELECT pg_temp.act('a8000000-0000-0000-0000-0000000000ca', 'a8-veteran@x.com');
+DO $$
+DECLARE refused boolean := false; msg text;
+BEGIN
+  BEGIN
+    PERFORM public.exos_create_org('One Too Many', 'a8-too-many');
+  EXCEPTION WHEN program_limit_exceeded THEN refused := true; msg := SQLERRM;
+  END;
+  ASSERT refused AND msg LIKE '%20 per account%', 'H9: the 21st org is refused';
+END $$;
+-- Platform admins are exempt (the harness stub says false; flip it here,
+-- rolled back with the rest).
+CREATE OR REPLACE FUNCTION public.exos_is_admin() RETURNS boolean
+  LANGUAGE sql STABLE AS $$ SELECT coalesce(auth.uid() = 'a8000000-0000-0000-0000-0000000000cb'::uuid, false) $$;
+INSERT INTO public.exos_orgs(id,name,slug,owner_uid,created_at)
+SELECT ('a8000000-0000-0000-0000-0000000020' || lpad(n::text, 2, '0'))::uuid, 'Adm ' || n, 'a8-adm-' || n,
+       'a8000000-0000-0000-0000-0000000000cb', now() - interval '1 hour'
+  FROM generate_series(1, 20) n;
+SELECT pg_temp.act('a8000000-0000-0000-0000-0000000000cb', 'a8-admin@x.com');
+DO $$
+BEGIN
+  ASSERT public.exos_create_org('Admin Org', 'a8-admin-org') IS NOT NULL, 'H9: admins are exempt';
+  RAISE NOTICE 'OK  H9 org creation cap';
 END $$;
 
 ROLLBACK;

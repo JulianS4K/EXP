@@ -9,7 +9,7 @@
 --              exos_event_house_available, exos_redeem_discount_code (prod only);
 --              from anon on exos_leave_waitlist, exos_has_org_role
 --           W: FUNCTION exos_check_in_offline, exos_queue_mail,
---              exos_queue_ticket_issued (patched in place)
+--              exos_queue_ticket_issued, exos_create_org (patched in place)
 --           C: INDEX exos_mail_dedupe_idx
 -- Pre-reqs: 20260929074000 (and 20260929060000 for exos_rate_hit)
 --
@@ -45,6 +45,16 @@
 --    receiver address, or an invite's, as often as they liked. Now the same
 --    mail to the same address within 10 minutes returns the one already
 --    queued, and a caller queues at most 10 mails a minute (exos_rate_hit).
+-- 5. The "someone sent you a ticket" mail (exos_queue_mail,
+--    transfer-initiated) linked /claim/<id> without the claim key, so only
+--    the addressed account could claim it although the mail says any account
+--    can. It now carries ?k=<claim_key> like every other claim link (mig
+--    20260929010000). Who may queue it (the pending transfer's sender) is
+--    unchanged. The other user-transfer mails (exos_create_transfer, checkout,
+--    comps, marketplace) already carry the key.
+-- 6. exos_create_org had no cap: any account could create organizations (and
+--    claim slugs) without limit. Now at most 3 in 24 hours and 20 in all per
+--    account (orgs it created or owns); platform admins are exempt.
 --
 -- Re-run safe: grants are idempotent; each patch asserts one match and is
 -- skipped once applied; functions missing from a schema are skipped with a
@@ -177,5 +187,45 @@ $o$,
   END IF;
   IF NOT public.exos_rate_hit('queue_mail:' || v_uid, 10) THEN
     RAISE EXCEPTION 'exos_queue_ticket_issued: too many emails, try again in a minute' USING ERRCODE = '54000';
+  END IF;
+$n$);
+
+-- ── 5. Transfer mail: the claim link carries its key ────────────────────────
+
+SELECT pg_temp.exos_patch('public.exos_queue_mail(text,uuid)',
+  'WHERE k0.id = t.id',
+  $o$/claim/' || t.id ||
+           '">Claim your ticket</a>$o$,
+  $n$/claim/' || t.id || '?k=' || (SELECT k0.claim_key FROM public.exos_transfers k0 WHERE k0.id = t.id) ||
+           '">Claim your ticket</a>$n$);
+
+-- ── 6. Organization creation is capped ──────────────────────────────────────
+
+SELECT pg_temp.exos_patch('public.exos_create_org(text,text)',
+  'exos_create_org: organization limit',
+  $o$    RAISE EXCEPTION 'exos_create_org: invalid slug %', p_slug;
+  END IF;
+$o$,
+  $n$    RAISE EXCEPTION 'exos_create_org: invalid slug %', p_slug;
+  END IF;
+
+  -- rpc hardening (mig 20260929080000): at most 3 new organizations a day and
+  -- 20 in all per account (created or owned); platform admins are exempt.
+  -- The lock serializes one account's concurrent calls so they can't race
+  -- past the cap.
+  IF NOT public.exos_is_admin() THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos_create_org:' || v_uid::text, 0));
+    IF (SELECT count(*) FROM public.exos_orgs o
+         WHERE o.owner_uid = v_uid AND o.created_at > now() - interval '24 hours') >= 3 THEN
+      RAISE EXCEPTION 'exos_create_org: organization limit reached (3 a day). Try again tomorrow, or contact support.'
+        USING ERRCODE = '54000';
+    END IF;
+    IF (SELECT count(*) FROM public.exos_orgs o
+         WHERE o.owner_uid = v_uid
+            OR EXISTS (SELECT 1 FROM public.exos_org_memberships m
+                        WHERE m.org_id = o.id AND m.user_id = v_uid AND m.role = 'owner')) >= 20 THEN
+      RAISE EXCEPTION 'exos_create_org: organization limit reached (20 per account). Contact support for more.'
+        USING ERRCODE = '54000';
+    END IF;
   END IF;
 $n$);
