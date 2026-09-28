@@ -9,3 +9,4 @@ export * from '../../../../supabase/functions/_shared/marketplace/tevo/fulfilmen
 export * from '../../../../supabase/functions/_shared/marketplace/tevo/client.ts';
 export * from '../../../../supabase/functions/_shared/marketplace/tevo/writer.ts';
 export * from '../../../../supabase/functions/_shared/marketplace/tevo/channel.ts';
+export * from '../../../../supabase/functions/_shared/marketplace/tevo/listingPlan.ts';

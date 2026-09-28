@@ -10,7 +10,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | Gametime | [`gametime/`](gametime/README.md) | API v3 (Swagger 2.0), onboarding guide, CSV columns, example CSV, Postman collection, 2026-09-27 |
 | GoTickets | [`gotickets/`](gotickets/README.md) | Seller Central API v1 (OpenAPI 3.0.1), 2026-09-28 |
 | Vivid Seats | [`vivid/`](vivid/README.md) | Broker Portal API 1.0.0 (OpenAPI 3.0.1), 2026-09-28 |
-| Ticket Evolution | [`tevo/`](tevo/README.md) | API v9 order-processing HOWTOs (TEvo Integrations wiki), 2026-09-28; orders side only |
+| Ticket Evolution | [`tevo/`](tevo/README.md) | API v9 order-processing HOWTOs (TEvo Integrations wiki) and Inventory create / update / delete, 2026-09-28 |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them

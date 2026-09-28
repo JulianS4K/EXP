@@ -79,7 +79,7 @@ import { GOTICKETS_SALE_WEBHOOKS, parseGoTicketsWebhook, verifyGoTicketsWebhookT
 import { VividClient } from "../_shared/marketplace/vivid/client.ts";
 import type { VividOrder } from "../_shared/marketplace/vivid/types.ts";
 import { TevoClient } from "../_shared/marketplace/tevo/client.ts";
-import { stripTevoOrder } from "../_shared/marketplace/tevo/orders.ts";
+import { annotateTevoOrder, stripTevoOrder, tevoRemoteIds } from "../_shared/marketplace/tevo/orders.ts";
 import type { TevoOrder } from "../_shared/marketplace/tevo/types.ts";
 
 const LOOKBACK_HOURS = 6;
@@ -235,7 +235,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const orders = await openTevoOrders(te);
       const seen = new Set(orders.map((o) => String(o.id)));
       orders.push(...await recheckTevoOrders(sb, te, seen));
-      result.evo = await ingest(sb, channels.get("evo")!, orders, undefined);
+      result.evo = await ingest(sb, channels.get("evo")!, await withTevoListingIds(sb, orders), undefined);
     } else {
       result.evo = { skipped: "no TEVO_API_TOKEN / TEVO_API_SECRET" };
     }
@@ -309,6 +309,21 @@ async function openTevoOrders(te: TevoClient): Promise<TevoOrder[]> {
     console.error("exos-marketplace-sales: TEvo listOrders failed", String(e));
     return [];
   }
+}
+
+// The Exos listing id on each ticket group TEvo hands back with an Exos
+// remote_id (exos_tevo_remote_ids, mig 20260928080000); broker groups are
+// left as they are and ignored downstream.
+async function withTevoListingIds(sb: SupabaseClient, orders: TevoOrder[]): Promise<TevoOrder[]> {
+  const ids = tevoRemoteIds(orders);
+  if (!ids.length) return orders;
+  const { data, error } = await sb.from("exos_tevo_remote_ids").select("remote_id, listing_id").in("remote_id", ids);
+  if (error) {
+    console.error("exos-marketplace-sales: TEvo remote_id lookup failed", error.message);
+    return orders;
+  }
+  const byRemoteId = new Map(((data ?? []) as Array<{ remote_id: number; listing_id: string }>).map((r) => [Number(r.remote_id), r.listing_id]));
+  return orders.map((o) => annotateTevoOrder(o, byRemoteId));
 }
 
 // Orders Exos already has, re-read by id, so an acceptance, a completion or

@@ -100,9 +100,9 @@ export function stubHubStatus(
   }
 }
 
-export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
+export type MarketplaceChannelId = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid' | 'evo';
 export const MARKETPLACE_LABEL: Record<MarketplaceChannelId, string> = {
-  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats',
+  stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats', evo: 'Ticket Evolution',
 };
 
 /** The event line for Vivid Seats: which Vivid event the listings attach to, or its mapping team. */
@@ -128,6 +128,32 @@ export function vividStatus(
       return { tone: 'warn', text: row.error || 'Vivid Seats: something needs a look.' };
     default:
       return { tone: 'muted', text: `Vivid Seats: ${row.status}.` };
+  }
+}
+
+/** The event line for Ticket Evolution: its listings need TEvo's event, linked by Exos staff. */
+export function tevoStatus(
+  row: StubHubDistributionRow | null,
+  ev: { ticked: boolean; published: boolean; primaryMarketOnly: boolean },
+): StubHubStatus | null {
+  if (!ev.ticked) return null;
+  if (ev.primaryMarketOnly) return { tone: 'muted', text: 'Primary market only is on, so nothing goes to Ticket Evolution.' };
+  if (!row) {
+    return ev.published
+      ? { tone: 'muted', text: 'Save to queue Ticket Evolution.' }
+      : { tone: 'muted', text: 'Ticket Evolution listings are planned when you publish.' };
+  }
+  switch (row.status) {
+    case 'pending':
+      return { tone: 'info', text: 'Queued for Ticket Evolution.' };
+    case 'planned':
+      return row.planned_request?.linked
+        ? { tone: 'ok', text: `Ticket Evolution listings attach to TEvo event ${row.planned_request.external_event_id}. Not sent yet: Ticket Evolution selling isn't switched on.` }
+        : { tone: 'info', text: 'Ticket Evolution: waiting for Exos staff to link this event to its Ticket Evolution event.' };
+    case 'failed':
+      return { tone: 'warn', text: row.error || 'Ticket Evolution: something needs a look.' };
+    default:
+      return { tone: 'muted', text: `Ticket Evolution: ${row.status}.` };
   }
 }
 

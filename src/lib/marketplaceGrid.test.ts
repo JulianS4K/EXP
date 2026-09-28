@@ -15,6 +15,6 @@ describe('marketplace seats per ticket type', () => {
 
   it('offers only the integrated marketplaces', () => {
     expect(SHOW_MARKETPLACES).toBe(true);
-    expect(MARKETPLACE_NETWORKS.map((n) => n.id)).toEqual(['stubhub', 'seatgeek', 'vivid', 'gametime', 'gotickets']);
+    expect(MARKETPLACE_NETWORKS.map((n) => n.id)).toEqual(['stubhub', 'seatgeek', 'vivid', 'gametime', 'gotickets', 'evo']);
   });
 });

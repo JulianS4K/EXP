@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, vividStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -130,5 +130,19 @@ describe('vividStatus', () => {
     expect(vividStatus(row({ status: 'planned', planned_request: { linked: false } }), ev)?.text).toMatch(/mapping|maps the listings/);
     expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}, {}] } }), 'vivid')?.text)
       .toBe("2 listings ready. Not sent yet: Vivid Seats selling isn't switched on.");
+  });
+});
+
+describe('tevoStatus', () => {
+  it('explains Ticket Evolution: a linked TEvo event, or waiting on staff to link it', () => {
+    const ev = { ticked: true, published: true, primaryMarketOnly: false };
+    expect(tevoStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(tevoStatus(null, { ...ev, primaryMarketOnly: true })?.text).toMatch(/Primary market only/);
+    expect(tevoStatus(row({ status: 'planned', planned_request: { linked: true, external_event_id: '2204331' } }), ev))
+      .toMatchObject({ tone: 'ok', text: expect.stringContaining('TEvo event 2204331') });
+    expect(tevoStatus(row({ status: 'failed', error: 'Ticket Evolution: waiting for Exos staff to link this event to its Ticket Evolution event' }), ev))
+      .toMatchObject({ tone: 'warn', text: expect.stringMatching(/waiting for Exos staff/) });
+    expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'evo')?.text)
+      .toBe("1 listing ready. Not sent yet: Ticket Evolution selling isn't switched on.");
   });
 });

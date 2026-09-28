@@ -6,6 +6,10 @@
 --      listing's seats; the mail says Ticket Evolution; a broker order is ignored
 --   E3 a TEvo sale to TEvo itself carries no buyer email: it goes to a human
 --      (the email arrives with the shipment, fulfilment.ts)
+--   E4 listings (mig 20260928080000): publishing with Ticket Evolution ticked
+--      queues its event row; each Exos listing gets one remote_id, for good,
+--      from 1,900,000,001 up; only an 'evo' allocation, only the service role
+--   E5 a staff link re-queues the TEvo event row (its event id goes on the listings)
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_tevo_orders.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -81,6 +85,71 @@ BEGIN
   SELECT * INTO f FROM public.exos_fulfil_marketplace_order(r.order_id, 'https://exos.example.test');
   IF f.status <> 'needs_attention' THEN RAISE EXCEPTION 'E3 FAIL: %', row_to_json(f); END IF;
   RAISE NOTICE 'E3 ok: a sale to TEvo without an email goes to a human (%)', f.reason;
+END $$;
+
+-- E4 -------------------------------------------------------------------------
+DO $$
+DECLARE alloc uuid; a bigint; b bigint; c bigint; n int; e text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings
+                  WHERE event_id = '8e000000-0000-0000-0000-0000000000e1' AND channel = 'evo' AND tier_id IS NULL AND status = 'pending') THEN
+    RAISE EXCEPTION 'E4 FAIL: no queued Ticket Evolution event row';
+  END IF;
+  SELECT id INTO alloc FROM public.exos_distribution_listings WHERE channel = 'evo' AND tier_id IS NOT NULL;
+  SELECT remote_id INTO a FROM public.exos_tevo_remote_ids(alloc, ARRAY['exryaaaaaaaaaaaaaaaaaaaaakxq1','exryaaaaaaaaaaaaaaaaaaaaakxq2'])
+   WHERE listing_id = 'exryaaaaaaaaaaaaaaaaaaaaakxq1';
+  IF a IS NULL OR a < 1900000001 THEN RAISE EXCEPTION 'E4 FAIL: remote_id %', a; END IF;
+  -- Again, plus a new listing: the old ones keep their numbers.
+  SELECT count(*), max(remote_id) FILTER (WHERE listing_id = 'exryaaaaaaaaaaaaaaaaaaaaakxq1'),
+         max(remote_id) FILTER (WHERE listing_id = 'exryaaaaaaaaaaaaaaaaaaaaakxq3')
+    INTO n, b, c
+    FROM public.exos_tevo_remote_ids(alloc, ARRAY['exryaaaaaaaaaaaaaaaaaaaaakxq1','exryaaaaaaaaaaaaaaaaaaaaakxq3']);
+  IF n <> 2 OR b <> a OR c <> a + 2 THEN RAISE EXCEPTION 'E4 FAIL: renumbered (% % % %)', n, a, b, c; END IF;
+  IF (SELECT count(*) FROM public.exos_tevo_remote_ids WHERE allocation_id = alloc) <> 3 THEN RAISE EXCEPTION 'E4 FAIL: count'; END IF;
+  -- Not a TEvo allocation.
+  BEGIN
+    PERFORM public.exos_tevo_remote_ids((SELECT id FROM public.exos_distribution_listings WHERE channel = 'evo' AND tier_id IS NULL), ARRAY['exryaaaaaaaaaaaaaaaaaaaaakxq9']);
+  EXCEPTION WHEN others THEN e := SQLERRM;
+  END;
+  IF e IS NULL OR e NOT LIKE '%not a Ticket Evolution allocation%' THEN RAISE EXCEPTION 'E4 FAIL: event row numbered (%)', e; END IF;
+  -- Not an Exos listing id.
+  e := NULL;
+  BEGIN
+    PERFORM public.exos_tevo_remote_ids(alloc, ARRAY['BROKER-1']);
+  EXCEPTION WHEN check_violation THEN e := 'refused';
+  END;
+  IF e IS NULL THEN RAISE EXCEPTION 'E4 FAIL: broker id numbered'; END IF;
+  IF has_function_privilege('authenticated', 'public.exos_tevo_remote_ids(uuid, text[])', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.exos_tevo_remote_ids(uuid, text[])', 'EXECUTE')
+     OR has_table_privilege('authenticated', 'public.exos_tevo_remote_ids', 'SELECT')
+     OR NOT has_function_privilege('service_role', 'public.exos_tevo_remote_ids(uuid, text[])', 'EXECUTE') THEN
+    RAISE EXCEPTION 'E4 FAIL: grants';
+  END IF;
+  RAISE NOTICE 'E4 ok: TEvo event row queued; remote_ids % and % (stable, never reused); service role only', a, c;
+END $$;
+
+-- E5 -------------------------------------------------------------------------
+UPDATE public.exos_distribution_listings SET status = 'failed', error = 'Ticket Evolution: waiting for Exos staff to link this event'
+ WHERE event_id = '8e000000-0000-0000-0000-0000000000e1' AND channel = 'evo' AND tier_id IS NULL;
+INSERT INTO public.exos_channel_event_links(event_id,org_id,channel,status,method,confidence,candidates)
+VALUES ('8e000000-0000-0000-0000-0000000000e1','8e000000-0000-0000-0000-000000000001','evo','review','auto_match',0.7,
+  '[{"external_event_id":"2204331","name":"TE Show","score":0.9}]');
+SELECT set_config('app.uid','8e000000-0000-0000-0000-0000000000a0',true);
+SET LOCAL ROLE authenticated;
+DO $$
+BEGIN
+  IF public.exos_link_channel_event('8e000000-0000-0000-0000-0000000000e1','evo','2204331') <> 'linked' THEN
+    RAISE EXCEPTION 'E5 FAIL: not linked';
+  END IF;
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  IF (SELECT status FROM public.exos_distribution_listings
+       WHERE event_id = '8e000000-0000-0000-0000-0000000000e1' AND channel = 'evo' AND tier_id IS NULL) <> 'pending' THEN
+    RAISE EXCEPTION 'E5 FAIL: TEvo event row not re-queued';
+  END IF;
+  RAISE NOTICE 'E5 ok: linking the TEvo event re-queues its row';
 END $$;
 
 ROLLBACK;

@@ -74,7 +74,7 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
-import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
@@ -1747,6 +1747,7 @@ export default function EditEvent() {
                gametimeStatus(eventRow('gametime'), { ...ev, ticked: nets.includes('gametime') }),
                goTicketsStatus(eventRow('gotickets'), { ...ev, ticked: nets.includes('gotickets') }),
                vividStatus(eventRow('vivid'), { ...ev, ticked: nets.includes('vivid') }),
+               tevoStatus(eventRow('evo'), { ...ev, ticked: nets.includes('evo') }),
              ].filter((st): st is NonNullable<typeof st> => !!st);
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
@@ -1754,7 +1755,7 @@ export default function EditEvent() {
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}
-               channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
+               channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
                tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
                rows={marketRows}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}

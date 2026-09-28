@@ -3,7 +3,7 @@
 // Every call carries X-Token (the API token) and X-Signature: base64 of
 // HMAC-SHA256(secret, string-to-sign), where the string to sign is
 //   "<METHOD> <host><path>?<query>"   for GET / DELETE (query sorted by key)
-//   "<METHOD> <host><path>?<body>"    for POST / PUT (the exact JSON sent)
+//   "<METHOD> <host><path>?<body>"    for POST / PUT / PATCH (the exact JSON sent)
 // VERIFY IN SANDBOX: this is TEvo v9's documented scheme as we know it; the
 // pages the operator supplied (docs/marketplace/tevo/README.md) show the
 // headers but not how the signature is made. signatureBase() is the one
@@ -110,7 +110,7 @@ export async function execute(cfg: TransportConfig, ep: Endpoint, parts: Request
   if (!c.token || !c.secret) throw new Error('tevo: no API token or secret');
   const path = buildPath(ep.path, parts.path);
   const query = toQueryString(parts.query);
-  const hasBody = ep.method === 'POST' || ep.method === 'PUT';
+  const hasBody = ep.method === 'POST' || ep.method === 'PUT' || ep.method === 'PATCH';
   const body = hasBody ? JSON.stringify(parts.json ?? {}) : undefined;
   const url = cfg.baseUrl + path + (query ? `?${query}` : '');
   const signature = await hmacSha256Base64(c.secret, signatureBase(ep.method, cfg.baseUrl, path, hasBody ? body! : query));

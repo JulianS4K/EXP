@@ -9,11 +9,15 @@
 //     update), approved = go. Nothing is accepted before that.
 //
 // The account can carry broker orders; only items whose ticket group
-// carries an Exos listing id ("ex…", ../listingIds.ts) are Exos's. Which
-// ticket-group field holds it depends on how the listing is sent to TEvo
-// (not documented yet), so every string field of the ticket group is checked.
+// carries an Exos listing id ("ex…", ../listingIds.ts) are Exos's. Exos
+// lists with the id in internal_notes and a numeric remote_id
+// (listingPlan.ts). Which of them an order's ticket group echoes isn't
+// documented, so exos-marketplace-sales maps remote_id to the listing id
+// (exos_tevo_remote_ids) and writes it on the ticket group as
+// exos_listing_id (annotateTevoOrder), and every string field is checked.
 
 import { isExosListingId } from '../listingIds.ts';
+import { isExosTevoRemoteId } from './listingPlan.ts';
 import type { TevoOrder, TevoOrderItem } from './types.ts';
 
 export const TEVO_OFFICE_BUYER_ID = 6;
@@ -45,10 +49,43 @@ export function fraudGate(o: TevoOrder): TevoFraudGate {
 export function exosListingRef(item: TevoOrderItem | undefined): string | null {
   const tg = item?.ticket_group;
   if (!tg || typeof tg !== 'object') return null;
-  for (const v of Object.values(tg)) {
+  for (const v of [tg.exos_listing_id, ...Object.values(tg)]) {
     if (typeof v === 'string' && isExosListingId(v.trim())) return v.trim();
   }
   return null;
+}
+
+/** An Exos remote_id on an item's ticket group (a number from exos_tevo_remote_ids), or null. */
+export function tevoRemoteId(item: TevoOrderItem | undefined): number | null {
+  const v = item?.ticket_group?.remote_id;
+  return isExosTevoRemoteId(v) ? Number(v) : null;
+}
+
+/** Every Exos remote_id in these orders, to look up once. */
+export function tevoRemoteIds(orders: TevoOrder[]): number[] {
+  const out = new Set<number>();
+  for (const o of orders) for (const it of o?.items ?? []) {
+    const r = tevoRemoteId(it);
+    if (r != null) out.add(r);
+  }
+  return [...out];
+}
+
+/**
+ * The order with exos_listing_id on each ticket group whose remote_id is an
+ * Exos listing's (byRemoteId: remote_id -> listing id). A new object; items
+ * without one are left as they are.
+ */
+export function annotateTevoOrder(o: TevoOrder, byRemoteId: ReadonlyMap<number, string>): TevoOrder {
+  if (!o || !Array.isArray(o.items)) return o;
+  return {
+    ...o,
+    items: o.items.map((it) => {
+      const r = tevoRemoteId(it);
+      const listing = r != null ? byRemoteId.get(r) : undefined;
+      return listing && isExosListingId(listing) ? { ...it, ticket_group: { ...it.ticket_group, exos_listing_id: listing } } : it;
+    }),
+  };
 }
 
 /** The buyer's email on a Client sale (TEvo's own purchases carry none), lower-cased, or null. */

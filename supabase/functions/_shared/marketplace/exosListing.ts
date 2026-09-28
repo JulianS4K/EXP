@@ -48,6 +48,8 @@ export const EXOS_LISTING_NOTES =
  *   gotickets  stockType MOBILE_TICKETS (fulfilled with SUBMIT_TRANSFER_URL)
  *   vivid      stockType ELECTRONIC with electronicTransfer (Vivid has no
  *              mobile-transfer stock type; TMET is Ticketmaster's own)
+ *   evo        format TM_mobile (delivered as a TMMobileLink / TMMobile
+ *              shipment: the claim link, tevo/fulfilment.ts)
  */
 export const EXOS_TRANSFER_STOCK = {
   stubhub: ['MobileTransfer', 'ElectronicTransfer'],
@@ -55,6 +57,7 @@ export const EXOS_TRANSFER_STOCK = {
   gametime: 'mobile_transfer',
   gotickets: 'MOBILE_TICKETS',
   vivid: 'ELECTRONIC',
+  evo: 'TM_mobile',
 } as const;
 
 export interface ExosAllocation {
@@ -111,7 +114,7 @@ export interface PlannedListingEntry<B = unknown> {
 }
 
 export interface PlannedMarketplaceListings<B = unknown> {
-  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid';
+  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid' | 'evo';
   listings: Array<PlannedListingEntry<B>>;
   per_order_cap: number;
   /** Fields the plan couldn't fill without guessing. */

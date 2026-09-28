@@ -56,7 +56,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260928040000_exos_marketplace_scarcity \
          20260928050000_exos_guest_checkout \
          20260928060000_exos_voucher_discounts_quota_editor \
-         20260928070000_exos_tevo_channel; do
+         20260928070000_exos_tevo_channel \
+         20260928080000_exos_tevo_inventory; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -119,7 +120,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260928040000_exos_marketplace_scarcity \
          20260928050000_exos_guest_checkout \
          20260928060000_exos_voucher_discounts_quota_editor \
-         20260928070000_exos_tevo_channel; do
+         20260928070000_exos_tevo_channel \
+         20260928080000_exos_tevo_inventory; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

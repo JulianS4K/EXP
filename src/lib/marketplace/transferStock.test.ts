@@ -5,6 +5,7 @@ import { planSeatGeekListings } from './seatgeek';
 import { planGametimeListings } from './gametime';
 import { planGoTicketsListings } from './gotickets';
 import { planVividListings } from './vivid';
+import { planTevoListings } from './tevo';
 
 const A: ExosAllocation = {
   id: '0f8fad5b-d9cb-469f-a165-70867728950e',
@@ -26,6 +27,7 @@ describe('every marketplace lists Exos tickets as mobile or electronic transfer'
     expect(body(planGametimeListings(A))).toMatchObject({ Stock: 'mobile_transfer', edelivery_ind: 'Y' });
     expect(body(planGoTicketsListings(A))).toMatchObject({ stockType: 'MOBILE_TICKETS' });
     expect(body(planVividListings(A))).toMatchObject({ stockType: 'ELECTRONIC', electronicTransfer: true });
-    expect(Object.keys(EXOS_TRANSFER_STOCK).sort()).toEqual(['gametime', 'gotickets', 'seatgeek', 'stubhub', 'vivid']);
+    expect(body(planTevoListings(A))).toMatchObject({ inventory: { ticket: { format: 'TM_mobile' } } });
+    expect(Object.keys(EXOS_TRANSFER_STOCK).sort()).toEqual(['evo', 'gametime', 'gotickets', 'seatgeek', 'stubhub', 'vivid']);
   });
 });

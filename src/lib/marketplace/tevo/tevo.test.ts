@@ -43,11 +43,11 @@ const officeOrder = (over: Partial<TevoOrder> = {}): TevoOrder => ({
 
 describe('endpoints', () => {
   it('buying, etickets and physical delivery are never sendable', () => {
-    for (const k of ['createOrder', 'addEtickets', 'finalizeEtickets', 'removeEtickets', 'deliverEtickets'] as const) {
+    for (const k of ['createOrder', 'addEtickets', 'finalizeEtickets', 'removeEtickets', 'deliverEtickets', 'bulkUpdateInventory', 'bulkDeleteInventory'] as const) {
       expect(TEVO_ENDPOINTS[k].access).toBe('forbidden');
     }
     expect(TEVO_ENDPOINTS.acceptOrder).toMatchObject({ method: 'POST', path: '/v9/orders/{order_id}/accept', access: 'write' });
-    expect(TEVO_WRITE_ROADMAP.flatMap((p) => p.endpoints)).toEqual(['acceptOrder', 'updateShipment', 'completeShipment']);
+    expect(TEVO_WRITE_ROADMAP.flatMap((p) => p.endpoints)).toEqual(['createInventory', 'updateInventory', 'deleteInventory', 'acceptOrder', 'updateShipment', 'completeShipment']);
   });
 });
 

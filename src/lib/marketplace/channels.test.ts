@@ -160,7 +160,7 @@ describe('channelsFromEnv', () => {
     const none = channelsFromEnv(() => undefined);
     expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo']);
     // TEvo has no event search yet, so the link pass skips it.
-    expect(none.get('evo')!.capabilities).toMatchObject({ findEvents: false, listings: false, fulfilByUrls: true });
+    expect(none.get('evo')!.capabilities).toMatchObject({ findEvents: false, listings: true, fulfilByUrls: true });
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
     expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
     expect(none.get('vivid')!.capabilities.findEvents).toBe(false);

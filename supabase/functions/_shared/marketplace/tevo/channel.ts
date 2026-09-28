@@ -1,8 +1,9 @@
 // Ticket Evolution as a MarketplaceChannel (../channel.ts), channel id 'evo'.
-//   link    none yet: TEvo's event search isn't in the supplied pages
+//   link    none yet: TEvo's event search isn't in the supplied pages, so
+//           staff link the event by hand (exos_channel_event_links)
 //   create  none
-//   list    not yet: how a seller puts inventory on TEvo (ticket groups or a
-//           POS feed) isn't in the supplied pages
+//   list    Inventory / Create, one ticket group per Exos listing
+//           (listingPlan.ts), planned by exos-distribute, dry-run
 //   sell    GET /v9/orders polled (webhooks and Order Integration later,
 //           once their payloads are supplied) -> MarketplaceSale
 //   fulfil  accept, then a mobile transfer: one link for one ticket, the
@@ -72,7 +73,7 @@ export function evoChannel(opts: { reviewerId?: number | null } = {}): Marketpla
   return {
     id: 'evo',
     label: 'Ticket Evolution',
-    capabilities: { findEvents: false, createEvent: false, listings: false, fulfilByUrls: true, displayQuantityCap: false },
+    capabilities: { findEvents: false, createEvent: false, listings: true, fulfilByUrls: true, displayQuantityCap: false },
     normalizeSale: normalizeTevoOrder,
     planFulfilByUrls(sale: MarketplaceSale, claimUrls: string[], seats?: number[]): PlannedRequest[] {
       return planTevoDelivery({ orderId: sale.externalOrderId, quantity: sale.quantity, claimUrls, reviewerId: opts.reviewerId, seats });
