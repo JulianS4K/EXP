@@ -34,6 +34,40 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key' }}
         run: npm run build
 
+  edge-functions:
+    name: Edge functions (deno check + Deno tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The edge functions are Deno and excluded from the Node tsconfig: the
+    # parts shared with the app (_shared/marketplace, pricing, scrub) are
+    # type-checked by `npm run lint`, but each function's index.ts only here.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: deno check every supabase/functions/*/index.ts
+        # SKIP lists functions that can't type-check for environmental
+        # reasons (name + why). None today: all of them check against their
+        # real esm.sh imports. --node-modules-dir=none: the repo root's
+        # package.json is the app's, not the functions'.
+        run: |
+          SKIP=""
+          fail=0
+          for f in supabase/functions/*/index.ts; do
+            fn=$(basename "$(dirname "$f")")
+            case " $SKIP " in *" $fn "*) echo "::notice::skipped $fn (see SKIP)"; continue;; esac
+            echo "::group::$fn"
+            deno check --node-modules-dir=none "$f" || { echo "::error::$fn does not type-check"; fail=1; }
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: Deno tests (_shared/ssrf_test.ts)
+        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts
+
   smoke:
     name: Browser smoke (mocked Supabase)
     runs-on: ubuntu-latest
@@ -125,3 +159,6 @@ jobs:
         run: |
           bad=$(ls supabase/migrations/*.sql | xargs -n1 basename | grep -vi exos || true)
           if [ -n "$bad" ]; then echo "::error::migration names must contain 'exos': $bad"; exit 1; fi
+
+      - name: Every recent migration is applied and replayed by run_p0.sh
+        run: bash scripts/check-migrations.sh

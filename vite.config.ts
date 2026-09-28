@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -11,6 +12,12 @@ export default defineConfig(() => {
     // <BrowserRouter basename="/bridge"> in App.tsx.
     base: '/bridge/',
     plugins: [react(), tailwindcss()],
+    test: {
+      // .claude/** holds agent worktrees (full copies of the repo): without
+      // this, a local `npm test` runs every test once per worktree.
+      // vitest's defaults, spelled out so the build never loads vitest.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/.{idea,git,cache,output,temp}/**', '.claude/**'],
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
