@@ -1506,7 +1506,7 @@ export default function EditEvent() {
              <MarketplaceGrid
                eventId={eventId}
                channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
-               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity, price: effectiveTierPrice(Number(t.price) || 0, t.priceSchedule) }))}
+               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity, price: effectiveTierPrice(Number(t.price) || 0, t.priceSchedule), split: t.marketSplit ?? 'any' }))}
                rows={marketRows}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
                onSaved={() => { void loadMarketRows(eventId); }}

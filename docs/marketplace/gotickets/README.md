@@ -65,7 +65,7 @@ Same marketplace sync as the others (migration `20260928020000`; see
    - blocks of at most the max per order;
    - `externalTicketId` = the `ex…` listing id;
    - `lowSeat` / `highSeat` = the block's internal seats, row `GA`;
-   - `splitType` ANY, `stockType` MOBILE_TICKETS, `price` / `faceValue`;
+   - `splitType` (+ `splitValuesSet`) from the ticket type's split policy, `stockType` MOBILE_TICKETS, `price` / `faceValue`;
    - `inHandDate` = the event day.
 
    Plans are created in batches of up to 100, updated with a full PUT by

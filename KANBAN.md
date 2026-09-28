@@ -25,6 +25,15 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Marketplace listing standard 2026-09-29
+
+- 🟡 **Split policy + listing ids** (`listingStandard.ts`, `20260929061000_exos_market_split`, authored, not
+  applied): one split per ticket type (any / don't leave one / pairs / all together) sent to StubHub, SeatGeek,
+  Gametime, GoTickets, Vivid and TEvo in their own enums (custom lists end at the quantity; pairs listings are even).
+  Every planner checks the `ex…` listing id against the marketplace's field and limit; `LISTING_FIELD_MAP` is the
+  per-marketplace field table, tested against every planner. Apply the migration before deploying exos-distribute.
+  Open: confirm Gametime `Splitvalue` and Vivid `splitValue` formats.
+
 ## Exos for AI assistants (MCP) 2026-09-29
 
 - 🟡 **Remote MCP server** (`exos-mcp`, `20260929060000_exos_mcp`, authored, not deployed; `docs/mcp.md`): one

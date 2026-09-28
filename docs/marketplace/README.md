@@ -38,7 +38,7 @@ on so that one Exos model fits all of them (mig `20260927050000`,
 | Our listing id | `external_id` | `seller_listing_id` (≤ 32 chars) | `TicketID` (examples numeric) | `externalTicketId` (≤ 100 chars) | `ticketId` (`internalTicketId` in queries) | `ex<base32 allocation id><n>`, stable across re-plans |
 | Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | no (CUSTOM splits only) | no | **listings of at most max per order** |
 | Seats | optional | required with a row | optional | optional (`lowSeat` / `highSeat`) | optional, can be hidden (`hideSeats`) | internal GA seat numbers per listing; row `GA` |
-| Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | ANY / NEVER_LEAVE_ONE / … | ANY / NEVERLEAVEONE / … | any, within the listing |
+| Split | Any / AvoidOne / Pairs / None | ANY / DONTLEAVEONE / CUSTOM (`splits`) | ANY / NEVERLEAVEONE / CUSTOM (`Splitvalue`) / NOSPLIT | ANY / NEVER_LEAVE_ONE / CUSTOM (`splitValuesSet`) / NO_SPLIT | ANY / NEVERLEAVEONE / CUSTOM (`splitValue`) | **one policy per ticket type** (any, don't leave one, pairs, all together), translated per marketplace (`listingStandard.ts`) |
 | Delivery type | `MobileTransfer`, else `ElectronicTransfer` (from the event's accepted types) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | `ELECTRONIC` + `electronicTransfer` | **mobile transfer, else electronic transfer, everywhere** (`EXOS_TRANSFER_STOCK`); the buyer gets an Exos claim link |
 | Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | full PUT / DELETE by external id (100 per call) | full PUT (Vivid id read back by our id) / DELETE by `internalTicketId` | one diff (create / update / delete) against what the marketplace has |
 | Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | webhooks (unsigned: read back) + `GET /rest/sales` | **polling only**: `GET /v1/getOrders` (XML), `getOrder` | normalized to one `MarketplaceSale` |
@@ -57,6 +57,47 @@ with the event as text (name, venue, venue-local date and time) and a stable
 only renames the fields (StubHub `listingPlan.ts`, SeatGeek `listingPlan.ts`,
 Gametime `inventory.ts`, GoTickets and Vivid Seats `listingPlan.ts`). Blocks are the one
 per-order cap that works on all of them, so StubHub moved from one display-capped listing to the same blocks.
+
+### The listing standard (`_shared/marketplace/listingStandard.ts`)
+
+The event is standardized in `eventStandard.ts` (title, section, category); the
+listing in `listingStandard.ts`:
+
+**Split policy.** One per ticket type (`exos_ticket_tiers.market_split`, mig
+`20260929061000`, set in the Marketplaces grid), sent to every marketplace in its
+own words. A custom list always ends at the listing's quantity (SeatGeek falls
+back to DEFAULT otherwise).
+
+| Exos policy | Buyer can take (listing of 4) | StubHub | SeatGeek | Gametime | GoTickets | Vivid Seats | TEvo |
+|---|---|---|---|---|---|---|---|
+| `any` (default) | 1, 2, 3, 4 | Any | ANY | ANY | ANY | ANY | ANY |
+| `no_single` | 1, 2, 4 | AvoidOne | DONTLEAVEONE | NEVERLEAVEONE | NEVER_LEAVE_ONE | NEVERLEAVEONE | NEVERLEAVEONE |
+| `pairs` | 2, 4 | Pairs | CUSTOM `2,4` | CUSTOM `2:4` | CUSTOM `[2,4]` | CUSTOM `2,4` | CUSTOM `[2,4]` |
+| `together` | 4 | None | CUSTOM `4` | NOSPLIT | NO_SPLIT | CUSTOM `4` | NONE |
+
+Pairs listings are even: blocks are capped at the max per order rounded down to
+even, and the top seat of an odd run is held back (the plan's `notices` say how
+many) until it pairs up. Gametime's `Splitvalue` and Vivid's `splitValue` formats
+aren't documented beyond an example / "string", so a plan with a custom split says
+so in `notices`. Notices never block a writer; `unresolved` does.
+
+**Listing ids.** Every listing carries the Exos id `ex<base32 allocation id><n>`
+(30 to 32 characters, stable across re-plans) and every planner refuses anything
+else (`assertListingId`):
+
+| | Field | Documented limit | Comes back on the sale as |
+|---|---|---|---|
+| StubHub | `external_id` | none | `external_listing_id` |
+| SeatGeek | `seller_listing_id` | 32 | `listing.id` |
+| Gametime | `TicketID` | none (examples numeric) | `source_id` / `listing_reference_id` |
+| GoTickets | `externalTicketId` | 100 | `externalTicketId` |
+| Vivid Seats | `ticketId` | none | `brokerTicketId` |
+| TEvo | `internal_notes` (+ integer `remote_id`, `exos_tevo_remote_ids`) | remote_id: positive int | `remote_id` |
+
+**Fields.** `LISTING_FIELD_MAP` names, per marketplace, the field for each
+standard value (id, quantity, section, row, seats, price, split, split values,
+delivery type, in-hand date, notes); a test checks every planner fills exactly
+those.
 
 **Stored plans** share one shape: `{ channel, listings: [{ listing_id,
 seat_from, seat_thru, quantity, request: { endpoint, method, path, body } }],

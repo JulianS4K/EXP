@@ -10,6 +10,7 @@
 
 import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
+import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
@@ -37,6 +38,7 @@ export function mapTier(t: any): Tier {
     exclusiveTaxPercent: Number(t.exclusive_tax_percent) || 0,
     accessible: t.accessible === true,
     accessibleNote: t.accessible_note || undefined,
+    marketSplit: parseMarketSplit(t.market_split),
   };
 }
 

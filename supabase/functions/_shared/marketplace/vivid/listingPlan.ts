@@ -6,7 +6,8 @@
 // Fields: ticketId = the Exos listing id (Vivid returns it on the order as
 // brokerTicketId; Exos only addresses its listings by it), row "GA",
 // seatFrom / seatThru = the block's internal seats with hideSeats on (GA
-// buyers shouldn't see them), splitType ANY within the block, stockType
+// buyers shouldn't see them), splitType / splitValue from the ticket type's
+// split policy (../listingStandard.ts), stockType
 // ELECTRONIC with electronicTransfer (delivered by URL transfer: the Exos
 // claim link), price, faceValue, inHandDate = the event day.
 // eventName, venue and eventDate (venue-local, no offset) are required;
@@ -16,7 +17,8 @@
 
 import { exosEventRef } from '../channel.ts';
 import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
-import type { VividListing } from './types.ts';
+import { assertListingId, commaSplits, marketSplitFor, splitFormatNotice } from '../listingStandard.ts';
+import type { VividListing, VividSplitType } from './types.ts';
 
 export type VividAllocation = ExosAllocation & {
   /** The linked Vivid event id (exos_channel_event_links), sent as productionId. */
@@ -35,11 +37,15 @@ export function planVividListings(a: VividAllocation): PlannedVividListings {
   const productionId = pid && /^\d+$/.test(pid) ? Number(pid) : undefined;
   const unresolved: string[] = [];
   if (productionId == null) unresolved.push("productionId: not linked to a Vivid event yet; Vivid's mapping team matches it (can be slow)");
+  const notices = [...set.notices];
   const listings = set.listings.map((l) => {
     if (!l.event.local_time) throw new Error("Vivid Seats needs the venue-local start time: set the event's timezone");
+    const split = marketSplitFor('vivid', l.split, l.quantity);
+    const fmt = splitFormatNotice('vivid', split);
+    if (fmt && !notices.includes(fmt)) notices.push(fmt);
     const body: VividListing = {
       ...(productionId != null ? { productionId } : {}),
-      ticketId: l.listing_id,
+      ticketId: assertListingId('vivid', l.listing_id),
       quantity: l.quantity,
       section: l.section,
       row: l.row,
@@ -50,7 +56,8 @@ export function planVividListings(a: VividAllocation): PlannedVividListings {
       price: l.price,
       ...(l.face_value != null ? { faceValue: l.face_value } : {}),
       priceCurrency: 'USD',
-      splitType: 'ANY',
+      splitType: split.type as VividSplitType,
+      ...(split.values ? { splitValue: commaSplits(split.values) } : {}),
       stockType: EXOS_TRANSFER_STOCK.vivid,
       electronic: true,
       electronicTransfer: true,
@@ -64,5 +71,5 @@ export function planVividListings(a: VividAllocation): PlannedVividListings {
     };
     return entryFor(l, { endpoint: 'createListing', method: 'POST', path: '/listings/v2/create', body });
   });
-  return { channel: 'vivid', listings, per_order_cap: set.per_order_cap, unresolved };
+  return { channel: 'vivid', listings, per_order_cap: set.per_order_cap, unresolved, notices };
 }

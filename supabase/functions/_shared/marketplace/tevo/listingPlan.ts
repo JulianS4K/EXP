@@ -7,7 +7,8 @@
 // 20260928080000; TEvo wants a positive integer, unique per office, and
 // hands it back on the order's ticket group), internal_notes = the Exos
 // listing id, row "GA", seats = the block's internal seats (quantity must
-// match), split ANY within the block, format TM_mobile (mobile transfer:
+// match), split_type / split_override from the ticket type's split policy
+// (../listingStandard.ts), format TM_mobile (mobile transfer:
 // delivered with the Exos claim link, fulfilment.ts), in_hand false until
 // the event day, price, face_value. The event goes by TEvo's event id when
 // Exos has the event linked, the office by TEVO_OFFICE_ID; both are
@@ -15,7 +16,8 @@
 // won't send it.
 
 import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
-import type { TevoInventoryBody } from './types.ts';
+import { assertListingId, marketSplitFor } from '../listingStandard.ts';
+import type { TevoInventoryBody, TevoSplitType } from './types.ts';
 
 /** exos_tevo_remote_ids numbers from here up (never a broker POS's range). */
 export const EXOS_TEVO_REMOTE_ID_MIN = 1_900_000_001;
@@ -56,6 +58,7 @@ export function planTevoListings(a: TevoAllocation): PlannedTevoListings {
     const remoteId = a.remoteIds?.[l.listing_id];
     if (!isExosTevoRemoteId(remoteId)) unresolved.push(`remote_id for ${l.listing_id}: not numbered yet (exos_tevo_remote_ids)`);
     const seats = Array.from({ length: l.quantity }, (_, i) => ({ seat: l.seat_from + i }));
+    const split = marketSplitFor('evo', l.split, l.quantity);
     const body: TevoInventoryBody = {
       inventory: {
         event: {
@@ -74,17 +77,18 @@ export function planTevoListings(a: TevoAllocation): PlannedTevoListings {
           section: l.section,
           type: 'EVENT',
           seats,
-          split_type: 'ANY',
+          split_type: split.type as TevoSplitType,
+          ...(split.values ? { split_override: split.values } : {}),
           in_hand: false,
           in_hand_on: l.in_hand_date,
           ...(l.face_value != null ? { face_value: l.face_value } : {}),
           external_notes: l.notes,
-          internal_notes: l.listing_id,
+          internal_notes: assertListingId('evo', l.listing_id),
         },
         venue: { name: l.event.venue },
       },
     };
     return entryFor(l, { endpoint: 'createInventory', method: 'POST', path: '/v9/inventory', body });
   });
-  return { channel: 'evo', listings, per_order_cap: set.per_order_cap, unresolved };
+  return { channel: 'evo', listings, per_order_cap: set.per_order_cap, unresolved, notices: set.notices };
 }

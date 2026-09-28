@@ -6,6 +6,7 @@
 
 import { supabase } from '../supabase';
 import type { MarketplaceRow, StubHubDistributionRow } from './stubhubStatus';
+import type { MarketSplit } from '../../../supabase/functions/_shared/marketplace/listingStandard.ts';
 
 export type AllocationChannel = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid' | 'evo';
 
@@ -65,6 +66,12 @@ export async function setChannelAllocation(eventId: string, channel: AllocationC
  * Exos) or before the ticket type has seats on that marketplace. Resolves to
  * the price the listings will carry.
  */
+/** How marketplace buyers may split this ticket type's listings (mig 20260929061000; RLS: org staff). */
+export async function setMarketSplit(tierId: string, split: MarketSplit): Promise<void> {
+  const { error } = await supabase.from('exos_ticket_tiers').update({ market_split: split }).eq('id', tierId);
+  if (error) throw error;
+}
+
 export async function setChannelPrice(eventId: string, channel: AllocationChannel, tierId: string, price: number | null): Promise<number> {
   const { data, error } = await supabase.rpc('exos_set_channel_price', {
     p_event_id: eventId,

@@ -51,7 +51,7 @@ order, internal seats, stable `ex…` ids), planned by `exos-distribute` into
 | `ticket.internal_notes` | The Exos listing id (`ex…`) |
 | `ticket.format` | `TM_mobile` (mobile transfer; the claim link, below) |
 | `section`, `row`, `seats` | Ticket type name (or section label), `GA`, the block's internal seats (`quantity` = seats) |
-| `split_type` | `ANY` within the block (the block is at most one order) |
+| `split_type` / `split_override` | the ticket type's split policy (`listingStandard.ts`): ANY, NEVERLEAVEONE, CUSTOM `[2,4…]` for pairs, NONE for all together; within the block (at most one order) |
 | `in_hand` / `in_hand_on` | `false` / the event day |
 | `price`, `face_value` | Marketplace price, ticket type price (USD only) |
 | `external_notes` | How delivery works (Exos claim link) |

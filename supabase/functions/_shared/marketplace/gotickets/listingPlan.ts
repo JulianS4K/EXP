@@ -4,8 +4,8 @@
 //
 // Fields (Listing schema): externalTicketId = the Exos listing id (GoTickets
 // passes it through; Exos only ever addresses its listings by it), row "GA"
-// (max 20), lowSeat / highSeat = the block's internal seats, splitType ANY
-// within the block, stockType MOBILE_TICKETS (the buyer gets a transfer URL:
+// (max 20), lowSeat / highSeat = the block's internal seats, splitType /
+// splitValuesSet from the ticket type's split policy (../listingStandard.ts), stockType MOBILE_TICKETS (the buyer gets a transfer URL:
 // the Exos claim link), price = the listing price, faceValue = the ticket
 // type's price, inHandDate = the event day. No eventId: GoTickets maps a
 // listing to its event from eventName / venueName / eventDateTime, helped by
@@ -13,7 +13,8 @@
 // the listing is "unmapped" (still addressable by externalTicketId).
 
 import { EXOS_TRANSFER_STOCK, entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
-import type { GoTicketsListing } from './types.ts';
+import { assertListingId, marketSplitFor } from '../listingStandard.ts';
+import type { GoTicketsListing, GoTicketsSplitType } from './types.ts';
 
 export type GoTicketsAllocation = ExosAllocation & {
   /** Linked marketplace event ids (exos_channel_event_links), to help GoTickets map the event. */
@@ -31,8 +32,9 @@ export function planGoTicketsListings(a: GoTicketsAllocation): PlannedGoTicketsL
   const sh = a.stubhubEventId?.trim();
   const sg = a.seatgeekEventId?.trim();
   const listings = set.listings.map((l) => {
+    const split = marketSplitFor('gotickets', l.split, l.quantity);
     const body: GoTicketsListing = {
-      externalTicketId: l.listing_id,
+      externalTicketId: assertListingId('gotickets', l.listing_id),
       section: l.section.slice(0, 200),
       row: l.row,
       lowSeat: String(l.seat_from),
@@ -40,7 +42,8 @@ export function planGoTicketsListings(a: GoTicketsAllocation): PlannedGoTicketsL
       notes: l.notes,
       quantity: l.quantity,
       instant: false,
-      splitType: 'ANY',
+      splitType: split.type as GoTicketsSplitType,
+      ...(split.values ? { splitValuesSet: split.values } : {}),
       inHandDate: l.in_hand_date,
       stockType: EXOS_TRANSFER_STOCK.gotickets,
       ...(l.face_value != null ? { faceValue: l.face_value } : {}),
@@ -57,6 +60,7 @@ export function planGoTicketsListings(a: GoTicketsAllocation): PlannedGoTicketsL
     channel: 'gotickets',
     listings,
     per_order_cap: set.per_order_cap,
+    notices: set.notices,
     unresolved: ['eventId: GoTickets maps the listing to its event itself (unmapped until it does)'],
   };
 }

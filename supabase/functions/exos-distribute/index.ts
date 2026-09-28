@@ -293,7 +293,7 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
     .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, exos_pool_state, " +
-      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label, price_schedule)`)
+      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label, price_schedule, market_split)`)
     .eq("channel", channel)
     .not("tier_id", "is", null)
     // Holding seats, or allowed to (a pool at 0 while Exos has none free).
