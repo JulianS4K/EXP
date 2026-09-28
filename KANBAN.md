@@ -33,6 +33,16 @@
   `exos_marketplace_fee_rates` gives the realized rate per store. Open: StubHub, Gametime, GoTickets and Vivid rates
   (payout-only data), filled in from Exos's own sales.
 
+## Calendar feeds 2026-09-29
+
+- 🟡 **Subscribe in Google / Apple / Outlook Calendar** (`exos-calendar`, `_shared/calendar/`,
+  `20260929073000_exos_calendar_feeds`, authored, not applied or deployed; `docs/calendar.md`): `.ics` feeds for an
+  organizer (`/org/<slug>.ics`), a venue (`/venue/<key>.ics`, key = venue name + city, merged by Place ID) and one
+  event, plus a private "my events" feed (`/me/<token>.ics`: followed organizers + events I hold tickets for; token
+  hashed at rest, rotate / turn off from My Tickets). Cancellations stay in as `STATUS:CANCELLED`. SPA: Outlook added
+  to "Add to Calendar", "Subscribe to calendar" on organizer pages, "<venue> calendar" on the event page. Next: apply +
+  deploy (operator), then a "subscribe" line in the ticket email.
+
 ## Events on Google (Search / Maps "Tickets") 2026-09-29
 
 - 🟡 **Google events feed** (`exos-google-feed`, `_shared/googleEvents/feed.ts`, authored, not deployed;

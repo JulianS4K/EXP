@@ -17,6 +17,7 @@ import { listSavedEvents } from '../lib/saves';
 import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
+import MyCalendarFeed from '../components/MyCalendarFeed';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
 
 export default function MyTickets() {
@@ -179,6 +180,9 @@ export default function MyTickets() {
             <button className="disp px-8 py-2.5 text-lg tracking-wide text-white/60 hover:text-white transition-colors">{t('tickets.archive')}</button>
           </div>
         </div>
+
+        {/* Personal calendar feed: tickets + followed organizers (docs/calendar.md) */}
+        <MyCalendarFeed className="mb-14" />
 
         {/* Transfer Notifications */}
         {(pendingTransfers.length > 0 || outboundTransfers.length > 0) && (

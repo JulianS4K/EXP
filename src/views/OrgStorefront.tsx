@@ -30,6 +30,8 @@ import { applyMeta } from '../lib/meta';
 import { initOrgPixels } from '../lib/pixels';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import SocialLinks from '../components/SocialLinks';
+import SubscribeCalendar from '../components/SubscribeCalendar';
+import { orgFeedLinks } from '../lib/calendar';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
 
@@ -230,6 +232,9 @@ function StorefrontInner({ org }: ResolvedOrg) {
             </span>
           )}
         </div>
+        {org.slug && (
+          <SubscribeCalendar links={orgFeedLinks(org.slug)} accent={accent} className="mb-8 -mt-4" />
+        )}
 
         {loading ? (
           <div className="text-center text-white/50 py-24 type uppercase tracking-[0.3em] animate-pulse">

@@ -68,7 +68,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929052000_exos_marketplace_pricing \
          20260929060000_exos_mcp \
          20260929061000_exos_market_split \
-         20260929062000_exos_marketplace_fees; do
+         20260929062000_exos_marketplace_fees \
+         20260929073000_exos_calendar_feeds; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -117,6 +118,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketpla
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_market_split.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketplace_fees.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_calendar_feeds.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout_attribution \
   20260924230000_exos_event_geo 20260924233000_exos_promoters 20260924234500_exos_fan_referrals \
@@ -152,7 +154,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929052000_exos_marketplace_pricing \
          20260929060000_exos_mcp \
          20260929061000_exos_market_split \
-         20260929062000_exos_marketplace_fees; do
+         20260929062000_exos_marketplace_fees \
+         20260929073000_exos_calendar_feeds; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
