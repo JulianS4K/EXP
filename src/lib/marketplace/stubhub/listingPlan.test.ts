@@ -54,6 +54,19 @@ describe('planStubHubListing', () => {
     expect(p.listings[0].request.body).toMatchObject({ number_of_tickets: 20, ticket_price: { amount: 55, currency_code: 'USD' }, seating: { section: 'Floor' } });
   });
 
+  it('never lists below the ticket type\'s Exos price (a stale lower marketplace price is lifted)', () => {
+    const p = planStubHubListing({
+      ...A, unit_price: '30', tier: { name: 'GA', price: 40, section_label: 'Floor' },
+      event: { ...A.event!, purchase_limits: null }, stubhubEventId: '1',
+    });
+    expect(p.listings[0].request.body).toMatchObject({ ticket_price: { amount: 40 } });
+    const blank = planStubHubListing({
+      ...A, unit_price: null, tier: { name: 'GA', price: 40, section_label: 'Floor' },
+      event: { ...A.event!, purchase_limits: null }, stubhubEventId: '1',
+    });
+    expect(blank.listings[0].request.body).toMatchObject({ ticket_price: { amount: 40 } });
+  });
+
   it('refuses what it cannot list', () => {
     expect(() => planStubHubListing({ ...A, tier: null })).toThrow(/ticket type/);
     expect(() => planStubHubListing({ ...A, requested_qty: 0, stubhubEventId: '1' })).toThrow(/nothing allocated to StubHub/);

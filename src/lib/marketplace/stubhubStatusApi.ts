@@ -9,7 +9,7 @@ import type { MarketplaceRow, StubHubDistributionRow } from './stubhubStatus';
 
 export type AllocationChannel = 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets' | 'vivid' | 'evo';
 
-const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats, sell_cap, sold_qty, list_qty, exos_pool_state';
+const COLS = 'channel, tier_id, status, error, external_event_id, planned_request, planned_listing, last_synced_at, requested_qty, internal_seats, sell_cap, sold_qty, list_qty, exos_pool_state, unit_price';
 
 /** Every StubHub / SeatGeek / Gametime row of the event. */
 export async function getMarketplaceRows(eventId: string): Promise<MarketplaceRow[]> {
@@ -56,4 +56,22 @@ export async function setChannelAllocation(eventId: string, channel: AllocationC
   });
   if (error) throw error;
   return data as number;
+}
+
+/**
+ * The organizer's price on one marketplace for one ticket type
+ * (exos_set_channel_price, mig 20260929052000); null = the ticket type's
+ * price. Refused below what Exos charges for it (listings never undercut
+ * Exos) or before the ticket type has seats on that marketplace. Resolves to
+ * the price the listings will carry.
+ */
+export async function setChannelPrice(eventId: string, channel: AllocationChannel, tierId: string, price: number | null): Promise<number> {
+  const { data, error } = await supabase.rpc('exos_set_channel_price', {
+    p_event_id: eventId,
+    p_channel: channel,
+    p_tier_id: tierId,
+    p_unit_price: price,
+  });
+  if (error) throw error;
+  return Number(data);
 }

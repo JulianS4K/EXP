@@ -13,8 +13,8 @@ import {
   type MarketplaceOrder,
 } from '../lib/marketplace/linksApi';
 import { useToast } from '../context/ToastContext';
-import { setChannelAllocation, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
-import { allocationCellStatus, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { setChannelAllocation, setChannelPrice, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
+import { allocationCellStatus, parseMarketplacePrice, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { formatSeatRanges, parseSeatRanges } from '../lib/marketplace';
 
 const LABEL: Record<string, string> = {
@@ -189,14 +189,17 @@ export function MarketplaceOrders({ eventId }: { eventId: string }) {
  * the marketplace listings carry exactly that many. Setting 0 takes the
  * listing down, then gives the seats back. The seat numbers shown are
  * internal (general admission has none; SeatGeek needs them): buyers never
- * see them.
+ * see them. Each cell also takes an optional price (blank = the ticket
+ * type's price); it can't be below what Exos charges (checked here and
+ * enforced by exos_set_channel_price).
  */
 export function MarketplaceGrid({
   eventId, channels, tiers, rows, maxPerOrder, onSaved,
 }: {
   eventId: string;
   channels: AllocationChannel[];
-  tiers: Array<{ id: string; name: string; capacity: number }>;
+  /** price: what Exos charges for it now (scheduled step included): the marketplace floor. */
+  tiers: Array<{ id: string; name: string; capacity: number; price: number }>;
   rows: MarketplaceRow[];
   /** The event's max per order: what one marketplace order can take. */
   maxPerOrder: number | null;
@@ -209,7 +212,13 @@ export function MarketplaceGrid({
     return r && r.status !== 'delisted' && r.status !== 'failed' ? r.sell_cap ?? r.requested_qty ?? 0 : 0;
   };
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [priceDraft, setPriceDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const currentPrice = (ch: string, tierId: string): string => {
+    const p = rowFor(ch, tierId)?.unit_price;
+    return p === null || p === undefined || p === '' ? '' : String(Number(p));
+  };
+  const priceValue = (ch: AllocationChannel, tierId: string) => priceDraft[`${ch}:${tierId}`] ?? currentPrice(ch, tierId);
   if (!tiers.length || !channels.length) return null;
   const key = (ch: string, tierId: string) => `${ch}:${tierId}`;
   const value = (ch: AllocationChannel, tierId: string) => draft[key(ch, tierId)] ?? String(current(ch, tierId));
@@ -228,7 +237,20 @@ export function MarketplaceGrid({
         if (n !== current(ch, t.id)) changes.push({ ch, tierId: t.id, n });
       }
     }
-    if (!changes.length) {
+    const priceChanges: Array<{ ch: AllocationChannel; tierId: string; price: number | null }> = [];
+    for (const ch of channels) {
+      for (const t of tiers) {
+        const raw = priceDraft[key(ch, t.id)];
+        if (raw === undefined || raw.trim() === currentPrice(ch, t.id)) continue;
+        const p = parseMarketplacePrice(raw, t.price);
+        if ('error' in p) {
+          toast({ kind: 'error', message: `${t.name} price on ${LABEL[ch]}: ${p.error}.` });
+          return;
+        }
+        priceChanges.push({ ch, tierId: t.id, price: p.price });
+      }
+    }
+    if (!changes.length && !priceChanges.length) {
       toast({ kind: 'info', message: 'Nothing changed.' });
       return;
     }
@@ -242,11 +264,22 @@ export function MarketplaceGrid({
         failed.push(`${tier} on ${LABEL[c.ch]}: ${err instanceof Error ? err.message.replace(/^exos_set_channel_allocation: /, '') : 'not saved'}`);
       }
     }
+    // Prices after seats: a price needs the ticket type's row on that marketplace.
+    for (const c of priceChanges) {
+      try {
+        await setChannelPrice(eventId, c.ch, c.tierId, c.price);
+      } catch (err) {
+        const tier = tiers.find((t) => t.id === c.tierId)?.name ?? 'ticket type';
+        failed.push(`${tier} price on ${LABEL[c.ch]}: ${err instanceof Error ? err.message.replace(/^exos_set_channel_price: /, '') : 'not saved'}`);
+      }
+    }
+    const total = changes.length + priceChanges.length;
     setBusy(false);
     setDraft({});
+    setPriceDraft({});
     onSaved();
     if (failed.length) toast({ kind: 'error', message: failed.join(' · ') });
-    else toast({ kind: 'success', message: `Marketplace seats saved (${changes.length} change${changes.length === 1 ? '' : 's'}).` });
+    else toast({ kind: 'success', message: `Marketplace seats and prices saved (${total} change${total === 1 ? '' : 's'}).` });
   };
 
   const tone = { muted: 'text-white/40', info: 'text-white/60', ok: 'text-brand-primary', warn: 'text-amber-400' } as const;
@@ -257,7 +290,9 @@ export function MarketplaceGrid({
         The most each marketplace sells, per ticket type: GA on one, VIP on all, or 0 to keep a ticket type off a
         marketplace. "Same on all" copies the first column across. Each one holds only a few seats at a time (twice your max per order)
         and is topped up from the free seats as it sells, so the event is live everywhere while Exos sells the rest, and a
-        seat is never on sale in two places. 0 takes the listing down and gives its seats back.
+        seat is never on sale in two places. 0 takes the listing down and gives its seats back. The price under each
+        number is what that marketplace lists it at: leave it blank for the ticket price. It can be higher, never lower
+        than what Exos charges.
         {maxPerOrder
           ? ` One marketplace order can take at most ${maxPerOrder} (your max per order).`
           : ' Set a max per order to stop one marketplace order taking them all.'}
@@ -275,7 +310,7 @@ export function MarketplaceGrid({
               <tr key={t.id} className="border-t border-white/10 align-top">
                 <td className="py-2 pr-3">
                   <span className="text-white">{t.name}</span>
-                  <span className="block text-white/40">{t.capacity} total</span>
+                  <span className="block text-white/40">{t.capacity} total · {t.price.toFixed(2)} on Exos</span>
                   {channels.length > 1 && (
                     <button
                       type="button" disabled={busy}
@@ -300,6 +335,13 @@ export function MarketplaceGrid({
                         onChange={(e) => setDraft({ ...draft, [key(ch, t.id)]: e.target.value })}
                         className="w-20 bg-black border border-white/20 px-2 py-1 text-white disabled:opacity-50"
                       />
+                      <input
+                        type="text" inputMode="decimal" aria-label={`${t.name} price on ${LABEL[ch]}`}
+                        placeholder={t.price.toFixed(2)} title="Price on this marketplace; blank = the ticket price"
+                        value={priceValue(ch, t.id)} disabled={busy || r?.status === 'delisting'}
+                        onChange={(e) => setPriceDraft({ ...priceDraft, [key(ch, t.id)]: e.target.value })}
+                        className="mt-1 block w-20 bg-black border border-white/10 px-2 py-1 text-white placeholder:text-white/30 disabled:opacity-50"
+                      />
                       {st && <span role="status" className={`block mt-1 ${tone[st.tone]}`}>{st.text}</span>}
                       {pool && <span className="block mt-1 text-white/50">{pool}</span>}
                       {seats && <span className="block mt-1 text-white/30">Internal seats {seats}</span>}
@@ -313,7 +355,7 @@ export function MarketplaceGrid({
       </div>
       <button type="button" onClick={save} disabled={busy}
         className="px-4 py-2 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
-        {busy ? 'Saving…' : 'Save marketplace seats'}
+        {busy ? 'Saving…' : 'Save marketplace seats and prices'}
       </button>
     </div>
   );

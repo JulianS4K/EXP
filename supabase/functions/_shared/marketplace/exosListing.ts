@@ -30,6 +30,7 @@
 // exos_claim_internal_seat) and the sync (./sync.ts) read only the shared
 // fields.
 
+import { effectiveTierPrice } from '../pricing.ts';
 import { exosEventRef, localDate, type ExosEventRowForChannels } from './channel.ts';
 import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, stableListingNumbers } from './listingIds.ts';
 import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
@@ -66,7 +67,8 @@ export interface ExosAllocation {
   requested_qty: number | null;
   /** Listing price; the ticket type's price when unset. */
   unit_price: number | string | null;
-  tier: { name: string; price: number | string; section_label?: string | null } | null;
+  /** price_schedule: the ticket type's time steps (the Exos price now is effectiveTierPrice). */
+  tier: { name: string; price: number | string; section_label?: string | null; price_schedule?: unknown } | null;
   event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
   /** exos_distribution_listings.internal_seats: one number per held seat. */
   internal_seats: string | SeatRun[] | null;
@@ -156,9 +158,14 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
   const held = a.requested_qty ?? 0;
   const qty = a.list_qty ?? held;
   if (!Number.isInteger(qty) || qty <= 0) throw new Error(`nothing allocated to ${label}`);
-  const price = Number(a.unit_price ?? a.tier.price);
-  if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
   const face = Number(a.tier.price);
+  // The organizer's marketplace price (exos_set_channel_price), never below
+  // what Exos charges for the ticket type now (its scheduled price), even if
+  // that went up after the marketplace price was set. Blank = the Exos price.
+  const exosNow = effectiveTierPrice(face, a.tier.price_schedule ?? []);
+  const custom = a.unit_price === null || a.unit_price === undefined || a.unit_price === '' ? NaN : Number(a.unit_price);
+  const price = Number.isFinite(custom) && custom > exosNow ? custom : exosNow;
+  if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
   const section = (a.tier.section_label || a.tier.name || '').trim().slice(0, 127);
   if (!section) throw new Error('the ticket type has no name to use as the section');
   const all = parseSeatRanges(a.internal_seats);

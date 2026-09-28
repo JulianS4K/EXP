@@ -29,6 +29,23 @@ export interface StubHubDistributionRow {
    * closed (3 hours before doors) | stagnant | scarce | selling | normal | fixed.
    */
   exos_pool_state?: string | null;
+  /** The organizer's marketplace price (mig 20260929052000); null = the ticket type's price. */
+  unit_price?: number | string | null;
+}
+
+/**
+ * A price cell of the Marketplaces grid: blank = the ticket type's price
+ * (null); otherwise a positive amount, at least what Exos charges for it
+ * (the server enforces the same floor).
+ */
+export function parseMarketplacePrice(raw: string, exosPrice: number): { ok: true; price: number | null } | { ok: false; error: string } {
+  const t = raw.trim().replace(/^\$/, '');
+  if (t === '') return { ok: true, price: null };
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return { ok: false, error: 'enter a price like 45 or 45.50, or leave it blank for the ticket price' };
+  const n = Number(t);
+  if (n <= 0) return { ok: false, error: 'the price must be above 0' };
+  if (n < exosPrice) return { ok: false, error: `at least ${exosPrice.toFixed(2)}: marketplace listings never undercut the Exos price` };
+  return { ok: true, price: n === exosPrice ? null : n };
 }
 
 /** What scarcity mode is doing with a pool, for the grid; null when nothing special. */

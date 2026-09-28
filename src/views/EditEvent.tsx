@@ -77,6 +77,7 @@ import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
+import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
@@ -1501,11 +1502,11 @@ export default function EditEvent() {
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
-             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
+             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}:${r.unit_price ?? ''}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}
                channels={(['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo'] as const).filter((ch) => (eventData.distributionNetworks || []).includes(ch))}
-               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity }))}
+               tiers={(eventData.ticketTiers || []).filter((t) => t.id && t.capacity > 0 && !tableCfg[t.id]?.isTable).map((t) => ({ id: t.id, name: t.name, capacity: t.capacity, price: effectiveTierPrice(Number(t.price) || 0, t.priceSchedule) }))}
                rows={marketRows}
                maxPerOrder={maxPerOrderFromLimits(eventData.purchaseLimits)}
                onSaved={() => { void loadMarketRows(eventId); }}
