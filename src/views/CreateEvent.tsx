@@ -1564,7 +1564,7 @@ export default function CreateEvent() {
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <ShieldCheck className="text-brand-primary w-5 h-5" />
-              <h3 className="disp text-lg uppercase tracking-wide text-white">Purchase Controls</h3>
+              <h3 className="disp text-lg uppercase tracking-wide text-white">Purchase limits</h3>
            </div>
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

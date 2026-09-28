@@ -712,11 +712,11 @@ export default function EditEvent() {
       })()}
 
       <form onSubmit={handleSubmit} className="space-y-12">
-        {/* Core Identity */}
+        {/* Event details */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Type className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Core Identity</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Event details</h2>
            </div>
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -830,7 +830,7 @@ export default function EditEvent() {
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <MapPin className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Logistics & Seating Manifest</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Venue &amp; seating</h2>
            </div>
 
            {/* Timing controls — Date / Doors / Show Start / Show End.
@@ -1061,7 +1061,7 @@ export default function EditEvent() {
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <ShieldCheck className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Purchase Controls</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Purchase limits</h2>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1115,7 +1115,7 @@ export default function EditEvent() {
            <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-3">
                  <ListOrdered className="text-brand-primary w-5 h-5" />
-                 <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Inventory Configuration</h2>
+                 <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Ticket types</h2>
               </div>
               <button 
                 type="button" 
@@ -1345,7 +1345,7 @@ export default function EditEvent() {
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Palette className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Branding Engine</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Look &amp; feel</h2>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1523,7 +1523,7 @@ export default function EditEvent() {
           disabled={saving}
           className="w-full bg-brand-primary text-black py-6 font-black uppercase italic tracking-tighter text-xs hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
         >
-          {saving ? 'Synchronizing Manifest...' : 'Commit Changes to Ledger'}
+          {saving ? 'Saving…' : 'Save changes'}
         </button>
 
         {/*
