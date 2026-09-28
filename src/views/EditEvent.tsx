@@ -1715,6 +1715,10 @@ export default function EditEvent() {
              Sell this event's own tickets on marketplaces too, at the price you set. Tick the ones to use, then choose how
              many seats of each ticket type each one gets below: GA on StubHub only, VIP everywhere, anything in between.
            </p>
+           <p className="type text-xs text-white/60 leading-relaxed -mt-4 border-l-2 border-brand-secondary pl-3">
+             Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
+             per marketplace later, so nothing is listed or sold there today.
+           </p>
 
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (

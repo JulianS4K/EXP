@@ -1882,6 +1882,10 @@ export default function CreateEvent() {
            </div>
 
            <p className="type text-xs text-white/50 leading-relaxed">Also sell this event's tickets on these marketplaces. After you save, Edit event lets you choose how many seats of each ticket type each one gets (for example GA on StubHub only, VIP everywhere).</p>
+           <p className="type text-xs text-white/60 leading-relaxed border-l-2 border-brand-secondary pl-3">
+             Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
+             per marketplace later, so nothing is listed or sold there today.
+           </p>
            
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (
