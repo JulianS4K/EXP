@@ -1,11 +1,12 @@
 -- ============================================================================
 -- Migration 20260929062000 — Exos (Bridge / D4): what each marketplace sale
--- was listed at, and the fee the marketplace took
+-- was listed at, the fee the marketplace took, and the Exos fee
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  W: exos_marketplace_orders (+list_unit_price, +marketplace_fee,
---              BEFORE trigger)
---           C: FUNCTION exos_listing_unit_price, exos_tg_marketplace_fee;
+--              +exos_fee, +organizer_net, BEFORE trigger)
+--           C: FUNCTION exos_platform_fee_bps, exos_listing_unit_price,
+--              exos_tg_marketplace_fee;
 --              VIEW exos_marketplace_fee_rates
 -- Pre-reqs: 20260929061000, 20260927050000 (listing_ref)
 --
@@ -23,18 +24,35 @@
 -- 180 days, to confirm the known rates and learn the others. The buyer's
 -- price (the marketplace's own markup on top) isn't visible and isn't needed.
 --
+-- Exos earns on every sale: 3% of every transaction, paid by the organizer
+-- (operator, 2026-09-28; _shared/platformFee.ts). On a marketplace sale the
+-- transaction Exos handles is the marketplace's payout, so exos_fee = 3% of
+-- proceeds (to the cent, half up) and organizer_net = proceeds - exos_fee:
+-- the same as an Exos checkout of the Exos price (40.00 -> 38.80 either way).
+-- exos_platform_fee_bps() is the one place the SQL side keeps the rate.
+--
 -- Service role only. Re-run safe (IF NOT EXISTS / CREATE OR REPLACE / DROP
 -- TRIGGER IF EXISTS). D4 authors; applying to prod is operator-gated.
 -- ============================================================================
 
 ALTER TABLE public.exos_marketplace_orders
   ADD COLUMN IF NOT EXISTS list_unit_price numeric CHECK (list_unit_price IS NULL OR list_unit_price >= 0),
-  ADD COLUMN IF NOT EXISTS marketplace_fee numeric;
+  ADD COLUMN IF NOT EXISTS marketplace_fee numeric,
+  ADD COLUMN IF NOT EXISTS exos_fee numeric CHECK (exos_fee IS NULL OR exos_fee >= 0),
+  ADD COLUMN IF NOT EXISTS organizer_net numeric;
+
+-- The Exos fee rate in basis points (300 = 3%). Keep in step with EXOS_FEE_BPS.
+CREATE OR REPLACE FUNCTION public.exos_platform_fee_bps()
+RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 300 $$;
 
 COMMENT ON COLUMN public.exos_marketplace_orders.list_unit_price IS
   'Per-ticket price the Exos listing carried when the sale arrived (planned listing entry unit_price). Mig 20260929062000.';
 COMMENT ON COLUMN public.exos_marketplace_orders.marketplace_fee IS
   'list_unit_price x quantity - proceeds: what the marketplace kept. Mig 20260929062000.';
+COMMENT ON COLUMN public.exos_marketplace_orders.exos_fee IS
+  'The Exos fee: exos_platform_fee_bps() of proceeds, to the cent, half up. Mig 20260929062000.';
+COMMENT ON COLUMN public.exos_marketplace_orders.organizer_net IS
+  'proceeds - exos_fee: what the organizer is owed for the sale. Mig 20260929062000.';
 
 -- The unit_price of the listing entry `p_ref` in an allocation's live (else planned) listings.
 CREATE OR REPLACE FUNCTION public.exos_listing_unit_price(p_allocation uuid, p_ref text)
@@ -60,6 +78,9 @@ BEGIN
   NEW.marketplace_fee := CASE
     WHEN NEW.list_unit_price IS NOT NULL AND NEW.proceeds IS NOT NULL AND NEW.quantity > 0
     THEN round(NEW.list_unit_price * NEW.quantity - NEW.proceeds, 4) END;
+  NEW.exos_fee := CASE WHEN NEW.proceeds IS NOT NULL
+    THEN round(NEW.proceeds * public.exos_platform_fee_bps() / 10000.0, 2) END;
+  NEW.organizer_net := NEW.proceeds - NEW.exos_fee;
   RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_tg_marketplace_fee() FROM PUBLIC, anon, authenticated;

@@ -5,6 +5,7 @@
 --      price x qty - proceeds
 --   F2 a later re-plan at a new price doesn't rewrite a past sale
 --   F3 exos_marketplace_fee_rates: the realized rate per store; service role only
+--   F4 the Exos fee: 3% of the payout, and the organizer's net (40.00 -> 38.80)
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -63,5 +64,17 @@ BEGIN
     RAISE EXCEPTION 'F3 FAIL: readable by app users';
   END IF;
   RAISE NOTICE 'F3 PASS: realized rate per store, service role only';
+
+  -- F4: 80.01 paid -> Exos 2.40 (2.4003), organizer 77.61; 42.75 -> 1.28 (1.2825), 41.47.
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-1';
+  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.61 THEN
+    RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
+  END IF;
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-2';
+  IF m.exos_fee IS DISTINCT FROM 1.28 OR m.organizer_net IS DISTINCT FROM 41.47 THEN
+    RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
+  END IF;
+  IF public.exos_platform_fee_bps() <> 300 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
+  RAISE NOTICE 'F4 PASS: Exos takes 3%% of every marketplace payout';
 END $$;
 ROLLBACK;

@@ -40,8 +40,9 @@ paid events can't be sold.**
 - Performers and artist links.
 - **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
-  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee; the
-  platform fee comes out of your payout.
+  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee. Exos
+  takes 3% of every sale from your payout, on Exos and on marketplaces alike: a 40.00 ticket pays
+  you 38.80 wherever it sells (marketplace prices are raised to cover their own seller fee).
 - **Scheduled prices** (early-bird → regular → last-minute). Buyers are charged the price that's
   live when they check out, which is the one the storefront shows.
 - **Vouchers:**

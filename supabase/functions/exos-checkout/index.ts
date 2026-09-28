@@ -18,13 +18,15 @@
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY, EXOS_REDIRECT_ORIGINS (origins success/cancel URLs
-// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 500 = 5%),
+// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 300 = 3%, _shared/platformFee.ts),
 // EXOS_GUEST_IP_SALT (salt for the hashed guest IP; defaults to a server secret).
 // Needs mig 20260924223000 (promoter_id / attribution columns) applied first.
 //
-// TODO(operator) before go-live: confirm the application-fee model/%, the
-// charge model (destination vs direct), and that 'standard' Connect accounts
-// are the right type.
+// Fee: 3% of every transaction, from the organizer (operator, 2026-09-28).
+// TODO(operator) before go-live: with destination charges the platform pays
+// Stripe (~2.9% + 30c), which the 3% doesn't cover on small orders
+// (docs/payments-go-live.md); confirm the charge model (destination vs
+// direct) and that 'standard' Connect accounts are the right type.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -33,6 +35,7 @@ import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from ".
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
+import { EXOS_FEE_BPS, exosFeeCents } from "../_shared/platformFee.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -291,8 +294,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // addonTotal is already all-in; the exclusive tax sits inside both unit amounts.
   const amountCents = ticketAllIn * quantity + addonTotal;
-  const feeBps = Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? "500");
-  const applicationFee = Math.round((amountCents * feeBps) / 10000);
+  // The Exos fee: 3% of the transaction, from the organizer's share (_shared/platformFee.ts).
+  const feeBps = Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS));
+  const applicationFee = exosFeeCents(amountCents, feeBps);
 
   // Only PAID line items go to Stripe ($0 lines are rejected in payment mode), so
   // a free tier + paid add-ons charges just the add-ons. Ticket quantity is still

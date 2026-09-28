@@ -34,8 +34,15 @@ the details with counsel.)
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
 - [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
       delayed methods would outlive the 30-minute seat hold.
-- [ ] Decide the platform fee. `EXOS_PLATFORM_FEE_BPS` defaults to `500` (5%). The operator
-      confirms the model and the rate. `exos-checkout` carries a `TODO(operator)` for this.
+- [x] Platform fee decided (operator, 2026-09-28): **3% of every transaction, paid by the organizer**,
+      on Exos checkouts and marketplace sales alike (`_shared/platformFee.ts`, `EXOS_FEE_BPS`; SQL
+      `exos_platform_fee_bps()`). `EXOS_PLATFORM_FEE_BPS` still overrides checkout; keep all three equal.
+- [ ] **Card processing vs the 3%.** With destination charges the platform pays Stripe (standard US
+      card pricing is about 2.9% + 30¢), and the 3% is all Exos keeps. On a 40.00 Exos checkout that's
+      1.20 in, about 1.46 out; Exos only clears Stripe's cost on orders above about 300. Marketplace
+      sales carry no card fee for Exos (the marketplace charged the card), so the 3% there is margin.
+      Decide: pass Stripe's fee to the organizer as well, add a fixed part (for example 3% + 30¢), move
+      to direct charges (the organizer's account pays Stripe), or accept the loss on small orders.
 - [ ] Transactional email works: `RESEND_API_KEY` and `EXOS_MAIL_FROM` are set for `exos-mail-drain`,
       and at least one real email has gone out. Ticket emails are part of checkout.
 
@@ -48,7 +55,7 @@ the details with counsel.)
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the connected-accounts endpoint (step 3). Without it organizers never become `chargesEnabled` |
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
-| `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 500 |
+| `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 300 (3%, `_shared/platformFee.ts`) |
 | `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |
 | `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | all | Supabase sets these automatically |
