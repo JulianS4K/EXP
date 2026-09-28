@@ -117,7 +117,7 @@ describe('listings', () => {
     expect(p.listings.map((l) => [l.listing_id, l.seat_from, l.seat_thru])).toEqual([[exosListingId(ALLOC, 1), 1, 4], [exosListingId(ALLOC, 2), 5, 6]]);
     expect(p.listings[1].request).toMatchObject({ endpoint: 'createListing', method: 'POST', path: '/listings/v2/create' });
     expect(p.listings[1].request.body).toEqual({
-      productionId: 4455667, ticketId: exosListingId(ALLOC, 2), quantity: 2, section: 'GA', row: 'GA', seatFrom: '5', seatThru: '6',
+      productionId: 4455667, ticketId: exosListingId(ALLOC, 2), quantity: 2, section: 'General Admission', row: 'GA', seatFrom: '5', seatThru: '6',
       hideSeats: true, notes: expect.stringContaining('Exos'), price: 45, faceValue: 40, priceCurrency: 'USD',
       splitType: 'ANY', stockType: 'ELECTRONIC', electronic: true, electronicTransfer: true, inHandDate: '2026-11-06T00:00:00',
       eventName: 'Late Night Jazz', venue: 'Blue Room', venueCity: 'Brooklyn', venueRegion: 'NY', venueCountryCode: 'US',

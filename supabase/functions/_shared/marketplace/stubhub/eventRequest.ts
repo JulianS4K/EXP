@@ -9,6 +9,8 @@
 // the exos_events row and, until an operator authorizes live writes, only
 // recorded as the plan (dry-run).
 
+import { marketTitle } from '../eventStandard.ts';
+
 export class ListingMappingError extends Error {
   constructor(message: string) {
     super(message);
@@ -82,6 +84,7 @@ export interface ExosEventRow {
   venue_location?: string | null;
   /** CreateEvent/EditEvent shape: { street, city, region, country, postal }, all free text. */
   venue_address?: Record<string, unknown> | null;
+  primary_performer_name?: string | null;
 }
 
 // The address form is free text, so accept the usual spellings. Anything else
@@ -118,11 +121,13 @@ export function exosEventForListing(row: ExosEventRow): ExosEventForListing {
   const addr = row.venue_address ?? {};
   const venueName = text(row.venue_name) || text(row.venue_location);
   const venueCity = text(addr.city);
-  if (!text(row.name)) throw new ListingMappingError("event name is required");
+  // The marketplace-standard title (../eventStandard.ts): no emoji, dates or sales words.
+  const title = marketTitle({ name: row.name, primary_performer_name: row.primary_performer_name, venue_name: venueName });
+  if (!title) throw new ListingMappingError("event name is required");
   if (!row.starts_at) throw new ListingMappingError("event start time is required");
   if (!venueName) throw new ListingMappingError("venue name is required");
   if (!venueCity) throw new ListingMappingError("venue city is required: add the venue address to the event");
-  const out: ExosEventForListing = { name: text(row.name), startsAt: row.starts_at, venueName, venueCity };
+  const out: ExosEventForListing = { name: title, startsAt: row.starts_at, venueName, venueCity };
   if (row.occurs_at_local) out.startsLocal = row.occurs_at_local;
   const region = text(addr.region);
   if (region) out.venueStateProvince = region;

@@ -50,7 +50,7 @@ describe('planTevoListings', () => {
         event: { id: 2204331, name: 'Late Night Jazz', occurs_at_date: '2026-11-06', occurs_at_time: '21:00' },
         office: { id: 1234 },
         ticket: {
-          format: 'TM_mobile', price: 45, quantity: 4, remote_id: R1, row: 'GA', section: 'GA', type: 'EVENT',
+          format: 'TM_mobile', price: 45, quantity: 4, remote_id: R1, row: 'GA', section: 'General Admission', type: 'EVENT',
           seats: [{ seat: 1 }, { seat: 2 }, { seat: 3 }, { seat: 4 }], split_type: 'ANY', in_hand: false, in_hand_on: '2026-11-06',
           face_value: 40, external_notes: expect.stringContaining('Exos'), internal_notes: L1,
         },

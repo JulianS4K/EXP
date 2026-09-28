@@ -180,7 +180,7 @@ const MATCHED_ON: Record<MarketChannel, string> = {
 async function planEventRows(sb: SupabaseClient, canSearch: Record<string, boolean>) {
   const { data, error } = await sb
     .from("exos_distribution_listings")
-    .select("id, event_id, channel, updated_at, exos_events(name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
+    .select("id, event_id, channel, updated_at, exos_events(name, primary_performer_name, starts_at, occurs_at_local, venue_name, venue_location, venue_address)")
     .in("channel", MARKET_CHANNELS)
     .is("tier_id", null)
     .eq("status", "pending")
@@ -284,7 +284,7 @@ function emptyPoolReason(state: string | null, label: string): string {
   return `nothing held: no free seats for ${label} right now`;
 }
 
-const EVENT_FIELDS = "name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
+const EVENT_FIELDS = "name, primary_performer_name, status, starts_at, occurs_at_local, timezone, venue_name, venue_location, venue_address, currency, purchase_limits";
 
 async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };

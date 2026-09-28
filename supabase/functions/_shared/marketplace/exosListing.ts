@@ -32,6 +32,7 @@
 
 import { effectiveTierPrice } from '../pricing.ts';
 import { exosEventRef, localDate, type ExosEventRowForChannels } from './channel.ts';
+import { ageLimit, marketSection } from './eventStandard.ts';
 import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, stableListingNumbers } from './listingIds.ts';
 import { lowestSeats, parseSeatRanges, seatBlocks, seatCount, type SeatRun } from './seats.ts';
 
@@ -166,7 +167,11 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
   const custom = a.unit_price === null || a.unit_price === undefined || a.unit_price === '' ? NaN : Number(a.unit_price);
   const price = Number.isFinite(custom) && custom > exosNow ? custom : exosNow;
   if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
-  const section = (a.tier.section_label || a.tier.name || '').trim().slice(0, 127);
+  // The marketplace-standard section (./eventStandard.ts): price phases list as
+  // General Admission, VIP as VIP, the organizer's section label wins.
+  const section = a.tier.name?.trim() || a.tier.section_label?.trim()
+    ? marketSection({ name: a.tier.name ?? '', section_label: a.tier.section_label }).slice(0, 127)
+    : '';
   if (!section) throw new Error('the ticket type has no name to use as the section');
   const all = parseSeatRanges(a.internal_seats);
   if (seatCount(all) !== held || qty > held) {
@@ -180,6 +185,7 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
     throw new Error(`that would be ${blocks.length} ${label} listings; raise the max per order`);
   }
   const date = localDate(ref);
+  const age = ageLimit(a.event.name);
   const event = { name: ref.name.slice(0, 255), venue: ref.venueName.slice(0, 255), starts_at: ref.startsAt, local_date: date, local_time: localTime(ref) };
   const listings = blocks
     .map((b, i) => ({ b, n: numbers[i] }))
@@ -199,7 +205,7 @@ export function planExosListings(a: ExosAllocation, label: string): ExosListingS
       in_hand_date: date,
       split: 'any',
       delivery: 'claim_link',
-      notes: EXOS_LISTING_NOTES,
+      notes: age ? `${EXOS_LISTING_NOTES} ${age} event: bring ID.` : EXOS_LISTING_NOTES,
     }));
   return { allocation_id: a.id, listings, per_order_cap: Math.max(...listings.map((l) => l.quantity)) };
 }

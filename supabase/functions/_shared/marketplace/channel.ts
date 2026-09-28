@@ -21,6 +21,8 @@
 //
 // No imports beyond sibling .ts files: loaded by Deno and by vitest.
 
+import { marketTitle } from './eventStandard.ts';
+
 export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
@@ -146,12 +148,14 @@ export interface ExosEventRowForChannels {
   venue_name: string | null;
   venue_location?: string | null;
   venue_address?: Record<string, unknown> | null;
+  primary_performer_name?: string | null;
 }
 
 const txt = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+/** The event as marketplaces see it: the standard title (./eventStandard.ts), venue, local time. */
 export function exosEventRef(row: ExosEventRowForChannels): ExosEventRef | null {
-  const name = txt(row.name);
+  const name = marketTitle({ name: row.name, primary_performer_name: row.primary_performer_name, venue_name: row.venue_name });
   const venueName = txt(row.venue_name) || txt(row.venue_location);
   if (!name || !row.starts_at || !venueName) return null;
   const addr = row.venue_address ?? {};

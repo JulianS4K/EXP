@@ -25,7 +25,7 @@ describe('planStubHubListing', () => {
     expect(p.listings[0].request).toMatchObject({ endpoint: 'createSellerListing', method: 'POST', path: '/events/104857/sellerlistings' });
     expect(p.listings[0].request.body).toMatchObject({
       external_id: exosListingId(A.id, 1), number_of_tickets: 6, split_type: 'Any',
-      seating: { section: 'GA', row: 'GA', seat_from: '1', seat_to: '6' },
+      seating: { section: 'General Admission', row: 'GA', seat_from: '1', seat_to: '6' },
       ticket_price: { amount: 40, currency_code: 'USD' }, face_value: { amount: 40, currency_code: 'USD' },
       published: false, ticket_type: null,
     });

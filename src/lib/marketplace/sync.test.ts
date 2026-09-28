@@ -94,7 +94,7 @@ describe('the same listings on every marketplace', () => {
     // StubHub: external_id is the Exos listing id, the block's seats, no display cap.
     expect(planStubHubListing(sh).listings[1].request.body).toMatchObject({
       external_id: exosSellerListingId(ALLOC, 2), number_of_tickets: 2, split_type: 'Any',
-      seating: { section: 'GA', row: 'GA', seat_from: '5', seat_to: '6' },
+      seating: { section: 'General Admission', row: 'GA', seat_from: '5', seat_to: '6' },
     });
     expect(planStubHubListing(sh).listings[0].request.body).not.toHaveProperty('display_number_of_tickets');
   });
