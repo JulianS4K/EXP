@@ -29,3 +29,22 @@ export function allInCents(unitCents: number, exclusiveTaxPercent: number): numb
   if (rate <= 0) return unitCents;
   return unitCents + Math.round((unitCents * rate) / 100);
 }
+
+// A voucher's per-ticket price (mig 20260928060000): a pinned price, a percent
+// off or an amount off the scheduled price, in whole cents. exos-checkout
+// charges it and the storefront shows it, so both call this. Never negative.
+export interface VoucherPricing {
+  overridePrice?: number | null;
+  discountPercent?: number | null;
+  discountAmount?: number | null;
+}
+export function voucherUnitPrice(scheduled: number, v: VoucherPricing | null | undefined): number {
+  const base = Math.round(scheduled * 100);
+  if (!v) return base / 100;
+  if (v.overridePrice != null) return Math.max(0, Math.round(Number(v.overridePrice) * 100)) / 100;
+  const pct = Number(v.discountPercent);
+  if (v.discountPercent != null && pct > 0 && pct < 100) return Math.round((base * (100 - pct)) / 100) / 100;
+  const off = Number(v.discountAmount);
+  if (v.discountAmount != null && off > 0) return Math.max(0, base - Math.round(off * 100)) / 100;
+  return base / 100;
+}

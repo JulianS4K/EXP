@@ -14,6 +14,9 @@ export interface AppliedVoucher {
   canBypass: boolean;
   /** Server-validated per-ticket price this voucher pins (null = normal price). */
   overridePrice: number | null;
+  /** Promo code: percent / amount off the scheduled price (null = none). */
+  discountPercent?: number | null;
+  discountAmount?: number | null;
   /** The only tier this voucher works for (null = any); it also unlocks that tier if hidden. */
   restrictTierId: string | null;
 }
@@ -45,8 +48,11 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
         return;
       }
       setAppliedCode(c);
-      onApplied({ code: c, canBypass: res.canBypass, overridePrice: res.overridePrice, restrictTierId: res.restrictTierId });
-      toast({ kind: 'success', message: res.canBypass ? 'Voucher applied — you can buy this event.' : 'Voucher applied.' });
+      onApplied({
+        code: c, canBypass: res.canBypass, overridePrice: res.overridePrice, restrictTierId: res.restrictTierId,
+        discountPercent: res.discountPercent, discountAmount: res.discountAmount,
+      });
+      toast({ kind: 'success', message: res.canBypass ? 'Code applied: you can buy this event.' : discountLabel(res) ? `Code applied: ${discountLabel(res)}.` : 'Code applied.' });
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not check voucher.' });
     } finally {
@@ -67,7 +73,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     return (
       <div className="mb-4 flex items-center gap-2 text-brand-primary text-xs font-black uppercase tracking-widest">
         <Check className="w-4 h-4" />
-        Voucher {appliedCode} applied
+        Code {appliedCode} applied
       </div>
     );
   }
@@ -80,8 +86,8 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
           value={code}
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') apply(); }}
-          placeholder="Voucher code"
-          aria-label="Voucher code"
+          placeholder="Promo or access code"
+          aria-label="Promo or access code"
           className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none pl-9 pr-3 py-2 text-sm font-bold uppercase"
         />
       </div>
@@ -95,6 +101,13 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
       </button>
     </div>
   );
+}
+
+/** "20% off" / "$5.00 off", or null for a code that doesn't discount. */
+export function discountLabel(v: { discountPercent?: number | null; discountAmount?: number | null }): string | null {
+  if (v.discountPercent != null && v.discountPercent > 0) return `${Number(v.discountPercent.toFixed(2))}% off`;
+  if (v.discountAmount != null && v.discountAmount > 0) return `$${v.discountAmount.toFixed(2)} off`;
+  return null;
 }
 
 /** Buyer-facing copy for exos_check_voucher's reason codes. */

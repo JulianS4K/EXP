@@ -35,6 +35,12 @@ distribution of Exos's own inventory, not resale.
   (hashed IP) and a ceiling on live guest holds; organizer switch per event. Tests: `tests/exos/test_guest_checkout.sql`
   (G1–G11), `src/lib/guestCheckout.test.ts`. Follow-ups: guest mode for the embedded iframe checkout; a CAPTCHA
   (Turnstile) on the email step if the network limit isn't enough; door lookup of unclaimed guest orders by email.
+- ✅ **Promo codes that work + quota editor** (`20260928060000_exos_voucher_discounts_quota_editor`, authored, not
+  applied): vouchers take a percent or an amount off (pretix price modes), priced by `_shared/pricing.ts`
+  `voucherUnitPrice` in both checkout and the event page; saved `exos_discount_codes` carry over. Edit event →
+  **Promo and access codes** and **Shared capacity (quotas)**. **Security fix:** quota RLS didn't tie a quota to its
+  event's org, so another org's owner could close a ticket type they don't own (reproduced; likely live in prod since
+  `20260702123030`). Tests: `tests/exos/test_voucher_discounts_quotas.sql` (V1–V5, Q1–Q3), `voucherDiscounts.test.ts`.
 
 ## All-in pricing (operator decision 2026-09-24)
 

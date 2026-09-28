@@ -116,6 +116,8 @@ for each case.
 | 12 | **Guest, no account:** signed out, Buy, enter a new email, pay | Session `fulfilled` with `guest = true` and no `buyer_uid`; tickets owned by the org owner, each with a pending transfer to the email; one `transfer-initiated` mail with a claim link per ticket. Open a link, sign in with the one-time code: the ticket (and any add-ons) move to that account |
 | 13 | **Guest, existing account:** signed out, buy with the email of a confirmed account | Tickets owned by that account, no transfers, a `ticket-issued` mail |
 | 14 | Six guest checkouts from one network within 10 minutes | The sixth gets "too many checkouts from this network" (409), no Stripe session |
+| 16 | **Promo code:** create `EARLY20` (20% off, 100 uses) in Edit event → Promo and access codes; apply it on a $40 tier and buy 2 | The event page shows $32 per ticket (plus any tax), Stripe charges $64, tickets record `price_paid` 32, the code shows 2/100 used |
+| 17 | A $5-off code on a $4 tier | 409 "that code takes off more than the ticket price", no Stripe session |
 | 15 | Untick **Guest checkout** in Edit event, then buy signed out | The Buy button opens sign-in, not the email step; a direct call with `guest_email` gets 409 "sign in to buy tickets for this event" |
 
 Useful queries:

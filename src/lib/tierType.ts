@@ -4,8 +4,9 @@ export type TicketType = 'paid' | 'free' | 'donation';
 // read-only), so the create/edit forms keep its controls hidden.
 export const SHOW_DISTRIBUTION = false;
 
-// Percent/fixed discount codes (exos_discount_codes) aren't redeemed by
-// checkout yet; vouchers are the working code path.
+// The old exos_discount_codes editor stays off: promo codes (% / $ off) are
+// vouchers now (mig 20260928060000, Edit event → Promo and access codes),
+// which checkout redeems. Saved discount codes were carried over.
 export const SHOW_DISCOUNT_CODES = false;
 
 /**

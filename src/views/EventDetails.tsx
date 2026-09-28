@@ -36,6 +36,7 @@ import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
 import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
@@ -226,15 +227,14 @@ export default function EventDetails() {
   };
   
   // All-in: exactly what exos-checkout will charge per ticket — the scheduled
-  // price (or a server-validated voucher's pinned price) plus exclusive tax.
+  // price, after a server-validated code's rule (pinned price, % or $ off;
+  // voucherUnitPrice is the function checkout uses), plus exclusive tax.
   const calculateFinalPrice = () => {
     if (!event) return 0;
     if (!selectedTier) return event.price;
-    const voucherApplies =
-      voucher?.overridePrice != null && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
-    const base = voucherApplies
-      ? (voucher!.overridePrice as number)
-      : effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    const voucherApplies = !!voucher && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
+    const scheduled = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    const base = voucherApplies ? voucherUnitPrice(scheduled, voucher) : scheduled;
     return allInPrice(base, selectedTier.exclusiveTaxPercent);
   };
 

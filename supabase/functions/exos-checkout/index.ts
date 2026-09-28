@@ -28,7 +28,7 @@
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { allInCents, effectiveTierPrice } from "../_shared/pricing.ts";
+import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
@@ -115,6 +115,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let voucherId: string | null = null;
   let bypassCapacity = false;
   let overridePrice: number | null = null;
+  // Percent / amount off (mig 20260928060000); at most one price rule per voucher.
+  let discountPercent: number | null = null;
+  let discountAmount: number | null = null;
   let voucherUnlocksTier = false;
   if (voucherCode) {
     const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
@@ -129,8 +132,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     // One voucher use buys one ticket (mig 20260924205508); refuse here rather
     // than charging and auto-refunding when fulfillment can't consume enough.
-    const { data: vUses } = await sb.from("exos_vouchers")
-      .select("max_uses, used_count").eq("id", v.voucher_id).maybeSingle();
+    type VoucherUses = { max_uses: number; used_count: number; discount_percent?: number | null; discount_amount?: number | null };
+    let { data: vUses, error: vuErr } = await sb.from("exos_vouchers")
+      .select("max_uses, used_count, discount_percent, discount_amount").eq("id", v.voucher_id)
+      .maybeSingle<VoucherUses>();
+    // Deployed before mig 20260928060000 (no discount columns): plain vouchers still work.
+    if (vuErr && (vuErr.code === "42703" || vuErr.code === "PGRST204")) {
+      ({ data: vUses } = await sb.from("exos_vouchers")
+        .select("max_uses, used_count").eq("id", v.voucher_id).maybeSingle<VoucherUses>());
+    }
     const remainingUses = vUses ? vUses.max_uses - vUses.used_count : 0;
     if (quantity > remainingUses) {
       return json({ error: `voucher covers ${Math.max(remainingUses, 0)} more ticket(s)` }, 409);
@@ -144,6 +154,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: "sign in to use this code" }, 409);
     }
     overridePrice = v.override_price != null ? Number(v.override_price) : null;
+    discountPercent = vUses?.discount_percent != null ? Number(vUses.discount_percent) : null;
+    discountAmount = vUses?.discount_amount != null ? Number(vUses.discount_amount) : null;
   }
 
   // A hidden tier is only sold through a voucher restricted to it (same rule
@@ -176,14 +188,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const currency = (ev.currency ?? "usd").toLowerCase();
-  // A voucher price override pins the per-ticket price (comp / special rate);
-  // otherwise charge the tier's scheduled price as of now, the same price the
-  // storefront shows (early-bird → regular → last-minute).
+  // The tier's scheduled price as of now, the same price the storefront shows
+  // (early-bird → regular → last-minute), then the voucher's rule: a pinned
+  // price, a percent off or an amount off (voucherUnitPrice, shared with the SPA).
   const scheduled = effectiveTierPrice(
     Number(tier.price),
     (tier as unknown as { price_schedule?: unknown }).price_schedule,
   );
-  const unitAmount = Math.round(Number(overridePrice ?? scheduled) * 100);
+  const unitAmount = Math.round(voucherUnitPrice(scheduled, { overridePrice, discountPercent, discountAmount }) * 100);
+  // A discount that leaves a paid ticket free is a comp, not a sale.
+  if (scheduled > 0 && unitAmount <= 0 && overridePrice == null) {
+    return json({ error: "that code takes off more than the ticket price" }, 409);
+  }
 
   // Validate + price add-ons server-side (never trust the client's prices). Each
   // must belong to this event, be public, and have stock. Build the priced

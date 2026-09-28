@@ -23,6 +23,7 @@ import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
+import QuotasEditor from '../components/QuotasEditor';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import TableTierFields from '../components/TableTierFields';
@@ -1332,6 +1333,9 @@ export default function EditEvent() {
 
         {/* Vouchers — self-contained CRUD (not part of the form submit). */}
         {eventId && <VouchersEditor eventId={eventId} tiers={(eventData.ticketTiers || []).map((t) => ({ id: t.id, name: t.name, visibility: t.visibility }))} />}
+
+        {/* Shared capacity across ticket types (quotas) — self-contained CRUD. */}
+        {eventId && <QuotasEditor eventId={eventId} tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))} />}
 
         {/* Tax / VAT rules — self-contained CRUD (not part of the form submit). */}
         {eventId && <TaxRulesEditor eventId={eventId} />}

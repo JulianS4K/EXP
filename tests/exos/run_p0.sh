@@ -54,7 +54,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260928010000_exos_marketplace_pools 20260928020000_exos_gotickets_channel \
          20260928030000_exos_vivid_channel \
          20260928040000_exos_marketplace_scarcity \
-         20260928050000_exos_guest_checkout; do
+         20260928050000_exos_guest_checkout \
+         20260928060000_exos_voucher_discounts_quota_editor; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -92,6 +93,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gotickets
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_vivid_orders.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketplace_scarcity.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_guest_checkout.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_voucher_discounts_quotas.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout_attribution \
   20260924230000_exos_event_geo 20260924233000_exos_promoters 20260924234500_exos_fan_referrals \
@@ -113,7 +115,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260928010000_exos_marketplace_pools 20260928020000_exos_gotickets_channel \
          20260928030000_exos_vivid_channel \
          20260928040000_exos_marketplace_scarcity \
-         20260928050000_exos_guest_checkout; do
+         20260928050000_exos_guest_checkout \
+         20260928060000_exos_voucher_discounts_quota_editor; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
