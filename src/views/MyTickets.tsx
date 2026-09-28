@@ -21,7 +21,7 @@ import MyCalendarFeed from '../components/MyCalendarFeed';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
 
 export default function MyTickets() {
-  const { user, signIn } = useAuth();
+  const { user, openAuth } = useAuth();
   // Back from a guest checkout (mig 20260928050000): tickets went by email.
   const [guestDone, setGuestDone] = useState(false);
   const location = useLocation();
@@ -146,7 +146,7 @@ export default function MyTickets() {
           Sign in with that email (we'll send a one-time code, no password) to see your QR codes here.
           Tickets can be forwarded to friends from the email.
         </p>
-        <button onClick={() => void signIn()} className="bg-brand-primary text-black font-black uppercase tracking-wider px-8 py-3">
+        <button onClick={() => openAuth('code', guestEmailHint() ?? '')} className="bg-brand-primary text-black font-black uppercase tracking-wider px-8 py-3">
           Sign in to see tickets
         </button>
       </div>

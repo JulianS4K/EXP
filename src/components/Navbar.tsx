@@ -93,7 +93,7 @@ export default function Navbar() {
                       <span>{t('nav.profile')}</span>
                     </Link>
                     <button
-                      onClick={logout}
+                      onClick={() => void logout()}
                       className="w-full text-left px-4 py-3.5 type text-[11px] uppercase tracking-widest text-white/60 hover:text-brand-accent hover:bg-white/5 flex items-center gap-3 transition-colors"
                     >
                       <LogOut className="w-4 h-4" />

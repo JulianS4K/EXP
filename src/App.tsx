@@ -54,6 +54,8 @@ const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const Notifications = lazy(() => import('./views/Notifications'));
+const ResetPassword = lazy(() => import('./views/ResetPassword'));
+const AuthCallback = lazy(() => import('./views/AuthCallback'));
 
 /**
  * @license
@@ -138,6 +140,10 @@ export default function App() {
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />
+                    {/* Email-link landings (docs/auth.md): password reset, and
+                        confirm-signup / magic-link / email-change / OAuth. */}
+                    <Route path="/reset-password" element={<ResetPassword />} />
+                    <Route path="/auth/callback" element={<AuthCallback />} />
                     <Route path="/my-tickets" element={<MyTickets />} />
                     <Route path="/alerts" element={<Notifications />} />
                     <Route path="/ticket/:id" element={<TicketDetail />} />
