@@ -25,6 +25,14 @@
   register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
   it's deployed.
 
+## Events on Google (Search / Maps "Tickets") 2026-09-29
+
+- 🟡 **Google events feed** (`exos-google-feed`, `_shared/googleEvents/feed.ts`, authored, not deployed;
+  `docs/google-events.md`): a snapshot JSON feed of schema.org Events: all-in offers per public ticket type,
+  venue-local times, Place ID, cancelled events as EventCancelled, checkout links tagged `utm_source=google`.
+  Operator report of skipped events. Next: join Google's events ticketing program (business step), then map to their
+  partner spec and set up the upload they ask for.
+
 ## Marketplace listing standard 2026-09-29
 
 - 🟡 **Split policy + listing ids** (`listingStandard.ts`, `20260929061000_exos_market_split`, authored, not
