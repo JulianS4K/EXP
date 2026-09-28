@@ -41,6 +41,12 @@ distribution of Exos's own inventory, not resale.
   **Promo and access codes** and **Shared capacity (quotas)**. **Security fix:** quota RLS didn't tie a quota to its
   event's org, so another org's owner could close a ticket type they don't own (reproduced; likely live in prod since
   `20260702123030`). Tests: `tests/exos/test_voucher_discounts_quotas.sql` (V1–V5, Q1–Q3), `voucherDiscounts.test.ts`.
+- ✅ **Marketplace seats per ticket type, visible** (UI only): the per-type backend (`exos_set_channel_allocation`,
+  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind `SHOW_DISTRIBUTION`.
+  `SHOW_MARKETPLACES` now shows the Marketplaces section (Create + Edit event): tick marketplaces, then seats per ticket
+  type per marketplace (GA on StubHub only, VIP everywhere), with a "Same on all" shortcut. The list is the five
+  integrated marketplaces (Ticketmaster/AXS/Viagogo/TickPick/TEvo were listed but never integrated). Sending stays
+  dry-run until live writes are authorized.
 
 ## All-in pricing (operator decision 2026-09-24)
 

@@ -73,7 +73,7 @@ const SUBGENRE_MAX_LEN = 40;
 const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-import { SHOW_DISTRIBUTION, autoTicketType } from '../lib/tierType';
+import { MARKETPLACE_NETWORKS, SHOW_DISTRIBUTION, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
@@ -174,7 +174,7 @@ export default function EditEvent() {
         console.warn('table tier fields unavailable:', err);
       }
       setOriginalSlug((data.branding?.customSlug || '').trim());
-      if (SHOW_DISTRIBUTION) {
+      if (SHOW_MARKETPLACES) {
         void loadMarketRows(eventId);
       }
       setOriginalNotifiable({
@@ -1704,26 +1704,20 @@ export default function EditEvent() {
            </div>
         </section>
 
-        {SHOW_DISTRIBUTION && (<>
-        {/* Distribution Networks */}
+        {SHOW_MARKETPLACES && (<>
+        {/* Marketplaces: pick them, then seats per ticket type (MarketplaceGrid). */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
            <div className="flex items-center space-x-3 mb-2">
               <Globe className="text-brand-primary w-5 h-5" />
-              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Distribution Hub Integration</h2>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Marketplaces</h2>
            </div>
+           <p className="type text-xs text-white/50 -mt-4">
+             Sell this event's own tickets on marketplaces too, at the price you set. Tick the ones to use, then choose how
+             many seats of each ticket type each one gets below: GA on StubHub only, VIP everywhere, anything in between.
+           </p>
 
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {[
-                { id: 'stubhub', name: 'StubHub' },
-                { id: 'seatgeek', name: 'SeatGeek' },
-                { id: 'ticketmaster', name: 'Ticketmaster' },
-                { id: 'axs', name: 'AXS' },
-                { id: 'vivid', name: 'Vivid Seats' },
-                { id: 'gametime', name: 'Gametime' },
-                { id: 'viagogo', name: 'Viagogo' },
-                { id: 'tickpick', name: 'TickPick' },
-                { id: 'gotickets', name: 'GoTickets' }
-              ].map(network => (
+              {MARKETPLACE_NETWORKS.map(network => (
                 <label key={network.id} className="flex items-center space-x-3 p-4 bg-black/40 cursor-pointer hover:bg-black/60 transition-colors border border-white/10 has-[:checked]:border-brand-primary has-[:checked]:bg-brand-primary/10">
                    <input
                      type="checkbox"

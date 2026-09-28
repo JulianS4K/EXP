@@ -199,7 +199,8 @@ export function MarketplaceGrid({
     <div className="space-y-3">
       <h3 className="type text-[11px] text-white/60 uppercase tracking-widest">Marketplaces</h3>
       <p className="type text-xs text-white/50">
-        The most each marketplace sells, per ticket type. Each one holds only a few seats at a time (twice your max per order)
+        The most each marketplace sells, per ticket type: GA on one, VIP on all, or 0 to keep a ticket type off a
+        marketplace. "Same on all" copies the first column across. Each one holds only a few seats at a time (twice your max per order)
         and is topped up from the free seats as it sells, so the event is live everywhere while Exos sells the rest, and a
         seat is never on sale in two places. 0 takes the listing down and gives its seats back.
         {maxPerOrder
@@ -220,6 +221,16 @@ export function MarketplaceGrid({
                 <td className="py-2 pr-3">
                   <span className="text-white">{t.name}</span>
                   <span className="block text-white/40">{t.capacity} total</span>
+                  {channels.length > 1 && (
+                    <button
+                      type="button" disabled={busy}
+                      onClick={() => setDraft(sameOnAll(draft, channels, t.id, value(channels[0], t.id)))}
+                      className="mt-1 text-[10px] uppercase tracking-widest text-white/50 hover:text-brand-primary disabled:opacity-40"
+                      aria-label={`Use ${LABEL[channels[0]]}'s number for ${t.name} on every marketplace`}
+                    >
+                      Same on all
+                    </button>
+                  )}
                 </td>
                 {channels.map((ch) => {
                   const r = rowFor(ch, t.id);
@@ -251,4 +262,13 @@ export function MarketplaceGrid({
       </button>
     </div>
   );
+}
+
+/** The draft with this ticket type set to `value` on every marketplace ("Same on all"). */
+export function sameOnAll(
+  draft: Record<string, string>, channels: readonly string[], tierId: string, value: string,
+): Record<string, string> {
+  const next = { ...draft };
+  for (const ch of channels) next[`${ch}:${tierId}`] = value;
+  return next;
 }
