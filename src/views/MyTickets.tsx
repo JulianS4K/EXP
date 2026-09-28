@@ -17,6 +17,7 @@ import { listSavedEvents } from '../lib/saves';
 import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
+import { trackCheckoutReturn } from '../lib/purchasePixel';
 
 export default function MyTickets() {
   const { user, signIn } = useAuth();
@@ -59,6 +60,12 @@ export default function MyTickets() {
     //   ?claimed=N        — a free claim that already minted N tickets
     const params = new URLSearchParams(location.search);
     const claimed = Number(params.get('claimed'));
+    if (params.get('checkout') === 'success') {
+      // Paid Purchase pixel, once per Stripe session. Async: it loads the
+      // org's pixels after the replace below has stripped the session id
+      // from the URL, so the vendors' PageView never sees it.
+      void trackCheckoutReturn(params.get('session_id'));
+    }
     if (params.get('checkout') === 'success' && params.get('guest') === '1') {
       setGuestDone(true);
     } else if (params.get('checkout') === 'success') {

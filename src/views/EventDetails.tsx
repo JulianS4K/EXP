@@ -22,6 +22,7 @@ import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
+import { rememberPendingCheckout } from '../lib/purchasePixel';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
@@ -300,7 +301,9 @@ export default function EventDetails() {
         eventId: event.id,
         tierId,
         quantity,
-        successUrl: publicUrl(guestEmail ? 'my-tickets?checkout=success&guest=1' : 'my-tickets?checkout=success'),
+        // Stripe fills in {CHECKOUT_SESSION_ID}; My Tickets uses it to report
+        // the Purchase pixel once per session (lib/purchasePixel.ts).
+        successUrl: publicUrl(`my-tickets?checkout=success${guestEmail ? '&guest=1' : ''}&session_id={CHECKOUT_SESSION_ID}`),
         cancelUrl: publicUrl(`event/${event.id}`),
         addons: addonSel.items,
         voucherCode: voucher?.code,
@@ -308,6 +311,19 @@ export default function EventDetails() {
         guestEmail,
       });
       clearPrefill(event.id);
+      if (event.orgId) {
+        // What the Purchase pixel falls back on when the session row isn't
+        // readable on return (guests). Estimate only for the tier on screen.
+        const estimate = tierId === selectedTier?.id ? priceToDisplay * quantity + addonSel.totalCents / 100 : undefined;
+        rememberPendingCheckout({
+          eventId: event.id,
+          orgId: event.orgId,
+          title: event.title,
+          currency: event.currency || 'USD',
+          quantity,
+          value: estimate,
+        });
+      }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
       console.error('Checkout failed:', err);
