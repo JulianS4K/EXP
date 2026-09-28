@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocationCellStatus, gametimeStatus, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
+import { allocationCellStatus, gametimeStatus, goTicketsStatus, poolLine, seatGeekStatus, stubHubStatus, type StubHubDistributionRow } from './stubhubStatus';
 
 const EV = { stubhubTicked: true, published: true, primaryMarketOnly: false };
 const row = (p: Partial<StubHubDistributionRow>): StubHubDistributionRow => ({
@@ -63,7 +63,7 @@ describe('allocationCellStatus', () => {
     expect(allocationCellStatus(alloc({}), 'seatgeek')?.text).toMatch(/listed once the event is published/);
     expect(allocationCellStatus(alloc({ planned_listing: { action: 'create', listings: [{}, {}, {}] } }), 'seatgeek')?.text)
       .toBe("3 listings ready. Not sent yet: SeatGeek selling isn't switched on.");
-    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create' } }), 'stubhub')?.text).toMatch(/^1 listing ready/);
+    expect(allocationCellStatus(alloc({ planned_listing: { action: 'create', listings: [{}, {}] } }), 'stubhub')?.text).toMatch(/^2 listings ready/);
     expect(allocationCellStatus(alloc({ planned_listing: { error: 'the ticket type has no price' } }), 'stubhub'))
       .toEqual({ tone: 'warn', text: 'the ticket type has no price' });
     expect(allocationCellStatus(alloc({ status: 'delisting' }), 'stubhub')?.text).toMatch(/Coming off StubHub/);
@@ -81,5 +81,28 @@ describe('gametimeStatus', () => {
     expect(gametimeStatus(row({ status: 'failed', error: 'x' }), ev)).toEqual({ tone: 'warn', text: 'x' });
     expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gametime')?.text)
       .toBe("1 listing ready. Not sent yet: Gametime selling isn't switched on.");
+  });
+});
+
+describe('poolLine', () => {
+  it('says what a marketplace holds, its cap and what it sold', () => {
+    expect(poolLine(null)).toBeNull();
+    expect(poolLine(row({ tier_id: 't', requested_qty: 4, sell_cap: 10, sold_qty: 2, list_qty: 4 })))
+      .toBe('Holding 4 now, up to 10 in total, 2 sold.');
+    expect(poolLine(row({ tier_id: 't', requested_qty: 0, sell_cap: 10, sold_qty: 6, list_qty: 0 })))
+      .toBe('Holding 0 now, up to 10 in total, 6 sold, none free right now.');
+    expect(poolLine(row({ tier_id: 't', status: 'listed', requested_qty: 4, sell_cap: 1, list_qty: 1 })))
+      .toBe('Holding 4 now, up to 1 in total, 3 back to Exos once the marketplace takes the lower number.');
+    expect(poolLine(row({ tier_id: 't', status: 'delisted', requested_qty: 0, sell_cap: 0 }))).toBeNull();
+  });
+});
+
+describe('goTicketsStatus', () => {
+  it('explains GoTickets', () => {
+    const ev = { ticked: true, published: true, primaryMarketOnly: false };
+    expect(goTicketsStatus(null, { ...ev, ticked: false })).toBeNull();
+    expect(goTicketsStatus(row({ status: 'planned' }), ev)?.text).toMatch(/matches the listings to its event itself/);
+    expect(allocationCellStatus(row({ tier_id: 't', requested_qty: 4, planned_listing: { action: 'create', listings: [{}] } }), 'gotickets')?.text)
+      .toBe("1 listing ready. Not sent yet: GoTickets selling isn't switched on.");
   });
 });

@@ -62,14 +62,16 @@ if (row.allocation) {
       id: row.allocation.id ?? '00000000-0000-4000-8000-000000000000',
       requested_qty: row.allocation.qty,
       unit_price: row.allocation.price ?? null,
+      // Internal seat numbers 1..qty, as exos_set_channel_allocation would hand out for a first allocation.
+      internal_seats: [{ from: 1, thru: row.allocation.qty }],
       tier: row.allocation.tier,
       event: row,
       stubhubEventId: row.allocation.stubhub_event_id ?? null,
     });
     console.log(JSON.stringify(plan, null, 2));
-    console.log(plan.display_cap
-      ? `   one listing of ${row.allocation.qty}; a buyer sees at most ${plan.display_cap} at a time`
-      : `   one listing of ${row.allocation.qty}; no per-order cap set on the event, so one order could take all of it`);
+    console.log(plan.listings.length > 1
+      ? `   ${plan.listings.length} listings of at most ${plan.per_order_cap} (the max per order), seats ${plan.listings.map((l) => `${l.seat_from}-${l.seat_thru}`).join(', ')}`
+      : `   one listing of ${row.allocation.qty}${plan.per_order_cap < row.allocation.qty ? '' : ' (no per-order cap below it)'}`);
   } catch (e) {
     console.log(`   REFUSED: ${e instanceof Error ? e.message : e}`);
   }

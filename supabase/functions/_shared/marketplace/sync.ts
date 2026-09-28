@@ -1,161 +1,86 @@
-// Keeping a marketplace's listings in step with an allocation (mig
-// 20260927030000). Pure: exos-distribute stores the result in
+// Keeping a marketplace's listings in step with an allocation (migs
+// 20260927030000 / 040000). Pure: exos-distribute stores the result in
 // exos_distribution_listings.planned_listing, and nothing is sent while
 // marketplace writes are dry-run (CLAUDE.md Hard Rule #2).
 //
+// One diff for every marketplace: plans share one shape (../exosListing.ts,
+// PlannedMarketplaceListings), keyed by the Exos listing id.
 // listed_snapshot is what the marketplace has now (the listings as last
-// sent). With none, everything is a create. With one, the plan is diffed
-// against it: new listings are created, changed ones updated, and ones that
-// are gone (sold out, dropped by a smaller allocation) deleted. An
-// allocation being pulled back ('delisting') gets a delist of everything the
-// marketplace has; its seats return to Exos once that has gone through.
+// sent). With none, everything is a create. With one, new listings are
+// created, changed ones updated, and ones that are gone (sold out, dropped
+// by a smaller allocation) deleted. An allocation being pulled back
+// ('delisting') gets a delist of everything the marketplace has; its seats
+// return to Exos once that has gone through.
 
-import type { PlannedListing } from './stubhub/listingPlan.ts';
-import type { PlannedSeatGeekListings } from './seatgeek/listingPlan.ts';
-import type { PlannedGametimeListings } from './gametime/inventory.ts';
-import { isExosListingId as isExosSellerListingId } from './listingIds.ts';
+import { plannedEntries, type PlannedMarketplaceListings } from './exosListing.ts';
+import { isExosListingId } from './listingIds.ts';
 
 export type SyncAction = 'create' | 'update' | 'none' | 'delist';
 
-type SgListing = PlannedSeatGeekListings['listings'][number];
-
-export interface SeatGeekSyncPlan extends PlannedSeatGeekListings {
-  action: SyncAction;
-  ops: {
-    create: string[];
-    update: Array<{ seller_listing_id: string; patch: Record<string, unknown> }>;
-    delete: string[];
-  };
+export interface ListingOps {
+  create: string[];
+  /** The changed request fields per listing (StubHub PATCH, SeatGeek PATCH, Gametime: the next file or POST /listings/{id}). */
+  update: Array<{ listing_id: string; patch: Record<string, unknown> }>;
+  delete: string[];
 }
 
-export interface StubHubSyncPlan extends PlannedListing {
-  action: SyncAction;
-  /** For an update: PATCH /externalsellerlistings/{external_id} with only what changed. */
-  update?: { endpoint: 'updateSellerListingByExternalId'; method: 'PATCH'; path: string; body: Record<string, unknown> };
-}
+export type SyncedListings<P extends PlannedMarketplaceListings> = P & { action: SyncAction; ops: ListingOps };
 
 export interface DelistPlan {
   action: 'delist';
-  endpoint: 'bulkDeleteListings' | 'deleteSellerListingByExternalId' | 'deleteListing';
-  method: 'POST' | 'DELETE';
-  path: string;
-  /** Gametime: one DELETE per listing. */
-  paths?: string[];
-  body?: { seller_listing_ids: string[] };
+  channel: 'stubhub' | 'seatgeek' | 'gametime' | 'gotickets';
+  /** One request per listing (StubHub, Gametime) or one bulk request (SeatGeek). */
+  requests: Array<{ endpoint: string; method: 'POST' | 'DELETE'; path: string; body?: unknown }>;
 }
 
-type ListingOps = {
-  create: string[];
-  update: Array<{ seller_listing_id: string; patch: Record<string, unknown> }>;
-  delete: string[];
-};
+// Fields that describe the event, not the listing: fixed once listed.
+const FIXED = new Set(['external_id', 'seller_listing_id', 'TicketID', 'event', 'venue', 'country', 'event_id']);
 
-/** Planned bodies vs what the marketplace has (null: nothing yet). */
-function diffListings(planned: ReadonlyArray<{ seller_listing_id: string }>, snapshot: unknown): { action: SyncAction; ops: ListingOps } {
-  const live = snapshot == null
-    ? null
-    : new Map(listingBodies(snapshot).map((b) => [b.seller_listing_id, b as unknown as Record<string, unknown>]));
-  const ops: ListingOps = { create: [], update: [], delete: [] };
-  for (const b of planned) {
-    const had = live?.get(b.seller_listing_id);
-    if (!had) {
-      ops.create.push(b.seller_listing_id);
-      continue;
-    }
-    const patch = changed(had, b as unknown as Record<string, unknown>, ['seller_listing_id']);
-    if (Object.keys(patch).length) ops.update.push({ seller_listing_id: b.seller_listing_id, patch });
-  }
-  if (live) {
-    const ids = new Set(planned.map((b) => b.seller_listing_id));
-    for (const id of live.keys()) if (!ids.has(id) && isExosSellerListingId(id)) ops.delete.push(id);
-  }
-  const action: SyncAction = !live ? 'create' : ops.create.length || ops.update.length || ops.delete.length ? 'update' : 'none';
-  return { action, ops };
-}
-
-/** The listing bodies in a stored snapshot / plan ({ listings: [{ body }] }). */
-export function listingBodies(v: unknown): Array<{ seller_listing_id: string; seat_from?: number; seat_thru?: number }> {
-  const ls = (v as { listings?: unknown } | null)?.listings;
-  if (!Array.isArray(ls)) return [];
-  return ls
-    .map((l) => (l as { body?: { seller_listing_id?: unknown } } | null)?.body)
-    .filter((b): b is { seller_listing_id: string } => !!b && typeof b.seller_listing_id === 'string');
-}
-
-/** The SeatGeek listing bodies in a stored snapshot / plan ({ listings: [{ body }] }). */
-export function seatGeekListingBodies(v: unknown): Array<SgListing['body']> {
-  const ls = (v as { listings?: unknown } | null)?.listings;
-  if (!Array.isArray(ls)) return [];
-  return ls
-    .map((l) => (l as { body?: SgListing['body'] } | null)?.body)
-    .filter((b): b is SgListing['body'] => !!b && typeof b.seller_listing_id === 'string');
-}
-
-function changed(before: Record<string, unknown>, after: Record<string, unknown>, skip: string[]): Record<string, unknown> {
+function changed(before: unknown, after: unknown): Record<string, unknown> {
+  const b = (before ?? {}) as Record<string, unknown>;
+  const a = (after ?? {}) as Record<string, unknown>;
   const patch: Record<string, unknown> = {};
-  for (const k of Object.keys(after)) {
-    if (skip.includes(k)) continue;
-    if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) patch[k] = after[k];
+  for (const k of Object.keys(a)) {
+    if (FIXED.has(k)) continue;
+    if (JSON.stringify(b[k]) !== JSON.stringify(a[k])) patch[k] = a[k];
   }
   return patch;
 }
 
-export function seatGeekSync(plan: PlannedSeatGeekListings, snapshot: unknown): SeatGeekSyncPlan {
-  return { ...plan, ...diffListings(plan.listings.map((l) => l.body), snapshot) };
+/** The plan, diffed against what the marketplace has (null: nothing yet). */
+export function syncListings<P extends PlannedMarketplaceListings>(plan: P, snapshot: unknown): SyncedListings<P> {
+  const live = snapshot == null ? null : new Map(plannedEntries(snapshot).map((e) => [e.listing_id, e]));
+  const ops: ListingOps = { create: [], update: [], delete: [] };
+  for (const l of plan.listings) {
+    const had = live?.get(l.listing_id);
+    if (!had) {
+      ops.create.push(l.listing_id);
+      continue;
+    }
+    const patch = changed(had.request?.body, l.request.body);
+    if (Object.keys(patch).length) ops.update.push({ listing_id: l.listing_id, patch });
+  }
+  if (live) {
+    const planned = new Set(plan.listings.map((l) => l.listing_id));
+    for (const id of live.keys()) if (!planned.has(id) && isExosListingId(id)) ops.delete.push(id);
+  }
+  const action: SyncAction = !live ? 'create' : ops.create.length || ops.update.length || ops.delete.length ? 'update' : 'none';
+  return { ...plan, action, ops };
 }
 
-export function seatGeekDelist(snapshot: unknown): DelistPlan | null {
-  const ids = seatGeekListingBodies(snapshot).map((b) => b.seller_listing_id).filter(isExosSellerListingId);
+/** Take down every Exos listing the marketplace has; null when it has none. */
+export function planDelist(channel: DelistPlan['channel'], snapshot: unknown): DelistPlan | null {
+  const ids = plannedEntries(snapshot).map((e) => e.listing_id).filter(isExosListingId);
   if (!ids.length) return null;
-  return { action: 'delist', endpoint: 'bulkDeleteListings', method: 'POST', path: '/listings/bulk-delete', body: { seller_listing_ids: ids } };
-}
-
-// StubHub fields that describe the event, not the listing: fixed once listed.
-const STUBHUB_FIXED = ['external_id', 'event', 'venue', 'country', 'event_id'];
-
-export function stubHubSync(plan: PlannedListing, snapshot: unknown, allocationId: string): StubHubSyncPlan {
-  const had = (snapshot as { body?: Record<string, unknown> } | null)?.body;
-  if (!had) return { ...plan, action: 'create' };
-  const patch = changed(had, plan.body, STUBHUB_FIXED);
-  if (!Object.keys(patch).length) return { ...plan, action: 'none' };
-  return {
-    ...plan,
-    action: 'update',
-    update: {
-      endpoint: 'updateSellerListingByExternalId',
-      method: 'PATCH',
-      path: `/externalsellerlistings/${encodeURIComponent(allocationId)}`,
-      body: patch,
-    },
-  };
-}
-
-export function stubHubDelist(allocationId: string): DelistPlan {
-  return {
-    action: 'delist',
-    endpoint: 'deleteSellerListingByExternalId',
-    method: 'DELETE',
-    path: `/externalsellerlistings/${encodeURIComponent(allocationId)}`,
-  };
-}
-
-export interface GametimeSyncPlan extends PlannedGametimeListings {
-  action: SyncAction;
-  ops: ListingOps;
-}
-
-/**
- * Gametime: every listing goes out in the next inventory file anyway; the ops
- * say what that file changes. A quantity-only change can also go through
- * POST /listings/{id} before the next file.
- */
-export function gametimeSync(plan: PlannedGametimeListings, snapshot: unknown): GametimeSyncPlan {
-  return { ...plan, ...diffListings(plan.listings.map((l) => l.body), snapshot) };
-}
-
-export function gametimeDelist(snapshot: unknown): DelistPlan | null {
-  const ids = listingBodies(snapshot).map((b) => b.seller_listing_id).filter(isExosSellerListingId);
-  if (!ids.length) return null;
-  const paths = ids.map((id) => `/listings/${encodeURIComponent(id)}/delete`);
-  return { action: 'delist', endpoint: 'deleteListing', method: 'DELETE', path: paths[0], paths };
+  const enc = encodeURIComponent;
+  const chunks = (n: number) => Array.from({ length: Math.ceil(ids.length / n) }, (_, i) => ids.slice(i * n, i * n + n));
+  const requests: DelistPlan['requests'] = channel === 'seatgeek'
+    ? [{ endpoint: 'bulkDeleteListings', method: 'POST', path: '/listings/bulk-delete', body: { seller_listing_ids: ids } }]
+    : channel === 'gotickets'
+      // By external id only, 100 per request.
+      ? chunks(100).map((c) => ({ endpoint: 'deleteListingsByExternalIds', method: 'DELETE' as const, path: '/rest/listings/external-id', body: c }))
+    : channel === 'stubhub'
+      ? ids.map((id) => ({ endpoint: 'deleteSellerListingByExternalId', method: 'DELETE' as const, path: `/externalsellerlistings/${enc(id)}` }))
+      : ids.map((id) => ({ endpoint: 'deleteListing', method: 'DELETE' as const, path: `/listings/${enc(id)}/delete` }));
+  return { action: 'delist', channel, requests };
 }

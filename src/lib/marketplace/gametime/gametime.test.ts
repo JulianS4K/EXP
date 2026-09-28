@@ -5,7 +5,6 @@ import {
   GametimeClient,
   GametimeWriteRefusedError,
   GametimeWriter,
-  csvRowOf,
   gametimeChannel,
   gametimeDate,
   gametimeInventoryCsv,
@@ -17,7 +16,7 @@ import {
   type GametimeAllocation,
   type GametimeWriteAuthorization,
 } from '.';
-import { exosListingId, gametimeDelist, gametimeSync } from '..';
+import { exosListingId, planDelist, syncListings } from '..';
 
 const ALLOC = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const AUTH: GametimeWriteAuthorization = {
@@ -67,12 +66,12 @@ describe('client', () => {
 describe('inventory', () => {
   it('plans one listing per max-per-order block with internal seats, in Gametime CSV form', () => {
     const p = planGametimeListings(base);
-    expect(p.listings.map((l) => [l.body.TicketID, l.body.SeatFrom, l.body.SeatThru, l.body.Quantity])).toEqual([
+    expect(p.listings.map((l) => [l.request.body.TicketID, l.request.body.SeatFrom, l.request.body.SeatThru, l.request.body.Quantity])).toEqual([
       [exosListingId(ALLOC, 1), '1', '4', '4'],
       [exosListingId(ALLOC, 2), '5', '8', '4'],
       [exosListingId(ALLOC, 3), '9', '10', '2'],
     ]);
-    expect(p.listings[0].body).toMatchObject({
+    expect(p.listings[0].request.body).toMatchObject({
       Event: 'Late Night Jazz, Vol. 2', Venue: 'Blue Room', EventDate: '11/6/2026', EventTime: '9:00:00 PM', Row: 'GA', Section: 'GA',
       Cost: '45.00', FaceValue: '40.00', edelivery_ind: 'Y', Instant: 'N', Splittype: 'ANY', Stock: 'mobile_transfer', InHandDate: '2026-11-06',
     });
@@ -81,12 +80,12 @@ describe('inventory', () => {
 
   it('writes a CSV with Gametime’s columns, quoting commas, Exos ids only', () => {
     const p = planGametimeListings(base);
-    const csv = gametimeInventoryCsv(p.listings.map((l) => csvRowOf(l.body)));
+    const csv = gametimeInventoryCsv(p.listings.map((l) => l.request.body));
     const lines = csv.trim().split('\r\n');
     expect(lines[0]).toBe(GAMETIME_CSV_COLUMNS.join(','));
     expect(lines).toHaveLength(4);
     expect(lines[1]).toMatch(/^y,"Late Night Jazz, Vol\. 2",Blue Room,11\/6\/2026,9:00:00 PM,4,GA,GA,1,4,/);
-    expect(() => gametimeInventoryCsv([{ ...csvRowOf(p.listings[0].body), TicketID: '1732272492' }])).toThrow(/not an Exos listing id/);
+    expect(() => gametimeInventoryCsv([{ ...p.listings[0].request.body, TicketID: '1732272492' }])).toThrow(/not an Exos listing id/);
   });
 
   it('refuses what it cannot describe', () => {
@@ -97,13 +96,13 @@ describe('inventory', () => {
 
   it('syncs against what Gametime has, and delists Exos listings only', () => {
     const live = planGametimeListings(base);
-    expect(gametimeSync(live, null).action).toBe('create');
-    expect(gametimeSync(live, live).action).toBe('none');
-    const next = planGametimeListings({ ...base, requested_qty: 8, internal_seats: '{[1,9)}', previous: live.listings.map((l) => l.body) });
-    expect(gametimeSync(next, live).ops.delete).toEqual([exosListingId(ALLOC, 3)]);
-    const d = gametimeDelist({ listings: [...live.listings, { body: { seller_listing_id: '1732272492' } }] });
-    expect(d?.paths).toHaveLength(3);
-    expect(d?.paths?.[0]).toBe(`/listings/${exosListingId(ALLOC, 1)}/delete`);
+    expect(syncListings(live, null).action).toBe('create');
+    expect(syncListings(live, live).action).toBe('none');
+    const next = planGametimeListings({ ...base, requested_qty: 8, internal_seats: '{[1,9)}', previous: live });
+    expect(syncListings(next, live).ops.delete).toEqual([exosListingId(ALLOC, 3)]);
+    const d = planDelist('gametime', { listings: [...live.listings, { listing_id: '1732272492' }] });
+    expect(d?.requests).toHaveLength(3);
+    expect(d?.requests[0]).toMatchObject({ method: 'DELETE', path: `/listings/${exosListingId(ALLOC, 1)}/delete` });
   });
 });
 
@@ -161,9 +160,13 @@ describe('orders', () => {
 
   it('delivers by confirming, then confirm_transfer with one claim link per ticket', () => {
     const urls = ['https://exos.test/claim/a', 'https://exos.test/claim/b'];
-    const plan = gametimeChannel().planFulfilByUrls!(normalizeGametimeSale(purchase), urls);
-    expect(plan).toMatchObject({ endpoint: 'confirmTransfer', method: 'POST', path: '/purchases/GT-100/confirm_transfer' });
-    expect((plan.body as { confirm_first: { path: string } }).confirm_first.path).toBe('/purchases/GT-100/confirm');
+    const steps = gametimeChannel().planFulfilByUrls!(normalizeGametimeSale(purchase), urls, [7, 8]);
+    expect(steps.map((s) => [s.endpoint, s.path])).toEqual([
+      ['confirmPurchase', '/purchases/GT-100/confirm'],
+      ['confirmTransfer', '/purchases/GT-100/confirm_transfer'],
+    ]);
+    // The tickets' internal seats go with the confirm.
+    expect(steps[0].body).toEqual({ seats: ['7', '8'] });
     expect(transferConfirmationForm({ orderNumber: 'GT-100', urls, quantity: 2 })).toEqual([
       ['transfer_url[]', urls[0]], ['transfer_url[]', urls[1]], ['transfer_type', 'generic'],
     ]);

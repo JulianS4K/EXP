@@ -8,6 +8,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | StubHub | [`stubhub/`](stubhub/README.md) | PDFs 2026-09-14 (API v2.249.0.0, Catalog v1.0.0.75) + OpenAPI specs from viagogo/stubhub-api-docs |
 | SeatGeek | [`seatgeek/`](seatgeek/README.md) | Seller Direct API 1.0.0 (OAS3), 2026-09-27; event search via the public Platform API |
 | Gametime | [`gametime/`](gametime/README.md) | API v3 (Swagger 2.0), onboarding guide, CSV columns, example CSV, Postman collection, 2026-09-27 |
+| GoTickets | [`gotickets/`](gotickets/README.md) | Seller Central API v1 (OpenAPI 3.0.1), 2026-09-28 |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
@@ -19,21 +20,57 @@ read-only. Every endpoint is tagged below as **read** or **write**. A write
 needs explicit operator authorization before any code calls it, per the
 charter's §6.1 carve-out process.
 
+## StubHub, SeatGeek, Gametime and GoTickets side by side
+
+StubHub, SeatGeek, Gametime and GoTickets are wired; the rest come later, as
+adapters in the same layer. What each one offers, and what Exos standardized
+on so that one Exos model fits all of them (mig `20260927050000`,
+`_shared/marketplace/exosListing.ts`):
+
+| | StubHub | SeatGeek | Gametime | GoTickets | **Exos standard** |
+|---|---|---|---|---|---|
+| Auth | OAuth2 (client credentials; seller refresh token) | seller token (`Authorization`) | API key in `?source=` | access id + secret headers | kept out of logs and plans everywhere |
+| Find the event | catalog search | Platform API search | none | none needed: it maps listings itself (name, venue, time, StubHub / SeatGeek ids) | linked when found; listings always carry the event as text |
+| Create the event | `PUT /sellerevents`, or a requested-event listing | no | no | no | StubHub only; the others match on name, venue, date |
+| Create listings | REST, one per call | REST `PUT /listings/single/{id}`, one per call | **CSV of the whole account on FTP, every < 6 h** | REST, up to 100 per call | the same planned listings, sent each marketplace's way |
+| Our listing id | `external_id` | `seller_listing_id` (≤ 32 chars) | `TicketID` (examples numeric) | `externalTicketId` (≤ 100 chars) | `ex<base32 allocation id><n>`, stable across re-plans |
+| Cap one order | `display_number_of_tickets` (not documented as a purchase cap) | no (CUSTOM splits must end at the quantity) | `lots` via edit | no (CUSTOM splits only) | **listings of at most max per order** |
+| Seats | optional | required with a row | optional | optional (`lowSeat` / `highSeat`) | internal GA seat numbers per listing; row `GA` |
+| Split | Any / AvoidOne / … | ANY / … | ANY / NEVERLEAVEONE / … | ANY / NEVER_LEAVE_ONE / … | any, within the listing |
+| Delivery type | ticket / mobile transfer (per event) | `mobile` | `mobile_transfer` | `MOBILE_TICKETS` | an Exos claim link per ticket |
+| Update / delist | PATCH / DELETE by external id | PATCH / bulk-delete | edit quantity / DELETE; drop from the next file | full PUT / DELETE by external id (100 per call) | one diff (create / update / delete) against what the marketplace has |
+| Sale arrives | webhook + `/sales/recentupdates` | webhook + `GET /orders` | webhook + `GET /purchases` | webhooks (unsigned: read back) + `GET /rest/sales` | normalized to one `MarketplaceSale` |
+| Sale names the listing | `external_listing_id` | `listing.id` | `listing_reference_id` / `source_id` | `externalTicketId` | `listing_ref` on the order: which block |
+| Buyer email | `/sales/{id}/ticketholders` | `/orders/customer` | on the purchase | on the sale | stored on the order; contact details stripped from the raw copy |
+| Statuses | pending / confirmed / delivered / cancelled … | submitted / confirmed / fulfilled / denied / void | unconfirmed / unfulfilled / completed / rejected | UNCONFIRMED / PENDING_FULFILLMENT / COMPLETED … + cancelReason | pending / confirmed / delivered / cancelled / unknown |
+| Deliver | PATCH sale: confirmed + e-ticket URLs | PATCH order: fulfilled + transfer URLs (GA: no confirm first) | confirm (+ seats), then confirm_transfer + URLs | confirm, then fulfil with SUBMIT_TRANSFER_URL + URLs | the same plan everywhere: claim links, the tickets' internal seats, the steps in order |
+
+**The Exos listing** (`planExosListings`): for each allocation, blocks of at
+most the event's max per order, each a contiguous run of the allocation's
+internal seat numbers, row `GA`, the listing price (face value = the ticket
+type's price), split any, delivered by claim link, in hand on the event day,
+with the event as text (name, venue, venue-local date and time) and a stable
+`ex…` listing id. Every marketplace gets exactly these listings; its module
+only renames the fields (StubHub `listingPlan.ts`, SeatGeek `listingPlan.ts`,
+Gametime `inventory.ts`, GoTickets `listingPlan.ts`). Blocks are the one
+per-order cap that works on all of them, so StubHub moved from one display-capped listing to the same blocks.
+
+**Stored plans** share one shape: `{ channel, listings: [{ listing_id,
+seat_from, seat_thru, quantity, request: { endpoint, method, path, body } }],
+per_order_cap, unresolved }`, plus `action` / `ops` from the sync. The sync,
+the delist plan and the SQL seat claim read only the shared fields.
+
+**A sale** records the listing it came from (`listing_ref`), and each ticket
+takes a seat from that listing's block (`exos_claim_internal_seat`), on all
+three marketplaces. **Delivery** is the same plan everywhere: the claim links,
+the tickets' internal seats, and the marketplace's steps in order.
+
+Details per marketplace: [`stubhub/`](stubhub/README.md),
+[`seatgeek/`](seatgeek/README.md), [`gametime/`](gametime/README.md).
+
 ## How StubHub ties into Exos
 
-StubHub, SeatGeek and Gametime are wired; the rest come later, as adapters
-in the same layer. Gametime ([`gametime/README.md`](gametime/README.md)) has
-no event search or creation, and takes listings only as a CSV of the whole
-account's inventory on its FTP server, re-sent at least every six hours: so
-Exos only ever uploads it to a Gametime account that holds Exos listings
-alone (not confirmed yet). SeatGeek differs in three ways (details in
-[`seatgeek/README.md`](seatgeek/README.md)): no event creation, so events
-are linked by search (Platform API) or by an admin; no display cap, so an
-allocation becomes several listings of at most the max per order, each a
-block of internal seat numbers; and sales come by webhook and by polling
-`GET /orders`.
-
-### One sync for both marketplaces (mig `20260927030000`)
+### One sync for every marketplace (mig `20260927030000`)
 
 - **Rows.** Per event and marketplace: one **event row** (`tier_id` NULL: the
   StubHub event request, or which SeatGeek event the listings attach to) and
@@ -130,30 +167,45 @@ The flow, end to end:
    Claiming rotates the barcode secret, so nothing scans before the buyer
    claims it.
 
-### No double buys: StubHub gets its own seats
+### No double buys: every marketplace holds its own small pool
 
-The seats on a StubHub listing are the same seats Exos sells, and StubHub's
-sale reaches Exos minutes later (webhook or poll). So "sync the quantity after
-each sale" can only narrow the window where both sides sell the last seat.
-Exos closes it instead with disjoint pools (mig `20260926193000`):
+The seats on a marketplace listing are the same seats Exos sells, and a
+marketplace sale reaches Exos seconds to minutes later (webhook or poll). So
+"sync the quantity after each sale" can only narrow the window where two
+places sell the last seat. Exos closes it instead with disjoint pools: at any
+moment a seat is held by exactly one of Exos, StubHub, SeatGeek or Gametime
+(migs `20260926193000`, `20260928010000`). "Broadcast everything everywhere"
+was considered and set aside for now: it would oversell near sell-out and
+leave marketplace orders to cancel (with penalties).
 
-- **Allocate.** The event editor's Marketplaces grid, or
-  `exos_set_channel_allocation`, sets N seats of a ticket type aside for
-  StubHub (`exos_distribution_listings.requested_qty`). Exos's availability
-  (`exos_tier_available`, `exos_quota_available`) leaves them out. Every Exos
-  path that sells or reserves a seat reads that availability: checkout
-  holds, free claims, comps, box office, waitlist offers.
-- **It only takes free seats.** It runs under the same locks as a cart hold
-  and writes the tier row, so a concurrent Exos checkout re-checks and can't
-  take a seat that was just allocated.
-- **A StubHub sale uses its own seats.** It takes them out of the allocation
-  in the same transaction that mints them, so it never competes with Exos
-  buyers. StubHub selling more than was allocated goes to a human.
-- **Give seats back.** Lowering the allocation releases the seats to Exos
-  straight away; taking a live listing down releases them once it's down
-  (delist, then release).
-- **Keep the StubHub listing quantity equal to the allocation.** StubHub
-  stops at its quantity, and Exos stops at capacity minus the allocation.
+- **The grid sets a cap, the marketplace holds a small pool.** The event
+  editor's Marketplaces grid (or `exos_set_channel_allocation`) sets the most
+  a marketplace sells of a ticket type (`sell_cap`). It holds only a few at a
+  time (`requested_qty`): **2 x the event's max per order** (8 without one;
+  `pool_size` overrides), never more than what's left of its cap. The event
+  is live on every ticked marketplace at once, and Exos sells everything not
+  held.
+- **Held seats are out of Exos's availability** (`exos_tier_available`,
+  `exos_quota_available`). Every Exos path that sells or reserves a seat reads
+  it: checkout holds, free claims, comps, box office, waitlist offers.
+- **Topped up with free seats only.** After each marketplace sale (same
+  transaction), and for every pool on each `exos-distribute` run
+  (`exos_refill_channel_pools`, which also picks up refunds and released
+  holds), the pool is refilled toward its size, under the same locks as a
+  cart hold, so it can't race an Exos checkout. If Exos has sold the rest,
+  the marketplace just holds less: the cap is a ceiling, not a promise.
+- **A marketplace sale uses its own pool.** Its seats come out of the pool in
+  the same transaction that mints them, so it never competes with Exos
+  buyers or another marketplace. Selling more than the pool holds goes to a
+  human.
+- **Giving seats back: never before the marketplace has the lower number.**
+  With nothing on the marketplace, a lower cap releases seats at once. A
+  **live** listing keeps them held while its listings are planned at the lower
+  number (`list_qty`, the lowest seats); they return to Exos only when the
+  marketplace confirms (`exos_confirm_channel_listing`, called by the live
+  writer after the update). Taking a listing down works the same way (delist,
+  then release).
+- **Per order:** listings hold at most the event's max per order.
 
 Two limits are enforced, not papered over:
 - Allocation is refused when the event's overall cap is lower than its
@@ -167,18 +219,13 @@ seat in three orders, and never sells it twice.
 
 ### One order can't take the whole allocation; over-limit accounts are flagged
 
-- **Per order: capped on StubHub.** Each allocation becomes one listing,
-  planned by `exos-distribute` pass 1b into
-  `exos_distribution_listings.planned_listing` (dry-run). It carries
-  `display_number_of_tickets = min(maxPerOrder, allocation)`, so StubHub
-  buyers see, and can take, at most the event's max per order at a time. The
-  rest shows as tickets sell. `split_type` is `AvoidOne` so nobody strands a
-  single seat.
-  - A marketplace without a display cap (`capabilities.displayQuantityCap =
-    false`: SeatGeek) gets the allocation split into several listings of at
-    most maxPerOrder each.
-  - The docs don't say whether StubHub enforces `display_number_of_tickets`
-    per purchase or only for display. Check on the first sandbox listing.
+- **Per order: capped by listing size, everywhere.** Each allocation becomes
+  listings of at most the event's max per order (the Exos standard above),
+  planned by `exos-distribute` into
+  `exos_distribution_listings.planned_listing` (dry-run). One order takes at
+  most one listing, so no marketplace order can take more than an Exos buyer
+  could. (StubHub used to get one listing with `display_number_of_tickets`,
+  which its docs don't describe as a purchase cap.)
 - **Per person: the account is flagged, the sale is not.** No marketplace
   can enforce Exos's max per account: one person can place several orders
   there. So nothing is blocked. Instead, once an Exos **account** actually

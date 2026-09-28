@@ -1,7 +1,12 @@
-// The StubHub listing for a channel allocation (mig 20260926193000), planned,
-// not sent: one listing per allocation, showing buyers at most the event's
-// max-per-order at a time (display_number_of_tickets), so a single order
-// can't take the whole allocation.
+// The StubHub listings for a channel allocation: the Exos listings
+// (../exosListing.ts: blocks of at most max per order, internal seats,
+// stable "ex…" ids) as StubHub seller listings. Planned, not sent.
+//
+// Standardized with SeatGeek and Gametime (was: one listing per allocation
+// showing buyers at most max per order through display_number_of_tickets,
+// which StubHub doesn't document as a purchase cap). Each block is its own
+// listing: external_id the Exos listing id, seating section / row "GA" /
+// seat_from–seat_to the block's internal seats, split "Any" within it.
 //
 // Route: when the event is linked to a StubHub event, POST
 // /events/{id}/sellerlistings; otherwise the requested-event listing, POST
@@ -10,65 +15,60 @@
 // ticket_type is left null in the plan: StubHub lists the accepted types per
 // event (listing constraints), and pickTicketType() chooses from those at
 // send time (ticket transfer, then mobile transfer). A plan never carries a
-// guessed value.
+// guessed value. Listings are created unpublished.
 
 import { exosEventForListing, type ExosEventRow } from './eventRequest.ts';
 import {
   buildCreateListingRequest,
   buildRequestedEventListingRequest,
   EXOS_TICKET_TYPE_PREFERENCE,
-  maxPerOrderFromLimits,
   type ListingDetails,
 } from './listing.ts';
+import { entryFor, planExosListings, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
 
-export interface AllocationForListing {
-  /** exos_distribution_listings.id: the listing's external_id. */
-  id: string;
-  requested_qty: number | null;
-  unit_price: number | string | null;
-  tier: { name: string; price: number | string; section_label?: string | null } | null;
+export type AllocationForListing = ExosAllocation & {
   event: (ExosEventRow & { currency?: string | null; purchase_limits?: unknown }) | null;
   /** The linked StubHub event id (exos_channel_event_links), if any. */
   stubhubEventId?: string | null;
-}
+};
 
-export interface PlannedListing {
-  endpoint: 'createSellerListing' | 'createSellerListingForRequestedEvent';
-  method: 'POST';
-  path: string;
-  body: Record<string, unknown>;
-  /** How many a buyer sees (and can take) at once; null = the whole listing. */
-  display_cap: number | null;
+export interface PlannedListing extends PlannedMarketplaceListings<Record<string, unknown>> {
+  channel: 'stubhub';
   ticket_type_from: string[];
 }
 
 export function planStubHubListing(a: AllocationForListing): PlannedListing {
-  if (!a.tier) throw new Error('the allocation has no ticket type');
-  if (!a.event) throw new Error('event not found');
-  const qty = a.requested_qty ?? 0;
-  const price = a.unit_price ?? a.tier.price;
-  const details: ListingDetails = {
-    // Placeholder so the builder validates the rest; nulled below.
-    ticketType: EXOS_TICKET_TYPE_PREFERENCE[0],
-    // Don't strand a single seat, when there's more than one to sell.
-    splitType: qty >= 2 ? 'AvoidOne' : 'Any',
-    section: (a.tier.section_label || a.tier.name || '').trim(),
-    currency: (a.event.currency || 'USD').toUpperCase(),
-    maxPerOrder: maxPerOrderFromLimits(a.event.purchase_limits),
-    published: false,
-  };
-  const row = { id: a.id, channel: 'stubhub', requested_qty: qty, unit_price: price };
+  const set = planExosListings(a, 'StubHub');
   const known = a.stubhubEventId?.trim();
-  const body = (known
-    ? buildCreateListingRequest(row, details)
-    : buildRequestedEventListingRequest(row, details, exosEventForListing(a.event))) as unknown as Record<string, unknown>;
-  body.ticket_type = null;
+  const requested = known ? null : exosEventForListing(a.event!);
+  const listings = set.listings.map((l) => {
+    const details: ListingDetails = {
+      // Placeholder so the builder validates the rest; nulled below.
+      ticketType: EXOS_TICKET_TYPE_PREFERENCE[0],
+      splitType: 'Any',
+      section: l.section,
+      row: l.row,
+      seatFrom: String(l.seat_from),
+      seatTo: String(l.seat_thru),
+      currency: l.currency,
+      ...(l.face_value != null ? { faceValue: l.face_value } : {}),
+      notes: l.notes,
+      published: false,
+    };
+    const row = { id: l.listing_id, channel: 'stubhub', requested_qty: l.quantity, unit_price: l.price };
+    const body = (requested
+      ? buildRequestedEventListingRequest(row, details, requested)
+      : buildCreateListingRequest(row, details)) as unknown as Record<string, unknown>;
+    body.ticket_type = null;
+    return entryFor(l, known
+      ? { endpoint: 'createSellerListing', method: 'POST', path: `/events/${encodeURIComponent(known)}/sellerlistings`, body }
+      : { endpoint: 'createSellerListingForRequestedEvent', method: 'POST', path: '/sellerlistings', body });
+  });
   return {
-    endpoint: known ? 'createSellerListing' : 'createSellerListingForRequestedEvent',
-    method: 'POST',
-    path: known ? `/events/${encodeURIComponent(known)}/sellerlistings` : '/sellerlistings',
-    body,
-    display_cap: typeof body.display_number_of_tickets === 'number' ? body.display_number_of_tickets : null,
+    channel: 'stubhub',
+    listings,
+    per_order_cap: set.per_order_cap,
+    unresolved: [],
     ticket_type_from: [...EXOS_TICKET_TYPE_PREFERENCE],
   };
 }

@@ -63,6 +63,19 @@ export function seatBlocks(runs: SeatRun[], max: number | null): SeatRun[] {
   return out;
 }
 
+/** The lowest `n` seats (a live listing waiting to shrink lists these; the highest go back to Exos). */
+export function lowestSeats(runs: SeatRun[], n: number): SeatRun[] {
+  const out: SeatRun[] = [];
+  let left = Math.max(0, Math.floor(n));
+  for (const r of runs) {
+    if (left <= 0) break;
+    const len = r.thru - r.from + 1;
+    out.push(len <= left ? { ...r } : { from: r.from, thru: r.from + left - 1 });
+    left -= Math.min(len, left);
+  }
+  return out;
+}
+
 /** "1-4, 11-12" for staff screens. */
 export function formatSeatRanges(runs: SeatRun[]): string {
   return runs.map((r) => (r.from === r.thru ? `${r.from}` : `${r.from}-${r.thru}`)).join(', ');

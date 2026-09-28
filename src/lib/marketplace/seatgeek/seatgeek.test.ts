@@ -106,10 +106,10 @@ describe('planSeatGeekListings', () => {
 
   it('plans one listing per max-per-order group, unlinked event as text', () => {
     const p = planSeatGeekListings(base);
-    expect(p.listings.map((l) => l.body.quantity)).toEqual([4, 4, 2]);
+    expect(p.listings.map((l) => l.request.body.quantity)).toEqual([4, 4, 2]);
     expect(p.per_order_cap).toBe(4);
-    expect(p.listings[0].path).toBe(`/listings/single/${exosSellerListingId(ALLOC, 1)}`);
-    expect(p.listings[2].body).toMatchObject({
+    expect(p.listings[0].request.path).toBe(`/listings/single/${exosSellerListingId(ALLOC, 1)}`);
+    expect(p.listings[2].request.body).toMatchObject({
       seller_listing_id: exosSellerListingId(ALLOC, 3),
       cost: 45,
       section: 'GA',
@@ -122,31 +122,31 @@ describe('planSeatGeekListings', () => {
       event_time: '21:00:00',
       venue: 'Blue Room',
     });
-    expect(p.listings[0].body.event_id).toBeUndefined();
+    expect(p.listings[0].request.body.event_id).toBeUndefined();
     expect(p.unresolved.some((u) => u.startsWith('event_id'))).toBe(true);
   });
 
   it('gives each listing a block of internal seat numbers (seat_from / seat_thru)', () => {
     const p = planSeatGeekListings(base);
-    expect(p.listings.map((l) => [l.body.seat_from, l.body.seat_thru])).toEqual([[1, 4], [5, 8], [9, 10]]);
+    expect(p.listings.map((l) => [l.request.body.seat_from, l.request.body.seat_thru])).toEqual([[1, 4], [5, 8], [9, 10]]);
     expect(p.unresolved.some((u) => u.startsWith('seat'))).toBe(false);
     // Blocks never span a gap in the numbers (another marketplace has 5-6).
     const q = planSeatGeekListings({ ...base, requested_qty: 6, internal_seats: '{[1,5),[7,9)}' });
-    expect(q.listings.map((l) => [l.body.seat_from, l.body.seat_thru, l.body.quantity])).toEqual([[1, 4, 4], [7, 8, 2]]);
+    expect(q.listings.map((l) => [l.request.body.seat_from, l.request.body.seat_thru, l.request.body.quantity])).toEqual([[1, 4, 4], [7, 8, 2]]);
   });
 
   it('keeps listing numbers across re-plans; new blocks get unused numbers', () => {
     const first = planSeatGeekListings(base);
-    const prev = first.listings.map((l) => l.body);
+    const prev = first;
     // Listing 1 sold out (seats 1-4 are on tickets now); 2 lost seat 8.
     const next = planSeatGeekListings({ ...base, requested_qty: 5, internal_seats: '{[5,8),[9,11)}', previous: prev });
-    expect(next.listings.map((l) => [l.body.seller_listing_id, l.body.seat_from, l.body.seat_thru])).toEqual([
+    expect(next.listings.map((l) => [l.request.body.seller_listing_id, l.request.body.seat_from, l.request.body.seat_thru])).toEqual([
       [exosSellerListingId(ALLOC, 2), 5, 7],
       [exosSellerListingId(ALLOC, 3), 9, 10],
     ]);
     // Grown by 3 new numbers (21-23): a new listing 4, not a reused 1.
-    const grown = planSeatGeekListings({ ...base, requested_qty: 8, internal_seats: '{[5,8),[9,11),[21,24)}', previous: next.listings.map((l) => l.body) });
-    expect(grown.listings.map((l) => l.body.seller_listing_id)).toEqual([2, 3, 4].map((n) => exosSellerListingId(ALLOC, n)));
+    const grown = planSeatGeekListings({ ...base, requested_qty: 8, internal_seats: '{[5,8),[9,11),[21,24)}', previous: next });
+    expect(grown.listings.map((l) => l.request.body.seller_listing_id)).toEqual([2, 3, 4].map((n) => exosSellerListingId(ALLOC, n)));
   });
 
   it('refuses seat numbers that do not match the allocation', () => {
@@ -157,7 +157,7 @@ describe('planSeatGeekListings', () => {
   it('uses the linked SeatGeek event id instead of the text', () => {
     const p = planSeatGeekListings({ ...base, seatgeekEventId: '6123456' });
     // event / venue / date are required even with an event_id.
-    expect(p.listings[0].body).toMatchObject({ event_id: 6123456, event: 'Late Night Jazz', venue: 'Blue Room' });
+    expect(p.listings[0].request.body).toMatchObject({ event_id: 6123456, event: 'Late Night Jazz', venue: 'Blue Room' });
     expect(p.unresolved.some((u) => u.startsWith('event_id'))).toBe(false);
   });
 
@@ -208,8 +208,9 @@ describe('orders', () => {
     const plan = planDelivery(seatGeekChannel(), { external_order_id: 'SG-1', quantity: 2, transfer_ids: ['0b7f5d3a-1c2e-4f6a-8b9d-111111111111', '0b7f5d3a-1c2e-4f6a-8b9d-222222222222'] }, 'https://exos.test/bridge');
     expect(plan.kind).toBe('planned');
     if (plan.kind !== 'planned') return;
-    expect(plan.request).toMatchObject({ channel: 'seatgeek', endpoint: 'updateOrder', method: 'PATCH', path: '/order' });
-    const body = plan.request.body as { form: [string, string][]; unresolved: string[] };
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]).toMatchObject({ channel: 'seatgeek', endpoint: 'updateOrder', method: 'PATCH', path: '/order' });
+    const body = plan.steps[0].body as { form: [string, string][]; unresolved: string[] };
     expect(body.form).toEqual([
       ['order_id', 'SG-1'], ['status', 'fulfilled'], ['delivery_method', 'electronic'], ['stock_type', 'mobile'],
       ['transfer_url', plan.claim_urls.join(',')],

@@ -23,13 +23,19 @@ export function recordPayload(sale: MarketplaceSale, raw?: unknown): Record<stri
   if (sale.confirmBy) p.confirm_by = sale.confirmBy;
   if (sale.shipBy) p.ship_by = sale.shipBy;
   if (sale.createdAt) p.sold_at = sale.createdAt;
+  if (sale.listingRef) p.listing_ref = sale.listingRef;
   if (raw !== undefined) p.raw = raw;
   return p;
 }
 
+/**
+ * How the tickets reach the marketplace buyer, the same shape everywhere:
+ * the claim links (one per ticket), the tickets' internal seats, and the
+ * marketplace calls in order (dry-run), or a note for a human.
+ */
 export type DeliveryPlan =
-  | { kind: 'planned'; request: PlannedRequest; claim_urls: string[] }
-  | { kind: 'manual'; reason: string; claim_urls: string[] };
+  | { kind: 'planned'; steps: PlannedRequest[]; claim_urls: string[]; seats: number[] }
+  | { kind: 'manual'; reason: string; claim_urls: string[]; seats: number[] };
 
 /**
  * What delivers the tickets: the channel's URL-delivery call (dry-run), or a
@@ -37,14 +43,15 @@ export type DeliveryPlan =
  */
 export function planDelivery(
   channel: MarketplaceChannel,
-  order: { external_order_id: string; quantity: number; transfer_ids: string[] },
+  order: { external_order_id: string; quantity: number; transfer_ids: string[]; seats?: number[] },
   appBase: string | undefined,
 ): DeliveryPlan {
-  if (!appBase) return { kind: 'manual', reason: 'EXOS_APP_BASE_URL is not set, so there are no claim links', claim_urls: [] };
+  const seats = order.seats ?? [];
+  if (!appBase) return { kind: 'manual', reason: 'EXOS_APP_BASE_URL is not set, so there are no claim links', claim_urls: [], seats };
   const urls = order.transfer_ids.map((t) => exosClaimUrl(appBase, t));
   if (!channel.capabilities.fulfilByUrls || !channel.planFulfilByUrls) {
-    return { kind: 'manual', reason: `${channel.label} can't take ticket links through its API: send them by hand`, claim_urls: urls };
+    return { kind: 'manual', reason: `${channel.label} can't take ticket links through its API: send them by hand`, claim_urls: urls, seats };
   }
   const sale = { externalOrderId: order.external_order_id, quantity: order.quantity } as MarketplaceSale;
-  return { kind: 'planned', request: channel.planFulfilByUrls(sale, urls), claim_urls: urls };
+  return { kind: 'planned', steps: channel.planFulfilByUrls(sale, urls, seats.length ? seats : undefined), claim_urls: urls, seats };
 }

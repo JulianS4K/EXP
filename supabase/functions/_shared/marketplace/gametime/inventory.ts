@@ -17,16 +17,14 @@
 // (mobile_transfer | mobile_screencap | eticket | commemorative), Discount,
 // ZonePrice.
 //
-// Exos: one listing per block of at most the event's max per order (as on
-// SeatGeek, so no order can take more than that; Splittype ANY within it),
-// Row "GA", SeatFrom / SeatThru the allocation's internal seat numbers,
-// Stock mobile_transfer (the buyer accepts an Exos claim link), TicketID
-// "ex<base32 allocation id><n>" with stable numbers (../listingIds.ts).
-// Edit is "y" as in Gametime's example file (not described there).
+// Exos: the Exos listings (../exosListing.ts: blocks of at most max per
+// order, internal seats as SeatFrom / SeatThru, row GA, TicketID the "ex…"
+// listing id) as CSV rows. Stock mobile_transfer (the buyer accepts an Exos
+// claim link), Splittype ANY within the block. Edit is "y" as in Gametime's
+// example file (not described there).
 
-import { exosEventRef, localDate, type ExosEventRowForChannels } from '../channel.ts';
-import { MAX_EXOS_LISTINGS_PER_ALLOCATION, exosListingId, isExosListingId, stableListingNumbers } from '../listingIds.ts';
-import { parseSeatRanges, seatBlocks, seatCount, type SeatRun } from '../seats.ts';
+import { entryFor, planExosListings, requireCurrency, type ExosAllocation, type PlannedMarketplaceListings } from '../exosListing.ts';
+import { isExosListingId } from '../listingIds.ts';
 
 export const GAMETIME_CSV_COLUMNS = [
   'Edit', 'Event', 'Venue', 'EventDate', 'EventTime', 'Quantity', 'Section', 'Row', 'SeatFrom', 'SeatThru', 'Notes', 'Cost',
@@ -34,128 +32,58 @@ export const GAMETIME_CSV_COLUMNS = [
 ] as const;
 export type GametimeCsvRow = Record<(typeof GAMETIME_CSV_COLUMNS)[number], string>;
 
-/** A planned Gametime listing: its CSV row, plus the fields the sync and the seat claim read. */
-export interface GametimeListingBody extends GametimeCsvRow {
-  seller_listing_id: string;
-  seat_from: number;
-  seat_thru: number;
-  quantity: number;
+export type GametimeAllocation = ExosAllocation;
+
+export interface PlannedGametimeListings extends PlannedMarketplaceListings<GametimeCsvRow> {
+  channel: 'gametime';
 }
 
-export interface GametimeAllocation {
-  id: string;
-  requested_qty: number | null;
-  unit_price: number | string | null;
-  tier: { name: string; price: number | string; section_label?: string | null } | null;
-  event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
-  internal_seats: string | SeatRun[] | null;
-  /** The listings Gametime has (listed_snapshot) or were last planned, for stable numbers. */
-  previous?: ReadonlyArray<{ seller_listing_id?: string; seat_from?: number; seat_thru?: number }> | null;
+/** "HH:MM:SS" -> "h:mm:ss AM". */
+function time12(t: string): string {
+  const [h, m, sec] = t.split(':');
+  const hh = Number(h);
+  return `${hh % 12 === 0 ? 12 : hh % 12}:${m}:${sec ?? '00'} ${hh < 12 ? 'AM' : 'PM'}`;
 }
 
-export interface PlannedGametimeListings {
-  endpoint: 'uploadInventory';
-  listings: Array<{ body: GametimeListingBody }>;
-  per_order_cap: number;
-  unresolved: string[];
-}
-
-const NOTES = 'Delivered by Exos: a link to claim the tickets into your Exos account; the entry QR code is in the Exos app.';
-
-function maxPerOrder(limits: unknown): number | null {
-  const v = (limits as { maxPerOrder?: unknown } | null)?.maxPerOrder;
-  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number.parseInt(v, 10) : NaN;
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
-/** "h:mm:ss AM" venue-local. */
-function localTime12(ev: { startsAt: string; occursAtLocal?: string | null; timezone?: string | null }): string | null {
-  let hh: number, mm: string, ss: string;
-  const m = /T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(ev.occursAtLocal ?? '');
-  if (m) {
-    hh = Number(m[1]); mm = m[2]; ss = m[3] ?? '00';
-  } else if (ev.timezone) {
-    try {
-      const t = new Intl.DateTimeFormat('en-GB', { timeZone: ev.timezone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
-        .format(new Date(ev.startsAt)).split(':');
-      hh = Number(t[0]); mm = t[1]; ss = t[2];
-    } catch {
-      return null;
-    }
-  } else {
-    return null;
-  }
-  return `${hh % 12 === 0 ? 12 : hh % 12}:${mm}:${ss} ${hh < 12 ? 'AM' : 'PM'}`;
-}
-
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
+const money = (n: number) => n.toFixed(2);
 
 export function planGametimeListings(a: GametimeAllocation): PlannedGametimeListings {
-  if (!a.tier) throw new Error('the allocation has no ticket type');
-  if (!a.event) throw new Error('event not found');
-  const ref = exosEventRef({ ...a.event, id: a.event.id ?? a.id });
-  if (!ref) throw new Error('the event needs a name, a start time and a venue');
-  const qty = a.requested_qty ?? 0;
-  if (!Number.isInteger(qty) || qty <= 0) throw new Error('nothing allocated to Gametime');
-  const price = Number(a.unit_price ?? a.tier.price);
-  if (!Number.isFinite(price) || price <= 0) throw new Error('the ticket type has no price');
-  const currency = (a.event.currency || 'USD').toUpperCase();
-  if (currency !== 'USD') throw new Error(`Gametime listings are in USD; this event is in ${currency}`);
-  const section = (a.tier.section_label || a.tier.name || '').trim();
-  if (!section) throw new Error('the ticket type has no name to use as the section');
-  const time = localTime12(ref);
-  if (!time) throw new Error("the event's local start time is unknown: set its time zone");
-  const runs = parseSeatRanges(a.internal_seats);
-  if (seatCount(runs) !== qty) {
-    throw new Error(`the allocation has ${seatCount(runs)} internal seat numbers for ${qty} seats: save it again`);
-  }
-  const blocks = seatBlocks(runs, maxPerOrder(a.event.purchase_limits));
-  const numbers = stableListingNumbers(a.id, blocks, a.previous ?? []);
-  if (blocks.length > MAX_EXOS_LISTINGS_PER_ALLOCATION || Math.max(...numbers) > MAX_EXOS_LISTINGS_PER_ALLOCATION) {
-    throw new Error(`that would be ${blocks.length} Gametime listings; raise the max per order`);
-  }
-  const face = Number(a.tier.price);
-  const [y, mo, d] = localDate(ref).split('-');
-  const eventDate = `${Number(mo)}/${Number(d)}/${y}`;
-
-  const order = blocks.map((b, i) => ({ b, n: numbers[i] })).sort((x, z) => x.n - z.n);
-  const listings = order.map(({ b, n }) => {
-    const size = b.thru - b.from + 1;
-    const id = exosListingId(a.id, n);
-    const body: GametimeListingBody = {
+  const set = planExosListings(a, 'Gametime');
+  requireCurrency(set, 'USD', 'Gametime');
+  const listings = set.listings.map((l) => {
+    if (!l.event.local_time) throw new Error("the event's local start time is unknown: set its time zone");
+    const [y, mo, d] = l.event.local_date.split('-');
+    const body: GametimeCsvRow = {
       Edit: 'y',
-      Event: ref.name.slice(0, 255),
-      Venue: ref.venueName.slice(0, 255),
-      EventDate: eventDate,
-      EventTime: time,
-      Quantity: String(size),
-      Section: section.slice(0, 127),
-      Row: 'GA',
-      SeatFrom: String(b.from),
-      SeatThru: String(b.thru),
-      Notes: NOTES,
-      Cost: money(price),
-      TicketID: id,
+      Event: l.event.name,
+      Venue: l.event.venue,
+      EventDate: `${Number(mo)}/${Number(d)}/${y}`,
+      EventTime: time12(l.event.local_time),
+      Quantity: String(l.quantity),
+      Section: l.section,
+      Row: l.row,
+      SeatFrom: String(l.seat_from),
+      SeatThru: String(l.seat_thru),
+      Notes: l.notes,
+      Cost: money(l.price),
+      TicketID: l.listing_id,
       edelivery_ind: 'Y',
-      InHandDate: localDate(ref),
+      InHandDate: l.in_hand_date,
       Instant: 'N',
       Splittype: 'ANY',
       Splitvalue: '',
-      FaceValue: Number.isFinite(face) && face > 0 ? money(face) : '',
+      FaceValue: l.face_value != null ? money(l.face_value) : '',
       Stock: 'mobile_transfer',
       Discount: '',
       ZonePrice: '',
-      seller_listing_id: id,
-      seat_from: b.from,
-      seat_thru: b.thru,
-      quantity: size,
     };
-    return { body };
+    // One row of the inventory file (FTP), not an HTTP call.
+    return entryFor(l, { endpoint: 'uploadInventory', method: 'FTP', path: 'inventory.csv', body });
   });
   return {
-    endpoint: 'uploadInventory',
+    channel: 'gametime',
     listings,
-    per_order_cap: Math.max(...listings.map((l) => l.body.quantity)),
+    per_order_cap: set.per_order_cap,
     // Gametime's examples use numeric TicketIDs; it doesn't say others are refused.
     unresolved: ['TicketID: Exos ids are "ex…" strings; confirm Gametime accepts non-numeric ids'],
   };
@@ -173,11 +101,4 @@ export function gametimeInventoryCsv(rows: ReadonlyArray<GametimeCsvRow>): strin
   const lines = [GAMETIME_CSV_COLUMNS.join(',')];
   for (const r of rows) lines.push(GAMETIME_CSV_COLUMNS.map((c) => csvField(String(r[c] ?? ''))).join(','));
   return lines.join('\r\n') + '\r\n';
-}
-
-/** The CSV row of a planned listing body (drops the helper fields). */
-export function csvRowOf(b: GametimeListingBody): GametimeCsvRow {
-  const row = {} as GametimeCsvRow;
-  for (const c of GAMETIME_CSV_COLUMNS) row[c] = b[c];
-  return row;
 }

@@ -126,7 +126,8 @@ describe('StubHub channel', () => {
     expect(() => ch.planCreateEvent!({ ...EV, venueCity: null })).toThrow(/venue city is required/);
     const sale = normalizeStubHubSale({ id: 555, number_of_tickets: 1, status: 'Confirmed' });
     const fulfil = ch.planFulfilByUrls!(sale, ['https://x.test/bridge/claim/00000000-0000-4000-8000-000000000001']);
-    expect(fulfil).toMatchObject({ endpoint: 'updateSale', method: 'PATCH', path: '/sales/555' });
+    expect(fulfil).toHaveLength(1);
+    expect(fulfil[0]).toMatchObject({ endpoint: 'updateSale', method: 'PATCH', path: '/sales/555' });
     expect(() => ch.planFulfilByUrls!(sale, [])).toThrow();
   });
 });
@@ -155,9 +156,9 @@ describe('StubHub catalog search', () => {
 });
 
 describe('channelsFromEnv', () => {
-  it('wires StubHub, SeatGeek and Gametime; catalog search only with credentials', () => {
+  it('wires StubHub, SeatGeek, Gametime and GoTickets; catalog search only with credentials', () => {
     const none = channelsFromEnv(() => undefined);
-    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime']);
+    expect([...none.keys()]).toEqual(['stubhub', 'seatgeek', 'gametime', 'gotickets']);
     expect(none.get('stubhub')!.capabilities.findEvents).toBe(false);
     expect(none.get('seatgeek')!.capabilities.findEvents).toBe(false);
     const env: Record<string, string> = { STUBHUB_CLIENT_ID: 'a', STUBHUB_CLIENT_SECRET: 'b', SEATGEEK_CLIENT_ID: 'c' };

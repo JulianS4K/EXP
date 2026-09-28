@@ -12,8 +12,8 @@
 //              planCreateEvent() (StubHub: PUT /sellerevents).
 //   3. sell    sales come back as MarketplaceSale via normalizeSale().
 //   4. fulfil  Exos mints the tickets and a claim link per ticket; the
-//              channel's planFulfilByUrls() is the call that hands those links
-//              to the marketplace.
+//              channel's planFulfilByUrls() is the call(s) that hand those
+//              links (and the tickets' internal seats) to the marketplace.
 //
 // Every call that changes something on a marketplace comes back as a
 // PlannedRequest (dry-run). Sending one needs an operator WriteAuthorization
@@ -21,7 +21,7 @@
 //
 // No imports beyond sibling .ts files: loaded by Deno and by vitest.
 
-export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
+export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
 export function isChannelId(v: unknown): v is ChannelId {
@@ -75,10 +75,13 @@ export interface MarketplaceSale {
   externalOrderId: string;
   externalEventId: string | null;
   /**
-   * The listing it sold from. Exos lists with external_id = its
-   * exos_distribution_listings.id, so this is how a sale finds its tier.
+   * The allocation it sold from (exos_distribution_listings.id): Exos
+   * listing ids ("ex…", ./listingIds.ts) map back to it. How a sale finds
+   * its tier.
    */
   externalListingId: string | null;
+  /** The listing id exactly as the marketplace reported it (the Exos listing id: which block of seats). */
+  listingRef?: string | null;
   quantity: number;
   status: SaleStatus;
   buyerEmail: string | null;
@@ -115,7 +118,12 @@ export interface MarketplaceChannel {
   findEvents?(ev: ExosEventRef): Promise<EventCandidate[]>;
   planCreateEvent?(ev: ExosEventRef): PlannedRequest;
   normalizeSale?(raw: unknown): MarketplaceSale;
-  planFulfilByUrls?(sale: MarketplaceSale, claimUrls: string[]): PlannedRequest;
+  /**
+   * Delivery, in order (e.g. Gametime: confirm, then confirm_transfer). One
+   * claim URL per ticket; `seats` are the tickets' internal seat numbers, for
+   * marketplaces that take them.
+   */
+  planFulfilByUrls?(sale: MarketplaceSale, claimUrls: string[], seats?: number[]): PlannedRequest[];
 }
 
 // ── Reading exos_events ──────────────────────────────────────────────

@@ -38,10 +38,11 @@ END $$;
 
 -- T2 -------------------------------------------------------------------------
 -- exos-distribute planned two listings (max 4 per order): 1-4 and 5-6.
+-- The shared plan shape (exosListing.ts).
 UPDATE public.exos_distribution_listings
-   SET planned_listing = jsonb_build_object('listings', jsonb_build_array(
-         jsonb_build_object('body', jsonb_build_object('seller_listing_id','exbbbbbbbbbbbbbbbbbbbbbbbbbb1','seat_from',1,'seat_thru',4)),
-         jsonb_build_object('body', jsonb_build_object('seller_listing_id','exbbbbbbbbbbbbbbbbbbbbbbbbbb2','seat_from',5,'seat_thru',6))))
+   SET planned_listing = jsonb_build_object('channel','gametime','listings', jsonb_build_array(
+         jsonb_build_object('listing_id','exbbbbbbbbbbbbbbbbbbbbbbbbbb1','seat_from',1,'seat_thru',4,'quantity',4),
+         jsonb_build_object('listing_id','exbbbbbbbbbbbbbbbbbbbbbbbbbb2','seat_from',5,'seat_thru',6,'quantity',2)))
  WHERE channel = 'gametime' AND tier_id IS NOT NULL;
 DO $$
 DECLARE alloc uuid; r record; f record; m text;
@@ -51,7 +52,8 @@ BEGIN
   SELECT * INTO r FROM public.exos_record_marketplace_order(jsonb_build_object(
     'channel','gametime','external_order_id','GT-8E-1','external_listing_id', alloc::text,
     'quantity',2,'sale_status','pending','buyer_email','gtbuyer@x.com','proceeds','90.00','currency','USD',
-    'raw', jsonb_build_object('id','GT-8E-1','status','unconfirmed','listing_reference_id','exbbbbbbbbbbbbbbbbbbbbbbbbbb2','quantity',2)));
+    'listing_ref','exbbbbbbbbbbbbbbbbbbbbbbbbbb2',
+    'raw', jsonb_build_object('id','GT-8E-1','status','unconfirmed','quantity',2)));
   IF r.status IS DISTINCT FROM 'received' THEN RAISE EXCEPTION 'T2 FAIL: record %', r.status; END IF;
   SELECT * INTO f FROM public.exos_fulfil_marketplace_order(r.order_id, 'https://exos.example.test');
   IF f.status <> 'fulfilled' OR cardinality(f.transfer_ids) <> 2 THEN RAISE EXCEPTION 'T2 FAIL: fulfil %', row_to_json(f); END IF;

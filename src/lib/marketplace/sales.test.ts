@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeStubHubSale,
   planDelivery,
+  exosListingId,
   recordPayload,
   stubHubChannel,
   type MarketplaceChannel,
@@ -15,16 +16,19 @@ const NO_LINKS: MarketplaceChannel = {
 
 const T1 = '00000000-0000-4000-8000-000000000001';
 const T2 = '00000000-0000-4000-8000-000000000002';
+const ALLOC = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const LISTING = exosListingId(ALLOC, 2);
 
 describe('recordPayload', () => {
   it('carries what exos_record_marketplace_order reads', () => {
     const sale = normalizeStubHubSale({
       id: 555, created_at: '2026-10-01T00:00:00Z', number_of_tickets: 2, status: 'Confirmed',
-      proceeds: { amount: 90.5, currency_code: 'USD' }, external_listing_id: 'dist-1', confirm_by: '2026-10-02T00:00:00Z',
+      proceeds: { amount: 90.5, currency_code: 'USD' }, external_listing_id: LISTING, confirm_by: '2026-10-02T00:00:00Z',
     });
     sale.buyerEmail = 'b@x.com';
+    // The Exos listing id maps back to its allocation; the listing itself (which block) rides along.
     expect(recordPayload(sale, { id: 555 })).toEqual({
-      channel: 'stubhub', external_order_id: '555', external_event_id: null, external_listing_id: 'dist-1',
+      channel: 'stubhub', external_order_id: '555', external_event_id: null, external_listing_id: ALLOC, listing_ref: LISTING,
       quantity: 2, sale_status: 'confirmed', buyer_email: 'b@x.com', currency: 'USD', proceeds: '90.50',
       confirm_by: '2026-10-02T00:00:00Z', sold_at: '2026-10-01T00:00:00Z', raw: { id: 555 },
     });
@@ -50,7 +54,7 @@ describe('planDelivery', () => {
       `https://vibepass-storefront-test.onrender.com/bridge/claim/${T1}`,
       `https://vibepass-storefront-test.onrender.com/bridge/claim/${T2}`,
     ]);
-    expect(plan.request).toMatchObject({
+    expect(plan.steps[0]).toMatchObject({
       channel: 'stubhub', endpoint: 'updateSale', method: 'PATCH', path: '/sales/555',
       body: { confirmed: true, eticket_urls: plan.claim_urls.map((url) => ({ url })) },
     });
@@ -60,6 +64,11 @@ describe('planDelivery', () => {
     const plan = planDelivery(NO_LINKS, order, 'https://x.test/bridge');
     expect(plan).toMatchObject({ kind: 'manual', claim_urls: [`https://x.test/bridge/claim/${T1}`, `https://x.test/bridge/claim/${T2}`] });
     expect(plan.kind === 'manual' && plan.reason).toMatch(/by hand/);
+  });
+
+  it('carries the tickets\' internal seats', () => {
+    const plan = planDelivery(stubHubChannel(), { ...order, seats: [5, 6] }, 'https://x.test/bridge');
+    expect(plan).toMatchObject({ kind: 'planned', seats: [5, 6] });
   });
 
   it('needs the app URL to make links', () => {
