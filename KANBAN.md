@@ -61,7 +61,8 @@ distribution of Exos's own inventory, not resale.
   event's org, so another org's owner could close a ticket type they don't own (reproduced; likely live in prod since
   `20260702123030`). Tests: `tests/exos/test_voucher_discounts_quotas.sql` (V1–V5, Q1–Q3), `voucherDiscounts.test.ts`.
 - ✅ **Marketplace seats per ticket type, visible** (UI only): the per-type backend (`exos_set_channel_allocation`,
-  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind `SHOW_DISTRIBUTION`.
+  one pool per marketplace × ticket type) and the Edit event grid existed but were hidden behind a flag (the old
+  `SHOW_DISTRIBUTION` controls have since been removed).
   `SHOW_MARKETPLACES` now shows the Marketplaces section (Create + Edit event): tick marketplaces, then seats per ticket
   type per marketplace (GA on StubHub only, VIP everywhere), with a "Same on all" shortcut. The list is the five
   integrated marketplaces (Ticketmaster/AXS/Viagogo/TickPick/TEvo were listed but never integrated). Sending stays
@@ -213,10 +214,9 @@ list)
 Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are on
 `claude/exos-p0`, in three stages (quick wins, buyer/door/organizer flow, create form and report).
 
-- [ ] **Percent / fixed discount codes don't work.** `exos_discount_codes` is written by the old
-  form but nothing redeems it: `exos-checkout` only consumes vouchers. The Create/Edit editors
-  are hidden (`SHOW_DISCOUNT_CODES`). Fix: add `percent_off` / `amount_off` to vouchers (migration
-  + `exos_check_voucher` + `exos-checkout`), then drop discount codes.
+- [x] **Percent / fixed discount codes don't work.** Done: vouchers take a percent or an amount
+  off (`20260928060000_exos_voucher_discounts_quota_editor`), and the old discount-code editors
+  (and their flag) were removed from Create / Edit event.
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
 - [ ] Native Apple / Google Wallet passes (the "open pass" is still a web page).

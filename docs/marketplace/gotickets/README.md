@@ -73,11 +73,14 @@ Same marketplace sync as the others (migration `20260928020000`; see
 4. **Sell.**
    - **Polling:** sales placed in the last 6 hours, every unconfirmed sale,
      and a rolling recheck of known orders.
-   - **Webhooks** are registered with a target URL that carries our own
-     token (`exos-marketplace-sales?channel=gotickets&token=…`, secret
-     `GOTICKETS_WEBHOOK_TOKEN`), because GoTickets doesn't sign them. The
-     payload is only a pointer: Exos reads the sale back from the API before
-     recording anything.
+   - **Webhooks** carry our own token (secret `GOTICKETS_WEBHOOK_TOKEN`),
+     because GoTickets doesn't sign them. Exos takes it from the
+     `X-Exos-Webhook-Token` header, then `Authorization: Bearer …`, then the
+     target URL's `?token=` (`exos-marketplace-sales?channel=gotickets&token=…`).
+     Prefer a header when GoTickets lets the webhook carry one: a query-string
+     secret can land in proxy and platform access logs. Exos never logs the
+     request URL. The payload is only a pointer: Exos reads the sale back
+     from the API before recording anything.
    - The buyer email comes from the sale. Names, phone and files are
      stripped from the stored raw copy.
    - Tickets take seats from the listing's own block.
