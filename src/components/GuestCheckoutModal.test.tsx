@@ -54,4 +54,13 @@ describe('GuestCheckoutModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign in instead/i }));
     expect(onSignIn).toHaveBeenCalled();
   });
+
+  it('free tickets: no payment wording, sends the tickets', () => {
+    const onContinue = vi.fn();
+    render(<GuestCheckoutModal open free onClose={vi.fn()} onContinue={onContinue} onSignIn={vi.fn()} />);
+    expect(screen.queryByText(/pay with/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'Fan@Example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /send my tickets/i }));
+    expect(onContinue).toHaveBeenCalledWith('fan@example.com');
+  });
 });

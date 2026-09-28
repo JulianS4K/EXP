@@ -133,3 +133,11 @@ SELECT pg_temp.exos_patch('public.exos_fulfill_checkout(text)',
   'door.</p>'' END || public.exos_receipt_html',
   '''Open the app to show your QR at the door.</p>'' END,',
   '''Open the app to show your QR at the door.</p>'' END || public.exos_receipt_html(s.session_id),');
+
+-- A guest's free claim (exos-checkout, no Stripe) goes through the same
+-- fulfilment: its mail says so instead of "Payment received".
+SELECT pg_temp.exos_patch('public.exos_fulfill_checkout(text)',
+  'You''re in. Your',
+  '''<p>Payment received. Your '' || cardinality(v_ids)::text',
+  '''<p>'' || CASE WHEN coalesce(s.amount_cents, 0) > 0 THEN ''Payment received.'' ELSE ''You''''re in.'' END ||
+          '' Your '' || cardinality(v_ids)::text');

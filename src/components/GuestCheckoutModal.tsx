@@ -16,9 +16,11 @@ interface GuestCheckoutModalProps {
   onClose: () => void;
   onContinue: (email: string) => void;
   onSignIn: () => void;
+  /** Free tickets: no payment step; the claim links are emailed right away. */
+  free?: boolean;
 }
 
-export default function GuestCheckoutModal({ open, busy, onClose, onContinue, onSignIn }: GuestCheckoutModalProps) {
+export default function GuestCheckoutModal({ open, busy, onClose, onContinue, onSignIn, free = false }: GuestCheckoutModalProps) {
   const [email, setEmail] = useState(() => {
     try { return localStorage.getItem(LAST_EMAIL_KEY) ?? ''; } catch { return ''; }
   });
@@ -46,8 +48,9 @@ export default function GuestCheckoutModal({ open, busy, onClose, onContinue, on
               </button>
             </div>
             <p className="text-white/60 text-sm mb-4">
-              No account needed. Pay with Apple Pay, Google Pay or card, and we'll email your tickets. To show your
-              QR at the door, open the email and sign in with a one-time code.
+              {free
+                ? "No account needed. We'll email your free tickets. To show your QR at the door, open the email and sign in with a one-time code."
+                : "No account needed. Pay with Apple Pay, Google Pay or card, and we'll email your tickets. To show your QR at the door, open the email and sign in with a one-time code."}
             </p>
             <label htmlFor="guest-email" className="type text-[11px] text-white/60 uppercase tracking-widest">Email</label>
             <div className="mt-1 mb-2 flex items-center gap-2 bg-white/5 border border-white/20 focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/40 px-3">
@@ -74,7 +77,7 @@ export default function GuestCheckoutModal({ open, busy, onClose, onContinue, on
               disabled={busy}
               className="w-full mt-2 bg-brand-primary text-black font-black uppercase tracking-wider py-4 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
-              {busy ? 'Starting checkout…' : 'Continue to payment'}
+              {free ? (busy ? 'Sending…' : 'Send my tickets') : (busy ? 'Starting checkout…' : 'Continue to payment')}
             </button>
             <button
               type="button"

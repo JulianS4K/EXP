@@ -5,7 +5,7 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
-import { startCheckout } from '../lib/checkout';
+import { claimFreeAsGuest, startCheckout } from '../lib/checkout';
 import { guestCheckoutAllowed } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
@@ -62,6 +62,7 @@ export default function EventDetails() {
   const [purchasing, setPurchasing] = useState(false);
   // Signed-out paid checkout: ask for an email instead of an account.
   const [guestOpen, setGuestOpen] = useState(false);
+  const [guestFree, setGuestFree] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
   // Phone buy bar: shown while the buy card is off screen.
   const buyCardRef = useRef<HTMLDivElement>(null);
@@ -293,6 +294,36 @@ export default function EventDetails() {
     await signIn();
   };
 
+  // Free tickets for a signed-out buyer: issued now, claim links emailed.
+  const claimFreeGuest = async (tierId: string, guestEmail: string) => {
+    if (!event) return;
+    setPurchasing(true);
+    try {
+      const { issued, email } = await claimFreeAsGuest({
+        eventId: event.id,
+        tierId,
+        quantity,
+        guestEmail,
+        successUrl: publicUrl('my-tickets'),
+        cancelUrl: publicUrl(`event/${event.id}`),
+        voucherCode: voucher?.code,
+        attribution,
+      });
+      clearPrefill(event.id);
+      setGuestOpen(false);
+      toast({
+        kind: 'success',
+        title: issued > 1 ? `${issued} tickets on their way` : 'Your ticket is on its way',
+        message: `Check ${email} for your claim link${issued > 1 ? 's' : ''}.`,
+      });
+    } catch (err: any) {
+      console.error('Guest free claim failed:', err);
+      toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
   // Paid checkout (signed in, or as a guest with just an email).
   const goToCheckout = async (tierId: string, guestEmail?: string) => {
     if (!event) return;
@@ -343,10 +374,17 @@ export default function EventDetails() {
     if (!user) {
       // Paid tickets: check out as a guest with just an email (unless the
       // organizer switched that off, or the code is a personal capacity-bypass
-      // offer). Free claims still need an account to mint into.
+      // offer). Free tickets work the same way (just an email, claim links by mail).
       const pick = selectedTierId ? allTiers.find((x) => x.id === selectedTierId) : allTiers[0];
       const paid = (pick?.price ?? event.price ?? 0) > 0 || addonSel.totalCents > 0;
       if (pick?.id && paid && stripeEnabled && guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass) {
+        setGuestFree(false);
+        setGuestOpen(true);
+        return;
+      }
+      // Free tickets: just an email too (claim links arrive by mail).
+      if (pick?.id && !paid && guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass) {
+        setGuestFree(true);
         setGuestOpen(true);
         return;
       }
@@ -1120,9 +1158,12 @@ export default function EventDetails() {
         busy={purchasing}
         onClose={() => setGuestOpen(false)}
         onSignIn={() => { setGuestOpen(false); void signInToBuy(); }}
+        free={guestFree}
         onContinue={(email) => {
           const tierId = selectedTierId ?? allTiers[0]?.id;
-          if (tierId) void goToCheckout(tierId, email);
+          if (!tierId) return;
+          if (guestFree) void claimFreeGuest(tierId, email);
+          else void goToCheckout(tierId, email);
         }}
       />
       {event && (

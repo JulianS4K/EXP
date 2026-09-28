@@ -5,6 +5,9 @@
 --      counting sold, live holds and marketplace allocations across tiers;
 --      guest holds too
 --   H2 purchase mails carry the amount paid, the tax in it and the order ref
+--   H3 a guest's free claim (exos-checkout, no Stripe): a $0 guest order
+--      fulfils like a paid one, parked with keyed claim links, and its mail
+--      says "You're in", not "Payment received"
 --   (pending refunds keeping their tickets: test_organizer_refunds.sql M5)
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -69,6 +72,28 @@ BEGIN
   END IF;
   IF public.exos_receipt_html('nope') <> '' THEN RAISE EXCEPTION 'H2 FAIL: unknown session'; END IF;
   RAISE NOTICE 'H2 ok: receipts show the amount, tax and escaped order reference';
+END $$;
+
+-- H3 -------------------------------------------------------------------------
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
+  ('6f000000-0000-0000-0000-0000000000d3','6f000000-0000-0000-0000-0000000000e1','Free RSVP',0,50,0);
+DO $$
+DECLARE h uuid; ids uuid[]; m text;
+BEGIN
+  PERFORM set_config('app.uid', '', true);
+  h := public.exos_create_guest_hold('6f000000-0000-0000-0000-0000000000e1', '6f000000-0000-0000-0000-0000000000d3', 2, '6f-rsvp@x.com', 'ip-6f-h3');
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,guest,quantity,amount_cents,currency,status)
+  VALUES ('free_6f_h3','6f000000-0000-0000-0000-0000000000e1','6f000000-0000-0000-0000-0000000000d3','6f000000-0000-0000-0000-000000000001',
+          NULL,'6f-rsvp@x.com',true,2,0,'usd','pending');
+  UPDATE public.exos_cart_holds SET checkout_session_id = 'free_6f_h3' WHERE id = h;
+  ids := public.exos_fulfill_checkout('free_6f_h3');
+  IF cardinality(ids) <> 2 THEN RAISE EXCEPTION 'H3 FAIL: issued %', cardinality(ids); END IF;
+  SELECT html INTO m FROM public.exos_mail WHERE to_email = '6f-rsvp@x.com' ORDER BY created_at DESC LIMIT 1;
+  IF m NOT LIKE '<p>You''re in. Your 2 tickets%' OR m LIKE '%Payment received%' OR m NOT LIKE '%?k=%' OR m LIKE '%Paid:%' THEN
+    RAISE EXCEPTION 'H3 FAIL: mail %', left(m, 300);
+  END IF;
+  IF (SELECT status FROM public.exos_cart_holds WHERE id = h) = 'active' THEN RAISE EXCEPTION 'H3 FAIL: hold still live'; END IF;
+  RAISE NOTICE 'H3 ok: a guest''s free claim is issued as keyed claim links, "You''re in"';
 END $$;
 
 ROLLBACK;
