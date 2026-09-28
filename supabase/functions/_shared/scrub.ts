@@ -14,7 +14,8 @@ const PREFIXED_KEY = /\b(?:sk|pk|rk|whsec|re|sbp|sb_secret|sb_publishable)_[A-Za
 // key=value / "key": "value" where the key names a secret.
 const SECRET_PAIR = /\b((?:api[_-]?key|api[_-]?token|apitoken|access[_-]?token|refresh[_-]?token|token|secret|password|passwd|source|signature|sig|client[_-]?secret|key|code|auth|authorization)["']?\s*[:=]\s*["']?)([^\s"'&,;}]+)/gi;
 // A long run of hex / base64url characters with at least one digit: a token.
-const LONG_TOKEN = /\b(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}\b/g;
+// UUIDs (row ids) are kept: they identify, they don't authorize.
+const LONG_TOKEN = /\b(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b)(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}\b/g;
 const URL_RE = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?#"'<>)]+)([?#][^\s"'<>)]*)?/gi;
 
 /** A URL with its query string and fragment removed. */

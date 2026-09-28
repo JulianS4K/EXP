@@ -58,7 +58,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
-import { redactError } from "../_shared/log.ts";
+import { redactError, reportError } from "../_shared/log.ts";
 import type { MarketplaceChannel, MarketplaceSale } from "../_shared/marketplace/channel.ts";
 import { channelsFromEnv } from "../_shared/marketplace/channels.ts";
 import { planDelivery, recordPayload } from "../_shared/marketplace/sales.ts";
@@ -115,7 +115,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.log("exos-marketplace-sales: GoTickets", n.type, n.id, sale.sellerStatus ?? "");
       return json(await ingest(sb, channels.get("gotickets")!, [sale], undefined));
     } catch (e) {
-      console.error("exos-marketplace-sales: GoTickets webhook failed", redactError(e));
+      await reportError("exos-marketplace-sales", e, { webhook: "GoTickets" });
       return json({ error: "internal error" }, 500);
     }
   }
@@ -133,7 +133,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.log("exos-marketplace-sales: Gametime sale", n.id, n.quantity, p?.status ?? "(not read)");
       return json(await ingest(sb, channels.get("gametime")!, [{ ...n, ...(p ?? {}) }], undefined));
     } catch (e) {
-      console.error("exos-marketplace-sales: Gametime webhook failed", redactError(e));
+      await reportError("exos-marketplace-sales", e, { webhook: "Gametime" });
       return json({ error: "internal error" }, 500);
     }
   }
@@ -156,7 +156,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (route.kind === "attention") return json({ noted: await noteSeatGeekListingIssues(sb, n.metadata.notification_type, route.items) });
       return json({ ignored: n.metadata.notification_type });
     } catch (e) {
-      console.error("exos-marketplace-sales: SeatGeek webhook failed", redactError(e));
+      await reportError("exos-marketplace-sales", e, { webhook: "SeatGeek" });
       // 500 so SeatGeek retries; ingest is idempotent per order.
       return json({ error: "internal error" }, 500);
     }
@@ -176,7 +176,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const out = await ingest(sb, channels.get("stubhub")!, [sale], stubhubBuyerEmail(sh));
       return json(out);
     } catch (e) {
-      console.error("exos-marketplace-sales: webhook failed", redactError(e));
+      await reportError("exos-marketplace-sales", e, { webhook: "StubHub" });
       // 500 so StubHub retries; ingest is idempotent per sale.
       return json({ error: "internal error" }, 500);
     }
@@ -251,7 +251,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     return json(result);
   } catch (e) {
-    console.error("exos-marketplace-sales failed", redactError(e));
+    await reportError("exos-marketplace-sales", e);
     return json({ error: "internal error" }, 500);
   }
 });

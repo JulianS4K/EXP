@@ -48,5 +48,9 @@ services:
         sync: false
       - key: VITE_GOOGLE_MAPS_EMBED_KEY
         sync: false
+      # Optional browser error reporting (docs/hosting.md "Error reporting").
+      # Unset = nothing is sent.
+      - key: VITE_SENTRY_DSN
+        sync: false
       - key: VITE_AUTOMATIQ_ENABLED
         value: "false"

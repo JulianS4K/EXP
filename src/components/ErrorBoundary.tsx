@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { reportError } from '../lib/errorReporting';
 
 interface Props {
   children: ReactNode;
@@ -42,9 +43,8 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // Replace this with a structured log forwarder (Sentry, Datadog, etc.)
-    // when one is wired in.
-    console.error('Uncaught render error:', error, info.componentStack);
+    // Scrubbed, and sent to Sentry when VITE_SENTRY_DSN is set (lib/errorReporting).
+    reportError(error, { source: 'ErrorBoundary', extra: { component: (info.componentStack ?? '').trim().split('\n')[0] ?? '' } });
   }
 
   private handleReload = () => {

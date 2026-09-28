@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { registerServiceWorker } from './lib/registerSW';
+import { installGlobalErrorHandlers } from './lib/errorReporting';
+
+// Uncaught errors and rejections: scrubbed, sent to Sentry when VITE_SENTRY_DSN is set.
+installGlobalErrorHandlers();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
