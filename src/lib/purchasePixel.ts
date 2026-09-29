@@ -127,7 +127,9 @@ export async function trackCheckoutReturn(sessionId: string | null): Promise<voi
 
     const org = await getPublicOrg(purchase.orgId);
     initOrgPixelsForPurchase(purchase.orgId, org?.marketing?.pixels);
-    trackPixelEvent('Purchase', purchase.params);
+    // The Stripe session id doubles as the dedupe id a server-side
+    // conversion for the same order will carry.
+    trackPixelEvent('Purchase', purchase.params, sid ?? undefined);
   } catch (err) {
     console.warn('Purchase pixel skipped:', err);
   }

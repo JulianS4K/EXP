@@ -7,6 +7,16 @@ describe('bridgeCsp', () => {
     expect(bridgeCsp('/bridge/o/nights')).toContain('analytics.tiktok.com');
     expect(bridgeCsp('/bridge/checkin/abc')).not.toContain('connect.facebook.net');
     expect(bridgeCsp('/bridge/my-tickets')).not.toContain('googletagmanager');
+    expect(bridgeCsp('/bridge/l/bk-nights/dj-kay')).toContain('connect.facebook.net');
+  });
+
+  it('allows pixels on the Stripe return so the paid Purchase fires', () => {
+    expect(bridgeCsp('/bridge/my-tickets', '?checkout=success&session_id=cs_test_a1B2c3D4e5')).toContain('connect.facebook.net');
+    expect(bridgeCsp('/bridge/my-tickets', '?checkout=success&guest=1&session_id=cs_live_a1B2c3D4e5')).toContain('analytics.tiktok.com');
+    // Not without a Stripe session id, and not on any other page.
+    expect(bridgeCsp('/bridge/my-tickets', '?checkout=success')).not.toContain('connect.facebook.net');
+    expect(bridgeCsp('/bridge/my-tickets', '?session_id=cs_test_a1B2c3D4e5')).not.toContain('connect.facebook.net');
+    expect(bridgeCsp('/bridge/dashboard', '?checkout=success&session_id=cs_test_a1B2c3D4e5')).not.toContain('connect.facebook.net');
   });
 
   it('allows Google Maps only where a map renders', () => {

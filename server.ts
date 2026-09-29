@@ -77,7 +77,9 @@ async function startServer() {
   // only for the embed). Dev keeps the loose set so Vite's HMR still works.
   app.use((req, res, next) => {
     if (isProd) {
-      for (const [k, v] of Object.entries(securityHeaders(req.path, { hsts: true }))) res.setHeader(k, v);
+      const q = req.originalUrl.indexOf("?");
+      const search = q >= 0 ? req.originalUrl.slice(q) : "";
+      for (const [k, v] of Object.entries(securityHeaders(req.path, { hsts: true, search }))) res.setHeader(k, v);
       return next();
     }
     res.setHeader("X-Content-Type-Options", "nosniff");

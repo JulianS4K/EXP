@@ -8,7 +8,11 @@
 // Why the policy varies by page:
 //   • Marketing pixels (Meta / GA4 / TikTok) only load on public listing
 //     pages, behind the organizer's consent gate (src/lib/pixels.ts
-//     isPixelRoute mirrors PIXEL_PREFIXES).
+//     isPixelRoute mirrors PIXEL_PREFIXES), plus the page a buyer lands on
+//     back from Stripe (My Tickets ?checkout=success&session_id=cs_…), which
+//     reports the paid Purchase (src/lib/purchasePixel.ts). Without that
+//     exception the return page's CSP blocked the pixel scripts, so no paid
+//     Purchase was ever reported.
 //   • The Google Maps JS API only loads where a map renders.
 //   • The embed is meant to be framed by any venue's site; nothing else is.
 //   • The door scanner needs the camera, so /bridge allows camera=(self).
@@ -17,7 +21,14 @@ const PIXEL_SCRIPT = ' https://connect.facebook.net https://www.googletagmanager
 const PIXEL_CONNECT =
   ' https://www.facebook.com https://*.google-analytics.com https://*.analytics.google.com' +
   ' https://www.googletagmanager.com https://analytics.tiktok.com';
-const PIXEL_PREFIXES = ['/bridge/event/', '/bridge/e/', '/bridge/o/', '/bridge/organizer/', '/bridge/embed/event/'];
+const PIXEL_PREFIXES = ['/bridge/event/', '/bridge/e/', '/bridge/o/', '/bridge/organizer/', '/bridge/embed/event/', '/bridge/l/'];
+
+/** The Stripe return: /bridge/my-tickets?checkout=success&session_id=cs_… */
+export function isCheckoutReturn(path: string, search: string): boolean {
+  if (path !== '/bridge/my-tickets' && path !== '/bridge/my-tickets/') return false;
+  const q = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  return q.get('checkout') === 'success' && /^cs_[A-Za-z0-9_]{8,250}$/.test(q.get('session_id') ?? '');
+}
 
 const MAPS_SCRIPT =
   ' https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com https://*.googleusercontent.com blob:';
@@ -29,8 +40,9 @@ const startsWithAny = (path: string, prefixes: string[]) => prefixes.some((p) =>
 export const isBridgePath = (path: string) => path === '/bridge' || path.startsWith('/bridge/');
 export const isEmbedPath = (path: string) => path.startsWith('/bridge/embed/');
 
-export function bridgeCsp(path: string): string {
-  const pixels = path === '/bridge' || path === '/bridge/' || startsWithAny(path, PIXEL_PREFIXES);
+export function bridgeCsp(path: string, search = ''): string {
+  const pixels = path === '/bridge' || path === '/bridge/' || startsWithAny(path, PIXEL_PREFIXES)
+    || isCheckoutReturn(path, search);
   const maps = startsWithAny(path, MAPS_PREFIXES);
   const embed = isEmbedPath(path);
   return (
@@ -62,13 +74,13 @@ export function bridgeCsp(path: string): string {
  * defaults. X-Frame-Options can't say "any origin", so the embed relies on
  * frame-ancestors alone.
  */
-export function securityHeaders(path: string, opts: { hsts: boolean }): Record<string, string> {
+export function securityHeaders(path: string, opts: { hsts: boolean; search?: string }): Record<string, string> {
   const bridge = isBridgePath(path);
   const h: Record<string, string> = {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': bridge ? 'geolocation=(), microphone=(), camera=(self)' : 'geolocation=(), microphone=(), camera=()',
-    'Content-Security-Policy': bridge ? bridgeCsp(path) : "default-src 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': bridge ? bridgeCsp(path, opts.search ?? '') : "default-src 'none'; frame-ancestors 'none'",
   };
   if (!isEmbedPath(path)) h['X-Frame-Options'] = 'DENY';
   if (opts.hsts) h['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains';
