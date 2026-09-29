@@ -11,6 +11,10 @@ async function run(name, fn, opts = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], ...(opts.ua ? { userAgent: opts.ua } : {}) });
   const log = []; const errors = [];
   await ctx.route('https://mock.supabase.test/**', (r) => handle(r, log));
+  // A stored, unexpired session: supabase-js reads it without a network call.
+  if (opts.signedIn) await ctx.addInitScript((session) => {
+    localStorage.setItem('sb-mock-auth-token', JSON.stringify(session));
+  }, SESSION);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|401/.test(m.text())) errors.push('console: ' + m.text()); });
@@ -23,6 +27,12 @@ async function run(name, fn, opts = {}) {
   }
   await ctx.close();
 }
+const SESSION = {
+  access_token: 'mock-access', refresh_token: 'mock-refresh', token_type: 'bearer', expires_in: 3600,
+  expires_at: Math.floor(Date.now() / 1000) + 3600,
+  user: { id: '66666666-6666-4666-8666-666666666666', aud: 'authenticated', role: 'authenticated',
+    email: 'fan@example.com', email_confirmed_at: new Date().toISOString(), app_metadata: {}, user_metadata: {} },
+};
 const expectText = async (page, text, timeout = 8000) => page.getByText(text, { exact: false }).first().waitFor({ timeout });
 const assert = (c, m) => { if (!c) throw new Error(m); };
 
@@ -31,6 +41,20 @@ await run('event page renders with directions', async (page) => {
   await expectText(page, 'Fall Party');
   const dir = page.getByRole('link', { name: /directions/i });
   assert((await dir.getAttribute('href')).includes('google.com/maps/dir'), 'directions link');
+});
+
+await run('store page renders markdown safely, lineup, FAQ and good to know', async (page) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Four rooms of house till late.');
+  assert(await page.locator('strong', { hasText: 'Big' }).count() >= 1, 'markdown bold rendered');
+  assert(await page.locator('a[href^="javascript:"]').count() === 0, 'no javascript: link');
+  assert(await page.locator('img[src="x"]').count() === 0, 'raw HTML stays text');
+  assert(!(await page.evaluate(() => window.__xss)), 'no script ran');
+  await expectText(page, '23:30');
+  await page.getByText('Is there a coat check?').click();
+  await expectText(page, 'Yes, $3.');
+  await expectText(page, 'Ages 21+');
+  await expectText(page, 'Refunds available up to 7 days before the event.');
 });
 
 await run('checkout link pre-fills tier, quantity and add-on; survives reload', async (page, log) => {
@@ -57,6 +81,17 @@ await run('bad checkout link explains itself', async (page) => {
   await expectText(page, 'no tickets in it');
 });
 
+await run('signed-out code entry asks for sign-in first', async (page, log) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  const voucher = page.getByPlaceholder(/voucher|code/i).first();
+  await voucher.fill('PRESALE');
+  await page.getByRole('button', { name: /sign in to apply/i }).click();
+  await expectText(page, 'code');
+  await page.getByRole('dialog').first().waitFor({ timeout: 8000 });
+  assert(!log.some((l) => l.includes('exos_check_voucher')), 'no code check while signed out');
+});
+
 await run('voucher reveals the hidden tier', async (page, log) => {
   await page.goto(BASE + '/event/' + EV);
   await expectText(page, 'Fall Party');
@@ -68,7 +103,7 @@ await run('voucher reveals the hidden tier', async (page, log) => {
   for (let i = 0; i < 50 && !log.some((l) => l.includes('exos_voucher_tier')); i++) await page.waitForTimeout(100);
   assert(log.some((l) => l.includes('exos_voucher_tier')), 'called exos_voucher_tier');
   await expectText(page, 'Presale');
-});
+}, { signedIn: true });
 
 await run('promoter link in bio lists events with the code', async (page) => {
   await page.goto(BASE + '/l/bk-nights/dj-kay');

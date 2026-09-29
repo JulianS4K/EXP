@@ -17,7 +17,7 @@ export default function DeleteAccountPanel() {
     setBusy(true);
     try {
       await deleteMyAccount();
-      await logout();
+      await logout({ skipDoorCheck: true });
       toast({ kind: 'success', message: 'Your account has been deleted.' });
       navigate('/');
     } catch (err) {

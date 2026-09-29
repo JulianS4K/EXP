@@ -18,6 +18,7 @@ import Home from './views/Home';
 const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
 const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
+const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
@@ -54,6 +55,8 @@ const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const Notifications = lazy(() => import('./views/Notifications'));
+const ResetPassword = lazy(() => import('./views/ResetPassword'));
+const AuthCallback = lazy(() => import('./views/AuthCallback'));
 
 /**
  * @license
@@ -131,6 +134,7 @@ export default function App() {
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
@@ -138,6 +142,10 @@ export default function App() {
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />
+                    {/* Email-link landings (docs/auth.md): password reset, and
+                        confirm-signup / magic-link / email-change / OAuth. */}
+                    <Route path="/reset-password" element={<ResetPassword />} />
+                    <Route path="/auth/callback" element={<AuthCallback />} />
                     <Route path="/my-tickets" element={<MyTickets />} />
                     <Route path="/alerts" element={<Notifications />} />
                     <Route path="/ticket/:id" element={<TicketDetail />} />

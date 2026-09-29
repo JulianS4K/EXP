@@ -5,8 +5,13 @@
 // field change): it updates the timing, logs the old→new, and emails every
 // non-voided holder the new date. Times are entered in the event's timezone
 // (matching the Create/Edit pickers). Light-theme, matches the dashboard.
+//
+// A move to another day or by more than 3 hours on an event with tickets asks
+// "Offer refunds to ticket holders?" (checked by default) with a deadline
+// (mig 20260929150000); buyers then refund themselves from the email or My
+// Tickets. What they did shows in RescheduleRefundsPanel.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, ArrowRight } from 'lucide-react';
 import { Event } from '../types';
 import {
@@ -22,6 +27,8 @@ import {
   getBrowserTimezone,
 } from '../lib/datetime';
 import { useToast } from '../context/ToastContext';
+import RefundOfferFields from './RefundOfferFields';
+import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
 
 // Timestamp | ISO string | Date | undefined → Date | null.
 function toDate(v: any): Date | null {
@@ -52,6 +59,22 @@ export default function ReschedulePanel({
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<Reschedule[]>([]);
+  // Refund offer (only asked for a qualifying move of a sold event).
+  const [offer, setOffer] = useState(true);
+  const [deadline, setDeadline] = useState('');
+  const [deadlineTouched, setDeadlineTouched] = useState(false);
+
+  const newStartUtc = useMemo(() => (start ? zonedWallClockToUtc(start, tz) : null), [start, tz]);
+  const qualifies = !!startDate && !!newStartUtc && qualifiesAsDateChange(startDate, newStartUtc, tz);
+  const asksRefunds = qualifies && Number(event.ticketsSold || 0) > 0;
+  // Keep the default deadline in step with the new start until it's edited.
+  useEffect(() => {
+    if (deadlineTouched) return;
+    const d = newStartUtc ? defaultRefundDeadline(new Date(), newStartUtc) : null;
+    setDeadline(d ? utcToZonedWallClock(d, tz) : '');
+  }, [newStartUtc, tz, deadlineTouched]);
+  const deadlineUtc = deadline ? zonedWallClockToUtc(deadline, tz) : null;
+  const offerProblem = asksRefunds && offer ? deadlineProblem(deadlineUtc, newStartUtc) : null;
 
   const load = useCallback(async () => {
     setHistory(await listEventReschedules(event.id));
@@ -69,9 +92,16 @@ export default function ReschedulePanel({
       toast({ kind: 'warn', message: 'Pick a new start date and time first.' });
       return;
     }
+    const offering = asksRefunds && offer;
+    if (offering && offerProblem) {
+      toast({ kind: 'warn', message: offerProblem });
+      return;
+    }
     if (
       !window.confirm(
-        'Reschedule this event? Every current ticket holder is emailed the new date. Tickets stay valid.',
+        offering
+          ? 'Reschedule this event? Every ticket holder is emailed the new date and can ask for a refund until the deadline.'
+          : 'Reschedule this event? Every current ticket holder is emailed the new date. Tickets stay valid.',
       )
     )
       return;
@@ -79,22 +109,25 @@ export default function ReschedulePanel({
     const endUtc = end ? zonedWallClockToUtc(end, tz) : null;
     setSaving(true);
     try {
-      const { recipientCount } = await rescheduleEvent({
+      const { recipientCount, refundsOffered } = await rescheduleEvent({
         eventId: event.id,
         newStartsAt: startUtc.toISOString(),
         newDoorsAt: doorsUtc ? doorsUtc.toISOString() : null,
         newEndsAt: endUtc ? endUtc.toISOString() : null,
         occursAtLocal: utcToOccursAtLocal(startUtc, tz) || null,
         reason: reason.trim() || null,
+        offerRefunds: offering,
+        refundDeadline: offering && deadlineUtc ? deadlineUtc.toISOString() : null,
       });
       toast({
         kind: 'success',
         message:
           recipientCount > 0
-            ? `Event rescheduled — ${recipientCount} holder${recipientCount === 1 ? '' : 's'} emailed the new date.`
+            ? `Event rescheduled — ${recipientCount} holder${recipientCount === 1 ? '' : 's'} emailed the new date${refundsOffered ? ' and offered a refund' : ''}.`
             : 'Event rescheduled. No ticket holders to email yet.',
       });
       setReason('');
+      setDeadlineTouched(false);
       await load();
     } catch (err: any) {
       console.error('reschedule failed:', err);
@@ -143,6 +176,18 @@ export default function ReschedulePanel({
         placeholder="Reason (optional) — shown to holders, e.g. venue conflict"
         className="w-full border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm rounded-lg resize-y mb-3"
       />
+      {asksRefunds && (
+        <div className="border-2 border-slate-100 rounded-xl p-4 mb-3">
+          <RefundOfferFields
+            offer={offer}
+            onOffer={setOffer}
+            deadline={deadline}
+            onDeadline={(v) => { setDeadline(v); setDeadlineTouched(true); }}
+            tz={tz}
+            problem={offerProblem}
+          />
+        </div>
+      )}
       <div className="flex justify-end">
         <button
           type="button"
@@ -168,6 +213,11 @@ export default function ReschedulePanel({
               <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
                 · {r.recipientCount} emailed
               </span>
+              {r.refundsOffered && r.refundDeadline ? (
+                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                  · refunds until {formatInTz(r.refundDeadline, tz, { dateStyle: 'medium', timeStyle: 'short' })}
+                </span>
+              ) : null}
               {r.reason ? <span className="italic text-slate-400 basis-full">{r.reason}</span> : null}
             </li>
           ))}

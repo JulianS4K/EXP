@@ -1,0 +1,392 @@
+import { describe, it, expect } from 'vitest';
+import {
+  DUPLICATE_READ_MS,
+  SAME_TICKET_HOLD_MS,
+  decideScan,
+  nameCheckinAccess,
+  parseDoorCode,
+  parseNameCheckinMode,
+  type DoorCachedTicket,
+  type ScanDecisionInput,
+} from './decide';
+
+const EVENT = 'eeeeeeee-0000-4000-8000-000000000001';
+const OTHER = 'eeeeeeee-0000-4000-8000-000000000002';
+const T1 = '11111111-2222-3333-4444-555555555555';
+const CODE = `T-${T1}:owner-1:12345:sig`;
+const NOW = Date.UTC(2026, 8, 29, 22, 0, 0);
+const HOUR = 60 * 60 * 1000;
+
+const fresh: DoorCachedTicket = { used: false, voided: false, pendingTransferId: null };
+const ok = { ok: true };
+const doorsOpen = { opensAt: NOW - HOUR, testUntil: null };
+
+function input(over: Partial<ScanDecisionInput> = {}): ScanDecisionInput {
+  const source = over.source ?? 'camera';
+  return {
+    code: parseDoorCode(CODE, source),
+    source,
+    eventId: EVENT,
+    entry: fresh,
+    queued: false,
+    verify: ok,
+    network: 'online',
+    gate: doorsOpen,
+    now: NOW,
+    canOverride: false,
+    recent: null,
+    ...over,
+  };
+}
+
+describe('parseDoorCode', () => {
+  it('reads the ticket id from signed, wallet and bare codes', () => {
+    expect(parseDoorCode(CODE, 'camera')).toEqual({ raw: CODE, ticketId: T1, bare: false });
+    expect(parseDoorCode(`W-${T1}:o:a1:mac`, 'manual').bare).toBe(false);
+    expect(parseDoorCode(` ${T1} `, 'manual')).toEqual({ raw: T1, ticketId: T1, bare: true });
+  });
+  it('never treats a camera read as a typed override', () => {
+    expect(parseDoorCode(T1, 'camera').bare).toBe(false);
+  });
+  it('drops ids that cannot be ticket ids', () => {
+    expect(parseDoorCode('x'.repeat(200), 'manual').ticketId).toBeNull();
+    expect(parseDoorCode('', 'manual').ticketId).toBeNull();
+  });
+});
+
+describe('decideScan: offline and flaky network', () => {
+  it('offline + fresh ticket → admit and queue', () => {
+    expect(decideScan(input({ network: 'offline' }))).toEqual({ action: 'admit', ticketId: T1, test: false, queue: true });
+  });
+
+  it('offline + used → reject used', () => {
+    expect(decideScan(input({ network: 'offline', entry: { ...fresh, used: true } }))).toMatchObject({ action: 'reject', reason: 'used' });
+  });
+
+  it('flaky network (request failed / timed out) + used → reject used, never admit', () => {
+    const d = decideScan(input({ network: 'unreachable', entry: { ...fresh, used: true } }));
+    expect(d).toMatchObject({ action: 'reject', reason: 'used' });
+  });
+
+  it('flaky network applies every local rule: voided, mid-transfer, bad signature', () => {
+    expect(decideScan(input({ network: 'unreachable', entry: { ...fresh, voided: true } }))).toMatchObject({ reason: 'voided' });
+    expect(decideScan(input({ network: 'unreachable', entry: { ...fresh, pendingTransferId: 'tr-1' } }))).toMatchObject({ reason: 'in-transfer' });
+    expect(decideScan(input({ network: 'unreachable', verify: { ok: false, reason: 'signature-mismatch' } }))).toMatchObject({ reason: 'invalid-barcode' });
+  });
+
+  it('a ticket queued on this device counts as used, online too', () => {
+    expect(decideScan(input({ network: 'offline', queued: true }))).toMatchObject({ action: 'reject', reason: 'used' });
+    expect(decideScan(input({ network: 'online', queued: true }))).toMatchObject({ action: 'reject', reason: 'used' });
+  });
+
+  it('unknown code offline → reject (cannot be checked), not admitted', () => {
+    expect(decideScan(input({ network: 'offline', entry: undefined, verify: null }))).toEqual({
+      action: 'reject', ticketId: T1, reason: 'unknown-offline',
+    });
+    expect(decideScan(input({ network: 'unreachable', entry: null, verify: null }))).toMatchObject({ reason: 'unknown-offline' });
+  });
+
+  it('cancelled event offline → reject', () => {
+    expect(decideScan(input({ network: 'offline', gate: { ...doorsOpen, cancelled: true } }))).toMatchObject({ reason: 'event-cancelled' });
+  });
+});
+
+describe('decideScan: online, the cache is only a hint', () => {
+  it('fresh ticket → ask the server', () => {
+    expect(decideScan(input())).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('cache says transferred (signature no longer matches) → ask the server', () => {
+    expect(decideScan(input({ verify: { ok: false, reason: 'signature-mismatch' } }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('cache says mid-transfer (transfer since cancelled or claimed) → ask the server', () => {
+    expect(decideScan(input({ entry: { ...fresh, pendingTransferId: 'tr-1' } }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('cache says used or voided → ask the server (it knows when and where)', () => {
+    expect(decideScan(input({ entry: { ...fresh, used: true } })).action).toBe('ask-server');
+    expect(decideScan(input({ entry: { ...fresh, voided: true } })).action).toBe('ask-server');
+  });
+
+  it('not on the saved list → ask the server', () => {
+    expect(decideScan(input({ entry: undefined, verify: null })).action).toBe('ask-server');
+  });
+
+  it('an expired or malformed code is refused locally (the server would too)', () => {
+    expect(decideScan(input({ verify: { ok: false, reason: 'bucket-expired' } }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+  });
+
+  it('doors and test window are left to the server online', () => {
+    expect(decideScan(input({ gate: { opensAt: NOW + HOUR, testUntil: null } })).action).toBe('ask-server');
+  });
+});
+
+describe('decideScan: doors and test window (offline)', () => {
+  it('doors not open → reject with the opening time', () => {
+    const d = decideScan(input({ network: 'offline', gate: { opensAt: NOW + HOUR, testUntil: null } }));
+    expect(d).toEqual({ action: 'reject', ticketId: T1, reason: 'doors-not-open', opensAt: NOW + HOUR });
+  });
+
+  it('pre-doors inside the test window → test OK, never queued', () => {
+    const d = decideScan(input({ network: 'unreachable', gate: { opensAt: NOW + HOUR, testUntil: NOW + 2 * HOUR } }));
+    expect(d).toEqual({ action: 'admit', ticketId: T1, test: true, queue: false });
+  });
+
+  it('an expired test window no longer lifts the gate', () => {
+    const d = decideScan(input({ network: 'offline', gate: { opensAt: NOW + HOUR, testUntil: NOW - 1 } }));
+    expect(d).toMatchObject({ action: 'reject', reason: 'doors-not-open' });
+  });
+
+  it('after doors, a scan is real even with a test window set', () => {
+    const d = decideScan(input({ network: 'offline', gate: { opensAt: NOW - 1, testUntil: NOW + HOUR } }));
+    expect(d).toEqual({ action: 'admit', ticketId: T1, test: false, queue: true });
+  });
+
+  it('no doors time at all → admit', () => {
+    expect(decideScan(input({ network: 'offline', gate: { opensAt: null, testUntil: null } })).action).toBe('admit');
+  });
+});
+
+describe('decideScan: wrong event, overrides, garbage', () => {
+  it('a ticket known to belong to another event → wrong-event, online or not', () => {
+    const entry = { ...fresh, eventId: OTHER };
+    expect(decideScan(input({ entry }))).toMatchObject({ action: 'reject', reason: 'wrong-event' });
+    expect(decideScan(input({ entry, network: 'offline' }))).toMatchObject({ action: 'reject', reason: 'wrong-event' });
+  });
+
+  it('typed id: a manager is asked for a reason, a scanner is refused', () => {
+    const code = parseDoorCode(T1, 'manual');
+    expect(decideScan(input({ source: 'manual', code, verify: null, canOverride: true }))).toEqual({ action: 'needs-reason', ticketId: T1 });
+    expect(decideScan(input({ source: 'manual', code, verify: null, canOverride: false }))).toMatchObject({ reason: 'needs-manager' });
+  });
+
+  it('typed id with a reason: server online, local rules offline', () => {
+    const code = parseDoorCode(T1, 'manual');
+    const base = { source: 'manual' as const, code, verify: null, canOverride: true, reason: 'phone died, ID checked' };
+    expect(decideScan(input(base)).action).toBe('ask-server');
+    expect(decideScan(input({ ...base, network: 'offline' }))).toMatchObject({ action: 'admit', queue: true });
+    expect(decideScan(input({ ...base, network: 'offline', entry: { ...fresh, used: true } }))).toMatchObject({ reason: 'used' });
+  });
+
+  it('empty or unreadable input → not-found', () => {
+    expect(decideScan(input({ code: parseDoorCode('', 'manual') }))).toMatchObject({ reason: 'not-found' });
+    expect(decideScan(input({ code: parseDoorCode('y'.repeat(300), 'camera') }))).toMatchObject({ reason: 'not-found' });
+  });
+});
+
+describe('decideScan: duplicate reads', () => {
+  const recent = { raw: CODE, ticketId: T1, at: NOW - 500, source: 'camera' as const, admitted: false };
+
+  it('the same code within the window is ignored', () => {
+    expect(decideScan(input({ recent }))).toEqual({ action: 'ignore' });
+  });
+
+  it('the same code after the window is decided again', () => {
+    expect(decideScan(input({ recent: { ...recent, at: NOW - DUPLICATE_READ_MS - 1 } })).action).toBe('ask-server');
+  });
+
+  it('a camera re-read of the ticket just admitted is held (new rotating code, same ticket)', () => {
+    const r = { ...recent, raw: `T-${T1}:owner-1:12344:old`, admitted: true, at: NOW - 3_000 };
+    expect(decideScan(input({ recent: r }))).toEqual({ action: 'ignore' });
+    expect(decideScan(input({ recent: { ...r, at: NOW - SAME_TICKET_HOLD_MS - 1 } })).action).toBe('ask-server');
+    // Not held after a refusal, or for a typed entry.
+    expect(decideScan(input({ recent: { ...r, admitted: false } })).action).toBe('ask-server');
+  });
+
+  it('an override with a reason is never swallowed as a duplicate', () => {
+    const code = parseDoorCode(T1, 'manual');
+    const d = decideScan(input({
+      source: 'manual', code, verify: null, canOverride: true, reason: 'ID checked',
+      recent: { raw: T1, ticketId: T1, at: NOW - 100, source: 'manual', admitted: false },
+    }));
+    expect(d.action).toBe('ask-server');
+  });
+});
+
+describe('nameCheckinAccess / parseNameCheckinMode', () => {
+  it('staff: every door role; managers: owner / manager only; off: nobody', () => {
+    expect(nameCheckinAccess('staff', false)).toBe('allowed');
+    expect(nameCheckinAccess('staff', true)).toBe('allowed');
+    expect(nameCheckinAccess('managers', false)).toBe('needs-manager');
+    expect(nameCheckinAccess('managers', true)).toBe('allowed');
+    expect(nameCheckinAccess('off', false)).toBe('off');
+    expect(nameCheckinAccess('off', true)).toBe('off');
+  });
+  it('reads the column, null when missing or unknown', () => {
+    expect(parseNameCheckinMode('managers')).toBe('managers');
+    expect(parseNameCheckinMode(undefined)).toBeNull();
+    expect(parseNameCheckinMode('will-call')).toBeNull();
+  });
+});
+
+describe('decideScan: check in by name', () => {
+  const parked: DoorCachedTicket = { used: false, voided: false, pendingTransferId: 'tr-1', parked: true };
+  const typed = parseDoorCode(T1, 'manual');
+  const byName = { code: typed, source: 'manual' as const, verify: null, byName: true };
+
+  it('staff mode: a scanner checks in by name, online via the server', () => {
+    expect(decideScan(input({ ...byName, nameCheckin: 'staff' }))).toEqual({ action: 'ask-server', ticketId: T1, byName: true });
+    // The default is staff.
+    expect(decideScan(input(byName))).toEqual({ action: 'ask-server', ticketId: T1, byName: true });
+  });
+
+  it('managers mode: a scanner is told to ask a manager, a manager goes ahead', () => {
+    expect(decideScan(input({ ...byName, nameCheckin: 'managers' }))).toEqual({
+      action: 'reject', ticketId: T1, reason: 'name-needs-manager',
+    });
+    expect(decideScan(input({ ...byName, nameCheckin: 'managers', canOverride: true }))).toEqual({
+      action: 'ask-server', ticketId: T1, byName: true,
+    });
+  });
+
+  it('off: nobody checks in by name, online or offline', () => {
+    expect(decideScan(input({ ...byName, nameCheckin: 'off', canOverride: true }))).toMatchObject({ reason: 'name-off' });
+    expect(decideScan(input({ ...byName, nameCheckin: 'off', network: 'offline' }))).toMatchObject({ reason: 'name-off' });
+  });
+
+  it('offline: a normal ticket and a parked one are both checked in and queued', () => {
+    expect(decideScan(input({ ...byName, network: 'offline' }))).toEqual({
+      action: 'admit', ticketId: T1, test: false, queue: true, byName: true,
+    });
+    expect(decideScan(input({ ...byName, entry: parked, network: 'unreachable' }))).toEqual({
+      action: 'admit', ticketId: T1, test: false, queue: true, byName: true,
+    });
+  });
+
+  it('offline: a holder\'s own pending transfer is refused (not parked)', () => {
+    const d = decideScan(input({ ...byName, entry: { ...fresh, pendingTransferId: 'tr-2' }, network: 'offline' }));
+    expect(d).toMatchObject({ action: 'reject', reason: 'in-transfer' });
+  });
+
+  it('used and voided are refused offline; online the server says when and where', () => {
+    expect(decideScan(input({ ...byName, entry: { ...fresh, used: true }, network: 'offline' }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ ...byName, entry: { ...parked, used: true }, network: 'offline' }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ ...byName, entry: { ...fresh, voided: true }, network: 'offline' }))).toMatchObject({ reason: 'voided' });
+    expect(decideScan(input({ ...byName, entry: { ...fresh, used: true } }))).toEqual({ action: 'ask-server', ticketId: T1, byName: true });
+  });
+
+  it('already queued on this device counts as used, online too', () => {
+    expect(decideScan(input({ ...byName, queued: true }))).toMatchObject({ action: 'reject', reason: 'used' });
+    expect(decideScan(input({ ...byName, queued: true, network: 'offline' }))).toMatchObject({ reason: 'used' });
+  });
+
+  it('offline respects doors, the test window, cancellation and the list', () => {
+    const off = { ...byName, network: 'offline' as const };
+    expect(decideScan(input({ ...off, gate: { opensAt: NOW + HOUR, testUntil: null } }))).toMatchObject({ reason: 'doors-not-open' });
+    expect(decideScan(input({ ...off, gate: { opensAt: NOW + HOUR, testUntil: NOW + HOUR } }))).toEqual({
+      action: 'admit', ticketId: T1, test: true, queue: false, byName: true,
+    });
+    expect(decideScan(input({ ...off, gate: { ...doorsOpen, cancelled: true } }))).toMatchObject({ reason: 'event-cancelled' });
+    expect(decideScan(input({ ...off, entry: null }))).toMatchObject({ reason: 'unknown-offline' });
+    expect(decideScan(input({ ...byName, entry: { ...fresh, eventId: OTHER } }))).toMatchObject({ reason: 'wrong-event' });
+  });
+
+  it('a by-name check-in is never swallowed as a duplicate read', () => {
+    const d = decideScan(input({
+      ...byName, recent: { raw: T1, ticketId: T1, at: NOW - 100, source: 'manual', admitted: false },
+    }));
+    expect(d).toEqual({ action: 'ask-server', ticketId: T1, byName: true });
+  });
+
+  it('reading a parked ticket opens the by-name confirmation when allowed', () => {
+    expect(decideScan(input({ entry: parked }))).toEqual({ action: 'confirm-name', ticketId: T1 });
+    expect(decideScan(input({ entry: parked, network: 'offline' }))).toEqual({ action: 'confirm-name', ticketId: T1 });
+    expect(decideScan(input({ entry: parked, code: typed, source: 'manual', canOverride: true }))).toEqual({
+      action: 'confirm-name', ticketId: T1,
+    });
+    expect(decideScan(input({ entry: parked, nameCheckin: 'managers' }))).toMatchObject({ reason: 'name-needs-manager' });
+    expect(decideScan(input({ entry: parked, nameCheckin: 'off' }))).toMatchObject({ reason: 'name-off' });
+  });
+
+  it('a parked ticket is never admitted as a plain scan offline', () => {
+    const d = decideScan(input({ entry: { ...parked, parked: false }, network: 'offline' }));
+    expect(d).toEqual({ action: 'reject', ticketId: T1, reason: 'in-transfer' });
+  });
+
+  it('a parked ticket for another event is not checked in here', () => {
+    expect(decideScan(input({ entry: { ...parked, eventId: OTHER } }))).toEqual({ action: 'reject', ticketId: T1, reason: 'wrong-event' });
+  });
+});
+
+describe('decideScan: check-in lists and re-entry (mig 20260929140000)', () => {
+  const GA = 'tier-ga';
+  const VIP = 'tier-vip';
+  const main = { id: 'list-main', name: 'Main door', tierIds: null, allowReentry: false, validFrom: null, validUntil: null, sortOrder: 0 };
+  const vip = { ...main, id: 'list-vip', name: 'VIP deck', tierIds: [VIP], allowReentry: true };
+  const passOut = { ...main, id: 'list-out', name: 'Pass-out', allowReentry: true };
+  const gaTicket: DoorCachedTicket = { ...fresh, tierId: GA };
+  const vipTicket: DoorCachedTicket = { ...fresh, tierId: VIP };
+
+  it('offline: a ticket type the list does not admit is wrong-list', () => {
+    expect(decideScan(input({ network: 'offline', list: vip, entry: gaTicket }))).toMatchObject({ action: 'reject', reason: 'wrong-list' });
+    expect(decideScan(input({ network: 'offline', list: vip, entry: vipTicket }))).toEqual({ action: 'admit', ticketId: T1, test: false, queue: true });
+  });
+
+  it('a roster from before lists (no tier) is left to the server / admitted', () => {
+    expect(decideScan(input({ network: 'offline', list: vip, entry: fresh }))).toMatchObject({ action: 'admit' });
+  });
+
+  it('offline: outside the window is invalid-time (entries only)', () => {
+    const later = { ...passOut, validFrom: new Date(NOW + HOUR).toISOString() };
+    const over = { ...passOut, validUntil: new Date(NOW - HOUR).toISOString() };
+    expect(decideScan(input({ network: 'offline', list: later }))).toMatchObject({ reason: 'invalid-time' });
+    expect(decideScan(input({ network: 'offline', list: over }))).toMatchObject({ reason: 'invalid-time' });
+    expect(decideScan(input({ network: 'offline', list: over, direction: 'exit', entry: { ...fresh, used: true, lists: { 'list-out': 'entry' } } })))
+      .toMatchObject({ action: 'admit', direction: 'exit' });
+  });
+
+  it('re-entry off (the default): used is refused and exits are not allowed', () => {
+    expect(decideScan(input({ network: 'offline', list: main, entry: { ...fresh, used: true } }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ network: 'offline', list: main, direction: 'exit' }))).toMatchObject({ reason: 'exit-not-allowed' });
+    expect(decideScan(input({ network: 'online', list: main, direction: 'exit' }))).toMatchObject({ reason: 'exit-not-allowed' });
+    expect(decideScan(input({ network: 'offline', list: null, direction: 'exit' }))).toMatchObject({ reason: 'exit-not-allowed' });
+    // Queued on this device: used, as before.
+    expect(decideScan(input({ network: 'online', list: main, queued: true }))).toMatchObject({ reason: 'used' });
+  });
+
+  it('re-entry on: entry, already-inside, exit, entry again', () => {
+    const inside = { ...fresh, used: true, lists: { 'list-out': 'entry' as const } };
+    const outside = { ...fresh, used: true, lists: { 'list-out': 'exit' as const } };
+    expect(decideScan(input({ network: 'offline', list: passOut }))).toMatchObject({ action: 'admit', queue: true });
+    expect(decideScan(input({ network: 'offline', list: passOut, entry: inside }))).toMatchObject({ action: 'reject', reason: 'already-inside' });
+    expect(decideScan(input({ network: 'offline', list: passOut, entry: inside, direction: 'exit' })))
+      .toEqual({ action: 'admit', ticketId: T1, test: false, queue: true, direction: 'exit' });
+    expect(decideScan(input({ network: 'offline', list: passOut, entry: outside }))).toEqual({ action: 'admit', ticketId: T1, test: false, queue: true });
+    // Used on another list (or with no list) is not "inside" this one.
+    expect(decideScan(input({ network: 'offline', list: passOut, entry: { ...fresh, used: true } }))).toMatchObject({ action: 'admit' });
+  });
+
+  it('re-entry on: a ticket with scans still queued is decided on this device, online too', () => {
+    const inside = { ...fresh, used: true, lists: { 'list-out': 'entry' as const } };
+    expect(decideScan(input({ network: 'online', list: passOut, queued: true, entry: inside }))).toMatchObject({ reason: 'already-inside' });
+    expect(decideScan(input({ network: 'online', list: passOut, queued: true, entry: inside, direction: 'exit' })))
+      .toMatchObject({ action: 'admit', direction: 'exit', queue: true });
+    expect(decideScan(input({ network: 'online', list: passOut, queued: false, entry: inside }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('exits: voided is refused, the doors time does not hold them, the test window does not count them', () => {
+    const inside = { ...fresh, used: true, lists: { 'list-out': 'entry' as const } };
+    expect(decideScan(input({ network: 'offline', list: passOut, direction: 'exit', entry: { ...inside, voided: true } })))
+      .toMatchObject({ reason: 'voided' });
+    expect(decideScan(input({ network: 'offline', list: passOut, direction: 'exit', entry: inside, gate: { opensAt: NOW + HOUR, testUntil: null } })))
+      .toMatchObject({ action: 'admit', queue: true, direction: 'exit' });
+    expect(decideScan(input({ network: 'offline', list: passOut, direction: 'exit', entry: inside, gate: { opensAt: NOW + HOUR, testUntil: NOW + HOUR } })))
+      .toMatchObject({ action: 'admit', test: true, queue: false, direction: 'exit' });
+  });
+
+  it('online, the server decides lists (a hint never refuses)', () => {
+    expect(decideScan(input({ network: 'online', list: vip, entry: gaTicket }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('by name: the same list rules offline', () => {
+    const byName = { byName: true, nameCheckin: 'staff' as const, network: 'offline' as const };
+    expect(decideScan(input({ ...byName, list: vip, entry: gaTicket }))).toMatchObject({ reason: 'wrong-list' });
+    expect(decideScan(input({ ...byName, list: passOut, entry: { ...fresh, used: true, lists: { 'list-out': 'entry' } } })))
+      .toMatchObject({ reason: 'already-inside' });
+    expect(decideScan(input({ ...byName, list: passOut, direction: 'exit', entry: { ...fresh, used: true, lists: { 'list-out': 'entry' } } })))
+      .toMatchObject({ action: 'admit', byName: true, direction: 'exit' });
+    expect(decideScan(input({ ...byName, list: main, direction: 'exit' }))).toMatchObject({ reason: 'exit-not-allowed' });
+    expect(decideScan(input({ ...byName, list: main, entry: { ...fresh, used: true } }))).toMatchObject({ reason: 'used' });
+  });
+});

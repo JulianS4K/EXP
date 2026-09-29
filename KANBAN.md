@@ -1,29 +1,139 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-09-26)
+## Prod state vs this repo (updated 2026-09-29)
 
-- **DB caught up.** Applied to prod 2026-09-24: the 2026-09-11 Stage 2/3 set and
-  `20260924200848_exos_audit_hardening_quota_transfer_waitlist` (which also carries the transfer secret leak fix).
-  Then the P0 set and all-in pricing: `20260924205115`, `205508`, `205916`, `210103`, `211840` (verified on prod).
-  `20260702121000` and `20260911130000` were not applied on their own; later migrations supersede them (see their headers).
-- **Applied 2026-09-26 (operator-approved, md5-verified against the tested copy):** `20260926000000_exos_advisor_cleanup`
-  and `20260926010000_exos_waitlist_signin_account_deletion`. Until the new bundle ships, the 07-27 `/bridge/` waitlist
-  button errors for signed-out visitors ("sign in to join").
-- **Applied 2026-09-26 (operator-approved; all 69 functions md5-verified against the tested real-schema copy):**
-  `20260926020000` promoter commissions, `030000` referral rewards, `040000` organizer refunds, `050000` tables +
-  guest lists, `060000` abandoned-checkout reminder (cron `exos_send_checkout_reminders` hourly at :17 is live),
-  `070000` price-disclosure record, `080000` refund/tables fix. Security advisor: no new ERRORs; the new
-  SECURITY DEFINER RPCs and RPC-only tables show the same by-design WARN/INFO as the existing exos set.
-  Not deployed: `exos-refund`, and the edited `exos-checkout` / `stripe-webhook` / `exos-mail-drain` (payments stay
-  off; the drain needs the new `EXOS_APP_URL` secret before reminder mails go out).
-- **Live `/bridge/` bundle:** built from EXP `2a11143` (ease-of-use pass), shipped in Terminal-2 #1005 (merged 2026-09-26).
-- **Authored, not applied:** `20260926090000_exos_accessible_tickets` (accessible tiers, event access info, holder and
-  guest access needs). Apply it before shipping a bundle built after it. The frontend degrades without it (the new
-  panels hide), except that ticking "Accessible ticket type" or filling Accessibility in Create Event fails the save.
-- **Payments are dormant by choice.** `stripe-webhook`, `exos-checkout`, `exos-reconcile-checkouts` have never been deployed.
-  Before Stripe go-live: set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `CRON_SECRET`, deploy the three functions,
-  register the Stripe webhook endpoint. The existing `exos-reconcile-checkouts-15min` cron starts hitting the function once
-  it's deployed.
+- **DB:** every Exos migration through `20260929080000_exos_rpc_hardening` is applied to prod (operator-approved;
+  `…074000` and earlier md5-verified, `080000` verified by its patch markers and grants on 2026-09-29).
+  `20260929120000_exos_event_store_content` applied 2026-09-29 (operator-approved; columns, checks, grants and the
+  `exos_public_events` append verified live).
+- **Edge functions:** 16 deployed and smoke-tested through pg_net on 2026-09-28 (checkout, webhook, refund, mail,
+  wallet, calendar, MCP, API, Google feed, payouts, POS, reconcile, webhook drain, geocode…). Held back:
+  `exos-distribute`, `exos-marketplace-sales`. `exos-checkout` redeployed 2026-09-29 (v2: guests can't try codes).
+- **Crons live:** reconcile checkouts (15 min), webhook drain (3 min), mail drain (2 min), wallet push (5 min),
+  mail follow-ups (hourly), geocode refresh and payouts (daily, dry-run).
+- **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (roll the test key first),
+  `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`, `EXOS_APP_BASE_URL`, `GOOGLE_MAPS_SERVER_KEY`.
+- **Hosting:** `exos-web` on Render serves `/bridge/` from main; Terminal-2 reverse-proxies to it when `EXOS_ORIGIN`
+  is set. Terminal-2's own `static/bridge` fallback copy is 66 commits behind (see the build plan below).
+
+## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
+
+The four audits' findings are summarized here. Marketing graded **C** (strong organic and promoter tools, no
+measurable paid ads); the door app **C+** (database side solid, five critical bugs in the scanner page); event
+creation works, and EXP is the only creator (Terminal-2 has no schema drift); money records stop short of fees,
+credit notes, disputes and payouts. Map of every buyer and organizer step: the "Exos Order-to-Payout Map" artifact.
+
+How we build it (techniques):
+- **API first.** Every capability is a database RPC or edge function before it's a screen, so the SPA, the public
+  API, the MCP server (AI assistants) and future agents are all just clients. No logic that only the UI knows.
+- **Pure decision functions + harness.** Money, door and pricing rules live in small pure functions with vitest
+  tables (like `pricing.ts`, `fees.ts`) and SQL harnesses in `tests/exos`; screens only call them.
+- **Outbox + drain for anything external** (mail, webhooks, ad conversions, payouts): write a row in the same
+  transaction, send from a cron with leases, idempotency keys and retries. Never call a vendor inside checkout.
+- **Dry-run by default for third-party writes** (marketplaces, Automatiq, payouts), switched on per org with a
+  recorded authorization.
+- **One source for shared text and shapes** (`_shared/*` imported by both Deno and the SPA) so feeds, MCP, SEO
+  and the page can't drift.
+- **Ship in thin vertical slices**: migration + harness + RPC + UI + doc in one PR, behind a column probe so the
+  app works before prod has the migration.
+
+### Now (heart of the product: the door)
+- ✅ **Door app critical fixes** (`src/lib/door/`, 61 tests): starts offline from the saved event and list; one
+  tested scan-decision function with a 4 s timeout and offline rules whenever the network fails (no double entry
+  on bad Wi-Fi); the saved list is a hint when online and refreshes every minute; roster downloaded in pages and
+  kept in IndexedDB; camera stays open, camera scans recorded as camera, duplicate reads ignored; test-window scans
+  never replay as real check-ins; "Sold" tile; guest-list upload recovers after a drop.
+- ✅ **Sync-health panel** (`src/lib/door/health.ts`): list age, uploads waiting (and the oldest), last upload,
+  clock vs server, refused-on-upload conflicts; on "not authorized" the uploads stop, say "not authorized to upload
+  N scans" and keep the queue; sign-out asks first when scans are waiting.
+- ✅ **Encrypted saved roster** (`src/lib/door/kv.ts`): AES-GCM under a non-extractable per-device WebCrypto key kept
+  in IndexedDB; plain-text rosters are sealed on first load; plain text with a warning where the browser can't;
+  sign-out wipes the list and the key.
+- ⬜ Roster delta RPC (instead of a full re-pull each minute); per-day door keys (stop shipping raw per-ticket
+  secrets).
+- ✅ **Name check-in** (mig `20260929130000`, not applied): door staff check anyone in by name, claimed or not
+  (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
+  staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the
+  roster shows unclaimed tickets' buyer name and masked email; works offline through the queue; the scan report
+  counts by-name check-ins.
+- ✅ **Record offline admissions the server rejects** (mig `20260929140000`, not applied): a refused offline entry
+  (voided, transferred after the download, wrong list, outside the list's hours, before doors, too old) is still
+  recorded as a forced check-in with the reason, next to the scan-reject row; the ticket isn't changed; the door's
+  sync-health panel and the scan report list them. The replay window is now the event's end + 48 h.
+- ⬜ Lock transfers once doors open.
+- ✅ **Check-in lists / gates / re-entry** (pretix model, mig `20260929140000`, not applied): lists per gate or area
+  with ticket types, an optional time window and **re-entry off unless turned on** (operator decision: "Keep reentry
+  optional"); entry / exit scans on re-entry lists (`already-inside`), the first entry still marks the ticket used;
+  a list picker and Entry / Exit switch on the scanner, decided offline too; the editor in Edit event. Old clients
+  keep the old RPCs unchanged.
+- ⬜ Door phones stop holding raw per-ticket secrets (derive per-event verify keys); end-of-night door summary;
+  attendee QR available offline in the app.
+
+### Next (sell more: marketing)
+- ✅ **Paid Purchase pixel actually fires** (CSP allowed pixels only on listing pages, so the Stripe return never
+  reported a Purchase) and carries the Stripe session id as the dedupe id (Meta eventID, TikTok event_id, GA4
+  transaction_id). Link-in-bio pages allow pixels too.
+- ✅ Every click id captured at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, msclkid, fbclid,
+  _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`, not
+  applied); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
+- ⬜ **Server-side conversions**: `exos_org_ad_credentials` (tokens in Vault, never in public `marketing`),
+  `exos_marketing_conversions` outbox written by `exos_fulfill_checkout` / free claims / refunds, `exos-conversions-drain`
+  cron → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit CAPI, Snap CAPI; Google Ads enhanced
+  conversions through the Data Manager API.
+- ⬜ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control.
+- ⬜ `exos-catalog-feed` (events as products for Meta / TikTok / Google dynamic ads, YouTube via Google Ads).
+- ⬜ Reddit, Snap, X pixels; UTM / source report for organizers; hashed custom-audience export (consent-gated).
+- ⬜ SMS opt-in and blasts (already on the board).
+
+### Next (event creation and the store page)
+- ✅ **Store page content** (mig `20260929120000`, live in prod): summary, rich description (safe markdown),
+  lineup with set times, FAQ, gallery, video, minimum age, refund policy and notes; feeds the Google events feed
+  (summary, lineup, age range) and the marketplace age note. Shows in Create / Edit once the columns exist.
+- ⬜ Store page follow-ups: summary on event cards, FAQ structured data, MCP / calendar / SEO copy, `min_age` in
+  `exos-distribute`'s select, lineup feeding Performers, a length check on the old `description` column.
+- ⬜ Currency picker in Create Event (new events are always USD today); drop the dead `exclusivity` field.
+- ⬜ Rebuild or retire Terminal-2's `static/bridge` copy (it still has the removed promo-code editor) and add a
+  CI check that it matches EXP main; one shared structured-data builder so `exos_seo.py` can retire.
+- ⬜ Online / hybrid events; post-checkout "what to bring" message; per-event `noindex`.
+
+### Next (money records: ERP-lite)
+1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate
+   at checkout; Stripe's actual fee, net, transfer and balance-transaction ids after fulfilment (best-effort,
+   backfilled by reconcile); `exos_order_money` view for owner / manager / finance.
+2. ⬜ Settlement report per event (gross, tax, refunds, disputes, fees, marketplace proceeds, commissions, net).
+3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
+4. ⬜ Credit notes on refund (`CN-` series); the invoice stays unchanged.
+5. ⬜ Printable invoice / receipt page with the seller's legal details.
+6. ⬜ Daily reconciliation against Stripe balance transactions.
+7. ⬜ Disputes: table, organizer alert, evidence, lost-dispute entry, recovery policy.
+8. ⬜ Payout statements and a Payouts page; journal CSV, then QuickBooks / Xero.
+9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps.
+10. ✅ Refunds when the date changes (mig 20260929150000, not applied): a move to another day or by more than
+    3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
+    start − 24 h). Holders get an `event-rescheduled` mail with a per-ticket refund / release link; buyers refund
+    themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
+    buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
+    (`docs/organizer-guide.md` "Changing the date").
+- ⬜ **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
+  change). v2: each friend pays their own seat within a 30-min group window (N one-seat holds, Exos expires the
+  sessions, unpaid seats return to sale, host can cover the rest). Never a multi-day hold: card authorizations last
+  ~7 days and ticketing can't use Stripe's extended authorization.
+
+### Distribution
+- ⬜ **Automatiq route** (`docs/marketplace/automatiq.md`): one route per event (direct or Automatiq, never both),
+  blocked on API docs, a key and a WriteAuthorization.
+
+### AI (use it, and stay reachable by it)
+- Reachable: MCP server, public API, Google events feed are live. ⬜ Server-rendered event pages / prerender for
+  crawlers and AI assistants, `llms.txt`, agent checkout (agentic-commerce standards) once payments are live,
+  bot rules that tell good agents from scalpers.
+- Use: ⬜ flyer-to-event import, description and social-copy writer, pricing suggestions from sales pace and
+  marketplace comps, buyer support agent (refund / transfer questions, human approves money), door anomaly alerts,
+  chargeback risk flags. AI never writes prices or orders to third parties.
+
+### Decisions only the operator can make
+Stripe Standard vs Express; organizers repay lost chargebacks?; refunds give back the card fee?; free months from
+signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent wording for ad-platform data.
 
 ## Marketplace payout ledger 2026-09-29
 

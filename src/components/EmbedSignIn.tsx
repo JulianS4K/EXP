@@ -11,6 +11,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
+import { cleanEmail as normalizeEmail, isValidEmail, mapAuthError } from '../lib/authRules';
 
 type Mode = 'email' | 'code' | 'password';
 
@@ -22,11 +23,11 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = normalizeEmail(email);
 
   const sendCode = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    if (!isValidEmail(cleanEmail)) {
       setError('Enter a valid email.');
       return;
     }
@@ -38,7 +39,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
     });
     setBusy(false);
     if (err) {
-      setError(err.message || 'Could not send the code.');
+      setError(mapAuthError(err).message);
       return;
     }
     setMode('code');
@@ -56,7 +57,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
     const { error: err } = await supabase.auth.verifyOtp({ email: cleanEmail, token, type: 'email' });
     setBusy(false);
     // Success: AuthContext picks up SIGNED_IN and the parent moves on.
-    if (err) setError(err.message || 'That code did not work.');
+    if (err) setError(mapAuthError(err).message);
   };
 
   const withPassword = async (e: FormEvent) => {
@@ -65,7 +66,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
     setError('');
     const { error: err } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
     setBusy(false);
-    if (err) setError(err.message || 'Sign-in failed.');
+    if (err) setError(mapAuthError(err).message);
   };
 
   const input = 'w-full bg-black border border-white/15 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-white/50';
@@ -81,7 +82,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
       {mode === 'email' && (
         <form onSubmit={sendCode} className="space-y-3">
           <input
-            type="email" autoComplete="email" required value={email}
+            type="email" autoComplete="email" required value={email} aria-label="Email"
             onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={input}
           />
           <button type="submit" disabled={busy} className={button} style={{ background: accent, color: '#000' }}>
@@ -96,7 +97,7 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
       {mode === 'code' && (
         <form onSubmit={verify} className="space-y-3">
           <input
-            inputMode="numeric" autoComplete="one-time-code" required value={code}
+            inputMode="numeric" autoComplete="one-time-code" required value={code} aria-label="6-digit code" autoFocus
             onChange={(e) => setCode(e.target.value)} placeholder="123456" className={`${input} tracking-[0.4em]`}
           />
           <button type="submit" disabled={busy} className={button} style={{ background: accent, color: '#000' }}>
@@ -112,11 +113,11 @@ export default function EmbedSignIn({ accent, onCancel }: { accent: string; onCa
       {mode === 'password' && (
         <form onSubmit={withPassword} className="space-y-3">
           <input
-            type="email" autoComplete="email" required value={email}
+            type="email" autoComplete="email" required value={email} aria-label="Email"
             onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={input}
           />
           <input
-            type="password" autoComplete="current-password" required value={password}
+            type="password" autoComplete="current-password" required value={password} aria-label="Password"
             onChange={(e) => setPassword(e.target.value)} placeholder="Password" className={input}
           />
           <button type="submit" disabled={busy} className={button} style={{ background: accent, color: '#000' }}>

@@ -63,7 +63,7 @@ let ready = false;
 // Events fired before consent/load are queued here and replayed once the
 // providers are live, so a first-visit ViewContent isn't lost to the consent
 // gate. Capped so a denied visitor can't grow it unbounded.
-const deferred: { name: string; params?: Record<string, unknown> }[] = [];
+const deferred: { name: string; params?: Record<string, unknown>; eventId?: string }[] = [];
 const MAX_DEFERRED = 20;
 
 export type PixelScopeAction = 'reload' | 'switch' | 'keep';
@@ -168,14 +168,26 @@ function flush(): void {
   if (p.tiktok) loadTikTok(p.tiktok);
   ready = true;
   const queued = deferred.splice(0, deferred.length);
-  for (const e of queued) fire(e.name, e.params);
+  for (const e of queued) fire(e.name, e.params, e.eventId);
 }
 
-function fire(name: string, params?: Record<string, unknown>): void {
-  if (window.fbq) window.fbq('track', name, params);
-  if (window.ttq) window.ttq.track(name, params);
-  // GA4 has no fixed event taxonomy; lowercase the canonical name.
-  if (window.gtag) window.gtag('event', name.toLowerCase(), params);
+function fire(name: string, params?: Record<string, unknown>, eventId?: string): void {
+  // eventId (the Stripe session id for a Purchase) lets each vendor match
+  // this browser event to a server-side one and count it once: Meta's
+  // eventID, TikTok's event_id, GA4's transaction_id.
+  if (window.fbq) {
+    if (eventId) window.fbq('track', name, params, { eventID: eventId });
+    else window.fbq('track', name, params);
+  }
+  if (window.ttq) window.ttq.track(name, eventId ? { ...params, event_id: eventId } : params);
+  // GA4: its recommended name where there is one (begin_checkout), else the
+  // lowercased canonical name.
+  if (window.gtag) window.gtag('event', ga4EventName(name), eventId && name === 'Purchase' ? { ...params, transaction_id: eventId } : params);
+}
+
+/** GA4 event name for a canonical pixel event. */
+export function ga4EventName(name: string): string {
+  return name === 'InitiateCheckout' ? 'begin_checkout' : name.toLowerCase();
 }
 
 // Fire a conversion/interaction event across whichever providers are loaded.
@@ -183,13 +195,13 @@ function fire(name: string, params?: Record<string, unknown>): void {
 // translated to each vendor's nearest equivalent. Calls made before consent
 // or before the providers finish loading are queued and replayed on flush.
 // Do NOT pass 'PageView' here — the loaders emit that themselves.
-export function trackPixelEvent(name: string, params?: Record<string, unknown>): void {
+export function trackPixelEvent(name: string, params?: Record<string, unknown>, eventId?: string): void {
   if (typeof window === 'undefined' || scopeOrg === null || reloading) return;
   if (getConsent() !== 'granted' || !ready) {
-    if (deferred.length < MAX_DEFERRED) deferred.push({ name, params });
+    if (deferred.length < MAX_DEFERRED) deferred.push({ name, params, eventId });
     return;
   }
-  fire(name, params);
+  fire(name, params, eventId);
 }
 
 function inject(src: string): void {

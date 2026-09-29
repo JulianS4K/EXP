@@ -48,13 +48,20 @@ transactional, **M** follow-up (opt-out). Render: **SQL** (html row) or **TS** (
 | `order-failed` | Paid but the seats were gone at fulfilment; refund starts | T | per session | SQL |
 | `event-reminder` | Cron `exos_send_event_reminders`: T-24h and T-2h; staff "send reminder now" (6h cooldown) | T | stamps on the event row | SQL; tickets link. A ticket parked on the org owner for a pending claim doesn't remind the owner |
 | `event-updated` | Organizer clicks "notify attendees" (`exos_notify_event_holders`) | T | none: an explicit action | TS: current time, doors, venue, event link |
-| `event-rescheduled` | `exos_reschedule_event` | T | per call | SQL |
+| `event-rescheduled` | `exos_reschedule_event` (mig 20260929150000; also the Edit event save when the date change qualifies) | T | per reschedule + address | TS: old and new date / time and doors in the event's zone, the organizer's note. When refunds are offered: a link per ticket the address may act on, until the deadline: **Get a refund** (tickets they paid for through Exos, amount incl. tax) or **Release my ticket** (free / comp they hold), `/refund?t=<64-hex token>`, one token per ticket + reschedule. Marketplace tickets: "refunds go through the marketplace". A holder someone else paid for: "only they can ask". Not offered: "nothing you need to do" |
 | `event-cancelled` | Event status → `cancelled` (trigger; any path) and the SPA's follow-up call | T | per event + address | TS: reason, and each holder's refund status: refunded / partial / processing / pending / free / someone else paid |
 | `refund-issued` | A refund row reaches `succeeded` (`exos_order_refunds` trigger; Stripe webhook, organizer refunds, auto-refunds) | T | per refund row | TS: amount, progress for a partial refund, order reference |
 | `waitlist-open` | Waitlist offer (code + hours to use it) | T | per offer | SQL |
 | `event-announcement` | Organizer announcement to holders | T | per announcement | SQL |
 | `checkout-abandoned` | Cron `exos_send_checkout_reminders`: checkout expired 1-24h ago, seats left | M | per buyer + event, forever | SQL |
 | `post-event` | Cron `exos_send_mail_followups`: event ended 12h-3d ago | M | per event + holder | TS: thanks, "follow <org>" (unless following), up to 3 next events |
+
+`event-rescheduled` recipients: the holder of every ticket (a ticket parked for a pending claim goes to the person
+it's waiting for, never to the org owner) plus, when refunds are offered, the payer of every refundable ticket (the
+checkout's buyer email), so a buyer who gave a ticket away still gets its refund link. One mail per address; at most
+40 links of each kind (the rest are on My Tickets). The tokens live in `exos_reschedule_links` (service role only)
+and only ever act on their own ticket, their own action and the event's latest reschedule. Rows queued before
+mig 20260929150000 were SQL-rendered html rows and still send as they are.
 
 `post-event` goes to holders with an account, not to org staff, not for tickets still waiting to be claimed, and
 not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default on).

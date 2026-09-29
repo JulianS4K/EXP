@@ -27,6 +27,12 @@
 // TODO(operator) before go-live: confirm the charge model (destination vs
 // direct) and that 'standard' Connect accounts are the right type.
 // Optional: EXOS_STRIPE_FEE_BPS / EXOS_STRIPE_FEE_FIXED_CENTS (default 290 / 30).
+//
+// Checkout records (mig 20260929131000): the session row also keeps the ad
+// click ids / browser ids and consent the SPA sent (_shared/adIds.ts), the
+// request's hashed IP and User-Agent, and the fee split behind the
+// application fee (checkoutFeeSplit). Before that migration is applied the
+// row is recorded without them.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -35,7 +41,10 @@ import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from ".
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
-import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, exosFeeBpsAt } from "../_shared/platformFee.ts";
+import {
+  EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
+} from "../_shared/platformFee.ts";
+import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -64,6 +73,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     attribution?: Record<string, unknown>;
     // Guest checkout: the email the tickets (or their claim links) go to.
     guest_email?: string;
+    // Ad click ids + browser ids (mig 20260929131000) and marketing consent.
+    ad_ids?: Record<string, unknown>;
+    consent?: string;
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
@@ -80,6 +92,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const attrIn = p.attribution && typeof p.attribution === "object" ? p.attribution : {};
   const attribution = readAttribution((k) => (attrIn as Record<string, unknown>)[k]);
   const { promoter: promoterId, ...campaignTags } = attribution;
+  // Checkout records (mig 20260929131000): sanitized here, whatever the client sent.
+  const adIdsIn = p.ad_ids && typeof p.ad_ids === "object" ? p.ad_ids : {};
+  const adIds = readAdIds((k) => (adIdsIn as Record<string, unknown>)[k]);
+  const consentMarketing = normalizeConsent(p.consent);
+  const userAgent = truncateUserAgent(req.headers.get("user-agent"));
   if (embedded) {
     if (!event_id || !tier_id || !returnUrl) {
       return json({ error: "missing event_id / tier_id / return_url" }, 400);
@@ -123,6 +140,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let discountPercent: number | null = null;
   let discountAmount: number | null = null;
   let voucherUnlocksTier = false;
+  // Codes need an account (mig 20260929080000): a guest can't try codes here
+  // either, so guessing stays on the per-account throttle.
+  if (voucherCode && !user) return json({ error: "sign in to use a code" }, 401);
   if (voucherCode) {
     const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
       p_event_id: event_id, p_code: voucherCode, p_email: buyerEmail || null,
@@ -299,18 +319,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // application fee is 3% plus that fee (_shared/platformFee.ts).
   // No Exos fee during the org's first 6 months (exos_org_billing); card processing still applies.
   const { data: billing } = await sb.from("exos_org_billing").select("fee_free_until").eq("org_id", ev.org_id).maybeSingle();
+  const feeFreeUntil = (billing as { fee_free_until?: string } | null)?.fee_free_until;
+  const feeNow = new Date();
   const feeBps = exosFeeBpsAt(
-    (billing as { fee_free_until?: string } | null)?.fee_free_until,
-    new Date(),
+    feeFreeUntil,
+    feeNow,
     Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
   );
-  const applicationFee = checkoutApplicationFeeCents(amountCents, {
-    bps: feeBps,
-    card: {
-      bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
-      fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
-    },
-  });
+  const cardFee = {
+    bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
+    fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
+  };
+  const applicationFee = checkoutApplicationFeeCents(amountCents, { bps: feeBps, card: cardFee });
+  // The same fee, broken down for the order record (mig 20260929131000).
+  // Recorded only, never sent to Stripe: application_fee_amount stays
+  // applicationFee above.
+  const feeSplit = checkoutFeeSplit(amountCents, { bps: feeBps, card: cardFee });
+  const feeRecord = feeSplit.applicationFeeCents === applicationFee
+    ? {
+      application_fee_cents: feeSplit.applicationFeeCents,
+      exos_fee_cents: feeSplit.exosFeeCents,
+      card_fee_est_cents: feeSplit.cardFeeEstCents,
+      fee_bps: feeSplit.feeBps,
+      fee_free: isFeeFreeAt(feeFreeUntil, feeNow),
+    }
+    : {};
 
   // Only PAID line items go to Stripe ($0 lines are rejected in payment mode), so
   // a free tier + paid add-ons charges just the add-ons. Ticket quantity is still
@@ -353,6 +386,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
+  // Salted hash of the request IP: the guest hold's rate-limit key and the
+  // checkout record's client_ip_hash (the IP itself is never stored).
+  const ipHash = await hashIp(
+    clientIp((h) => req.headers.get(h)),
+    Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const checkoutRecord: Record<string, unknown> = {
+    ad_ids: isEmptyAdIds(adIds) ? null : adIds,
+    consent_marketing: consentMarketing,
+    client_ip_hash: ipHash,
+    user_agent: userAgent,
+  };
+
   // Reserve inventory with a cart hold BEFORE creating the Stripe session, so a
   // buyer who is about to pay actually holds the seats (closes the read-then-
   // charge oversell). Bypass vouchers skip it — they may exceed caps, honored at
@@ -371,10 +417,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       })
       : await sb.rpc("exos_create_guest_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
-        p_ip_hash: await hashIp(
-          clientIp((h) => req.headers.get(h)),
-          Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        ),
+        p_ip_hash: ipHash,
         p_voucher_code: voucherUnlocksTier ? voucherCode : null,
       });
     if (holdErr) {
@@ -388,13 +431,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // guest one keyed claim link per ticket, as for a paid guest order.
   if (freeGuest) {
     const sessionId = `free_${crypto.randomUUID()}`;
-    const { error: fInsErr } = await sb.from("exos_checkout_sessions").insert({
+    const fInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       buyer_uid: null, buyer_email: buyerEmail, guest: true,
       quantity, amount_cents: 0, currency, status: "pending",
       addons: addonsForSession.length > 0 ? addonsForSession : null,
       voucher_id: voucherId, promoter_id: promoterId ?? null,
       attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
+      ...checkoutRecord,
     });
     if (fInsErr) {
       console.error("exos-checkout: free guest order not recorded", fInsErr.message);
@@ -465,16 +509,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     tax_cents: recordedTax > 0 ? recordedTax : null,
     promoter_id: promoterId ?? null,
     attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
+    ...checkoutRecord,
+    ...feeRecord,
   };
-  let { error: insErr } = await sb.from("exos_checkout_sessions").insert(ledgerRow);
-  // Deployed before mig 20260924223000 (no promoter_id / attribution columns):
-  // record the sale without attribution rather than failing every checkout.
-  if (insErr && (insErr.code === "42703" || insErr.code === "PGRST204")) {
-    console.error("exos-checkout: attribution columns missing (apply 20260924223000); recording without them");
-    delete ledgerRow.promoter_id;
-    delete ledgerRow.attribution;
-    ({ error: insErr } = await sb.from("exos_checkout_sessions").insert(ledgerRow));
-  }
+  const insErr = await insertSessionRow(sb, ledgerRow);
   if (insErr) {
     console.error("exos-checkout: ledger insert failed", insErr);
     await releaseHold(sb, holdId);
@@ -516,6 +554,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (embedded) return json({ client_secret: session.client_secret, session_id: session.id });
   return json({ url: session.url, session_id: session.id });
 });
+
+// Columns added by mig 20260929131000 (checkout records). Nice to have, never
+// worth losing a sale over.
+const RECORD_COLUMNS = [
+  "ad_ids", "consent_marketing", "client_ip_hash", "user_agent",
+  "application_fee_cents", "exos_fee_cents", "card_fee_est_cents", "fee_bps", "fee_free",
+];
+
+// Insert the checkout session row. Deployed before a migration that adds
+// columns, it records the sale without them rather than failing every
+// checkout: first without the checkout-record columns (mig 20260929131000;
+// also on a CHECK violation from one of them), then without attribution
+// (mig 20260924223000). Returns the final error, if any.
+// deno-lint-ignore no-explicit-any
+async function insertSessionRow(sb: SupabaseClient<any, any, any>, row: Record<string, unknown>) {
+  const missingColumn = (e: { code?: string } | null) => !!e && (e.code === "42703" || e.code === "PGRST204");
+  let { error } = await sb.from("exos_checkout_sessions").insert(row);
+  if (error && (missingColumn(error) || error.code === "23514") && RECORD_COLUMNS.some((k) => k in row)) {
+    console.error("exos-checkout: checkout-record columns refused (apply 20260929131000?); recording without them", error.message);
+    for (const k of RECORD_COLUMNS) delete row[k];
+    ({ error } = await sb.from("exos_checkout_sessions").insert(row));
+  }
+  if (missingColumn(error) && ("promoter_id" in row || "attribution" in row)) {
+    console.error("exos-checkout: attribution columns missing (apply 20260924223000); recording without them");
+    delete row.promoter_id;
+    delete row.attribution;
+    ({ error } = await sb.from("exos_checkout_sessions").insert(row));
+  }
+  return error;
+}
 
 // Best-effort release of a reservation when checkout can't complete (Stripe
 // error, ledger insert failure). Never throws — a stuck hold self-expires via

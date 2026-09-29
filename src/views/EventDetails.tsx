@@ -1,5 +1,8 @@
 import { Accessibility as AccessIcon } from 'lucide-react';
 import { EventAccessInfo } from '../components/Accessibility';
+import { EventFaq, EventGallery, EventGoodToKnow, EventLineup, EventVideo } from '../components/StoreContent';
+import { RichText } from '../lib/richText';
+import { ageLabel } from '../lib/storeContent';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
@@ -22,7 +25,9 @@ import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
-import { rememberPendingCheckout } from '../lib/purchasePixel';
+import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from '../lib/purchasePixel';
+import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
+import { getConsent } from '../lib/consent';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
@@ -89,6 +94,8 @@ export default function EventDetails() {
   useEffect(() => {
     if (!id) return;
     setAttribution(captureAttribution(id, window.location.search));
+    // Ad click ids (gclid, ttclid, ...) for the checkout record, kept for the visit.
+    captureClickIds(id, window.location.search);
     setPrefill(readPrefill(id));
   }, [id]);
   const location = useLocation();
@@ -136,7 +143,8 @@ export default function EventDetails() {
           const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
           applyMeta({
             title: data.title,
-            description: (data.description || '').slice(0, 200),
+            // The organizer's one-line summary when set (mig 20260929120000).
+            description: (data.summary || data.description || '').slice(0, 200),
             imageUrl: data.image || undefined,
             canonicalUrl: publicUrl(`event/${data.id}`),
             event: startIso
@@ -153,7 +161,7 @@ export default function EventDetails() {
                     postal: data.address?.postal,
                   },
                   image: data.image,
-                  description: (data.description || '').slice(0, 200),
+                  description: (data.summary || data.description || '').slice(0, 200),
                   offers: {
                     price: data.price,
                     currency: data.currency || 'USD',
@@ -310,6 +318,8 @@ export default function EventDetails() {
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
         attribution,
+        adIds: checkoutAdIds(event.id),
+        consent: checkoutConsent(),
       });
       clearPrefill(event.id);
       setGuestOpen(false);
@@ -343,20 +353,28 @@ export default function EventDetails() {
         voucherCode: voucher?.code,
         attribution,
         guestEmail,
+        adIds: checkoutAdIds(event.id),
+        consent: checkoutConsent(),
       });
       clearPrefill(event.id);
       if (event.orgId) {
         // What the Purchase pixel falls back on when the session row isn't
         // readable on return (guests). Estimate only for the tier on screen.
         const estimate = tierId === selectedTier?.id ? priceToDisplay * quantity + addonSel.totalCents / 100 : undefined;
-        rememberPendingCheckout({
+        const pendingCheckout = {
           eventId: event.id,
           orgId: event.orgId,
           title: event.title,
           currency: event.currency || 'USD',
           quantity,
           value: estimate,
-        });
+          initiateEventId: newPixelEventId(),
+        };
+        rememberPendingCheckout(pendingCheckout);
+        // InitiateCheckout, deduped by the random id kept in the stash.
+        trackPixelEvent('InitiateCheckout', initiateCheckoutParams(pendingCheckout), pendingCheckout.initiateEventId);
+        // Give a live pixel a moment to send before the page unloads.
+        if (getConsent() === 'granted') await new Promise((r) => setTimeout(r, 300));
       }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
@@ -737,7 +755,15 @@ export default function EventDetails() {
                 <span className="disp bg-brand-primary text-black px-3 text-lg tracking-wide inline-block mb-3">
                   {event.category}
                 </span>
+                {event.minAge != null && (
+                  <span className="disp border border-white/60 text-white px-3 text-lg tracking-wide inline-block mb-3 ml-2">
+                    {ageLabel(event.minAge)}
+                  </span>
+                )}
                 <h1 className="disp text-5xl md:text-7xl tracking-tight leading-[0.85]">{event.title}</h1>
+                {event.summary && (
+                  <p className="type text-base md:text-lg text-white/80 mt-3 max-w-2xl">{event.summary}</p>
+                )}
               </div>
             </div>
 
@@ -851,8 +877,20 @@ export default function EventDetails() {
 
             <div className="mb-14">
               <h2 className="disp text-3xl tracking-tight mb-6 border-l-4 border-brand-primary pl-4">ABOUT THE EVENT</h2>
-              <p className="type text-white/60 text-base leading-relaxed whitespace-pre-wrap">{event.description}</p>
+              {/* Markdown "About" when the organizer wrote one (rendered from an
+                  allowlist, never as HTML); else the plain description. */}
+              {event.descriptionMd?.trim() ? (
+                <RichText source={event.descriptionMd} className="type text-white/60 text-base leading-relaxed space-y-4" />
+              ) : (
+                <p className="type text-white/60 text-base leading-relaxed whitespace-pre-wrap">{event.description}</p>
+              )}
             </div>
+
+            <EventVideo url={event.videoUrl} title={event.title} />
+            <EventGallery gallery={event.gallery} title={event.title} />
+            <EventLineup lineup={event.lineup} />
+            <EventFaq faq={event.faq} />
+            <EventGoodToKnow minAge={event.minAge} refundPolicy={event.refundPolicy} policyNotes={event.policyNotes} />
 
             <div className="mb-14 bg-[#111] border border-white/10 p-7 flex items-center justify-between group">
                <div className="flex items-center gap-5">

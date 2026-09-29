@@ -49,8 +49,11 @@ the details with counsel.)
 - [ ] **Confirm Stripe's rate.** Checkout estimates Stripe's fee at standard US card pricing
       (2.9% + 30¢; set `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` if the account has a
       negotiated rate). International and some premium cards cost Stripe more, and on those Exos keeps
-      slightly less than 3%. Reading the real fee from each charge's balance transaction would make it
-      exact; it isn't built.
+      slightly less than 3%. Since mig `20260929131000` each order records the split at checkout
+      (`exos_checkout_sessions.application_fee_cents` = `exos_fee_cents` + `card_fee_est_cents`) and,
+      after fulfilment, Stripe's actual fee from the charge's balance transaction
+      (`exos_order_payments.stripe_fee_cents`, `net_cents`, `transfer_id`). Compare them in
+      `exos_order_money` (`card_fee_est_cents` vs `card_fee_actual_cents`).
 - [ ] **Refunds and the card fee.** A refund returns the application fee in proportion by default
       (`refund_application_fee`), card-fee part included, but Stripe keeps its fee, so Exos pays it on
       refunded orders. Decide whether a refund keeps the card-fee part (`EXOS_REFUND_KEEP_PLATFORM_FEE`
@@ -82,14 +85,18 @@ it, which is part of why payments are dormant. Checkout itself redirects to the 
 
 | Function | Entry | Extra files in the bundle | `verify_jwt` | Why |
 |---|---|---|---|---|
-| `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts`, `../_shared/attribution.ts` | **true** | Called by signed-in buyers |
+| `exos-checkout` | `index.ts` | `../_shared/pricing.ts`, `../_shared/redirects.ts`, `../_shared/attribution.ts`, `../_shared/adIds.ts`, `../_shared/guest.ts`, `../_shared/currency.ts`, `../_shared/platformFee.ts` | **true** | Called by signed-in buyers |
 | `exos-connect-onboard` | `index.ts` | `../_shared/redirects.ts` | **true** | Called by the org owner |
-| `stripe-webhook` | `index.ts` | `../_shared/auto-refund.ts` | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
-| `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts`, `../_shared/auto-refund.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
+| `stripe-webhook` | `index.ts` | `../_shared/auto-refund.ts`, `../_shared/feeActuals.ts` | **false** | Stripe doesn't send a JWT; the Stripe signature is the auth |
+| `exos-reconcile-checkouts` | `index.ts` | `../_shared/cron-auth.ts`, `../_shared/auto-refund.ts`, `../_shared/feeActuals.ts` | **false** | Called by pg_cron; `CRON_SECRET` is the auth |
+| `exos-refund` | `index.ts` | `../_shared/organizer-refund.ts`, `../_shared/reschedule-refund.ts` | **true** | Organizer refunds (JWT + org role in SQL). Since mig `20260929150000` also buyer refunds after a date change: signed in, or signed out with the mail link's token (the SPA sends the anon key, which passes the gateway) |
 
 **Apply migrations `20260924215000` and `20260924223000` first** (all-or-nothing fulfillment, promoter attribution). `exos-checkout` writes the columns the second one adds.
 Also apply **`20260925020000`** (dispute recording, reconcile bookkeeping) before deploying `stripe-webhook`
 and `exos-reconcile-checkouts`: without it the dispute handler returns 500 and the sweep does nothing.
+**`20260929131000`** (checkout records: ad click ids, consent, hashed IP, user agent and the fee split per
+order) is optional for the deploy order: before it, `exos-checkout` records the sale without those columns,
+and the webhook and the sweep skip the fee read.
 
 With the CLI (from `Terminal-2/`): `supabase functions deploy <name> --project-ref hzrizjeaxlqcxfrtczpq`,
 adding `--no-verify-jwt` for the last two. Then schedule the reconcile sweep by applying
@@ -135,7 +142,7 @@ for each case.
 | # | Do | Expect (check in SQL) |
 |---|---|---|
 | 1 | Org owner runs Connect onboarding and finishes the Stripe form | `exos_org_secrets.payments` has `chargesEnabled: true` (from `account.updated`) |
-| 2 | Buy 2 tickets | Session `fulfilled`, 2 active tickets with `order_ref = session_id`, an `exos_order_payments` row, one ticket email queued, and the fee shown on the Stripe payment |
+| 2 | Buy 2 tickets | Session `fulfilled`, 2 active tickets with `order_ref = session_id`, an `exos_order_payments` row, one ticket email queued, and the fee shown on the Stripe payment. With mig `20260929131000`: the session has `application_fee_cents` equal to that fee, and the payment row gets `stripe_fee_cents`, `transfer_id` and `balance_txn_id` (`SELECT * FROM exos_order_money WHERE session_id = '<cs_…>'`) |
 | 3 | Refund $10 of it in the Stripe dashboard | Session `partially_refunded`, tickets **still active**, one refund row with Stripe's `re_…` id |
 | 4 | Refund the rest | Session `refunded`, **both tickets voided**, tier `sold` back down by 2 |
 | 5 | Buy 1 ticket, then open a dispute (test card `4000 0000 0000 0259`) | Session keeps its status and gets `dispute_status`; tickets stay valid. Lose it (submit losing evidence in test mode) → tickets voided |
@@ -180,6 +187,26 @@ Rebuild the SPA **without** `VITE_STRIPE_PUBLISHABLE_KEY`, which hides paid chec
 sessions have settled, because refunds and disputes still need it.
 `stripe-webhook` is idempotent and safe to keep running.
 
+## Refunds when the date changes (mig 20260929150000)
+
+When an organizer moves a sold event to another day or by more than 3 hours, they choose whether holders may
+refund themselves until a deadline (`docs/organizer-guide.md`, "Changing the date"). The money path is the
+organizer-refund one, run by the buyer instead of the organizer:
+
+- `exos-refund` action `reschedule_refund` (JWT or mail-link token) → `exos_request_reschedule_refund` (checks the
+  offer, deadline, ticket state, that the caller paid, locks the order, reserves the amount as a `reschedule`
+  request) → `stripe.refunds.create` with the same parameters as organizer refunds (`reverse_transfer: true`,
+  `refund_application_fee` per `EXOS_REFUND_KEEP_PLATFORM_FEE`) and key `exos_refund_<request id>` →
+  `exos_refund_finalize` (voids the ticket once the refund succeeds; the webhook finalizes by metadata if the
+  function dies). The request is unique per ticket + reschedule, so double clicks and concurrent calls reuse it.
+- Amount: the ticket's share of the order's ticket total, tax included. Add-ons are refunded only with the order's
+  last ticket (that request takes everything still refundable).
+- No organizer step and no new secret. Free / comp releases (`reschedule_release`) and link info
+  (`reschedule_info`) work without Stripe; `reschedule_refund` answers 503 while payments are off.
+- Test in Stripe test mode: buy 2 tickets + an add-on, move the event two days with refunds offered, refund one
+  ticket from My Tickets (one refund of its share, ticket voided, `refund-issued` mail), then the other from the
+  email link signed out (share + add-on, order `refunded`). Click twice: one Stripe refund each.
+
 ## Guest checkout (mig 20260928050000)
 
 A signed-out buyer on a paid ticket gets an email step ("Where should we send your tickets?") instead of a
@@ -206,5 +233,7 @@ Still open:
 - The fee model (minimum per ticket, who pays Stripe's fee) and the chargeback policy are operator
   decisions; until then a cheap ticket or any refund can cost the platform money.
 - Tax: rates are organizer-entered; there is no Stripe Tax or nexus logic.
-- Organizer payout reporting beyond the Connect status.
+- Organizer payout reporting beyond the Connect status. The per-order numbers exist now
+  (`exos_order_money`, mig `20260929131000`, org owner / manager / finance); there is no settlement
+  page or export on top of them yet.
 - The money edge functions have no handler-level tests (the SQL harnesses cover the database side).

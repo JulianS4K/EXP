@@ -15,6 +15,14 @@
 //   3. The org's pixels are loaded (consent-gated, lib/pixels.ts) and Purchase
 //      fires. A sessionStorage marker per session id stops a reload or a
 //      back-navigation from counting it twice.
+//
+// InitiateCheckout fires on the event page right before the Stripe redirect.
+// The Stripe session id isn't something the page can use as the dedupe id
+// for it (a later server-side event couldn't know which browser event it
+// matches), so it gets a random id, kept in the stash as initiateEventId.
+//
+// Params carry GA4 `items` (one line: the event, its quantity and unit
+// price) next to the Meta / TikTok fields.
 
 import { supabase } from './supabase';
 import { getPublicOrg } from './orgs';
@@ -33,6 +41,8 @@ export interface PendingCheckout {
   quantity: number;
   /** Estimated total in major units (what the buyer saw); undefined if unknown. */
   value?: number;
+  /** The InitiateCheckout pixel's event id (random; see the header). */
+  initiateEventId?: string;
   at: number;
 }
 
@@ -60,6 +70,37 @@ function readPending(now: number): PendingCheckout | null {
   } catch {
     return null;
   }
+}
+
+/** A fresh pixel event id (for InitiateCheckout, whose Stripe session id isn't known yet). */
+export function newPixelEventId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch { /* fall through */ }
+  return `ic_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** GA4 `items`: one line for the event's tickets (price = the unit value when the total is known). */
+export function ga4Items(eventId: string, name: string | undefined, quantity: number, value?: number): Record<string, unknown>[] {
+  const item: Record<string, unknown> = { item_id: eventId, quantity: quantity > 0 ? quantity : 1 };
+  if (name) item.item_name = name;
+  if (typeof value === 'number' && Number.isFinite(value) && quantity > 0) {
+    item.price = Math.round((value / quantity) * 100) / 100;
+  }
+  return [item];
+}
+
+/** InitiateCheckout params from what the event page knows before the redirect. */
+export function initiateCheckoutParams(p: Omit<PendingCheckout, 'at'>): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    content_ids: [p.eventId],
+    content_name: p.title,
+    currency: (p.currency || 'usd').toUpperCase(),
+    num_items: p.quantity,
+  };
+  if (typeof p.value === 'number' && Number.isFinite(p.value)) params.value = Math.round(p.value * 100) / 100;
+  params.items = ga4Items(p.eventId, p.title, p.quantity, params.value as number | undefined);
+  return params;
 }
 
 /** Stripe Checkout Session ids look like cs_test_… / cs_live_…. */
@@ -92,6 +133,12 @@ export function purchaseFromCheckout(
     params.currency = (stash.currency || 'usd').toUpperCase();
     params.num_items = stash.quantity;
   }
+  params.items = ga4Items(
+    eventId,
+    stash?.title,
+    typeof params.num_items === 'number' ? params.num_items : 1,
+    typeof params.value === 'number' ? params.value : undefined,
+  );
   return { orgId, params };
 }
 
@@ -127,7 +174,9 @@ export async function trackCheckoutReturn(sessionId: string | null): Promise<voi
 
     const org = await getPublicOrg(purchase.orgId);
     initOrgPixelsForPurchase(purchase.orgId, org?.marketing?.pixels);
-    trackPixelEvent('Purchase', purchase.params);
+    // The Stripe session id doubles as the dedupe id a server-side
+    // conversion for the same order will carry.
+    trackPixelEvent('Purchase', purchase.params, sid ?? undefined);
   } catch (err) {
     console.warn('Purchase pixel skipped:', err);
   }

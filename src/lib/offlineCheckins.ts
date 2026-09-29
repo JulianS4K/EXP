@@ -11,8 +11,12 @@
 
 /** The cached roster (names + barcode secrets) is dropped after this. */
 export const REGISTRY_TTL_MS = 24 * 60 * 60 * 1000;
-/** The server refuses replays of scans older than this. */
+/** The server refuses replays of scans older than this, unless the event
+ *  ended less than REPLAY_AFTER_END_MS ago (mig 20260929140000; scans
+ *  queued with a list / direction). At most REPLAY_MAX_AGE_MS either way. */
 export const REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const REPLAY_AFTER_END_MS = 48 * 60 * 60 * 1000;
+export const REPLAY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface QueuedScan {
   ref: string;
@@ -24,6 +28,14 @@ export interface QueuedScan {
   source: 'camera' | 'manual';
   /** Typed override reason (owner / manager). */
   reason?: string;
+  /** A check-in by name (optional note in `reason`): replayed through
+   *  exos_door_checkin_by_name, mig 20260929130000. */
+  kind?: 'name';
+  /** Check-in lists (mig 20260929140000): set on scans queued by a build that
+   *  knows lists (null = no list). Such a scan replays through the list-aware
+   *  RPCs, which also record a refused entry as a forced check-in. */
+  listId?: string | null;
+  direction?: 'entry' | 'exit';
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,10 +93,33 @@ export function parseQueue(
         scannedAt: item.scannedAt,
         source: item.source,
         ...(typeof item.reason === 'string' && item.reason ? { reason: item.reason } : {}),
+        ...((item as { kind?: unknown }).kind === 'name' ? { kind: 'name' as const } : {}),
+        ...listFields(item as { listId?: unknown; direction?: unknown }),
       });
     }
   }
   return out;
+}
+
+function listFields(item: { listId?: unknown; direction?: unknown }): Pick<QueuedScan, 'listId' | 'direction'> {
+  if (item.direction !== 'entry' && item.direction !== 'exit') return {};
+  const listId = typeof item.listId === 'string' && UUID_RE.test(item.listId) ? item.listId : null;
+  return { listId, direction: item.direction };
+}
+
+/** Scans waiting to upload on this device, across events (sign-out warns). */
+export function pendingScanCount(storage: Pick<Storage, 'length' | 'key' | 'getItem'> | null, now: number = Date.now()): number {
+  let n = 0;
+  if (!storage) return 0;
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && k.startsWith('pending_updates_')) n += parseQueue(storage.getItem(k), now, () => '').length;
+    }
+  } catch {
+    /* storage blocked */
+  }
+  return n;
 }
 
 /** Add a scan (a ref already queued is not added twice). */

@@ -88,10 +88,10 @@ END $$;
 DO $$
 DECLARE p numeric; n int;
 BEGIN
-  SET LOCAL ROLE anon;
+  SET LOCAL ROLE authenticated;  -- codes need an account (mig 20260929080000)
   SELECT discount_percent INTO p FROM public.exos_voucher_discount('9d000000-0000-0000-0000-0000000000e1', 'early20');
   RESET ROLE;
-  ASSERT p = 20, 'V3: anon sees the discount of a valid code (any case)';
+  ASSERT p = 20, 'V3: a buyer sees the discount of a valid code (any case)';
   SELECT count(*) INTO n FROM public.exos_voucher_discount('9d000000-0000-0000-0000-0000000000e1', 'NOPE');
   ASSERT n = 0, 'V3: nothing for an unknown code';
   UPDATE public.exos_vouchers SET valid_until = now() - interval '1 minute' WHERE code = 'FIVEOFF';
@@ -120,6 +120,9 @@ INSERT INTO public.exos_discount_codes(event_id, code, type, value, usage_limit,
    ARRAY['9d000000-0000-0000-0000-0000000000d1','9d000000-0000-0000-0000-0000000000d2']::uuid[]);
 \ir ../../supabase/migrations/20260928060000_exos_voucher_discounts_quota_editor.sql
 \ir ../../supabase/migrations/20260928060000_exos_voucher_discounts_quota_editor.sql
+-- The replay re-grants exos_voucher_discount to anon; the later hardening
+-- (mig 20260929080000) owns that grant, so put it back as prod has it.
+\ir ../../supabase/migrations/20260929080000_exos_rpc_hardening.sql
 DO $$
 DECLARE v record;
 BEGIN

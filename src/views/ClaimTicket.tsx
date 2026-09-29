@@ -34,7 +34,7 @@ export default function ClaimTicket() {
   // The key from the emailed link (mig 20260929010000): lets any account claim.
   const [search] = useSearchParams();
   const claimKey = search.get('k');
-  const { user, openAuthModal } = useAuth();
+  const { user, openAuthModal, openAuth } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const t = useT();
@@ -183,11 +183,19 @@ export default function ClaimTicket() {
                 <p className="type text-white/50 text-sm mb-8">
                   {t('claim.signInPrompt')}
                 </p>
+                {/* The transfer email promises "sign in with a one-time code":
+                    that's the main path here, other methods one tap away. */}
                 <button
-                  onClick={() => openAuthModal()}
+                  onClick={() => openAuth('code')}
                   className="disp w-full bg-white text-black py-4 text-lg tracking-wide hover:bg-brand-primary transition-all"
                 >
-                  {t('claim.signInButton')}
+                  {t('claim.codeButton')}
+                </button>
+                <button
+                  onClick={() => openAuthModal()}
+                  className="type mt-5 text-[11px] uppercase tracking-widest text-white/60 hover:text-brand-primary underline-offset-4 hover:underline"
+                >
+                  {t('claim.otherOptions')}
                 </button>
               </div>
             ) : (

@@ -59,6 +59,27 @@ paid events can't be sold.**
 - **Shared capacity (quotas):** one pool several tiers draw from, e.g. a 300-person room split
   into GA and VIP. *There's no screen for this yet; support sets it up in SQL.*
 
+**Store page** (the "Store page" section of create and edit). Everything in it is optional and
+shows on your event page:
+
+- **Summary:** one line (160 characters) under the title. Search results and link previews use it.
+- **About:** the long description. It takes simple formatting: `**bold**`, `*italic*`,
+  `[link](https://…)`, `- ` lists, `## ` headings and `> ` quotes. Use **Preview** to check it.
+  Links must be `https://` or `mailto:`. Raw HTML shows as plain text, and images go in the gallery.
+- **Lineup:** each act's name, role (headliner, support, DJ, host), set time and a short bio.
+- **FAQ:** questions and answers, shown as a list buyers can expand.
+- **Gallery:** up to 12 extra photos (upload them or paste `https://` links). The cover image
+  stays the main one.
+- **Video:** a YouTube or Vimeo link. It plays on the event page in privacy-enhanced mode.
+- **Age limit** (all ages, 16+, 18+, 21+) shows as a badge. Marketplace listings and Google use it
+  too.
+- **Refund policy** and **Good to know** (dress code, bag policy, re-entry) show together near
+  the bottom. The refund policy is what you tell buyers. Refunds themselves are still yours to
+  issue from the event dashboard.
+
+*This section appears once the store-page database update is live. Until then the form shows the
+plain description box.*
+
 **Recurring and timed-entry events** (`/dashboard/event/:eventId/series`): clone an event, with its
 tiers and discount codes, into a series of dates.
 
@@ -102,11 +123,47 @@ tiers and discount codes, into a series of dates.
   - When seats free up, the next people in line automatically get a code valid for 48 hours.
   - A group of 3 waits until 3 seats are free, and nobody behind them jumps ahead.
   - **Offered seats are reserved.** Other buyers can't take them while the code is live.
-- **Announcements** to ticket holders. **Reschedule** (holders are notified of the changed fields).
+- **Announcements** to ticket holders. **Reschedule** (holders are emailed the new date; see
+  [Changing the date](#changing-the-date)).
   **Reminders:** automatic 24 h and 2 h before start, plus a manual "send now" limited to once
   every 6 hours.
 - **Release policy:** whether holders can give back a *free* ticket themselves, and up to how many
   hours before the start. Freed seats go to the waitlist.
+
+### Changing the date
+
+Move an event from **Edit event** (change the start and save) or from **Reschedule** on the event
+dashboard's settings tab. Every ticket holder is emailed the old and new date and time (in the
+event's time zone); their tickets stay valid.
+
+- **When you're asked about refunds.** If tickets are out and the event moves to another day (in its
+  own time zone) or its start moves by more than 3 hours, the save asks **"Offer refunds to ticket
+  holders?"**. It's checked by default; untick it to only send the new date. A smaller move (say
+  8 pm to 9 pm the same night) just saves and emails holders. A plain save can't skip this: the
+  database refuses a big date change on a sold event unless it goes through the reschedule step.
+- **The deadline.** Holders can ask for a refund until the deadline. It defaults to two weeks from
+  the change or a day before the new start, whichever comes first (until the start if that's less
+  than a day away). You can change it; it has to be in the future and no later than the new start.
+- **What buyers get.** Refunds are self-serve and automatic, with no approval step:
+  - A ticket paid through Exos checkout: its price back, tax included, on the card that paid.
+    Add-ons (parking, merch) are refunded only with the order's last ticket.
+  - A free ticket or comp: **Release my ticket** (it's voided, the seat goes back on sale).
+  - A ticket bought on a resale marketplace (StubHub, SeatGeek, ...): the email says refunds go
+    through that marketplace. Exos doesn't refund those.
+  - A ticket someone was given: only the person who paid can refund it, since the money goes back
+    to their card. The refund voids the ticket, and the holder's email says so.
+  - Not eligible: tickets already checked in, bought after the change, or on an event you've
+    since cancelled (cancelling refunds everyone from the refund panel).
+- **How they ask.** Signed in, from **My Tickets**. Without an account, from the link in their email
+  (one per ticket; it works only for that ticket and stops working if you change the date again).
+- **Who pays.** Refunds come out of the event's money, like refunds you issue yourself: Stripe pulls
+  the ticket's share back from your connected account and Exos returns its fee in proportion
+  (unless the platform is set to keep it, `EXOS_REFUND_KEEP_PLATFORM_FEE`).
+- **Tracking it.** **Date changes and refunds** on the event dashboard, next to the refund panel,
+  lists every date change and, for the latest one, how many refunds were asked for, how much went
+  back, free tickets given back, and how many tickets can still ask.
+- **Moving it again** closes the earlier offer. Offer refunds again on the new change if you want
+  holders to keep the option.
 
 ## 5. At the door (`/checkin/:eventId`)
 
@@ -116,11 +173,93 @@ tiers and discount codes, into a series of dates.
   refused and logged.
 - **Offline mode:** download the roster before doors open. The device can then admit tickets
   without a connection and syncs when it's back online.
-  - Anything the server rejects on sync is flagged to staff.
+  - Anything the server rejects on sync is flagged to staff (see **Offline conflicts** below).
   - **Sign out of shared devices after the event.** Signing out clears the cached roster.
 - Doors can't be scanned before the event's doors time. An owner or manager can open a 3-hour
   test window for rehearsals. Test scans check the ticket ("Test scan OK") but don't use it up, so
   the holder still gets in at doors.
+
+### Check in by name
+
+Staff can check someone in without scanning: find them in the door list and tap **Check in by
+name**. It's for a dead phone, a ticket nobody has claimed yet, or anyone else staff can see on the
+list. It works for every active ticket of the event, claimed or not.
+
+- **Who may do it** is set per event in **Edit event → Venue & seating → Check in by name at the
+  door**:
+  - **All door staff** (the default): owners, managers, and scanners assigned to the event.
+  - **Owners and managers only**: scanners see **Ask a manager** instead of the button.
+  - **Off (QR code only)**: nobody sees the button. An owner or manager can still type a full pass
+    ID as a manual override, with a reason.
+- Search a **name**, an **email**, or the last 6 characters of the pass ID. Tap **Check in by
+  name** on the right row. The door shows the name and ticket type. Add a note if you like (for
+  example "checked ID"), then tap **Check in**.
+- **Tickets nobody has claimed yet.** Some tickets go to an email address with no Exos account:
+  marketplace sales (StubHub and the rest), guest checkout, and comps or box-office tickets sent by
+  email. Until the buyer claims the link, the ticket is held on your org. The list shows the buyer's
+  name (when the order had one), a small "Not claimed yet" note, and a masked email like
+  `j***@gmail.com`. Door devices never get the full address. Checking one in cancels the claim
+  link, so nobody can claim the ticket after the buyer is inside. The ticket stays on your org,
+  marked used.
+- A ticket its holder is sending to a friend (a transfer waiting to be claimed) can't be checked in
+  by name: it may already belong to the friend. The holder cancels the transfer, or the friend
+  claims it and shows their code.
+- Used, refunded, wrong-event tickets and doors not open yet are refused the same as a scan.
+- It works offline too. The check-in is queued and uploaded when the device is back online. If the
+  server refuses it then (for example, the ticket was used at another door), the refusal is flagged
+  the same way as other offline conflicts.
+- The scan report counts check-ins by name, and lists each one with verification `name` and the
+  note.
+
+### Check-in lists and re-entry
+
+**Re-entry is off unless you turn it on.** By default every ticket gets in once, at any door, and a
+second scan says **Already used**. Nothing on this page is required: an event with no lists works
+exactly like that.
+
+Add lists in **Edit event → Venue & seating → Check-in lists** when the door needs more than that:
+
+- **A list is a gate or an area**, for example *Main door*, *VIP deck* or *Late entrance*. Give it
+  a name and pick the ticket types it admits (all of them, or some). A ticket type that isn't on the
+  list is refused at that list's door: "This ticket type isn't on this check-in list".
+- **Opens / Closes** (optional) limit when the list admits people, in the event's time zone.
+  Outside that window entries are refused ("isn't open right now").
+- **Allow re-entry** (off by default). When it's on, staff scan people **out** when they leave and
+  back **in** when they return:
+  - The scanner shows an **Entry / Exit** switch for that list. Use Exit when someone leaves.
+  - A second entry without an exit in between is refused: **Already inside**. Scan them out first.
+  - Each list keeps its own in / out state, so a guest inside the main room can still enter the
+    VIP deck once.
+  - Exits are refused on a list without re-entry, and when the device isn't scanning for a list.
+- **Ticket counts don't change.** The first entry marks a ticket used, as always; leaving and coming
+  back doesn't. "Checked in", sold and no-show numbers still count tickets that came in, not people
+  inside right now. The scan report also shows re-entries and exits.
+- **On the door device** each scanner picks its list at the top of the scanner (the choice is
+  remembered on that device). "Any ticket, no list" admits every ticket once, as without lists.
+- Check in by name follows the same list: wrong ticket type, closed window and "Already inside" are
+  refused the same as a scan. With Exit selected, the button reads **Check out by name**.
+- Deleting a list doesn't remove its past check-ins; the scan report keeps the list's name.
+
+### Offline conflicts and sync health
+
+- A scan admitted while the device was offline is uploaded later. If the server refuses it then
+  (the ticket was refunded, was transferred after the list was downloaded, the list doesn't admit
+  that ticket type, doors weren't open, or the upload came more than 48 hours after the event
+  ended), the person is still **recorded as attended**, marked as an **offline conflict** with the
+  reason. The ticket itself isn't changed, so a transferred ticket's new holder can still get in.
+  A true double entry ("Already used" at another door) is only logged as a refusal.
+- The scanner's **Sync health** panel shows how old the offline list is, how many scans are waiting
+  to upload and since when, the last successful upload, how far the device's clock is from the
+  server's, and the conflicts from the last uploads. **Re-download** and **Upload now** are there
+  too.
+- If the server says the signed-in account may no longer upload (for example it was removed as
+  door staff), the device stops retrying and says **Not authorized to upload N scans**. The scans
+  stay on the device: hand it to a manager, or sign in as door staff for the event and tap
+  **Upload now**. Signing out while scans are waiting asks for confirmation first.
+- The offline list is encrypted on the device with a key that can't be copied off it. Browsers that
+  can't do that (some private windows, very old browsers) keep it unencrypted and the scanner says
+  so. Signing out deletes the list and the key.
+- The **scan report** lists offline conflicts separately, with the reason, the list and the device.
 
 ## 6. After a sale
 

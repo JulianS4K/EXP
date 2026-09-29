@@ -16,6 +16,12 @@ if (!url || !anonKey) {
   );
 }
 
+// The URL the page was opened with, captured before the client below reads
+// and clears the auth params (it wipes #access_token… once it has stored the
+// session). /auth/callback and /reset-password read it to tell a recovery or
+// email-change link from a plain visit, and to show link errors.
+export const initialAuthUrl = typeof window !== 'undefined' ? window.location.href : '';
+
 export const supabase = createClient(url ?? '', anonKey ?? '', {
   auth: {
     // Persist the session in localStorage and refresh it transparently so
@@ -24,5 +30,9 @@ export const supabase = createClient(url ?? '', anonKey ?? '', {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    // flowType stays at the supabase-js default, 'implicit': email links land
+    // with #access_token… and work on any device. PKCE ('?code=') would tie
+    // each email link to the browser that asked for it. /auth/callback and
+    // /reset-password still handle ?code= and ?token_hash= links.
   },
 });

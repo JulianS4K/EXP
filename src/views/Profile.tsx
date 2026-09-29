@@ -1,10 +1,18 @@
+import { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Settings } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import DeleteAccountPanel from '../components/DeleteAccountPanel';
+import AccountSecurityPanel from '../components/AccountSecurityPanel';
 
 export default function Profile() {
   const { user } = useAuth();
+  const { hash } = useLocation();
+
+  // /profile#account (linked from /reset-password and the settings list).
+  useEffect(() => {
+    if (user && hash === '#account') document.getElementById('account')?.scrollIntoView();
+  }, [user, hash]);
 
   if (!user) {
     return (
@@ -69,6 +77,8 @@ export default function Profile() {
               </div>
             </div>
 
+            <AccountSecurityPanel />
+
           </div>
 
           {/* Sidebar */}
@@ -85,6 +95,7 @@ export default function Profile() {
               </div>
               <ul className="space-y-3">
                 <li><button className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">edit profile</button></li>
+                <li><a href="#account" onClick={(e) => { e.preventDefault(); document.getElementById('account')?.scrollIntoView({ behavior: 'smooth' }); }} className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">account &amp; security</a></li>
                 <li><button className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">payment methods</button></li>
                 <li><Link to="/privacy" className="type text-[12px] uppercase tracking-widest text-white hover:text-brand-primary transition-colors">privacy</Link></li>
               </ul>

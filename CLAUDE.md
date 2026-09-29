@@ -19,7 +19,7 @@ bash tests/exos/run.sh <db>   # SQL harnesses against a scratch Postgres
 
 Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs the same three plus the SQL harnesses.
 
-New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
+New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. Writing an RPC or reviewing the security advisor: `docs/security.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
 
 ## Rules carried over from Terminal-2
 

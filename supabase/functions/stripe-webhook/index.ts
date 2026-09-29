@@ -33,6 +33,13 @@
 //                       voids the tickets). Won / warning_closed: record only.
 //   account.updated  -> exos_record_org_stripe() (Connect onboarding status).
 //
+// Fee actuals (mig 20260929131000): after a settled session is fulfilled and
+// its payment recorded, Stripe's actual fee, the platform net, the transfer
+// and balance-transaction ids are read from the PaymentIntent's latest charge
+// and stored on exos_order_payments. Best effort and last: a Stripe read
+// failure or timeout is logged, never a 500; exos-reconcile-checkouts fills
+// what's missing.
+//
 // Idempotency: fulfillment (session status gate), refund recording (unique
 // refund_id), and refund voiding (session status gate) are each idempotent, so
 // Stripe's at-least-once retries and event replays are safe. Auto-refund also
@@ -54,6 +61,7 @@
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
+import { recordFeeActuals } from "../_shared/feeActuals.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -235,6 +243,15 @@ async function fulfillSettledSession(
       if (rfErr) throw new Error(`record_refund (auto) failed for ${session.id}: ${rfErr.message}`);
       console.error(`stripe-webhook: auto-refunded unfulfillable session ${session.id} (refund ${refund.id})`);
     }
+  }
+
+  // What Stripe actually took (fee, platform net, transfer). Best effort and
+  // never throws, so it can't fail fulfilment or cause a retry loop; skipped
+  // on a replay once recorded.
+  if (pi && session.payment_status === "paid") {
+    await recordFeeActuals(sb, stripe, session.id, pi, {
+      log: (msg, err) => console.error(`stripe-webhook: ${msg}`, err ?? ""),
+    });
   }
 }
 

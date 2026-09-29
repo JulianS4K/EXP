@@ -82,7 +82,8 @@ export interface ExosAllocation {
     /** exos_ticket_tiers.market_split (mig 20260929061000); unset = any. */
     market_split?: string | null;
   } | null;
-  event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown }) | null;
+  // min_age (mig 20260929120000) is read when the caller selects it.
+  event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown; min_age?: number | null }) | null;
   /** exos_distribution_listings.internal_seats: one number per held seat. */
   internal_seats: string | SeatRun[] | null;
   /**
@@ -221,7 +222,7 @@ export function planExosListings(a: ExosAllocation, label: string, channel?: Spl
     throw new Error(`that would be ${blocks.length} ${label} listings; raise the max per order`);
   }
   const date = localDate(ref);
-  const age = ageLimit(a.event.name);
+  const age = ageLimit(a.event.name, a.event.min_age);
   const event = { name: ref.name.slice(0, 255), venue: ref.venueName.slice(0, 255), starts_at: ref.startsAt, local_date: date, local_time: localTime(ref) };
   const listings = blocks
     .map((b, i) => ({ b, n: numbers[i] }))

@@ -30,6 +30,7 @@ import {
   type DoorExtras,
 } from '../lib/guestListsApi';
 import { useToast } from '../context/ToastContext';
+import { isServerAnswer, withDeadline } from '../lib/door/net';
 
 const newRef = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -58,7 +59,6 @@ export default function GuestListDoor({
   const [pending, setPending] = useState<PendingArrival[]>(() => loadPendingArrivals(eventId));
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [flash, setFlash] = useState<{ id: string; text: string; ok: boolean } | null>(null);
-  const [replaying, setReplaying] = useState(false);
   const extrasRef = useRef(extras);
   extrasRef.current = extras;
 
@@ -79,37 +79,60 @@ export default function GuestListDoor({
     onExtrasChange({ ...cur, guests: cur.guests.map((g) => (g.id === id ? fn(g) : g)) });
   };
 
-  // Replay queued arrivals once the link is back.
+  // Replay queued arrivals once the link is back. The in-flight flag is a ref
+  // and is always cleared in `finally`, and answered refs are always dropped
+  // (even if the component re-rendered or unmounted mid-loop), so a flap in
+  // the middle of a replay can't leave the queue stuck until a reload. Scans
+  // that couldn't reach the server retry on a timer.
+  const replayingRef = useRef(false);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    if (isOffline || pending.length === 0 || replaying) return undefined;
-    let cancelled = false;
-    (async () => {
-      setReplaying(true);
-      const done: string[] = [];
-      const refused: string[] = [];
-      for (const p of pending) {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const replay = async () => {
+    if (replayingRef.current) return;
+    const queue = loadPendingArrivals(eventId);
+    if (queue.length === 0) return;
+    replayingRef.current = true;
+    const done: string[] = [];
+    const refused: string[] = [];
+    try {
+      for (const p of queue) {
         try {
-          const r = await guestCheckIn(eventId, p.entryId, p.count, p.ref, 'offline-sync');
+          const r = await withDeadline(() => guestCheckIn(eventId, p.entryId, p.count, p.ref, 'offline-sync'), 10_000);
           done.push(p.ref);
           if (!r.ok) refused.push(r.reason);
-        } catch {
-          /* still offline for this call — keep it queued */
+        } catch (err) {
+          // Still offline for this call — keep it (and the rest) queued.
+          if (!isServerAnswer(err)) break;
         }
       }
-      if (cancelled) return;
-      persistPending(dropFromQueue(loadPendingArrivals(eventId), done));
-      setReplaying(false);
-      if (refused.length > 0) {
-        toast({
-          kind: 'error',
-          message: `${refused.length} guest arrival(s) recorded offline were refused on sync (${[...new Set(refused)].join(', ')}). Re-sync to see the latest counts.`,
-        });
-      }
-      if (done.length > 0) onSync();
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } finally {
+      replayingRef.current = false;
+      const remaining = dropFromQueue(loadPendingArrivals(eventId), done);
+      if (mountedRef.current) persistPending(remaining);
+      else savePendingArrivals(eventId, remaining);
+    }
+    if (!mountedRef.current) return;
+    if (refused.length > 0) {
+      toast({
+        kind: 'error',
+        message: `${refused.length} guest arrival(s) recorded offline were refused on sync (${[...new Set(refused)].join(', ')}). Re-sync to see the latest counts.`,
+      });
+    }
+    if (done.length > 0) onSync();
+  };
+  const replayRef = useRef(replay);
+  replayRef.current = replay;
+
+  useEffect(() => {
+    if (isOffline || pending.length === 0) return undefined;
+    void replayRef.current();
+    const t = setInterval(() => void replayRef.current(), 15_000);
+    return () => clearInterval(t);
   }, [isOffline, pending.length]);
 
   const checkIn = async (g: GuestEntry, count: number) => {
@@ -127,7 +150,9 @@ export default function GuestListDoor({
     };
     if (isOffline) return queueIt();
     try {
-      const r = await guestCheckIn(eventId, g.id, count, ref);
+      // Time-boxed; on a timeout the arrival is queued with the same ref, so
+      // if the first call did land, the replay counts once.
+      const r = await withDeadline(() => guestCheckIn(eventId, g.id, count, ref));
       if (r.ok && r.reason === 'test-scan') {
         setFlash({ id: g.id, text: 'Test check-in OK (not recorded before doors).', ok: true });
         return;
@@ -141,6 +166,11 @@ export default function GuestListDoor({
       if (typeof r.arrived === 'number') patchGuest(g.id, (e) => ({ ...e, arrived: r.arrived! }));
       setFlash({ id: g.id, text: arrivalReasonText(r.reason, r.remaining), ok: false });
     } catch (err) {
+      if (isServerAnswer(err)) {
+        console.error('guest check-in refused by the server', err);
+        setFlash({ id: g.id, text: 'The server refused this check-in for this account. Sign in again or ask a manager.', ok: false });
+        return;
+      }
       console.error('guest check-in failed; queued for sync', err);
       queueIt();
     }

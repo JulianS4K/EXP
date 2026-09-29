@@ -21,6 +21,13 @@ describe('marketTitle', () => {
     expect(ageLimit('Warehouse Rave (21+)')).toBe('21+');
     expect(ageLimit('All Ages Matinee')).toBeNull();
   });
+  it("prefers the organizer's age limit over the title", () => {
+    expect(ageLimit('Warehouse Rave', 18)).toBe('18+');
+    expect(ageLimit('Warehouse Rave (21+)', 18)).toBe('18+');
+    expect(ageLimit('Warehouse Rave (21+)', 0)).toBeNull(); // all ages
+    expect(ageLimit('Warehouse Rave (21+)', null)).toBe('21+');
+    expect(ageLimit('Warehouse Rave (21+)', undefined)).toBe('21+');
+  });
 });
 
 describe('marketSection', () => {

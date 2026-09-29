@@ -108,6 +108,7 @@ migration to prove it (every P0 fix was checked this way).
 
 - `KANBAN.md`: prod state, open audit findings and the roadmap.
 - `docs/payments-go-live.md`: turning Stripe on.
+- `docs/auth.md`: sign-in / sign-up / password flows and the Supabase Auth dashboard settings.
 - `docs/strategy.md` and `docs/gtm-nyc.md`: the phased plan and who we sell to first.
 - `docs/organizer-guide.md`: what organizers do, to help with support and testing.
 - `docs/d4_bridge_charter.md`: the original architecture charter (historical, but still useful).

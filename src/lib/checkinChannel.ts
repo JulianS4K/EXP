@@ -29,15 +29,24 @@ export interface CheckinChannel {
   leave: () => void;
 }
 
+/** One inserted check-in row. list / direction / forced come from mig
+ *  20260929140000 (absent before it: a plain entry). */
+export interface RemoteCheckin {
+  ticketId: string;
+  listId: string | null;
+  direction: 'entry' | 'exit';
+  forced: boolean;
+}
+
 /**
  * Subscribe to other lanes' check-ins for an event. `onRemoteCheckIn` fires
- * with the ticket id each time a check-in audit row is inserted for this event
- * (including this lane's own — callers already mark those used, so a redundant
- * mark is a no-op).
+ * each time a check-in audit row is inserted for this event (including this
+ * lane's own — callers already mark those, so a redundant mark is a no-op).
+ * An exit on a re-entry list is a row too (direction 'exit').
  */
 export function joinCheckinChannel(
   eventId: string,
-  onRemoteCheckIn: (ticketId: string) => void,
+  onRemoteCheckIn: (row: RemoteCheckin) => void,
 ): CheckinChannel {
   const channel: RealtimeChannel = supabase
     .channel(`exos-checkin:${eventId}`)
@@ -50,8 +59,16 @@ export function joinCheckinChannel(
         filter: `event_id=eq.${eventId}`,
       },
       (payload) => {
-        const ticketId = (payload.new as { ticket_id?: string } | null)?.ticket_id;
-        if (ticketId) onRemoteCheckIn(ticketId);
+        const row = (payload.new ?? null) as
+          | { ticket_id?: string; list_id?: string | null; direction?: string; forced?: boolean }
+          | null;
+        if (!row?.ticket_id) return;
+        onRemoteCheckIn({
+          ticketId: row.ticket_id,
+          listId: row.list_id ?? null,
+          direction: row.direction === 'exit' ? 'exit' : 'entry',
+          forced: row.forced === true,
+        });
       },
     )
     .subscribe();
