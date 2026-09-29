@@ -326,6 +326,9 @@ export interface Event {
   seriesIndex?: number;
   // Venue access info shown on the event page (mig 20260926090000).
   accessibility?: import('./lib/accessibility').EventAccessibility;
+  // Who may check people in by name at the door (mig 20260929130000):
+  // 'staff' (default), 'managers' or 'off'. Undefined until the column exists.
+  doorNameCheckin?: import('./lib/door/decide').NameCheckinMode;
   // Store page content (mig 20260929120000). All undefined until the columns
   // exist on the database this build talks to.
   summary?: string;

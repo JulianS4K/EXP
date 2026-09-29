@@ -290,7 +290,7 @@ export interface RegistryEntry {
   barcodeSecret: string;
   promoterId: string;
   pendingTransferId: string | null;
-  /** Unclaimed ticket held on the org for its buyer (will-call, mig 20260929130000). */
+  /** Unclaimed ticket held on the org for its buyer (mig 20260929130000). */
   parked: boolean;
   claimName: string | null;
   /** Masked (j***@gmail.com); the roster never carries the full address. */
@@ -512,9 +512,9 @@ export async function checkInOffline(
   eventId: string,
   device?: string,
 ): Promise<CheckInResult> {
-  // A will-call admit replays through its own RPC, with the same ref rules.
-  if (scan.kind === 'will-call') {
-    return admitParked(scan.ticketId, eventId, scan.reason ?? '', {
+  // A check-in by name replays through its own RPC, with the same ref rules.
+  if (scan.kind === 'name') {
+    return checkInByName(scan.ticketId, eventId, scan.reason ?? null, {
       device,
       scannedAt: scan.scannedAt,
       clientRef: scan.ref,
@@ -534,25 +534,26 @@ export async function checkInOffline(
   return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
 }
 
-/** Will-call: admit a parked ticket (minted for an email with no account and
- *  held on the org with a pending claim transfer) after an ID check. Owner /
- *  manager with a reason; the pending transfer is cancelled and the check-in
- *  is logged as 'will-call' (exos_door_admit_parked, mig 20260929130000).
- *  Reasons: 'checked-in' | 'test-scan' (ok) | 'needs-manager' |
- *  'reason-required' | 'not-parked' | 'in-transfer' | 'used' | 'voided' |
- *  'wrong-event' | 'not-assigned' | 'event-cancelled' | 'doors-not-open' |
- *  'bad-scan-time' | 'bad-client-ref' | 'not-found'. With a clientRef (offline
- *  replay) the same ref twice counts once (duplicate:true). */
-export async function admitParked(
+/** Check a ticket in by name, without a live code (exos_door_checkin_by_name,
+ *  mig 20260929130000): any active ticket of the event, claimed or not, as the
+ *  event's door_name_checkin allows ('staff' / 'managers' / 'off'). The note is
+ *  optional. An unclaimed ticket's pending claim link is cancelled; a holder's
+ *  own pending transfer is refused. Logged with verification 'name'.
+ *  Reasons: 'checked-in' | 'test-scan' (ok) | 'name-checkin-off' |
+ *  'needs-manager' | 'in-transfer' | 'used' | 'voided' | 'wrong-event' |
+ *  'not-assigned' | 'event-cancelled' | 'doors-not-open' | 'bad-scan-time' |
+ *  'bad-client-ref' | 'not-found'. With a clientRef (offline replay) the same
+ *  ref twice counts once (duplicate:true). */
+export async function checkInByName(
   ticketId: string,
   eventId: string,
-  reason: string,
+  note: string | null,
   opts: { device?: string; scannedAt?: number; clientRef?: string; signal?: AbortSignal } = {},
-): Promise<CheckInResult & { will_call?: boolean; claim_name?: string }> {
-  const call = supabase.rpc('exos_door_admit_parked', {
+): Promise<CheckInResult & { by_name?: boolean; parked?: boolean; name?: string }> {
+  const call = supabase.rpc('exos_door_checkin_by_name', {
     p_ticket_id: ticketId,
     p_event_id: eventId,
-    p_reason: reason,
+    p_note: note && note.trim() ? note.trim() : null,
     p_device: opts.device ?? null,
     p_scanned_at: opts.scannedAt != null ? new Date(opts.scannedAt).toISOString() : null,
     p_client_ref: opts.clientRef ?? null,

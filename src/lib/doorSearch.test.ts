@@ -33,7 +33,7 @@ describe('rosterMatches', () => {
   });
 });
 
-describe('rosterMatches: will-call (parked tickets)', () => {
+describe('rosterMatches: unclaimed (parked) tickets', () => {
   const roster = {
     'aaaaaaaa-0000-4000-8000-000000000001': { name: 'Jane Doe', claimName: 'Jane Doe', claimEmailMasked: 'j***@gmail.com', parked: true },
     'aaaaaaaa-0000-4000-8000-000000000002': { name: 'k***@example.org', claimName: null, claimEmailMasked: 'k***@example.org', parked: true },

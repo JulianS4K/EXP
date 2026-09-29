@@ -42,8 +42,7 @@ interface CheckIn {
   // small events run one station per source.
   station: string;
   // Verification mode — 'verified' (HMAC ok), 'legacy' (pre-HMAC
-  // ticket), 'offline-cached' (registry-verified offline), or
-  // 'attest-admit' (manual override on reconnect).
+  // ticket), 'manual' (typed override) or 'name' (checked in by name).
   verification: string;
   // Door time. Prefer offlineScannedAt when present (offline scans
   // recorded the *real* arrival moment, not the moment WiFi came
@@ -131,6 +130,11 @@ export default function ScanReport({ eventId, totalSold }: Props) {
   const checkInRate = totalSold && totalSold > 0
     ? Math.round((checkIns.length / totalSold) * 100)
     : null;
+  // Checked in by name at the door, no live code (mig 20260929130000).
+  const byName = checkIns.filter((c) => c.verification === 'name').length;
+  const totalSub = [checkInRate !== null ? `${checkInRate}% checked in` : null, byName > 0 ? `${byName} by name` : null]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className="space-y-6">
@@ -143,7 +147,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
               ? `${checkIns.length} / ${totalSold}`
               : `${checkIns.length}`
           }
-          sub={checkInRate !== null ? `${checkInRate}% checked in` : undefined}
+          sub={totalSub || undefined}
           icon={<Activity size={16} />}
         />
         <Stat

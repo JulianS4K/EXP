@@ -14,7 +14,7 @@
 // whole thing is unit-tested without a browser.
 
 import { isRegistryFresh } from '../offlineCheckins';
-import type { DoorGate } from './decide';
+import { parseNameCheckinMode, type DoorGate, type NameCheckinMode } from './decide';
 import { storageKeys, type DoorKV, type StorageLike } from './kv';
 
 export const ROSTER_PAGE_SIZE = 1000;
@@ -59,8 +59,8 @@ export interface DoorRosterEntry {
   promoterId?: string;
   /** Pending-transfer lock: the offline path refuses while it's set. */
   pendingTransferId?: string | null;
-  /** Unclaimed ticket held on the org for its buyer: will-call
-   *  (mig 20260929130000). `name` is then the buyer's, not the org's. */
+  /** Unclaimed ticket held on the org for its buyer (mig 20260929130000);
+   *  it can be checked in by name. `name` is then the buyer's, not the org's. */
   parked?: boolean;
   /** The name the ticket was issued to, when known. */
   claimName?: string | null;
@@ -229,6 +229,10 @@ export interface DoorEvent {
   ticketsSold: number;
   checkinTestMode: boolean;
   checkinTestUntil: string | null;
+  /** door_name_checkin (mig 20260929130000), saved with the header so the
+   *  door knows offline whether name check-in is allowed. null = the
+   *  database doesn't have the column yet. */
+  nameCheckin: NameCheckinMode | null;
 }
 
 export function mapDoorEventRow(row: Record<string, unknown>): DoorEvent {
@@ -247,6 +251,7 @@ export function mapDoorEventRow(row: Record<string, unknown>): DoorEvent {
     ticketsSold: Number(row.tickets_sold ?? 0) || 0,
     checkinTestMode: row.checkin_test_mode === true,
     checkinTestUntil: s(row.checkin_test_until),
+    nameCheckin: parseNameCheckinMode(row.door_name_checkin),
   };
 }
 

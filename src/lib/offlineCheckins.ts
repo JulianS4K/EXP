@@ -24,9 +24,9 @@ export interface QueuedScan {
   source: 'camera' | 'manual';
   /** Typed override reason (owner / manager). */
   reason?: string;
-  /** A will-call admit of a parked ticket (owner / manager, with a reason):
-   *  replayed through exos_door_admit_parked, mig 20260929130000. */
-  kind?: 'will-call';
+  /** A check-in by name (optional note in `reason`): replayed through
+   *  exos_door_checkin_by_name, mig 20260929130000. */
+  kind?: 'name';
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,7 +84,7 @@ export function parseQueue(
         scannedAt: item.scannedAt,
         source: item.source,
         ...(typeof item.reason === 'string' && item.reason ? { reason: item.reason } : {}),
-        ...((item as { kind?: unknown }).kind === 'will-call' ? { kind: 'will-call' as const } : {}),
+        ...((item as { kind?: unknown }).kind === 'name' ? { kind: 'name' as const } : {}),
       });
     }
   }

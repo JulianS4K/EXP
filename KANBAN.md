@@ -45,11 +45,11 @@ How we build it (techniques):
   never replay as real check-ins; "Sold" tile; guest-list upload recovers after a drop.
 - ⬜ Roster delta RPC (instead of a full re-pull each minute); sync-health panel that stops and says so on an
   authorization error; encrypt the saved roster, then per-day door keys.
-- ✅ **Will-call for parked tickets** (mig `20260929130000`, not applied): the roster marks unclaimed marketplace,
-  guest and comp tickets with the buyer's name or masked email; an owner or manager admits after an ID check
-  (`exos_door_admit_parked`, logged as will-call, the claim link is cancelled); works offline through the queue.
-  Follow-ups: "you're in" mail to the buyer, a per-event switch letting scanners admit will-call, guest checkout
-  collecting a name.
+- ✅ **Name check-in** (mig `20260929130000`, not applied): door staff check anyone in by name, claimed or not
+  (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
+  staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the
+  roster shows unclaimed tickets' buyer name and masked email; works offline through the queue; the scan report
+  counts by-name check-ins.
 - ⬜ **Record offline admissions the server rejects** (keep attendance true, flag for review) and lock transfers once
   doors open.
 - ⬜ **Check-in lists / gates / re-entry** (pretix model): lists per gate or ticket type, validity windows, pass-out

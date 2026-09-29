@@ -126,7 +126,7 @@ describe('buildRoster', () => {
     expect(r['t-000003'].pendingTransferId).toBe('tr');
   });
 
-  it('carries will-call fields for parked tickets only', () => {
+  it('carries the unclaimed-ticket fields for parked tickets only', () => {
     const r = buildRoster([
       row(1, { pendingTransferId: 'tr', parked: true, claimName: 'Jane Doe', claimEmailMasked: 'j***@gmail.com' }),
       row(2, { parked: false, claimName: 'ignored' }),
@@ -226,10 +226,17 @@ describe('event header cache (offline cold start)', () => {
     id: EVENT, name: 'Night One', org_id: 'org-1', status: 'published', timezone: 'America/New_York',
     starts_at: '2026-09-30T01:00:00Z', doors_at: '2026-09-30T00:00:00Z', ends_at: null,
     total_tickets: 500, tickets_sold: 312, checkin_test_mode: true, checkin_test_until: '2026-09-29T23:00:00Z',
+    door_name_checkin: 'managers',
   });
 
   it('maps the row, with tickets sold separate from capacity', () => {
     expect(ev).toMatchObject({ title: 'Night One', orgId: 'org-1', totalTickets: 500, ticketsSold: 312, checkinTestMode: true });
+  });
+
+  it('keeps the name check-in setting (null before the column exists)', () => {
+    expect(ev.nameCheckin).toBe('managers');
+    expect(mapDoorEventRow({ id: EVENT, name: 'x' }).nameCheckin).toBeNull();
+    expect(mapDoorEventRow({ id: EVENT, name: 'x', door_name_checkin: 'bogus' }).nameCheckin).toBeNull();
   });
 
   it('saves and loads with the door role; expires with the roster', () => {

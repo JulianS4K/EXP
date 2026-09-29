@@ -34,10 +34,12 @@ describe('parseQueue', () => {
     expect(parseQueue(JSON.stringify(q), NOW)).toEqual(q);
   });
 
-  it('keeps a will-call admit as will-call, and drops an unknown kind', () => {
-    const wc: QueuedScan = { ...scan(R1), payload: null, source: 'manual', reason: 'ID checked', kind: 'will-call' };
-    expect(parseQueue(JSON.stringify([wc]), NOW)).toEqual([wc]);
-    const odd = { ...scan(R2), kind: 'something-else' };
+  it('keeps a by-name check-in (with or without a note), and drops an unknown kind', () => {
+    const byName: QueuedScan = { ...scan(R1), payload: null, source: 'manual', reason: 'ID checked', kind: 'name' };
+    expect(parseQueue(JSON.stringify([byName]), NOW)).toEqual([byName]);
+    const noNote: QueuedScan = { ...scan(R2, T2), payload: null, source: 'manual', kind: 'name' };
+    expect(parseQueue(JSON.stringify([noNote]), NOW)).toEqual([noNote]);
+    const odd = { ...scan(R2), kind: 'will-call' };
     expect(parseQueue(JSON.stringify([odd]), NOW)).toEqual([scan(R2)]);
   });
 

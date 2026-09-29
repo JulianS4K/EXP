@@ -536,6 +536,8 @@ export default function EditEvent() {
         distributionNetworks: ed.distributionNetworks,
         // Only once the column exists (the loaded row had it).
         ...(accessSupported ? { accessibility: serializeAccessibility(ed.accessibility ?? {}) } : {}),
+        // Only once the column exists (mig 20260929130000).
+        ...(ed.doorNameCheckin !== undefined ? { doorNameCheckin: ed.doorNameCheckin } : {}),
         // Store page; also derives the plain `description` from the markdown.
         ...(storeSupported ? storeToInput(store) : {}),
       });
@@ -978,6 +980,28 @@ export default function EditEvent() {
                 </div>
               </div>
            </div>
+
+           {/* Door check-in by name (mig 20260929130000): only once the column
+               exists (the loaded event carries it). */}
+           {eventData.doorNameCheckin !== undefined && (
+             <div className="space-y-2 max-w-xl">
+               <label htmlFor="edit-event-name-checkin" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Check in by name at the door</label>
+               <select
+                 id="edit-event-name-checkin"
+                 className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
+                 value={eventData.doorNameCheckin}
+                 onChange={(e) => setEventData({ ...eventData, doorNameCheckin: e.target.value as Event['doorNameCheckin'] })}
+               >
+                 <option value="staff">All door staff</option>
+                 <option value="managers">Owners and managers only</option>
+                 <option value="off">Off (QR code only)</option>
+               </select>
+               <p className="text-sm text-white/60 ml-1">
+                 Lets door staff find someone in the door list and check them in without scanning, for a dead phone or a
+                 ticket nobody has claimed yet.
+               </p>
+             </div>
+           )}
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">

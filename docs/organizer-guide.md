@@ -143,28 +143,37 @@ tiers and discount codes, into a series of dates.
   test window for rehearsals. Test scans check the ticket ("Test scan OK") but don't use it up, so
   the holder still gets in at doors.
 
-### Will-call: tickets nobody has claimed
+### Check in by name
 
-Some tickets are issued to an email address with no Exos account: marketplace sales (StubHub and
-the rest), guest checkout, and comps or box-office tickets sent by email. Until the buyer claims
-the link in their email, the ticket is held on your org and has no code in the buyer's hands.
-Those buyers still get in:
+Staff can check someone in without scanning: find them in the door list and tap **Check in by
+name**. It's for a dead phone, a ticket nobody has claimed yet, or anyone else staff can see on the
+list. It works for every active ticket of the event, claimed or not.
 
-- Search the buyer's **name** or **email** in the door search. Unclaimed tickets show
-  "Unclaimed" with the buyer's name (when the order had one) and a masked email, like
-  `j***@gmail.com`. Door devices never get the full address.
-- Tap **Will-call…** (or scan / type the ticket id). The door shows an amber **Unclaimed —
-  will-call** card.
-- An **owner or manager** checks photo ID against the name, or asks for the email the order went
-  to. Then they type a reason and tap **ID checked, admit**. Scanners see the card but have to
-  call an owner or manager, the same as a manual override.
-- Admitting cancels the unclaimed link, so nobody can claim the ticket after the buyer is inside.
-  The ticket stays on your org, marked used. The scan report lists it as `will-call` with the
-  reason.
-- It works offline too. The admit is queued and uploaded when the device is back online. If the
-  buyer claimed the ticket in the meantime, the upload is refused, and the refusal is flagged the
-  same way as other offline conflicts.
-- A ticket that the buyer has claimed is no longer at will-call. Scan its live code as usual.
+- **Who may do it** is set per event in **Edit event → Venue & seating → Check in by name at the
+  door**:
+  - **All door staff** (the default): owners, managers, and scanners assigned to the event.
+  - **Owners and managers only**: scanners see **Ask a manager** instead of the button.
+  - **Off (QR code only)**: nobody sees the button. An owner or manager can still type a full pass
+    ID as a manual override, with a reason.
+- Search a **name**, an **email**, or the last 6 characters of the pass ID. Tap **Check in by
+  name** on the right row. The door shows the name and ticket type. Add a note if you like (for
+  example "checked ID"), then tap **Check in**.
+- **Tickets nobody has claimed yet.** Some tickets go to an email address with no Exos account:
+  marketplace sales (StubHub and the rest), guest checkout, and comps or box-office tickets sent by
+  email. Until the buyer claims the link, the ticket is held on your org. The list shows the buyer's
+  name (when the order had one), a small "Not claimed yet" note, and a masked email like
+  `j***@gmail.com`. Door devices never get the full address. Checking one in cancels the claim
+  link, so nobody can claim the ticket after the buyer is inside. The ticket stays on your org,
+  marked used.
+- A ticket its holder is sending to a friend (a transfer waiting to be claimed) can't be checked in
+  by name: it may already belong to the friend. The holder cancels the transfer, or the friend
+  claims it and shows their code.
+- Used, refunded, wrong-event tickets and doors not open yet are refused the same as a scan.
+- It works offline too. The check-in is queued and uploaded when the device is back online. If the
+  server refuses it then (for example, the ticket was used at another door), the refusal is flagged
+  the same way as other offline conflicts.
+- The scan report counts check-ins by name, and lists each one with verification `name` and the
+  note.
 
 ## 6. After a sale
 

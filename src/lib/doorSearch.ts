@@ -31,9 +31,9 @@ export function rosterMatches<
   const qMasked = maskEmail(q);
   const out: [string, E][] = [];
   for (const [id, entry] of Object.entries(roster)) {
-    // Will-call: an unclaimed ticket is found by the buyer's name, the
-    // visible part of their masked email, or their full email typed in
-    // (masked the same way, so the full address never has to be on the device).
+    // An unclaimed ticket is found by the buyer's name, the visible part of
+    // their masked email, or their full email typed in (masked the same way,
+    // so the full address never has to be on the device).
     const masked = (entry.claimEmailMasked || '').toLowerCase();
     const byName =
       (entry.name || '').toLowerCase().includes(q) ||

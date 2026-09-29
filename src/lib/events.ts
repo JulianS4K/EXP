@@ -10,6 +10,7 @@
 
 import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
+import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
@@ -103,6 +104,8 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     seriesIndex: row.series_index ?? undefined,
     // undefined when the column isn't there yet (mig 20260926090000 not applied).
     accessibility: 'accessibility' in row ? parseAccessibility(row.accessibility) : undefined,
+    // Door check-in by name (mig 20260929130000); undefined until applied.
+    doorNameCheckin: 'door_name_checkin' in row ? parseNameCheckinMode(row.door_name_checkin) ?? 'staff' : undefined,
     // Store page content: likewise undefined until mig 20260929120000 is applied.
     ...('lineup' in row
       ? {
@@ -305,6 +308,7 @@ export interface EventInput {
   allowHolderRelease?: boolean;
   releaseCutoffHours?: number;
   accessibility?: EventAccessibility;
+  doorNameCheckin?: NameCheckinMode;
   // Store page content (mig 20260929120000). The jsonb lists go as stored
   // (snake_case keys); lib/storeContent.storeToInput builds them.
   summary?: string | null;
@@ -329,7 +333,7 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
   ['imageUrl', 'image_url'], ['totalTickets', 'total_tickets'], ['branding', 'branding'], ['exclusivity', 'exclusivity'],
   ['purchaseLimits', 'purchase_limits'], ['distributionNetworks', 'distribution_networks'],
   ['allowHolderRelease', 'allow_holder_release'], ['releaseCutoffHours', 'release_cutoff_hours'],
-  ['accessibility', 'accessibility'],
+  ['accessibility', 'accessibility'], ['doorNameCheckin', 'door_name_checkin'],
   ['summary', 'summary'], ['descriptionMd', 'description_md'], ['lineup', 'lineup'], ['faq', 'faq'],
   ['gallery', 'gallery'], ['videoUrl', 'video_url'], ['minAge', 'min_age'], ['refundPolicy', 'refund_policy'],
   ['policyNotes', 'policy_notes'],
