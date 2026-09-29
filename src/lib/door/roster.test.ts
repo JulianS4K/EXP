@@ -125,6 +125,16 @@ describe('buildRoster', () => {
     expect(r['t-000002']).toMatchObject({ used: false, voided: true });
     expect(r['t-000003'].pendingTransferId).toBe('tr');
   });
+
+  it('carries will-call fields for parked tickets only', () => {
+    const r = buildRoster([
+      row(1, { pendingTransferId: 'tr', parked: true, claimName: 'Jane Doe', claimEmailMasked: 'j***@gmail.com' }),
+      row(2, { parked: false, claimName: 'ignored' }),
+    ]);
+    expect(r['t-000001']).toMatchObject({ parked: true, claimName: 'Jane Doe', claimEmailMasked: 'j***@gmail.com' });
+    expect(r['t-000002'].parked).toBeUndefined();
+    expect(r['t-000002'].claimName).toBeUndefined();
+  });
 });
 
 describe('roster storage', () => {

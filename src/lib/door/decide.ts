@@ -14,6 +14,12 @@
 //     and is never queued (a queued scan would burn the ticket on replay).
 //   * A scan this device admitted that hasn't uploaded yet counts as used,
 //     online too (the server doesn't know about it yet).
+//   * A parked ticket (minted for an email with no account: a marketplace
+//     sale, a guest checkout, an emailed comp; held on the org with a pending
+//     claim transfer) is will-call: whatever was read, the door shows the
+//     buyer's name / masked email and an owner or manager admits after an ID
+//     check, with a reason (exos_door_admit_parked). Offline it is queued like
+//     an override.
 //   * The same read twice within DUPLICATE_READ_MS is ignored (camera double
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
@@ -51,6 +57,8 @@ export interface DoorCachedTicket {
   used: boolean;
   voided?: boolean;
   pendingTransferId?: string | null;
+  /** Unclaimed ticket held on the org for its buyer (roster `parked`). */
+  parked?: boolean;
   /** Set when the entry came from a single-ticket server read. */
   eventId?: string;
 }
@@ -76,6 +84,8 @@ export interface ScanDecisionInput {
   source: DoorSource;
   /** Override reason (owner / manager), already given. */
   reason?: string;
+  /** "ID checked, admit" was pressed on the will-call verdict (with `reason`). */
+  willCall?: boolean;
   eventId: string;
   entry?: DoorCachedTicket | null;
   /** A scan of this ticket is waiting in this device's upload queue. */
@@ -100,13 +110,18 @@ export type DoorRejectReason =
   | 'in-transfer'
   | 'doors-not-open'
   | 'wrong-event'
-  | 'event-cancelled';
+  | 'event-cancelled'
+  /** Will-call was asked for a ticket the list no longer shows as parked. */
+  | 'not-parked';
 
 export type ScanDecision =
   | { action: 'ignore' }
   | { action: 'needs-reason'; ticketId: string }
-  | { action: 'ask-server'; ticketId: string }
-  | { action: 'admit'; ticketId: string; test: boolean; queue: boolean }
+  /** Show the will-call verdict (the page offers "ID checked, admit" to
+   *  owners / managers; `canAdmit` false = ask a manager). */
+  | { action: 'will-call'; ticketId: string; canAdmit: boolean }
+  | { action: 'ask-server'; ticketId: string; willCall?: boolean }
+  | { action: 'admit'; ticketId: string; test: boolean; queue: boolean; willCall?: boolean }
   | { action: 'reject'; ticketId: string | null; reason: DoorRejectReason; opensAt?: number };
 
 export function isDuplicateRead(input: Pick<ScanDecisionInput, 'code' | 'source' | 'reason' | 'now' | 'recent'>): boolean {
@@ -127,6 +142,12 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
   if (isDuplicateRead(input)) return { action: 'ignore' };
   const ticketId = code.ticketId;
   if (!ticketId) return { action: 'reject', ticketId: null, reason: 'not-found' };
+
+  const parked =
+    !!entry?.parked && !entry.used && !entry.voided && !input.queued &&
+    !(entry.eventId && entry.eventId !== input.eventId);
+  if (input.willCall) return decideWillCall(input, ticketId, parked);
+  if (parked) return { action: 'will-call', ticketId, canAdmit: input.canOverride };
 
   // Typed ticket id: an owner / manager override that needs a reason (the
   // server enforces both; this only saves a round trip).
@@ -169,4 +190,27 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     return { action: 'reject', ticketId, reason: 'doors-not-open', opensAt: gate.opensAt };
   }
   return { action: 'admit', ticketId, test: false, queue: true };
+}
+
+/** "ID checked, admit" on a parked ticket. Owner / manager with a reason;
+ *  online the server decides (exos_door_admit_parked), offline the saved list
+ *  does and the admit is queued (replayed with its client ref). */
+function decideWillCall(input: ScanDecisionInput, ticketId: string, parked: boolean): ScanDecision {
+  const { entry, gate, now } = input;
+  if (!input.canOverride) return { action: 'reject', ticketId, reason: 'needs-manager' };
+  if (!input.reason || input.reason.trim().length < 3) return { action: 'will-call', ticketId, canAdmit: true };
+  if (input.network === 'online') return { action: 'ask-server', ticketId, willCall: true };
+  if (gate.cancelled) return { action: 'reject', ticketId, reason: 'event-cancelled' };
+  if (!entry) return { action: 'reject', ticketId, reason: 'unknown-offline' };
+  if (entry.eventId && entry.eventId !== input.eventId) return { action: 'reject', ticketId, reason: 'wrong-event' };
+  if (input.queued || entry.used) return { action: 'reject', ticketId, reason: 'used' };
+  if (entry.voided) return { action: 'reject', ticketId, reason: 'voided' };
+  if (!parked) return { action: 'reject', ticketId, reason: 'not-parked' };
+  if (gate.opensAt != null && now < gate.opensAt) {
+    if (gate.testUntil != null && now < gate.testUntil) {
+      return { action: 'admit', ticketId, test: true, queue: false, willCall: true };
+    }
+    return { action: 'reject', ticketId, reason: 'doors-not-open', opensAt: gate.opensAt };
+  }
+  return { action: 'admit', ticketId, test: false, queue: true, willCall: true };
 }

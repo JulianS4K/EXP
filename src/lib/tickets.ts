@@ -290,6 +290,11 @@ export interface RegistryEntry {
   barcodeSecret: string;
   promoterId: string;
   pendingTransferId: string | null;
+  /** Unclaimed ticket held on the org for its buyer (will-call, mig 20260929130000). */
+  parked: boolean;
+  claimName: string | null;
+  /** Masked (j***@gmail.com); the roster never carries the full address. */
+  claimEmailMasked: string | null;
 }
 
 /** Every ticket for an event, for the offline check-in registry (staff RLS).
@@ -324,6 +329,9 @@ export async function listEventTicketsForRegistry(eventId: string): Promise<Regi
     barcodeSecret: r.barcode_secret || '',
     promoterId: r.promoter_id || '',
     pendingTransferId: r.pending_transfer_id ?? null,
+    parked: r.parked === true,
+    claimName: r.claim_name ?? null,
+    claimEmailMasked: r.claim_email_masked ?? null,
   }));
 }
 
@@ -504,6 +512,14 @@ export async function checkInOffline(
   eventId: string,
   device?: string,
 ): Promise<CheckInResult> {
+  // A will-call admit replays through its own RPC, with the same ref rules.
+  if (scan.kind === 'will-call') {
+    return admitParked(scan.ticketId, eventId, scan.reason ?? '', {
+      device,
+      scannedAt: scan.scannedAt,
+      clientRef: scan.ref,
+    });
+  }
   const { data, error } = await supabase.rpc('exos_check_in_offline', {
     p_client_ref: scan.ref,
     p_ticket_id: scan.ticketId,
@@ -514,6 +530,34 @@ export async function checkInOffline(
     p_reason: scan.reason ?? null,
     p_device: device ?? null,
   });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
+}
+
+/** Will-call: admit a parked ticket (minted for an email with no account and
+ *  held on the org with a pending claim transfer) after an ID check. Owner /
+ *  manager with a reason; the pending transfer is cancelled and the check-in
+ *  is logged as 'will-call' (exos_door_admit_parked, mig 20260929130000).
+ *  Reasons: 'checked-in' | 'test-scan' (ok) | 'needs-manager' |
+ *  'reason-required' | 'not-parked' | 'in-transfer' | 'used' | 'voided' |
+ *  'wrong-event' | 'not-assigned' | 'event-cancelled' | 'doors-not-open' |
+ *  'bad-scan-time' | 'bad-client-ref' | 'not-found'. With a clientRef (offline
+ *  replay) the same ref twice counts once (duplicate:true). */
+export async function admitParked(
+  ticketId: string,
+  eventId: string,
+  reason: string,
+  opts: { device?: string; scannedAt?: number; clientRef?: string; signal?: AbortSignal } = {},
+): Promise<CheckInResult & { will_call?: boolean; claim_name?: string }> {
+  const call = supabase.rpc('exos_door_admit_parked', {
+    p_ticket_id: ticketId,
+    p_event_id: eventId,
+    p_reason: reason,
+    p_device: opts.device ?? null,
+    p_scanned_at: opts.scannedAt != null ? new Date(opts.scannedAt).toISOString() : null,
+    p_client_ref: opts.clientRef ?? null,
+  });
+  const { data, error } = await (opts.signal ? call.abortSignal(opts.signal) : call);
   if (error) throw error;
   return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
 }

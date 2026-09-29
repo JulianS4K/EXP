@@ -77,7 +77,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929073000_exos_calendar_feeds \
          20260929074000_exos_pos_scaffold \
          20260929080000_exos_rpc_hardening \
-         20260929120000_exos_event_store_content; do
+         20260929120000_exos_event_store_content \
+         20260929130000_exos_door_will_call; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -174,7 +175,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929073000_exos_calendar_feeds \
          20260929074000_exos_pos_scaffold \
          20260929080000_exos_rpc_hardening \
-         20260929120000_exos_event_store_content; do
+         20260929120000_exos_event_store_content \
+         20260929130000_exos_door_will_call; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -182,3 +184,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_pa
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_store_content.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_will_call.sql"

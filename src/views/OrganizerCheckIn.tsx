@@ -7,6 +7,7 @@ import {
   listEventTicketsForRegistry,
   checkInTicket,
   checkInOffline,
+  admitParked,
   undoCheckIn,
   recordScanReject,
   countEventCheckins,
@@ -128,6 +129,8 @@ const REFUSAL_TEXT: Record<string, string> = {
   'reason-required': 'Give a reason for the override (at least 3 characters).',
   'not-assigned': "You're not assigned to scan this event. Ask an owner or manager to add it to your events.",
   'bad-scan-time': 'This offline scan is too old to upload (more than 24 hours).',
+  'not-parked':
+    'This ticket was claimed since the list was downloaded, so it is no longer at will-call. Ask the holder to open their ticket and scan the live code.',
 };
 
 const VOIDED_TEXT =
@@ -149,12 +152,21 @@ export default function OrganizerCheckIn() {
   // Door role saved with the event header, so overrides still show offline.
   const [cachedRole, setCachedRole] = useState<string | null>(null);
   const [searchId, setSearchId] = useState('');
-  const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode' | 'needs-reason'>('idle');
+  const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode' | 'needs-reason' | 'will-call'>('idle');
   // "Already used": when (and on which device) the ticket was checked in.
   const [usedInfo, setUsedInfo] = useState<{ at?: string; device?: string } | null>(null);
   // A typed override waiting for its reason (owner / manager only).
   const [overrideFor, setOverrideFor] = useState<{ ticketId: string; name: string } | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
+  // Will-call: an unclaimed (parked) ticket waiting for an ID check.
+  const [willCallFor, setWillCallFor] = useState<{
+    ticketId: string;
+    name: string;
+    emailMasked: string | null;
+    tier?: string;
+    canAdmit: boolean;
+  } | null>(null);
+  const [willCallReason, setWillCallReason] = useState('');
   // Undo a check-in from the scan log.
   const [undoKey, setUndoKey] = useState<string | null>(null);
   const [undoReason, setUndoReason] = useState('');
@@ -768,7 +780,9 @@ export default function OrganizerCheckIn() {
     }
     // The server is the authority: bring the saved list in line with it.
     if (result.reason === 'voided') markLocal(ticketId, { voided: true });
-    if (result.reason === 'in-transfer') markLocal(ticketId, { pendingTransferId: offlineRegistry[ticketId]?.pendingTransferId || 'pending' });
+    if (result.reason === 'in-transfer') markLocal(ticketId, { pendingTransferId: offlineRegistry[ticketId]?.pendingTransferId || 'pending', parked: false });
+    // Will-call: claimed since the download, so it scans like any ticket now.
+    if (result.reason === 'not-parked') markLocal(ticketId, { pendingTransferId: null, parked: false });
     const opensAt = (result as CheckInResult & { opens_at?: string }).opens_at;
     const opensMs = opensAt ? Date.parse(opensAt) : NaN;
     const text: Record<string, string> = {
@@ -806,11 +820,12 @@ export default function OrganizerCheckIn() {
     setFoundTicket(ticket);
     if (!test) {
       pushScan(ticket.id, name, 'SUCCESS');
-      markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false });
+      markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
     }
     setStatus('success');
     setSearchId('');
     setOverrideFor(null);
+    setWillCallFor(null);
   };
 
   // Act on a decision that needs no server call (lib/door/decide).
@@ -823,6 +838,38 @@ export default function OrganizerCheckIn() {
       setOverrideFor({ ticketId: d.ticketId, name: ctx.name });
       setOverrideReason('');
       setStatus('needs-reason');
+      return;
+    }
+    if (d.action === 'will-call') {
+      const entry = offlineRegistry[d.ticketId];
+      setBuyerName(ctx.name);
+      // Keep a reason already typed for this ticket (a retry after "too short").
+      if (willCallFor?.ticketId !== d.ticketId) setWillCallReason('');
+      setWillCallFor({
+        ticketId: d.ticketId,
+        name: entry?.claimName || ctx.name,
+        emailMasked: entry?.claimEmailMasked ?? null,
+        tier: ctx.tier,
+        canAdmit: d.canAdmit,
+      });
+      setStatus('will-call');
+      return;
+    }
+    if (d.action === 'admit' && d.willCall) {
+      if (d.queue) {
+        // Offline will-call: replayed through exos_door_admit_parked with its
+        // ref (lib/tickets checkInOffline routes kind 'will-call').
+        queueScan({
+          ref: newClientRef(),
+          ticketId: d.ticketId,
+          payload: null,
+          scannedAt: serverNow(),
+          source: 'manual',
+          reason: ctx.reason ?? '',
+          kind: 'will-call',
+        });
+      }
+      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true);
       return;
     }
     if (d.action === 'admit') {
@@ -889,6 +936,10 @@ export default function OrganizerCheckIn() {
         setStatus('invalid-barcode');
         setInvalidReason('This event was cancelled. Nobody can be checked in.');
         return;
+      case 'not-parked':
+        setStatus('invalid-barcode');
+        setInvalidReason(REFUSAL_TEXT['not-parked']);
+        return;
       case 'unknown-offline':
         setStatus('not-found');
         setInvalidReason(
@@ -901,7 +952,13 @@ export default function OrganizerCheckIn() {
     }
   };
 
-  const handleCheckIn = async (e?: React.FormEvent, manualValue?: string, reason?: string, source: DoorSource = 'manual') => {
+  const handleCheckIn = async (
+    e?: React.FormEvent,
+    manualValue?: string,
+    reason?: string,
+    source: DoorSource = 'manual',
+    opts: { willCall?: boolean } = {},
+  ) => {
     if (e) e.preventDefault();
     const raw = (manualValue || searchId).trim();
     if (!raw || !eventId || inFlightRef.current) return;
@@ -914,6 +971,7 @@ export default function OrganizerCheckIn() {
       code,
       source: src,
       reason,
+      willCall: opts.willCall,
       eventId,
       entry: cached,
       queued: !!docId && pendingUpdates.some((q) => q.ticketId === docId),
@@ -950,6 +1008,40 @@ export default function OrganizerCheckIn() {
       }
 
       const ticketId = d.ticketId;
+      if (d.willCall && reason) {
+        // Will-call admit (owner / manager, ID checked): its own RPC, which
+        // cancels the pending claim and logs the check-in as 'will-call'.
+        const who = willCallFor?.ticketId === ticketId ? willCallFor.name : name;
+        setStatus('searching');
+        try {
+          const result = await withDeadline(
+            (signal) => admitParked(ticketId, eventId, reason, { device, signal }),
+            DOOR_REQUEST_TIMEOUT_MS,
+          );
+          noteServerOk();
+          if (!result.ok) {
+            setWillCallFor(null);
+            showRefusal(result, ticketId, who, 'manual');
+            return;
+          }
+          admitted({ id: ticketId, tierName: cached?.tier } as Ticket, who, result.reason === 'test-scan');
+          if (result.reason !== 'test-scan') admittedId = ticketId;
+        } catch (err) {
+          if (isServerAnswer(err)) {
+            console.error('will-call refused by the server', err);
+            setStatus('invalid-barcode');
+            setInvalidReason("The server refused this check-in for this account (signed out, or no longer door staff for this event). Sign in again or ask a manager.");
+            return;
+          }
+          console.warn('Server unreachable; will-call decided on the saved list.', err);
+          noteServerFailure();
+          const fb = decideScan({ ...base, recent: null, verify: null, network: 'unreachable' });
+          if (fb.action === 'ignore' || fb.action === 'ask-server') return;
+          applyLocalDecision(fb, { ...ctx, name: who });
+          if (fb.action === 'admit' && !fb.test) admittedId = fb.ticketId;
+        }
+        return;
+      }
       // Only a server round trip shows the spinner: a local verdict replaces
       // the last one directly (and a spinner flashed for a few ms can leave
       // the animated verdict stuck on "Verifying").
@@ -1050,6 +1142,13 @@ export default function OrganizerCheckIn() {
     const why = overrideReason.trim();
     if (!overrideFor || why.length < 3) return;
     void handleCheckIn(undefined, overrideFor.ticketId, why);
+  };
+
+  const submitWillCall = (e: React.FormEvent) => {
+    e.preventDefault();
+    const why = willCallReason.trim();
+    if (!willCallFor || why.length < 3) return;
+    void handleCheckIn(undefined, willCallFor.ticketId, why, 'manual', { willCall: true });
   };
 
   // Undo a check-in from the scan log (owner / manager, with a reason).
@@ -1360,7 +1459,10 @@ export default function OrganizerCheckIn() {
                      <li key={id} className="flex items-center gap-3 px-4 py-3">
                        <div className="min-w-0 flex-1">
                          <p className="font-bold text-slate-900 text-sm truncate">{entry.name || 'Unnamed'}</p>
-                         <p className="text-[11px] text-slate-500 truncate">{entry.tier} · …{id.slice(-6)}</p>
+                         <p className="text-[11px] text-slate-500 truncate">
+                           {entry.parked && !entry.used ? `Unclaimed${entry.claimEmailMasked ? ` · ${entry.claimEmailMasked}` : ''} · ` : ''}
+                           {entry.tier} · …{id.slice(-6)}
+                         </p>
                          {(doorExtras?.ticketAccess?.[id]?.length ?? 0) > 0 && (
                            <div className="mt-1"><AccessNeedBadges needs={doorExtras!.ticketAccess![id]} /></div>
                          )}
@@ -1369,6 +1471,15 @@ export default function OrganizerCheckIn() {
                          <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
                        ) : entry.used ? (
                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">In</span>
+                       ) : entry.parked ? (
+                         // Unclaimed ticket: the will-call verdict (ID check).
+                         <button
+                           type="button"
+                           onClick={() => { setSearchId(''); void handleCheckIn(undefined, id); }}
+                           className="px-4 py-2.5 bg-amber-500 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-600"
+                         >
+                           Will-call…
+                         </button>
                        ) : canOverride ? (
                          // Admitting by name is a typed override: asks for a reason.
                          <button
@@ -1456,6 +1567,73 @@ export default function OrganizerCheckIn() {
                    );
                  })()}
               </div>
+            </motion.div>
+          )}
+
+          {status === 'will-call' && willCallFor && (
+            <motion.div
+              key="will-call"
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              className="bg-amber-50/70 p-8 rounded-[2.5rem] border border-amber-200 flex flex-col items-center text-center"
+            >
+              <h2 className="text-2xl font-bold text-amber-900 mb-1 leading-none uppercase tracking-tight">Unclaimed — will-call</h2>
+              <p className="text-amber-700 font-bold uppercase tracking-widest text-[10px] mb-4">
+                Bought without an account or on a marketplace · not claimed yet · …{willCallFor.ticketId.slice(-6)}
+              </p>
+              <div className="w-full max-w-sm space-y-2 mb-4 text-left">
+                <div className="p-4 bg-white rounded-2xl border border-amber-100">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Issued to</p>
+                  <p className="font-bold text-slate-900">{willCallFor.name || 'Name not given'}</p>
+                  {willCallFor.emailMasked && <p className="text-sm text-slate-600">{willCallFor.emailMasked}</p>}
+                </div>
+                {willCallFor.tier && (
+                  <div className="p-4 bg-white rounded-2xl border border-amber-100">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
+                    <p className="font-bold text-slate-900">{willCallFor.tier}</p>
+                  </div>
+                )}
+              </div>
+              {willCallFor.canAdmit ? (
+                <>
+                  <p className="text-slate-600 text-sm mb-4 max-w-sm">
+                    Check photo ID against the name, or ask for the email the order went to. Admitting cancels the unclaimed
+                    link. The reason is saved with the check-in and shows in the scan report.
+                  </p>
+                  <form onSubmit={submitWillCall} className="w-full max-w-sm space-y-3">
+                    <input
+                      type="text"
+                      value={willCallReason}
+                      onChange={(e) => setWillCallReason(e.target.value)}
+                      placeholder="Reason, e.g. driver licence matches the name"
+                      aria-label="Reason for the will-call admit"
+                      maxLength={300}
+                      autoFocus
+                      className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        disabled={willCallReason.trim().length < 3}
+                        className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-black disabled:opacity-40"
+                      >
+                        ID checked, admit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setWillCallFor(null); setStatus('idle'); }}
+                        className="px-4 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <p className="text-slate-700 text-sm max-w-sm">
+                  Ask an owner or manager to check their ID and admit them at will-call. Or the buyer can claim the ticket
+                  from their email and show the live code.
+                </p>
+              )}
             </motion.div>
           )}
 

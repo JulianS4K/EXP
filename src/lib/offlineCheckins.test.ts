@@ -34,6 +34,13 @@ describe('parseQueue', () => {
     expect(parseQueue(JSON.stringify(q), NOW)).toEqual(q);
   });
 
+  it('keeps a will-call admit as will-call, and drops an unknown kind', () => {
+    const wc: QueuedScan = { ...scan(R1), payload: null, source: 'manual', reason: 'ID checked', kind: 'will-call' };
+    expect(parseQueue(JSON.stringify([wc]), NOW)).toEqual([wc]);
+    const odd = { ...scan(R2), kind: 'something-else' };
+    expect(parseQueue(JSON.stringify([odd]), NOW)).toEqual([scan(R2)]);
+  });
+
   it('turns legacy bare ids into typed entries scanned now', () => {
     const q = parseQueue(JSON.stringify([T1, 'not-a-uuid']), NOW, () => R1);
     expect(q).toEqual([{ ref: R1, ticketId: T1, payload: null, scannedAt: NOW, source: 'manual' }]);

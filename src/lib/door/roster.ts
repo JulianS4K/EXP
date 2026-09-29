@@ -59,6 +59,13 @@ export interface DoorRosterEntry {
   promoterId?: string;
   /** Pending-transfer lock: the offline path refuses while it's set. */
   pendingTransferId?: string | null;
+  /** Unclaimed ticket held on the org for its buyer: will-call
+   *  (mig 20260929130000). `name` is then the buyer's, not the org's. */
+  parked?: boolean;
+  /** The name the ticket was issued to, when known. */
+  claimName?: string | null;
+  /** The buyer's email, masked (j***@gmail.com). Never the full address. */
+  claimEmailMasked?: string | null;
 }
 
 export type DoorRoster = Record<string, DoorRosterEntry>;
@@ -72,6 +79,9 @@ export interface RosterRow {
   barcodeSecret: string;
   promoterId: string;
   pendingTransferId: string | null;
+  parked?: boolean;
+  claimName?: string | null;
+  claimEmailMasked?: string | null;
 }
 
 export function buildRoster(rows: RosterRow[]): DoorRoster {
@@ -86,6 +96,9 @@ export function buildRoster(rows: RosterRow[]): DoorRoster {
       barcodeSecret: e.barcodeSecret,
       promoterId: e.promoterId,
       pendingTransferId: e.pendingTransferId,
+      ...(e.parked
+        ? { parked: true, claimName: e.claimName ?? null, claimEmailMasked: e.claimEmailMasked ?? null }
+        : {}),
     };
   }
   return out;

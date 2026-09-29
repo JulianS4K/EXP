@@ -201,3 +201,69 @@ describe('decideScan: duplicate reads', () => {
     expect(d.action).toBe('ask-server');
   });
 });
+
+describe('decideScan: will-call for parked tickets', () => {
+  const parked: DoorCachedTicket = { used: false, voided: false, pendingTransferId: 'tr-1', parked: true };
+  const typed = parseDoorCode(T1, 'manual');
+
+  it('a parked ticket shows the will-call verdict, online or offline, scanned or typed', () => {
+    expect(decideScan(input({ entry: parked }))).toEqual({ action: 'will-call', ticketId: T1, canAdmit: false });
+    expect(decideScan(input({ entry: parked, network: 'offline' }))).toEqual({ action: 'will-call', ticketId: T1, canAdmit: false });
+    expect(decideScan(input({ entry: parked, source: 'manual', code: typed, canOverride: true }))).toEqual({
+      action: 'will-call', ticketId: T1, canAdmit: true,
+    });
+  });
+
+  it('offline, a parked ticket is never admitted as a plain scan (it was in-transfer before)', () => {
+    const d = decideScan(input({ entry: { ...parked, parked: false }, network: 'offline' }));
+    expect(d).toEqual({ action: 'reject', ticketId: T1, reason: 'in-transfer' });
+  });
+
+  it('used / voided / queued parked tickets follow the normal rules', () => {
+    expect(decideScan(input({ entry: { ...parked, used: true, pendingTransferId: null }, network: 'offline' }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ entry: { ...parked, voided: true }, network: 'offline' }))).toMatchObject({ reason: 'voided' });
+    expect(decideScan(input({ entry: parked, queued: true, network: 'offline' }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ entry: { ...parked, used: true }, network: 'online' }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
+  it('admit online goes to the server as will-call (owner / manager with a reason)', () => {
+    const d = decideScan(input({ entry: parked, code: typed, source: 'manual', canOverride: true, willCall: true, reason: 'ID checked' }));
+    expect(d).toEqual({ action: 'ask-server', ticketId: T1, willCall: true });
+  });
+
+  it('a scanner cannot admit at will-call', () => {
+    const d = decideScan(input({ entry: parked, code: typed, source: 'manual', willCall: true, reason: 'ID checked' }));
+    expect(d).toEqual({ action: 'reject', ticketId: T1, reason: 'needs-manager' });
+  });
+
+  it('no reason yet: stays on the will-call verdict', () => {
+    const d = decideScan(input({ entry: parked, code: typed, source: 'manual', canOverride: true, willCall: true, reason: ' x ' }));
+    expect(d).toEqual({ action: 'will-call', ticketId: T1, canAdmit: true });
+  });
+
+  it('offline admit is queued as will-call', () => {
+    const d = decideScan(input({
+      entry: parked, code: typed, source: 'manual', canOverride: true, willCall: true, reason: 'ID checked', network: 'unreachable',
+    }));
+    expect(d).toEqual({ action: 'admit', ticketId: T1, test: false, queue: true, willCall: true });
+  });
+
+  it('offline admit respects doors, the test window, cancellation and the list', () => {
+    const base = { code: typed, source: 'manual' as const, canOverride: true, willCall: true, reason: 'ID checked', network: 'offline' as const };
+    expect(decideScan(input({ ...base, entry: parked, gate: { opensAt: NOW + HOUR, testUntil: null } }))).toMatchObject({ reason: 'doors-not-open' });
+    expect(decideScan(input({ ...base, entry: parked, gate: { opensAt: NOW + HOUR, testUntil: NOW + HOUR } }))).toEqual({
+      action: 'admit', ticketId: T1, test: true, queue: false, willCall: true,
+    });
+    expect(decideScan(input({ ...base, entry: parked, gate: { ...doorsOpen, cancelled: true } }))).toMatchObject({ reason: 'event-cancelled' });
+    expect(decideScan(input({ ...base, entry: null }))).toMatchObject({ reason: 'unknown-offline' });
+    expect(decideScan(input({ ...base, entry: { ...parked, used: true } }))).toMatchObject({ reason: 'used' });
+    expect(decideScan(input({ ...base, entry: parked, queued: true }))).toMatchObject({ reason: 'used' });
+    // Claimed since the download: the list no longer shows it parked.
+    expect(decideScan(input({ ...base, entry: fresh }))).toMatchObject({ reason: 'not-parked' });
+  });
+
+  it('a parked ticket for another event is not will-call here', () => {
+    const d = decideScan(input({ entry: { ...parked, eventId: OTHER } }));
+    expect(d).toEqual({ action: 'reject', ticketId: T1, reason: 'wrong-event' });
+  });
+});

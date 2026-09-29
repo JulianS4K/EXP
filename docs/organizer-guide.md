@@ -143,6 +143,29 @@ tiers and discount codes, into a series of dates.
   test window for rehearsals. Test scans check the ticket ("Test scan OK") but don't use it up, so
   the holder still gets in at doors.
 
+### Will-call: tickets nobody has claimed
+
+Some tickets are issued to an email address with no Exos account: marketplace sales (StubHub and
+the rest), guest checkout, and comps or box-office tickets sent by email. Until the buyer claims
+the link in their email, the ticket is held on your org and has no code in the buyer's hands.
+Those buyers still get in:
+
+- Search the buyer's **name** or **email** in the door search. Unclaimed tickets show
+  "Unclaimed" with the buyer's name (when the order had one) and a masked email, like
+  `j***@gmail.com`. Door devices never get the full address.
+- Tap **Will-call…** (or scan / type the ticket id). The door shows an amber **Unclaimed —
+  will-call** card.
+- An **owner or manager** checks photo ID against the name, or asks for the email the order went
+  to. Then they type a reason and tap **ID checked, admit**. Scanners see the card but have to
+  call an owner or manager, the same as a manual override.
+- Admitting cancels the unclaimed link, so nobody can claim the ticket after the buyer is inside.
+  The ticket stays on your org, marked used. The scan report lists it as `will-call` with the
+  reason.
+- It works offline too. The admit is queued and uploaded when the device is back online. If the
+  buyer claimed the ticket in the meantime, the upload is refused, and the refusal is flagged the
+  same way as other offline conflicts.
+- A ticket that the buyer has claimed is no longer at will-call. Scan its live code as usual.
+
 ## 6. After a sale
 
 - **Refunds** are issued in Stripe:
