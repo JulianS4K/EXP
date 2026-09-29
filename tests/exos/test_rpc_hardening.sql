@@ -18,6 +18,8 @@
 --      that key lets any account claim
 --   H9 exos_create_org: first org (onboarding) works; 3 a day and 20 per
 --      account; platform admins exempt
+--   H10 voucher checks need an account: anon can't run the three voucher
+--      RPCs; a signed-in buyer still checks a code
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -115,8 +117,6 @@ BEGIN
        -- public by design
        'exos_event_is_published', 'exos_public_promoter', 'exos_public_table_tiers',
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
-       -- throttled (exos_voucher_throttle)
-       'exos_check_voucher', 'exos_voucher_discount', 'exos_voucher_tier',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',
@@ -337,5 +337,43 @@ BEGIN
   ASSERT public.exos_create_org('Admin Org', 'a8-admin-org') IS NOT NULL, 'H9: admins are exempt';
   RAISE NOTICE 'OK  H9 org creation cap';
 END $$;
+RESET ROLE;
+
+-- H10 ------------------------------------------------------------------------
+INSERT INTO public.exos_vouchers(id,event_id,code,max_uses)
+VALUES ('a8000000-0000-0000-0000-0000000000aa','a8000000-0000-0000-0000-0000000000e1','A8CODE1',5);
+DO $$
+DECLARE f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY['public.exos_check_voucher(uuid,text,text)',
+                           'public.exos_voucher_discount(uuid,text,text)',
+                           'public.exos_voucher_tier(uuid,text,text)'] LOOP
+    ASSERT NOT has_function_privilege('anon', f, 'EXECUTE'), 'H10: anon can still run ' || f;
+    ASSERT has_function_privilege('authenticated', f, 'EXECUTE'), 'H10: signed-in lost ' || f;
+    ASSERT has_function_privilege('service_role', f, 'EXECUTE'), 'H10: service_role lost ' || f;
+  END LOOP;
+END $$;
+SELECT pg_temp.act(NULL, NULL);
+SET LOCAL ROLE anon;
+DO $$
+DECLARE refused boolean := false;
+BEGIN
+  BEGIN
+    PERFORM public.exos_check_voucher('a8000000-0000-0000-0000-0000000000e1', 'A8CODE1', NULL);
+  EXCEPTION WHEN insufficient_privilege THEN refused := true;
+  END;
+  ASSERT refused, 'H10: anon checking a code is refused';
+END $$;
+RESET ROLE;
+SELECT pg_temp.act('a8000000-0000-0000-0000-0000000000b1', 'a8-fan@x.com');
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE ok boolean;
+BEGIN
+  SELECT is_valid INTO ok FROM public.exos_check_voucher('a8000000-0000-0000-0000-0000000000e1', 'a8code1', 'a8-fan@x.com');
+  ASSERT ok, 'H10: a signed-in buyer checks a code';
+  RAISE NOTICE 'OK  H10 codes need an account';
+END $$;
+RESET ROLE;
 
 ROLLBACK;

@@ -46,8 +46,8 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_tier_is_table` | Revoked | Internal; answered for any tier id |
 | `exos_tier_party_size` | Revoked | Internal; only definer functions (and `exos_assert_quota`, called by definer functions) use it |
 | `exos_event_is_published` | OK | Boolean only; backs the anon tier-read policy `exos_tiers_public_read`, so anon must keep it |
-| `exos_check_voucher` | OK | Throttled by `exos_voucher_throttle` (10 misses / 10 min per account, 60 per event for anon). See operator decision 2 |
-| `exos_voucher_discount`, `exos_voucher_tier` | OK | Go through `exos_check_voucher` (same throttle) |
+| `exos_check_voucher` | Signed-in only | Throttled by `exos_voucher_throttle` (10 misses / 10 min per account). Applying a code needs an account (decision 2, 2026-09-29); `exos-checkout` refuses a code from a guest |
+| `exos_voucher_discount`, `exos_voucher_tier` | Signed-in only | Go through `exos_check_voucher` (same throttle) |
 | `exos_invite_preview` | OK | Bearer `gen_random_uuid()` invite token; returns org, role, status, expiry |
 | `exos_leave_waitlist` | Revoked (anon) | A no-op for anon (matches only the caller's uid or verified JWT email). Signed-in use unchanged |
 | `exos_mail_unsubscribe` | OK | 64-hex token (two UUIDv4s), format-checked; only sets the opt-out |
@@ -131,12 +131,14 @@ These can't be set from a migration. Project: the shared Supabase project
 
 1. **Apply 20260929080000 to prod.** It's re-run safe; prod needs explicit
    operator permission.
-2. **Anonymous voucher throttle is per event.** Sixty wrong codes in ten
-   minutes from anyone blocks anonymous code entry on that event for the rest
-   of the window (signed-in buyers have their own bucket). The alternatives
-   are to key the anon bucket on the client IP from `request.headers` (only
-   safe if the gateway's forwarded-for header can't be spoofed) or to require
-   sign-in to apply a code.
+2. **Voucher codes need an account (decided 2026-09-29).** Signed-out
+   buyers used to share one 60-miss bucket per event, so a guesser could
+   also lock everyone else out of codes. Now anon can't run the voucher RPCs,
+   `exos-checkout` answers 401 "sign in to use a code" to a guest, and the
+   code field asks for sign-in (the emailed 6-digit code keeps the buyer on
+   the page) and applies the code once they're in. Guest checkout without a
+   code is unchanged. CAPTCHA on sign-up matters more now: accounts are the
+   throttle's unit.
 3. **Org creation caps** (3 a day, 20 per account, admins exempt) are a
    judgement call. Raising them is a one-line change in `exos_create_org`;
    anyone who hits them sees a message asking them to contact support.

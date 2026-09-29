@@ -123,6 +123,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let discountPercent: number | null = null;
   let discountAmount: number | null = null;
   let voucherUnlocksTier = false;
+  // Codes need an account (mig 20260929080000): a guest can't try codes here
+  // either, so guessing stays on the per-account throttle.
+  if (voucherCode && !user) return json({ error: "sign in to use a code" }, 401);
   if (voucherCode) {
     const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
       p_event_id: event_id, p_code: voucherCode, p_email: buyerEmail || null,

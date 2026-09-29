@@ -7,7 +7,8 @@
 --              exos_addon_exclusive_tax_percent, exos_tier_exclusive_tax_percent,
 --              exos_tier_is_table, exos_tier_party_size, exos_channel_allocated,
 --              exos_event_house_available, exos_redeem_discount_code (prod only);
---              from anon on exos_leave_waitlist, exos_has_org_role
+--              from anon on exos_leave_waitlist, exos_has_org_role,
+--              exos_check_voucher, exos_voucher_discount, exos_voucher_tier
 --           W: FUNCTION exos_check_in_offline, exos_queue_mail,
 --              exos_queue_ticket_issued, exos_create_org (patched in place)
 --           C: INDEX exos_mail_dedupe_idx
@@ -33,6 +34,12 @@
 --    - exos_leave_waitlist (anon): a no-op for anon (it only matches the
 --      caller's uid or verified JWT email); exos_has_org_role (anon in the
 --      harness schema only; prod already had it signed-in only).
+--    - exos_check_voucher / exos_voucher_discount / exos_voucher_tier
+--      (anon): signed-out buyers shared one 60-miss bucket per event, so a
+--      guesser could either try 60 codes per 10 minutes per event or lock
+--      everyone else out of codes. Applying a code now needs an account
+--      (operator decision, 2026-09-29): misses count per account (10 per
+--      10 minutes), and exos-checkout refuses a code from a guest.
 --    service_role keeps EXECUTE on all of them.
 -- 3. exos_check_in_offline let ANY signed-in account write: it recorded the
 --    client ref (and, for a ticket id of some org, a scan-reject row in that
@@ -115,7 +122,10 @@ BEGIN
   -- Signed-in only.
   FOREACH f IN ARRAY ARRAY[
     'public.exos_leave_waitlist(uuid,text)',
-    'public.exos_has_org_role(uuid,text[])'
+    'public.exos_has_org_role(uuid,text[])',
+    'public.exos_check_voucher(uuid,text,text)',
+    'public.exos_voucher_discount(uuid,text,text)',
+    'public.exos_voucher_tier(uuid,text,text)'
   ] LOOP
     IF to_regprocedure(f) IS NULL THEN
       RAISE NOTICE '%: not present, skipped', f;

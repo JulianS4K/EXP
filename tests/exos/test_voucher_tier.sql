@@ -10,7 +10,7 @@ INSERT INTO public.exos_vouchers(event_id,code,tier_id,max_uses) VALUES
   ('f1000000-0000-0000-0000-0000000000e1','F1PRESALE','f1000000-0000-0000-0000-0000000000f5',5),
   ('f1000000-0000-0000-0000-0000000000e1','F1ANYTIER',NULL,5);
 
-SET ROLE anon;
+SET ROLE authenticated;  -- codes need an account (mig 20260929080000)
 DO $$
 DECLARE r record;
 BEGIN
@@ -26,7 +26,7 @@ RESET ROLE;
 
 -- V2. A used-up code no longer reveals the tier.
 UPDATE public.exos_vouchers SET used_count = max_uses WHERE code = 'F1PRESALE';
-SET ROLE anon;
+SET ROLE authenticated;  -- codes need an account (mig 20260929080000)
 DO $$
 BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_voucher_tier('f1000000-0000-0000-0000-0000000000e1','F1PRESALE')), 'V2: spent code reveals nothing';
