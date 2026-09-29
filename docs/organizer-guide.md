@@ -123,11 +123,47 @@ tiers and discount codes, into a series of dates.
   - When seats free up, the next people in line automatically get a code valid for 48 hours.
   - A group of 3 waits until 3 seats are free, and nobody behind them jumps ahead.
   - **Offered seats are reserved.** Other buyers can't take them while the code is live.
-- **Announcements** to ticket holders. **Reschedule** (holders are notified of the changed fields).
+- **Announcements** to ticket holders. **Reschedule** (holders are emailed the new date; see
+  [Changing the date](#changing-the-date)).
   **Reminders:** automatic 24 h and 2 h before start, plus a manual "send now" limited to once
   every 6 hours.
 - **Release policy:** whether holders can give back a *free* ticket themselves, and up to how many
   hours before the start. Freed seats go to the waitlist.
+
+### Changing the date
+
+Move an event from **Edit event** (change the start and save) or from **Reschedule** on the event
+dashboard's settings tab. Every ticket holder is emailed the old and new date and time (in the
+event's time zone); their tickets stay valid.
+
+- **When you're asked about refunds.** If tickets are out and the event moves to another day (in its
+  own time zone) or its start moves by more than 3 hours, the save asks **"Offer refunds to ticket
+  holders?"**. It's checked by default; untick it to only send the new date. A smaller move (say
+  8 pm to 9 pm the same night) just saves and emails holders. A plain save can't skip this: the
+  database refuses a big date change on a sold event unless it goes through the reschedule step.
+- **The deadline.** Holders can ask for a refund until the deadline. It defaults to two weeks from
+  the change or a day before the new start, whichever comes first (until the start if that's less
+  than a day away). You can change it; it has to be in the future and no later than the new start.
+- **What buyers get.** Refunds are self-serve and automatic, with no approval step:
+  - A ticket paid through Exos checkout: its price back, tax included, on the card that paid.
+    Add-ons (parking, merch) are refunded only with the order's last ticket.
+  - A free ticket or comp: **Release my ticket** (it's voided, the seat goes back on sale).
+  - A ticket bought on a resale marketplace (StubHub, SeatGeek, ...): the email says refunds go
+    through that marketplace. Exos doesn't refund those.
+  - A ticket someone was given: only the person who paid can refund it, since the money goes back
+    to their card. The refund voids the ticket, and the holder's email says so.
+  - Not eligible: tickets already checked in, bought after the change, or on an event you've
+    since cancelled (cancelling refunds everyone from the refund panel).
+- **How they ask.** Signed in, from **My Tickets**. Without an account, from the link in their email
+  (one per ticket; it works only for that ticket and stops working if you change the date again).
+- **Who pays.** Refunds come out of the event's money, like refunds you issue yourself: Stripe pulls
+  the ticket's share back from your connected account and Exos returns its fee in proportion
+  (unless the platform is set to keep it, `EXOS_REFUND_KEEP_PLATFORM_FEE`).
+- **Tracking it.** **Date changes and refunds** on the event dashboard, next to the refund panel,
+  lists every date change and, for the latest one, how many refunds were asked for, how much went
+  back, free tickets given back, and how many tickets can still ask.
+- **Moving it again** closes the earlier offer. Offer refunds again on the new change if you want
+  holders to keep the option.
 
 ## 5. At the door (`/checkin/:eventId`)
 

@@ -29,6 +29,7 @@ import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
+import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
 import GuestListPanel from '../components/GuestListPanel';
@@ -408,6 +409,12 @@ export default function OrganizerEventReport() {
           canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
           canCancel={canAct}
           onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+        />
+
+        {/* Date changes: the refund offer and what buyers did with it (mig 20260929150000). */}
+        <RescheduleRefundsPanel
+          event={event}
+          canView={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
         />
 
         {/* Guest list / bulk comps (owner/manager) — one call issues to a

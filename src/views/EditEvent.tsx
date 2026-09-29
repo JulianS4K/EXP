@@ -85,6 +85,10 @@ import StoreContentEditor from '../components/StoreContentEditor';
 import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import Dialog from '../components/Dialog';
 import CheckinListsEditor from '../components/CheckinListsEditor';
+import RefundOfferFields from '../components/RefundOfferFields';
+import { rescheduleEvent } from '../lib/reschedule';
+import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
+import { utcToOccursAtLocal } from '../lib/datetime';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -152,6 +156,14 @@ export default function EditEvent() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [notifying, setNotifying] = useState(false);
+  // Date change on a sold event (mig 20260929150000): moving it to another day
+  // or by more than 3 hours goes through exos_reschedule_event, which tells
+  // every holder and, when offered, lets them refund until the deadline. The
+  // save asks first; the answer lives here until the save runs.
+  const [reschedulePrompt, setReschedulePrompt] = useState(false);
+  const [offerRefunds, setOfferRefunds] = useState(true);
+  const [refundDeadline, setRefundDeadline] = useState('');
+  const [rescheduleNote, setRescheduleNote] = useState('');
   // Table packages (mig 20260926050000), keyed by tier id (client id for new tiers).
   const [tableCfg, setTableCfg] = useState<Record<string, TableTierDraft>>({});
   const [originalTableCfg, setOriginalTableCfg] = useState<Record<string, TableTierDraft>>({});
@@ -494,8 +506,88 @@ export default function EditEvent() {
       return;
     }
 
+    // A new date for a sold event: ask about refunds before saving.
+    const change = dateChange();
+    if (change.qualifies && change.sold) {
+      openReschedulePrompt(change.newStart);
+      return;
+    }
+    await save(null);
+  };
+
+  // The start as loaded vs. as edited, and whether that change needs the
+  // reschedule path (another day in the event's zone, or > 3 hours, with
+  // tickets out). The server enforces the same rule (exos_events_date_guard).
+  const dateChange = () => {
+    const ed = eventData as Event;
+    const tz = ed.timezone || getBrowserTimezone();
+    const startTs: any = ed.timing?.startTime ?? ed.date;
+    const newStart: Date | null = startTs && typeof startTs.toDate === 'function' ? startTs.toDate() : null;
+    const oldMs = originalNotifiable.startMs ?? originalNotifiable.dateMs;
+    const oldStart = oldMs != null ? new Date(oldMs) : null;
+    return {
+      tz,
+      newStart,
+      qualifies: !!oldStart && !!newStart && qualifiesAsDateChange(oldStart, newStart, tz),
+      sold: Number(ed.ticketsSold || 0) > 0,
+    };
+  };
+
+  const openReschedulePrompt = (newStart: Date | null) => {
+    const tz = (eventData as Event).timezone || getBrowserTimezone();
+    const d = newStart ? defaultRefundDeadline(new Date(), newStart) : null;
+    setOfferRefunds(true);
+    setRefundDeadline(d ? utcToZonedWallClock(d, tz) : '');
+    setReschedulePrompt(true);
+  };
+
+  const confirmReschedule = async () => {
+    const { tz, newStart } = dateChange();
+    const deadlineUtc = refundDeadline ? zonedWallClockToUtc(refundDeadline, tz) : null;
+    if (offerRefunds) {
+      const problem = deadlineProblem(deadlineUtc, newStart);
+      if (problem) {
+        toast({ kind: 'warn', message: problem });
+        return;
+      }
+    }
+    await save({ offerRefunds, refundDeadline: offerRefunds && deadlineUtc ? deadlineUtc.toISOString() : null, reason: rescheduleNote.trim() || null });
+  };
+
+  const save = async (reschedule: { offerRefunds: boolean; refundDeadline: string | null; reason: string | null } | null) => {
+    if (!eventId) return;
     setSaving(true);
     try {
+      // 0. A qualifying date change on a sold event: move it through the RPC
+      //    first (records it, emails holders, opens refunds when offered).
+      //    The plain update below then carries the same times.
+      if (reschedule) {
+        const ed0 = eventData as Event;
+        const tz0 = ed0.timezone || getBrowserTimezone();
+        const startTs0: any = ed0.timing?.startTime ?? ed0.date;
+        const start0: Date = startTs0.toDate();
+        const doors0: any = ed0.timing?.doorsOpen;
+        const end0: any = ed0.timing?.endTime;
+        const r = await rescheduleEvent({
+          eventId,
+          newStartsAt: start0.toISOString(),
+          newDoorsAt: doors0 && typeof doors0.toDate === 'function' ? doors0.toDate().toISOString() : null,
+          newEndsAt: end0 && typeof end0.toDate === 'function' ? end0.toDate().toISOString() : null,
+          occursAtLocal: utcToOccursAtLocal(start0, tz0) || null,
+          reason: reschedule.reason,
+          offerRefunds: reschedule.offerRefunds,
+          refundDeadline: reschedule.refundDeadline,
+        });
+        setReschedulePrompt(false);
+        setRescheduleNote('');
+        setOriginalNotifiable((o) => ({ ...o, startMs: start0.getTime(), dateMs: start0.getTime() }));
+        toast({
+          kind: 'success',
+          title: 'Date changed',
+          message: `${r.recipientCount} ticket holder${r.recipientCount === 1 ? '' : 's'} emailed the new date${r.refundsOffered ? ' with a refund option' : ''}.`,
+        });
+      }
+
       const currentTierIds = (eventData.ticketTiers || []).map((t) => t.id);
       const added = currentTierIds.filter((id) => !originalTierIds.includes(id));
       const removed = originalTierIds.filter((id) => !currentTierIds.includes(id));
@@ -586,7 +678,13 @@ export default function EditEvent() {
       toast({ kind: 'success', message: 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'events', toast);
+      // The server refused a plain date change (tickets it didn't know about
+      // here): ask about refunds and go through the reschedule path.
+      if (!reschedule && /exos_reschedule_event/.test(String((error as any)?.message ?? ''))) {
+        openReschedulePrompt(dateChange().newStart);
+      } else {
+        handleFirestoreError(error, OperationType.WRITE, 'events', toast);
+      }
     } finally {
       setSaving(false);
     }
@@ -1648,6 +1746,76 @@ export default function EditEvent() {
           </section>
         )}
       </form>
+
+      {/* Date change on a sold event: offer refunds? (mig 20260929150000) */}
+      <Dialog
+        open={reschedulePrompt}
+        onClose={() => setReschedulePrompt(false)}
+        dismissible={!saving}
+        labelledBy="reschedule-title"
+        className="w-full max-w-md bg-[#111] border border-white/10 p-6"
+      >
+        <h2 id="reschedule-title" className="text-xl font-black uppercase italic tracking-tighter text-white mb-2">
+          Change the date?
+        </h2>
+        <p className="text-sm text-white/60 mb-4">
+          {(() => {
+            const { tz, newStart } = dateChange();
+            const oldMs = originalNotifiable.startMs ?? originalNotifiable.dateMs;
+            return <>
+              People already have tickets. Moving it from{' '}
+              <strong className="text-white">{oldMs != null ? formatInTz(new Date(oldMs), tz, { dateStyle: 'medium', timeStyle: 'short' }) : 'TBA'}</strong>{' '}
+              to <strong className="text-white">{newStart ? formatInTz(newStart, tz, { dateStyle: 'medium', timeStyle: 'short' }) : 'TBA'}</strong>{' '}
+              emails every ticket holder the new date.
+            </>;
+          })()}
+        </p>
+        <div className="mb-4">
+          <RefundOfferFields
+            dark
+            offer={offerRefunds}
+            onOffer={setOfferRefunds}
+            deadline={refundDeadline}
+            onDeadline={setRefundDeadline}
+            tz={(eventData as Event).timezone || getBrowserTimezone()}
+            problem={offerRefunds
+              ? deadlineProblem(
+                  refundDeadline ? zonedWallClockToUtc(refundDeadline, (eventData as Event).timezone || getBrowserTimezone()) : null,
+                  dateChange().newStart)
+              : null}
+          />
+        </div>
+        <label htmlFor="reschedule-note" className="block type text-[10px] text-white/40 uppercase tracking-widest mb-2">
+          Note to ticket holders (optional)
+        </label>
+        <textarea
+          id="reschedule-note"
+          value={rescheduleNote}
+          onChange={(e) => setRescheduleNote(e.target.value)}
+          rows={2}
+          maxLength={500}
+          placeholder="Venue conflict, artist travel, etc."
+          className="w-full bg-black border border-white/20 px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
+        />
+        <div className="flex gap-2 mt-4 justify-end">
+          <button
+            type="button"
+            onClick={() => setReschedulePrompt(false)}
+            disabled={saving}
+            className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-black uppercase tracking-tighter italic text-xs transition-all"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={() => void confirmReschedule()}
+            disabled={saving}
+            className="px-4 py-2 bg-brand-primary hover:bg-white text-black font-black uppercase tracking-tighter italic text-xs transition-all disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Change date & save'}
+          </button>
+        </div>
+      </Dialog>
 
       {/* Cancellation confirmation modal. */}
       <Dialog

@@ -24,6 +24,12 @@ const org = { id: ORG, name: 'Org <7f> & Co' };
 const PAYLOADS: Record<string, Record<string, unknown>> = {
   'event-cancelled': { event: event(), reason: EVIL, refund: { status: 'refunded', paid_cents: 5000, refunded_cents: 5000, currency: 'usd' }, marketing: false },
   'event-updated': { event: event(), marketing: false },
+  'event-rescheduled': {
+    event: event(), reschedule_id: EV2, old_starts_at: '2026-09-30T23:00:00+00:00', new_starts_at: '2026-10-02T00:00:00+00:00',
+    reason: EVIL, refunds_offered: true, refund_deadline: '2026-10-01T00:00:00+00:00',
+    refunds: [{ ticket_id: TIER, tier_name: 'GA <early>', token: TOKEN, amount_cents: 3000, currency: 'usd' }],
+    releases: [], more_links: 0, tickets: 1, marketplace: 1, not_buyer: 0, other_paid: 0, marketing: false,
+  },
   'refund-issued': { event: event(), amount_cents: 1000, currency: 'usd', order_ref: 'cs_<x>', paid_cents: 3000, refunded_total_cents: 1000, partial: true, marketing: false },
   'post-event': {
     event: event(), org, following: false, marketing: true, unsubscribe_token: TOKEN,

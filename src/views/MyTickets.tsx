@@ -19,6 +19,14 @@ import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
 import MyCalendarFeed from '../components/MyCalendarFeed';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
+import {
+  listMyRescheduleOffers,
+  requestRescheduleRefund,
+  releaseForReschedule,
+  reasonText,
+  type RescheduleOffer,
+} from '../lib/rescheduleRefunds';
+import { formatCents } from '../lib/refunds';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
@@ -35,6 +43,48 @@ export default function MyTickets() {
   const [outboundTransfers, setOutboundTransfers] = useState<Transfer[]>([]);
   const [savedEvents, setSavedEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  // Date changes with a refund offer (mig 20260929150000): tickets this
+  // account holds or paid for. Refunds go back to the card that paid.
+  const [offers, setOffers] = useState<RescheduleOffer[]>([]);
+  const [offerBusy, setOfferBusy] = useState<string | null>(null);
+
+  const reloadOffers = async () => setOffers(await listMyRescheduleOffers());
+
+  const actOnOffers = async (key: string, list: RescheduleOffer[]) => {
+    const refunds = list.filter((o) => o.ok && o.kind === 'refund');
+    const releases = list.filter((o) => o.ok && o.kind === 'release');
+    if (refunds.length + releases.length === 0) return;
+    const total = refunds.reduce((n, o) => n + o.amountCents, 0);
+    const question = refunds.length > 0
+      ? `Refund ${refunds.length} ticket${refunds.length === 1 ? '' : 's'} (${formatCents(total, refunds[0].currency)})? ` +
+        'The money goes back to the card that paid, and the ticket stops working, also if you gave it to someone.'
+      : `Give back ${releases.length} free ticket${releases.length === 1 ? '' : 's'}? It stops working and can't be undone.`;
+    if (!window.confirm(question)) return;
+    setOfferBusy(key);
+    try {
+      const results = [
+        ...(refunds.length ? await requestRescheduleRefund({ ticketIds: refunds.map((o) => o.ticketId) }) : []),
+        ...(releases.length ? await releaseForReschedule({ ticketIds: releases.map((o) => o.ticketId) }) : []),
+      ];
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length === 0) {
+        toast({
+          kind: 'success',
+          title: refunds.length ? 'Refund on its way' : 'Ticket released',
+          message: refunds.length
+            ? 'It goes back to your card and can take 5 to 10 days to show up. We emailed you a receipt.'
+            : 'Thanks for letting someone else have the spot.',
+        });
+      } else {
+        toast({ kind: 'error', message: failed[0].error || reasonText(failed[0].reason) });
+      }
+    } catch (err: any) {
+      toast({ kind: 'error', message: err?.message || 'That didn’t work. Try again.' });
+    } finally {
+      setOfferBusy(null);
+      await reloadOffers();
+    }
+  };
 
   const handleCancelTransfer = async (transferId: string) => {
     // Confirmation lives outside the loading state so a user that backs out
@@ -88,13 +138,15 @@ export default function MyTickets() {
         // Tickets (with event joined) + both pending-transfer directions.
         // The transfer rows carry denormalised event title/image, so no
         // ticket/event dereference is needed (the old Firestore N+1 is gone).
-        const [ticketsWithEvents, inbound, outbound, saved] = await Promise.all([
+        const [ticketsWithEvents, inbound, outbound, saved, dateOffers] = await Promise.all([
           listMyTickets(),
           listInboundTransfers(),
           listOutboundTransfers(),
           listSavedEvents(),
+          listMyRescheduleOffers(),
         ]);
         if (cancelled) return;
+        setOffers(dateOffers);
 
         setTickets(ticketsWithEvents);
         setSavedEvents(saved);
@@ -248,6 +300,63 @@ export default function MyTickets() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Date changed: refund or give back, until the organizer's deadline. */}
+        {offers.length > 0 && (
+          <section className="mb-16" aria-labelledby="date-changes-title">
+            <h2 id="date-changes-title" className="type text-[12px] text-brand-primary uppercase tracking-widest mb-6">
+              date changed · refunds available
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {offersByEvent(offers).map(([eventId, list]) => {
+                const first = list[0];
+                const when = (d: Date | null) => (d ? formatInTz(d, first.timezone ?? undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'TBA');
+                const actionable = list.filter((o) => o.ok && (o.kind === 'refund' || o.kind === 'release'));
+                const refundTotal = actionable.filter((o) => o.kind === 'refund').reduce((n, o) => n + o.amountCents, 0);
+                return (
+                  <div key={eventId} className="bg-[#111] border border-white/10 p-7">
+                    <h3 className="disp text-2xl tracking-tight text-white leading-none mb-2">{first.eventName}</h3>
+                    <p className="text-sm text-white/60 mb-1">
+                      <span className="line-through">{when(first.oldStartsAt)}</span> → <strong className="text-white">{when(first.newStartsAt)}</strong>
+                    </p>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-5">
+                      refunds until {when(first.refundDeadline)}
+                    </p>
+                    <ul className="space-y-2 mb-5">
+                      {list.map((o) => (
+                        <li key={o.ticketId} className="text-sm text-white/80 flex flex-wrap justify-between gap-2">
+                          <span>
+                            {o.tierName || 'Ticket'}
+                            {!o.mine && <span className="text-white/50"> (you gave this one away)</span>}
+                          </span>
+                          <span className={o.ok ? 'text-brand-primary' : 'text-white/50 text-xs basis-full'}>
+                            {o.ok
+                              ? o.kind === 'refund' ? formatCents(o.amountCents, o.currency) : 'free: give back'
+                              : reasonText(o.requestStatus === 'claimed' || o.requestStatus === 'pending' ? 'in-progress' : o.reason)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {actionable.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={offerBusy !== null}
+                        onClick={() => void actOnOffers(eventId, actionable)}
+                        className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide hover:bg-white transition-colors disabled:opacity-50"
+                      >
+                        {offerBusy === eventId
+                          ? 'WORKING…'
+                          : refundTotal > 0
+                            ? `GET A REFUND (${formatCents(refundTotal, actionable[0].currency)})`
+                            : 'RELEASE MY TICKET'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         )}
 
         {tickets.length === 0 ? (
@@ -406,6 +515,12 @@ export default function MyTickets() {
       </Dialog>
    </div>
   );
+}
+
+function offersByEvent(offers: RescheduleOffer[]): [string, RescheduleOffer[]][] {
+  const m = new Map<string, RescheduleOffer[]>();
+  for (const o of offers) m.set(o.eventId, [...(m.get(o.eventId) ?? []), o]);
+  return [...m.entries()];
 }
 
 function guestEmailHint(): string | null {

@@ -80,7 +80,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929120000_exos_event_store_content \
          20260929130000_exos_door_name_checkin \
          20260929131000_exos_checkout_records \
-         20260929140000_exos_door_lists; do
+         20260929140000_exos_door_lists \
+         20260929150000_exos_reschedule_refunds; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -180,7 +181,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929120000_exos_event_store_content \
          20260929130000_exos_door_name_checkin \
          20260929131000_exos_checkout_records \
-         20260929140000_exos_door_lists; do
+         20260929140000_exos_door_lists \
+         20260929150000_exos_reschedule_refunds; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -191,3 +193,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_sto
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_name_checkin.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_checkout_records.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_lists.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_reschedule_refunds.sql"

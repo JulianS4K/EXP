@@ -4,7 +4,8 @@
 // 20260703124000). One read function serves both audiences — org staff see
 // their events' history, a ticket holder sees reschedules for events they hold a
 // ticket for (RLS decides). rescheduleEvent moves the event's timing, logs the
-// old→new, and emails holders the new date. Reads swallow errors to [] so the
+// old→new, and emails holders the new date; since mig 20260929150000 it also
+// records whether holders may ask for a refund, and until when. Reads swallow errors to [] so the
 // surface degrades cleanly before the migration is applied (A1 applies).
 
 import { supabase } from './supabase';
@@ -17,6 +18,9 @@ export interface Reschedule {
   reason: string | null;
   recipientCount: number;
   createdAt: Date;
+  /** Mig 20260929150000: holders may ask for a refund until refundDeadline. */
+  refundsOffered: boolean;
+  refundDeadline: Date | null;
 }
 
 function mapRow(r: any): Reschedule {
@@ -28,6 +32,8 @@ function mapRow(r: any): Reschedule {
     reason: r.reason ?? null,
     recipientCount: Number(r.recipient_count) || 0,
     createdAt: r.created_at ? new Date(r.created_at) : new Date(0),
+    refundsOffered: !!r.refunds_offered,
+    refundDeadline: r.refund_deadline ? new Date(r.refund_deadline) : null,
   };
 }
 
@@ -57,7 +63,11 @@ export async function rescheduleEvent(input: {
   newEndsAt?: string | null;
   occursAtLocal?: string | null;
   reason?: string | null;
-}): Promise<{ id: string; recipientCount: number }> {
+  /** Let holders ask for a refund (free tickets: release) until refundDeadline. */
+  offerRefunds?: boolean;
+  /** ISO; null = the default (earlier of now + 14 days and new start − 24 h). */
+  refundDeadline?: string | null;
+}): Promise<{ id: string; recipientCount: number; refundsOffered: boolean; refundDeadline: Date | null }> {
   const { data, error } = await supabase.rpc('exos_reschedule_event', {
     p_event_id: input.eventId,
     p_new_starts_at: input.newStartsAt,
@@ -65,11 +75,15 @@ export async function rescheduleEvent(input: {
     p_new_ends_at: input.newEndsAt ?? null,
     p_occurs_at_local: input.occursAtLocal ?? null,
     p_reason: input.reason ?? null,
+    p_offer_refunds: input.offerRefunds ?? false,
+    p_refund_deadline: input.refundDeadline ?? null,
   });
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
   return {
     id: (row?.reschedule_id as string) ?? '',
     recipientCount: Number(row?.recipient_count) || 0,
+    refundsOffered: !!row?.refunds_offered,
+    refundDeadline: row?.refund_deadline ? new Date(row.refund_deadline) : null,
   };
 }

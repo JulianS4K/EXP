@@ -108,6 +108,12 @@ How we build it (techniques):
 7. ⬜ Disputes: table, organizer alert, evidence, lost-dispute entry, recovery policy.
 8. ⬜ Payout statements and a Payouts page; journal CSV, then QuickBooks / Xero.
 9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps.
+10. ✅ Refunds when the date changes (mig 20260929150000, not applied): a move to another day or by more than
+    3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
+    start − 24 h). Holders get an `event-rescheduled` mail with a per-ticket refund / release link; buyers refund
+    themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
+    buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
+    (`docs/organizer-guide.md` "Changing the date").
 - ⬜ **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
   change). v2: each friend pays their own seat within a 30-min group window (N one-seat holds, Exos expires the
   sessions, unpaid seats return to sale, host can cover the rest). Never a multi-day hold: card authorizations last

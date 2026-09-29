@@ -243,6 +243,80 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // Mig 20260929150000: the organizer moved the event. Old and new time in the
+  // event's zone; when refunds are offered, a link per ticket this address may
+  // refund (they paid) or release (free / comp), each carrying a 64-hex token
+  // for that ticket + reschedule only. Marketplace buyers are sent to the
+  // marketplace; a holder someone else paid for is told the refund is theirs.
+  "event-rescheduled": (ctx) => {
+    const ev = event(ctx.p);
+    const e = obj(ctx.p, "event");
+    const tz = opt(e, "timezone");
+    const orgName = str(e, "org_name", "The organizer");
+    const oldAt = opt(ctx.p, "old_starts_at");
+    const newAt = opt(ctx.p, "new_starts_at") ?? opt(e, "starts_at");
+    const doors = opt(e, "doors_at");
+    const reason = opt(ctx.p, "reason");
+    const offered = ctx.p.refunds_offered === true;
+    const deadline = opt(ctx.p, "refund_deadline");
+    const refunds = list(ctx.p, "refunds");
+    const releases = list(ctx.p, "releases");
+    const more = num(ctx.p, "more_links", 0);
+    const marketplace = num(ctx.p, "marketplace", 0);
+    const notBuyer = num(ctx.p, "not_buyer", 0);
+    const otherPaid = num(ctx.p, "other_paid", 0);
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    const token = (x: Obj): string => {
+      const t = x.token;
+      if (typeof t !== "string" || !TOKEN.test(t)) throw new PayloadError("token missing");
+      return t;
+    };
+    const link = (x: Obj, label: string) =>
+      `<li><a href="${href(ctx, `/refund?t=${token(x)}`)}">${esc(label)}</a></li>`;
+    const refundItems = refunds.map((x) => {
+      const amount = formatMoney(num(x, "amount_cents", 0), str(x, "currency", "usd"));
+      return link(x, `Get a refund: ${str(x, "tier_name", "Ticket")} (${amount})`);
+    }).join("");
+    const releaseItems = releases.map((x) => link(x, `Release my ticket: ${str(x, "tier_name", "Ticket")}`)).join("");
+    const canAct = offered && (refundItems !== "" || releaseItems !== "");
+
+    let body =
+      `<p>${esc(orgName)} changed the date of an event you have tickets for.</p>` +
+      `<p><strong>${esc(ev.name)}</strong>` + (ev.where ? `<br>${esc(ev.where)}` : "") + `</p>` +
+      (oldAt ? `<p>Was: <s>${esc(formatWhen(oldAt, tz))}</s><br>` : "<p>") +
+      (newAt ? `Now: <strong>${esc(formatWhen(newAt, tz))}</strong>` : "") + `</p>` +
+      (doors ? `<p>Doors open ${esc(formatWhen(doors, tz))}.</p>` : "") +
+      (reason ? `<p>From the organizer: “${esc(reason)}”</p>` : "");
+    if (canAct) {
+      body +=
+        `<p>Your tickets work for the new date. If you can't make it, you can ` +
+        (refundItems && releaseItems ? "get a refund or give your free ticket back" : refundItems ? "get a refund" : "give your ticket back") +
+        (deadline ? ` until <strong>${esc(formatWhen(deadline, tz))}</strong>` : "") + `.</p>` +
+        (refundItems ? `<ul>${refundItems}</ul><p style="color:#666;font-size:13px">A refund goes back to the card you paid with, including tax, and cancels that ticket (also if you gave it to someone).</p>` : "") +
+        (releaseItems ? `<ul>${releaseItems}</ul>` : "") +
+        (more > 0 ? `<p>${esc(plural(more, "more ticket"))}: sign in to Exos and open Your tickets.</p>` : "");
+    } else {
+      body += `<p>Your ticket still works for the new date. There's nothing you need to do.</p>`;
+    }
+    if (marketplace > 0) {
+      body += `<p>You bought ${esc(plural(marketplace, "ticket"))} on a resale marketplace. ` +
+        (offered ? `Refunds for those go through the marketplace where you bought them.` : `Questions about those go to the marketplace where you bought them.`) + `</p>`;
+    }
+    if (offered && notBuyer > 0) {
+      body += `<p>Someone else paid for ${notBuyer === 1 ? "a ticket you hold" : `${notBuyer} of your tickets`}. ` +
+        `A refund goes back to their card, so only they can ask for it.</p>`;
+    }
+    if (offered && otherPaid > 0) {
+      body += `<p>For tickets you didn't buy on Exos, ask ${esc(orgName)} about refunds.</p>`;
+    }
+    body += button(ctx, `/event/${ev.id}`, "See the event");
+    return {
+      audience: "buyer",
+      subject: `New date: ${ev.name}`,
+      body,
+    };
+  },
+
   "refund-issued": (ctx) => {
     const ev = event(ctx.p);
     const cur = str(ctx.p, "currency", "usd");
