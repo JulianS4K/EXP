@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { AppUser, toAppUser, isAdminUser, setCurrentAppUser } from '../lib/auth';
+import { doorKV } from '../lib/door/kv';
+import { wipeDoorRosters } from '../lib/door/roster';
 import AuthModal, { type AuthView } from '../components/AuthModal';
 
 interface AuthContextType {
@@ -137,6 +139,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* storage unavailable */
     }
+    // The roster itself lives in IndexedDB (lib/door/kv).
+    await wipeDoorRosters(doorKV()).catch(() => {});
     return !error;
   };
 

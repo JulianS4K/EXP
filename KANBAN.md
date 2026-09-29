@@ -38,11 +38,13 @@ How we build it (techniques):
   app works before prod has the migration.
 
 ### Now (heart of the product: the door)
-- 🔄 **Door app critical fixes** (in progress): start offline from the saved list; one tested scan-decision
-  function with a 4 s timeout and offline rules whenever the network fails (no double entry on bad Wi-Fi); saved
-  list is a hint when online and refreshes every minute; roster downloaded in pages (> 1,000 tickets); camera scans
-  recorded as camera; duplicate-read guard; test-window scans stay test scans offline; "Sold" tile; guest-list
-  upload recovery.
+- ✅ **Door app critical fixes** (`src/lib/door/`, 61 tests): starts offline from the saved event and list; one
+  tested scan-decision function with a 4 s timeout and offline rules whenever the network fails (no double entry
+  on bad Wi-Fi); the saved list is a hint when online and refreshes every minute; roster downloaded in pages and
+  kept in IndexedDB; camera stays open, camera scans recorded as camera, duplicate reads ignored; test-window scans
+  never replay as real check-ins; "Sold" tile; guest-list upload recovers after a drop.
+- ⬜ Roster delta RPC (instead of a full re-pull each minute); sync-health panel that stops and says so on an
+  authorization error; encrypt the saved roster, then per-day door keys.
 - ⬜ **Will-call for parked tickets** (StubHub sales, guests without accounts, emailed comps are parked on the org
   owner until claimed and are refused at the door today): door search by buyer name/email from the pending
   transfer, ID check, manager-approved admit that completes the transfer to a door placeholder and checks in.
@@ -69,8 +71,11 @@ How we build it (techniques):
 - ⬜ SMS opt-in and blasts (already on the board).
 
 ### Next (event creation and the store page)
-- 🔄 **Store page content** (in progress): summary, rich description (safe markdown), lineup with set times, FAQ,
-  gallery, video, minimum age, refund policy and notes; feeds Google events, marketplace notes (age) and MCP.
+- ✅ **Store page content** (mig `20260929120000`, not applied to prod): summary, rich description (safe markdown),
+  lineup with set times, FAQ, gallery, video, minimum age, refund policy and notes; feeds the Google events feed
+  (summary, lineup, age range) and the marketplace age note. Shows in Create / Edit once the columns exist.
+- ⬜ Store page follow-ups: summary on event cards, FAQ structured data, MCP / calendar / SEO copy, `min_age` in
+  `exos-distribute`'s select, lineup feeding Performers, a length check on the old `description` column.
 - ⬜ Currency picker in Create Event (new events are always USD today); drop the dead `exclusivity` field.
 - ⬜ Rebuild or retire Terminal-2's `static/bridge` copy (it still has the removed promo-code editor) and add a
   CI check that it matches EXP main; one shared structured-data builder so `exos_seo.py` can retire.

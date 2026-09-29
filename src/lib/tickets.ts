@@ -21,6 +21,7 @@ import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
 import { estimateOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
+import { fetchAllPages } from './door/roster';
 
 const toTs = (iso?: string | null): Timestamp =>
   Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
@@ -300,11 +301,21 @@ export interface RegistryEntry {
  *  progressively slower on large events. Door roles only (owner/manager/
  *  scanner or admin), same gate as the barcode-secret view. */
 export async function listEventTicketsForRegistry(eventId: string): Promise<RegistryEntry[]> {
-  const { data, error } = await supabase.rpc('exos_event_checkin_roster', {
-    p_event_id: eventId,
-  });
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  // Paged (ranges of ROSTER_PAGE_SIZE until a page comes back empty): a single
+  // call is capped at PostgREST max_rows, which would silently cut the offline
+  // list of a large event short.
+  const rows = await fetchAllPages<any>(
+    async (from, to) => {
+      const { data, error } = await supabase
+        .rpc('exos_event_checkin_roster', { p_event_id: eventId })
+        .order('ticket_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return data ?? [];
+    },
+    (r) => String(r.ticket_id),
+  );
+  return rows.map((r: any) => ({
     id: r.ticket_id,
     status: r.status,
     ownerId: r.owner_id ?? '',
@@ -462,9 +473,9 @@ export async function checkInTicket(
   verification: 'verified' | 'legacy' | 'manual',
   barcodePayload?: string,
   eventId?: string,
-  opts: { reason?: string; device?: string } = {},
+  opts: { reason?: string; device?: string; signal?: AbortSignal } = {},
 ): Promise<CheckInResult> {
-  const { data, error } = await supabase.rpc('exos_check_in_ticket', {
+  const call = supabase.rpc('exos_check_in_ticket', {
     p_ticket_id: ticketId,
     p_source: source,
     p_verification: verification,
@@ -478,6 +489,7 @@ export async function checkInTicket(
     p_reason: opts.reason ?? null,
     p_device: opts.device ?? null,
   });
+  const { data, error } = await (opts.signal ? call.abortSignal(opts.signal) : call);
   if (error) throw error;
   return (data ?? { ok: false, reason: 'not-found' }) as CheckInResult;
 }

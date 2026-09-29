@@ -1,7 +1,7 @@
 import { AccessNeedBadges } from '../components/Accessibility';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEventForEdit, getPublicEvent } from '../lib/events';
+import { getPublicEvent } from '../lib/events';
 import {
   getTicketForScan,
   listEventTicketsForRegistry,
@@ -15,7 +15,7 @@ import {
   type CheckInResult,
   type ScanTicket,
 } from '../lib/tickets';
-import { Ticket, Event } from '../types';
+import { Ticket } from '../types';
 import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 // html5-qrcode (~330KB) is loaded on demand when the scanner opens, so it
@@ -24,12 +24,11 @@ import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
-import { verifyBarcode, extractTicketIdFromAny, type VerifyResult } from '../lib/barcode';
+import { verifyBarcode, type VerifyResult } from '../lib/barcode';
 import { describeSkew, serverNow } from '../lib/serverClock';
 import {
   deviceLabel,
   enqueueScan,
-  isRegistryFresh,
   newClientRef,
   parseQueue,
   removeRefs,
@@ -50,60 +49,50 @@ import {
 } from '../lib/guestListsApi';
 import { overlayPending } from '../lib/guestLists';
 import { indexTablesByTicket, tableSummary } from '../lib/tables';
+import {
+  decideScan,
+  parseDoorCode,
+  type DoorNetwork,
+  type DoorSource,
+  type RecentRead,
+  type ScanDecision,
+  type ScanDecisionInput,
+} from '../lib/door/decide';
+import { DOOR_REQUEST_TIMEOUT_MS, isServerAnswer, withDeadline } from '../lib/door/net';
+import { doorKV, safeLocalStorage } from '../lib/door/kv';
+import {
+  ROSTER_REFRESH_MS,
+  addMark,
+  applyMarks,
+  buildRoster,
+  doorGate,
+  loadDoorEvent,
+  loadMarks,
+  loadRoster,
+  marksSince,
+  pruneLocalDoorCaches,
+  pruneRosters,
+  saveDoorEvent,
+  saveMarks,
+  saveRoster,
+  type DoorEvent,
+  type DoorRosterEntry,
+  type RosterMarks,
+} from '../lib/door/roster';
+import { fetchDoorEvent, pingServer } from '../lib/door/api';
 
 // The cached roster holds every ticket's barcode secret, so it is dropped
 // 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
 // A multi-day event re-downloads it each day; opening the page online does
-// that automatically.
+// that automatically, and it is re-pulled every minute while online.
+// Storage layout: lib/door/roster. Scan rules: lib/door/decide.
 
-interface OfflineTicketEntry {
-  used: boolean;
-  voided?: boolean;
-  name: string;
-  tier: string;
-  ownerId?: string;
-  barcodeSecret?: string;
-  promoterId?: string;
-  // Pending-transfer lock. When set, the ticket is mid-flight to a
-  // receiver and the offline scan path refuses entry. Picked up on
-  // each registry refresh so the lock propagates within a refresh
-  // cycle even when the door staff is fully offline-cached.
-  pendingTransferId?: string | null;
-}
+type OfflineTicketEntry = DoorRosterEntry;
 
-interface StoredRegistry {
-  _savedAt: number;
-  data: Record<string, OfflineTicketEntry>;
-}
-
-function saveRegistry(eventId: string, data: StoredRegistry['data']) {
-  const payload: StoredRegistry = { _savedAt: Date.now(), data };
-  localStorage.setItem(`registry_${eventId}`, JSON.stringify(payload));
-}
-
-function pruneStaleCheckInCaches() {
-  const now = Date.now();
-  // Queued offline scans (pending_updates_*) are NOT dropped with their
-  // roster: they replay on their own, and the server answers for them.
-  const toDelete: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key || !key.startsWith('registry_')) continue;
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw);
-      // Legacy entries (no _savedAt wrapper) are old-format and considered
-      // stale by definition — they predate this hygiene pass.
-      if (!parsed || typeof parsed !== 'object' || !isRegistryFresh(parsed._savedAt, now)) {
-        toDelete.push(key);
-      }
-    } catch {
-      toDelete.push(key);
-    }
-  }
-  for (const k of toDelete) localStorage.removeItem(k);
-}
+/** While the server isn't answering, probe it this often. */
+const PROBE_MS = 10_000;
+/** Queued offline scans retry this often while any are waiting. */
+const REPLAY_RETRY_MS = 15_000;
 
 function savePending(eventId: string | undefined, queue: QueuedScan[]) {
   if (!eventId) return;
@@ -111,6 +100,25 @@ function savePending(eventId: string | undefined, queue: QueuedScan[]) {
     localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(queue));
   } catch {
     /* storage full / blocked: the in-memory queue still replays this session */
+  }
+}
+
+function loadPendingRaw(eventId: string): string | null {
+  try {
+    return localStorage.getItem(`pending_updates_${eventId}`);
+  } catch {
+    return null;
+  }
+}
+
+const clockTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** A time in the event's zone (falls back to the device's). */
+function eventTime(ms: number, timeZone?: string): string {
+  try {
+    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone, timeZoneName: 'short' });
+  } catch {
+    return clockTime(ms);
   }
 }
 
@@ -122,6 +130,11 @@ const REFUSAL_TEXT: Record<string, string> = {
   'bad-scan-time': 'This offline scan is too old to upload (more than 24 hours).',
 };
 
+const VOIDED_TEXT =
+  'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.';
+const IN_TRANSFER_TEXT =
+  'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.';
+
 type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' };
 
 export default function OrganizerCheckIn() {
@@ -130,7 +143,11 @@ export default function OrganizerCheckIn() {
   const { user, isAdmin } = useAuth();
   const { orgs } = useOrganization();
   const { toast } = useToast();
-  const [event, setEvent] = useState<Event | null>(null);
+  const [event, setEvent] = useState<DoorEvent | null>(null);
+  // 'unavailable': no network and no saved copy of this event on this device.
+  const [eventLoad, setEventLoad] = useState<'loading' | 'ready' | 'unavailable' | 'missing'>('loading');
+  // Door role saved with the event header, so overrides still show offline.
+  const [cachedRole, setCachedRole] = useState<string | null>(null);
   const [searchId, setSearchId] = useState('');
   const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode' | 'needs-reason'>('idle');
   // "Already used": when (and on which device) the ticket was checked in.
@@ -145,9 +162,7 @@ export default function OrganizerCheckIn() {
   // A scan during the pre-doors test window: verified, but the ticket stays
   // unused (the server answers reason 'test-scan'), so don't mark it locally.
   const [testScan, setTestScan] = useState(false);
-  // Reason text shown in the 'invalid-barcode' state — populated by the
-  // HMAC verifier so the operator knows whether the issue was a stale
-  // barcode (screenshot from earlier) or a forged one.
+  // Reason text shown in the 'invalid-barcode' / 'not-found' states.
   const [invalidReason, setInvalidReason] = useState<string>('');
   // Set when a check-in is refused because doors aren't open yet — surfaces an
   // owner/manager "enable test scanning" control (RPC is server-gated).
@@ -157,6 +172,8 @@ export default function OrganizerCheckIn() {
   // True when the last lookup was typed or picked from the name search
   // rather than a scanned signed QR — nothing was cryptographically verified.
   const [manualEntry, setManualEntry] = useState(false);
+  // Admitted on the saved list (server unreachable); uploads later.
+  const [admittedOffline, setAdmittedOffline] = useState(false);
   const verdictRef = useRef<HTMLDivElement>(null);
   // On a phone the verdict renders below the scanner; bring it into view.
   useEffect(() => {
@@ -166,8 +183,18 @@ export default function OrganizerCheckIn() {
   const [buyerName, setBuyerName] = useState<string>('');
   const [scanning, setScanning] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  // The browser says online but the server didn't answer (a request failed or
+  // timed out): scans use the offline rules until a probe succeeds.
+  const [serverDown, setServerDown] = useState(false);
+  const effectiveOffline = isOffline || serverDown;
+  const network: DoorNetwork = isOffline ? 'offline' : serverDown ? 'unreachable' : 'online';
   const [offlineRegistry, setOfflineRegistry] = useState<Record<string, OfflineTicketEntry>>({});
+  // When the roster in use was downloaded (ms), for the offline banner.
+  const [rosterSavedAt, setRosterSavedAt] = useState<number | null>(null);
+  const rosterSavedAtRef = useRef<number | null>(null);
+  const marksRef = useRef<RosterMarks>({});
   const [downloading, setDownloading] = useState(false);
+  const downloadingRef = useRef(false);
   const [syncing, setSyncing] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<QueuedScan[]>([]);
   const [recentScans, setRecentScans] = useState<ScanRow[]>([]);
@@ -180,7 +207,8 @@ export default function OrganizerCheckIn() {
     }
   }, []);
   // Role in the event's org — a hint for the UI; the server enforces it.
-  const doorRole = orgs.find((o) => o.org.id === event?.orgId)?.membership.role ?? null;
+  const liveRole = orgs.find((o) => o.org.id === event?.orgId)?.membership.role ?? null;
+  const doorRole = liveRole ?? cachedRole;
   const canOverride = isAdmin || doorRole === 'owner' || doorRole === 'manager';
   // "Inside venue" = tickets actually scanned in (exos_event_checkins count),
   // NOT tickets sold. Seeded on mount; refreshed by the realtime channel below
@@ -193,13 +221,20 @@ export default function OrganizerCheckIn() {
   // null (timeout hasn't run) so stopScanner is a no-op, then the timeout
   // fires and starts the camera with no owner to shut it down.
   const startScannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wasOfflineRef = useRef(isOffline);
+  const wasOfflineRef = useRef(effectiveOffline);
+  // One scan at a time; the camera keeps decoding while a scan is decided.
+  const inFlightRef = useRef(false);
+  // The last read, for the duplicate-read guard (lib/door/decide).
+  const lastReadRef = useRef<RecentRead | null>(null);
   // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
   const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
   // Offline door download: table labels by ticket + every guest-list entry.
   const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
   const [extrasSyncing, setExtrasSyncing] = useState(false);
   const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+
+  const noteServerOk = () => setServerDown(false);
+  const noteServerFailure = () => setServerDown(true);
 
   const updateDoorExtras = (next: DoorExtras) => {
     setDoorExtras(next);
@@ -225,55 +260,79 @@ export default function OrganizerCheckIn() {
     }
   };
 
-  useEffect(() => {
-    async function fetchEvent() {
-      if (!eventId) return;
+  // The event header: network first, the saved copy when the network is gone
+  // (a reload or relaunch at a door with no signal must still open the scanner).
+  const loadEventHeader = async (opts: { quiet?: boolean } = {}) => {
+    if (!eventId) return;
+    if (navigator.onLine) {
       try {
-        // Staff RLS on exos_events lets door staff read the event (any status).
-        const ev = await getEventForEdit(eventId);
-        if (ev) setEvent(ev);
+        const ev = await withDeadline((signal) => fetchDoorEvent(eventId, signal), 8_000);
+        if (ev) {
+          setEvent(ev);
+          setEventLoad('ready');
+          return;
+        }
+        if (!opts.quiet) setEventLoad((s) => (s === 'ready' ? s : 'missing'));
+        return;
       } catch (err) {
-        console.error('Failed to load event for check-in:', err);
+        console.warn('Event header unavailable; using the saved copy.', err);
+        // Online by the browser's account but no answer: scan on the saved
+        // list straight away instead of waiting out a timeout per scan.
+        if (!isServerAnswer(err)) noteServerFailure();
       }
     }
-    fetchEvent();
+    if (opts.quiet) return;
+    const saved = loadDoorEvent(safeLocalStorage(), eventId, Date.now());
+    if (saved) {
+      setEvent(saved.event);
+      setCachedRole(saved.role);
+      setEventLoad('ready');
+    } else {
+      setEventLoad((s) => (s === 'ready' ? s : 'unavailable'));
+    }
+  };
+
+  // Keep the saved header (and the role) current whenever it changes online.
+  useEffect(() => {
+    if (!event) return;
+    if (liveRole) setCachedRole(liveRole);
+    saveDoorEvent(safeLocalStorage(), event, liveRole ?? cachedRole, Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event, liveRole]);
+
+  useEffect(() => {
+    // The saved role is a fallback until the live org list loads.
+    if (eventId) setCachedRole(loadDoorEvent(safeLocalStorage(), eventId, Date.now())?.role ?? null);
+    void loadEventHeader();
 
     const handleSyncStatus = () => setIsOffline(!navigator.onLine);
     window.addEventListener('online', handleSyncStatus);
     window.addEventListener('offline', handleSyncStatus);
 
-    // Sweep stale offline-check-in caches from previous events.
-    //
-    // We tag each registry payload with `_savedAt` and prune anything older
-    // than 7 days on mount. Without this, every event the organizer checks
-    // attendees in for accumulates ~one entry per attendee in localStorage
-    // forever and eventually trips the ~5MB browser quota.
-    pruneStaleCheckInCaches();
+    // Sweep stale offline-check-in caches from previous events (rosters hold
+    // barcode secrets; they are dropped after REGISTRY_TTL_MS).
+    const now = Date.now();
+    pruneLocalDoorCaches(safeLocalStorage(), now);
     pruneStaleDoorExtras();
 
-    // Load registry and pending updates for THIS event, if cached.
+    let cancelled = false;
     if (eventId) {
-      const saved = localStorage.getItem(`registry_${eventId}`);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          // Older payloads were stored as plain Record<id, entry>; newer ones
-          // wrap the data in `{ _savedAt, data }`. Handle both shapes.
-          if (parsed && typeof parsed === 'object' && parsed.data) {
-            setOfflineRegistry(parsed.data);
-          } else {
-            setOfflineRegistry(parsed);
-          }
-        } catch {
-          // Corrupt cache — drop it.
-          localStorage.removeItem(`registry_${eventId}`);
-        }
-      }
+      marksRef.current = loadMarks(safeLocalStorage(), eventId, now);
+      void pruneRosters(doorKV(), now)
+        .then(() => loadRoster(doorKV(), safeLocalStorage(), eventId, now))
+        .then((stored) => {
+          // Don't clobber a download that finished first.
+          if (cancelled || !stored || (rosterSavedAtRef.current ?? 0) > stored._savedAt) return;
+          rosterSavedAtRef.current = stored._savedAt;
+          setRosterSavedAt(stored._savedAt);
+          setOfflineRegistry(applyMarks(stored.data, marksRef.current));
+        })
+        .catch((err) => console.warn('saved door list unavailable', err));
       setDoorExtras(loadCachedDoorExtras(eventId));
       // Queued offline scans (older builds stored bare ids; parseQueue
       // upgrades them to typed entries, which the server treats as overrides).
       // Saved back so an upgraded entry keeps its ref across reloads.
-      const queued = parseQueue(localStorage.getItem(`pending_updates_${eventId}`), serverNow());
+      const queued = parseQueue(loadPendingRaw(eventId), serverNow());
       setPendingUpdates(queued);
       if (queued.length > 0) savePending(eventId, queued);
     }
@@ -282,20 +341,47 @@ export default function OrganizerCheckIn() {
     void syncServerClock();
 
     return () => {
+      cancelled = true;
       window.removeEventListener('online', handleSyncStatus);
       window.removeEventListener('offline', handleSyncStatus);
       void stopScanner();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   useEffect(() => {
-    if (!isOffline && pendingUpdates.length > 0) {
-      syncPendingUpdates();
+    if (!effectiveOffline && pendingUpdates.length > 0) {
+      void syncRef.current();
     }
-  }, [isOffline, pendingUpdates.length]);
+  }, [effectiveOffline, pendingUpdates.length]);
 
+  // Scans that failed to upload (server hiccup) retry on a timer, not only
+  // when the network flips or the queue grows.
+  useEffect(() => {
+    if (effectiveOffline || pendingUpdates.length === 0) return undefined;
+    const t = setInterval(() => void syncRef.current(), REPLAY_RETRY_MS);
+    return () => clearInterval(t);
+  }, [effectiveOffline, pendingUpdates.length]);
+
+  // Leave "server unreachable" as soon as the server answers again.
+  useEffect(() => {
+    if (!serverDown || isOffline) return undefined;
+    let stopped = false;
+    const t = setInterval(() => {
+      void pingServer().then((ok) => {
+        if (ok && !stopped) setServerDown(false);
+      });
+    }, PROBE_MS);
+    return () => {
+      stopped = true;
+      clearInterval(t);
+    };
+  }, [serverDown, isOffline]);
+
+  const syncingRef = useRef(false);
   const syncPendingUpdates = async () => {
-    if (pendingUpdates.length === 0 || syncing || !eventId) return;
+    if (pendingUpdates.length === 0 || syncingRef.current || !eventId) return;
+    syncingRef.current = true;
     setSyncing(true);
     const answered: string[] = [];
     const conflicts: { id: string; reason: string }[] = [];
@@ -309,12 +395,20 @@ export default function OrganizerCheckIn() {
       // throws and keeps the scan queued.
       for (const scan of pendingUpdates) {
         try {
-          const result = await checkInOffline(scan, eventId, device);
+          const result = await withDeadline(() => checkInOffline(scan, eventId, device), 10_000);
+          // A timed-out online check-in can still have landed: the server then
+          // answers 'used' by THIS device, which isn't a conflict.
+          const ownEarlierScan = result.reason === 'used' && result.device === device;
           // The server logs refusals to the scan report itself.
-          if (!result.ok) conflicts.push({ id: scan.ticketId, reason: result.reason ?? 'unknown' });
+          if (!result.ok && !ownEarlierScan) conflicts.push({ id: scan.ticketId, reason: result.reason ?? 'unknown' });
           answered.push(scan.ref);
+          noteServerOk();
         } catch (err) {
           console.error(`Error syncing offline scan ${scan.ref}:`, err);
+          if (!isServerAnswer(err)) {
+            noteServerFailure();
+            break; // the rest would wait out the same dead link
+          }
         }
       }
     } finally {
@@ -324,6 +418,7 @@ export default function OrganizerCheckIn() {
         savePending(eventId, remaining);
         return remaining;
       });
+      syncingRef.current = false;
       setSyncing(false);
       if (conflicts.length > 0) {
         toast({
@@ -333,6 +428,8 @@ export default function OrganizerCheckIn() {
       }
     }
   };
+  const syncRef = useRef(syncPendingUpdates);
+  syncRef.current = syncPendingUpdates;
 
   // Tear down the live camera scanner safely. stop() rejects if the camera
   // isn't actively running, so guard on state and swallow that case.
@@ -386,10 +483,11 @@ export default function OrganizerCheckIn() {
             },
           },
           (decodedText: string) => {
-            setSearchId(decodedText);
-            handleCheckIn(undefined, decodedText);
-            void stopScanner();
-            setScanning(false);
+            // The camera stays open for the next attendee. This callback is
+            // registered once, so it goes through a ref to the current
+            // handler (current roster, queue, network state) and says
+            // explicitly that the read came from the camera.
+            void handleCheckInRef.current(undefined, decodedText, undefined, 'camera');
           },
           () => {
             /* per-frame decode miss — ignore */
@@ -416,12 +514,12 @@ export default function OrganizerCheckIn() {
    * the organizer can extend this.
    */
   const exportAttendeesCsv = async () => {
-    let entries = Object.entries(offlineRegistry);
+    let entries: [string, OfflineTicketEntry][] = Object.entries(offlineRegistry);
     // Auto-sync if the operator hits Export before they've ever
     // downloaded the registry. Skip if we're offline (downloadRegistry
     // would just fail) — in that case the toast tells them what to do.
     if (entries.length === 0) {
-      if (isOffline) {
+      if (effectiveOffline) {
         toast({
           kind: 'info',
           message: 'No registry data — connect to the network and sync first.',
@@ -429,31 +527,13 @@ export default function OrganizerCheckIn() {
         return;
       }
       toast({ kind: 'info', message: 'Syncing attendees first…' });
-      await downloadRegistry();
-      // Re-read state after the sync. We can't rely on closure-captured
-      // offlineRegistry — pull from localStorage which the sync just
-      // wrote, then fall through to the CSV build.
-      try {
-        const raw = localStorage.getItem(`registry_${eventId}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          const data = (parsed && parsed.data) || parsed;
-          entries = Object.entries(data);
-        }
-      } catch {
-        /* ignore — we'll just fall through to "no entries" */
-      }
+      entries = Object.entries((await downloadRegistry()) ?? {});
       if (entries.length === 0) {
         toast({ kind: 'warn', message: 'No attendees to export yet.' });
         return;
       }
     }
-    const rows = entries.map(([id, raw]) => {
-      // `Object.entries` widens our typed Record values to `unknown`; cast
-      // back to the row shape we put in.
-      const e = raw as OfflineTicketEntry;
-      return [id, e.name, e.tier, e.voided ? 'voided' : e.used ? 'used' : 'active', e.promoterId || ''];
-    });
+    const rows = entries.map(([id, e]) => [id, e.name, e.tier, e.voided ? 'voided' : e.used ? 'used' : 'active', e.promoterId || '']);
     // Shared builder (lib/csv): RFC 4180 quoting + formula-injection guard.
     downloadCsv(
       csvFileName(['attendees', event?.title ?? eventId]),
@@ -463,41 +543,52 @@ export default function OrganizerCheckIn() {
     toast({ kind: 'success', message: `Exported ${rows.length} attendee(s).` });
   };
 
-  const downloadRegistry = async (opts: { silent?: boolean } = {}) => {
-    if (!eventId || !user) return;
+  /** Download the whole roster (paged) and save it for offline use. Returns
+   *  the merged roster, or null when the download failed. */
+  const downloadRegistry = async (opts: { silent?: boolean } = {}): Promise<Record<string, OfflineTicketEntry> | null> => {
+    if (!eventId || !user || downloadingRef.current) return null;
     const silent = opts.silent === true;
+    downloadingRef.current = true;
     if (!silent) setDownloading(true);
+    const startedAt = Date.now();
     try {
       // listEventTicketsForRegistry resolves owner display names + carries the
       // per-ticket barcode_secret (staff RLS) so the offline HMAC check works.
       const entries = await listEventTicketsForRegistry(eventId);
-      const registry: Record<string, OfflineTicketEntry> = {};
-      for (const e of entries) {
-        registry[e.id] = {
-          used: e.status === 'used',
-          voided: e.status === 'voided',
-          name: e.name,
-          tier: e.tier,
-          ownerId: e.ownerId,
-          barcodeSecret: e.barcodeSecret,
-          promoterId: e.promoterId,
-          pendingTransferId: e.pendingTransferId,
-        };
+      const roster = buildRoster(entries);
+      // What this device changed while the download ran stays on top of it.
+      marksRef.current = marksSince(marksRef.current, startedAt);
+      saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
+      const merged = { ...applyMarks(roster, marksRef.current) };
+      // Admitted here but not uploaded yet: the server's copy says active.
+      for (const q of pendingUpdates) {
+        if (merged[q.ticketId]) merged[q.ticketId] = { ...merged[q.ticketId], used: true };
       }
-
-      setOfflineRegistry(registry);
-      saveRegistry(eventId, registry);
+      setOfflineRegistry(merged);
+      rosterSavedAtRef.current = startedAt;
+      setRosterSavedAt(startedAt);
+      const saved = await saveRoster(doorKV(), eventId, roster, startedAt);
+      if (!saved && !silent) {
+        toast({ kind: 'warn', message: 'This device is out of storage: the list works while this page stays open, but not after a reload.' });
+      }
       void downloadDoorExtras({ silent: true });
+      // Keep the camera code in the offline cache (service worker) so the
+      // scanner opens after a reload with no network.
+      void import('html5-qrcode').catch(() => {});
       if (!silent) {
         toast({
           kind: 'success',
           message: `Synced ${entries.length} ticket(s) for offline check-in.`,
         });
       }
+      return merged;
     } catch (err) {
       console.error(err);
+      if (!isServerAnswer(err)) noteServerFailure();
       if (!silent) toast({ kind: 'error', message: 'Failed to sync offline registry.' });
+      return null;
     } finally {
+      downloadingRef.current = false;
       if (!silent) setDownloading(false);
     }
   };
@@ -508,13 +599,7 @@ export default function OrganizerCheckIn() {
   useEffect(() => {
     if (!eventId) return undefined;
     const ch = joinCheckinChannel(eventId, (ticketId) => {
-      setOfflineRegistry((prev) => {
-        const entry = prev[ticketId];
-        if (!entry || entry.used) return prev; // unknown ticket or already used
-        const next = { ...prev, [ticketId]: { ...entry, used: true } };
-        saveRegistry(eventId, next);
-        return next;
-      });
+      markLocal(ticketId, { used: true });
       // A check-in landed (this lane or another) — bump the live count by one
       // rather than re-running a count(*) per scan. A count(*) per realtime tick
       // per lane doesn't scale at a busy multi-lane gate; postgres_changes emits
@@ -523,6 +608,7 @@ export default function OrganizerCheckIn() {
       setInsideVenue((n) => n + 1);
     });
     return () => ch.leave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   // Seed "inside venue" on mount (the realtime channel keeps it live after).
@@ -536,25 +622,40 @@ export default function OrganizerCheckIn() {
   }, [eventId]);
 
   // Pull the roster once on open (silently) so name search works without a
-  // manual download; the cached copy from localStorage covers offline opens.
+  // manual download; the saved copy covers offline opens.
   useEffect(() => {
     if (!eventId || !user || !navigator.onLine) return;
     void downloadRegistry({ silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, user?.uid]);
 
+  // While online, re-pull the roster and the event header every minute: the
+  // cached list is only a hint online, but it is all there is if the link
+  // drops, so keep it current (new sales, transfers, refunds, doors time).
+  const refreshRef = useRef<() => void>(() => {});
+  refreshRef.current = () => {
+    void downloadRegistry({ silent: true });
+    void loadEventHeader({ quiet: true });
+  };
+  useEffect(() => {
+    if (!eventId || !user || effectiveOffline) return undefined;
+    const t = setInterval(() => refreshRef.current(), ROSTER_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [eventId, user?.uid, effectiveOffline]);
+
   // On reconnect, re-pull the registry: Realtime doesn't replay check-ins other
   // lanes made while we were offline, so catch up silently once links return.
   useEffect(() => {
-    if (wasOfflineRef.current && !isOffline) {
-      void downloadRegistry({ silent: true });
+    if (wasOfflineRef.current && !effectiveOffline) {
+      refreshRef.current();
       // Realtime doesn't replay check-ins that landed while we were
       // disconnected, so reconcile the live count against the authoritative
       // head-count once (the only count(*) on this path — not per scan).
       if (eventId) countEventCheckins(eventId).then(setInsideVenue).catch(() => {});
     }
-    wasOfflineRef.current = isOffline;
-  }, [isOffline]);
+    wasOfflineRef.current = effectiveOffline;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveOffline]);
 
   // Write an audit entry every time we refuse a scan. Organizers
   // see these on the event report — useful for door-staff debugging
@@ -571,7 +672,7 @@ export default function OrganizerCheckIn() {
       | 'invalid-barcode'
       | 'not-found'
       | 'expired-code',
-    source: 'camera' | 'manual',
+    source: DoorSource,
     ctx: {
       ticketIdAttempted?: string | null;
       wrongEventId?: string;
@@ -608,14 +709,19 @@ export default function OrganizerCheckIn() {
       return next;
     });
 
-  const markLocal = (ticketId: string, patch: Partial<OfflineTicketEntry>) =>
+  // A per-scan change: patched in memory and saved to the small marks overlay
+  // (not a rewrite of the whole roster).
+  const markLocal = (ticketId: string, patch: Partial<OfflineTicketEntry>) => {
     setOfflineRegistry((prev) => {
       const entry = prev[ticketId];
       if (!entry) return prev;
-      const next = { ...prev, [ticketId]: { ...entry, ...patch } };
-      if (eventId) saveRegistry(eventId, next);
-      return next;
+      if (Object.entries(patch).every(([k, v]) => entry[k as keyof OfflineTicketEntry] === v)) return prev;
+      return { ...prev, [ticketId]: { ...entry, ...patch } };
     });
+    if (!eventId) return;
+    marksRef.current = addMark(marksRef.current, ticketId, patch, Date.now());
+    saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
+  };
 
   // Why the local signature check refused a code. A correctly signed code from
   // the wrong time window is a clock problem (or a screenshot): say by how much.
@@ -633,7 +739,7 @@ export default function OrganizerCheckIn() {
     return reasonText[v.reason || ''] || 'Code rejected.';
   };
 
-  const denyLocal = (ticketId: string, name: string, v: VerifyResult, src: 'camera' | 'manual') => {
+  const denyLocal = (ticketId: string, name: string, v: VerifyResult, src: DoorSource) => {
     setStatus('invalid-barcode');
     setInvalidReason(localRejectText(v, serverNow()));
     pushScan(ticketId, name, 'DENIED');
@@ -644,7 +750,7 @@ export default function OrganizerCheckIn() {
   };
 
   // A server refusal (online check-in).
-  const showRefusal = (result: CheckInResult, ticketId: string, name: string, src: 'camera' | 'manual') => {
+  const showRefusal = (result: CheckInResult, ticketId: string, name: string, src: DoorSource) => {
     setBuyerName(name);
     if (result.reason === 'reason-required') {
       // We always ask first; if the server still wants one, ask again.
@@ -660,17 +766,21 @@ export default function OrganizerCheckIn() {
       void writeScanReject('used', src, { ticketIdAttempted: ticketId });
       return;
     }
+    // The server is the authority: bring the saved list in line with it.
     if (result.reason === 'voided') markLocal(ticketId, { voided: true });
+    if (result.reason === 'in-transfer') markLocal(ticketId, { pendingTransferId: offlineRegistry[ticketId]?.pendingTransferId || 'pending' });
+    const opensAt = (result as CheckInResult & { opens_at?: string }).opens_at;
+    const opensMs = opensAt ? Date.parse(opensAt) : NaN;
     const text: Record<string, string> = {
       ...REFUSAL_TEXT,
       'barcode-expired': 'This code expired. Ask the attendee to refresh their ticket and rescan.',
       'barcode-rejected':
         "Signature didn't match this ticket (server check) — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded.",
-      'doors-not-open': 'Doors are not open yet for this event. Check-in opens at the event’s doors time.',
-      'voided':
-        'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.',
-      'in-transfer':
-        'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
+      'doors-not-open': Number.isFinite(opensMs)
+        ? `Doors are not open yet. Check-in opens at ${eventTime(opensMs, event?.timezone)}.`
+        : 'Doors are not open yet for this event. Check-in opens at the event’s doors time.',
+      'voided': VOIDED_TEXT,
+      'in-transfer': IN_TRANSFER_TEXT,
       'wrong-event': 'This ticket is for a different event.',
       'event-cancelled': 'This event was cancelled. Nobody can be checked in.',
     };
@@ -689,194 +799,251 @@ export default function OrganizerCheckIn() {
     void writeScanReject(audit, src, { ticketIdAttempted: ticketId, reasonDetail: result.reason });
   };
 
-  const admitted = (ticket: Ticket, name: string, test: boolean) => {
+  const admitted = (ticket: Ticket, name: string, test: boolean, offline = false) => {
     setTestScan(test);
+    setAdmittedOffline(offline);
     setBuyerName(name || 'Anonymous attendee');
     setFoundTicket(ticket);
     if (!test) {
       pushScan(ticket.id, name, 'SUCCESS');
-      markLocal(ticket.id, { used: true });
+      markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false });
     }
     setStatus('success');
     setSearchId('');
     setOverrideFor(null);
   };
 
-  const handleCheckIn = async (e?: React.FormEvent, manualValue?: string, reason?: string) => {
-    if (e) e.preventDefault();
-    const probeValue = (manualValue || searchId).trim();
-    if (!probeValue || !eventId) return;
-    const src: 'camera' | 'manual' = scanning ? 'camera' : 'manual';
-    // A typed ticket id (no signed code). A CAMERA scan is never treated as
-    // one: a scanned bare UUID is a forgery downgrade and fails the signature
-    // check (and the server refuses it).
-    const isBareManualEntry = !scanning && !probeValue.startsWith('T-') && !probeValue.includes(':');
+  // Act on a decision that needs no server call (lib/door/decide).
+  const applyLocalDecision = (
+    d: Exclude<ScanDecision, { action: 'ask-server' } | { action: 'ignore' }>,
+    ctx: { raw: string; src: DoorSource; reason?: string; name: string; tier?: string; verify: VerifyResult | null },
+  ) => {
+    if (d.action === 'needs-reason') {
+      setBuyerName(ctx.name);
+      setOverrideFor({ ticketId: d.ticketId, name: ctx.name });
+      setOverrideReason('');
+      setStatus('needs-reason');
+      return;
+    }
+    if (d.action === 'admit') {
+      if (d.queue) {
+        // Admit on the downloaded list and queue the scan WITH its code and
+        // time. The upload re-checks the signature server-side, so a ticket
+        // transferred since the download comes back as a conflict.
+        queueScan({
+          ref: newClientRef(),
+          ticketId: d.ticketId,
+          payload: parseDoorCode(ctx.raw, ctx.src).bare ? null : ctx.raw,
+          scannedAt: serverNow(),
+          source: ctx.src,
+          ...(ctx.reason ? { reason: ctx.reason } : {}),
+        });
+      }
+      // A pre-doors test-window scan is never queued: replayed after doors it
+      // would check the ticket in for real.
+      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true);
+      return;
+    }
+    const id = d.ticketId;
+    setBuyerName(ctx.name);
+    const canAudit = !effectiveOffline;
+    switch (d.reason) {
+      case 'used':
+        setStatus('already-used');
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        if (canAudit) void writeScanReject('used', ctx.src, { ticketIdAttempted: id });
+        return;
+      case 'invalid-barcode':
+        if (id && ctx.verify) denyLocal(id, ctx.name, ctx.verify, ctx.src);
+        else {
+          setStatus('invalid-barcode');
+          setInvalidReason('Code rejected.');
+        }
+        return;
+      case 'voided':
+      case 'in-transfer':
+        setStatus('invalid-barcode');
+        setInvalidReason(d.reason === 'voided' ? VOIDED_TEXT : IN_TRANSFER_TEXT);
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        void writeScanReject(d.reason, ctx.src, { ticketIdAttempted: id });
+        return;
+      case 'doors-not-open':
+        setStatus('invalid-barcode');
+        setInvalidReason(
+          d.opensAt != null
+            ? `Doors are not open yet. Check-in opens at ${eventTime(d.opensAt, event?.timezone)}.`
+            : 'Doors are not open yet for this event.',
+        );
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        return;
+      case 'needs-manager':
+        setStatus('invalid-barcode');
+        setInvalidReason(REFUSAL_TEXT['needs-manager']);
+        return;
+      case 'wrong-event':
+        setStatus('invalid-barcode');
+        setInvalidReason('Wrong event — this ticket belongs to a different event. Direct the holder to the correct door.');
+        if (id) pushScan(id, '—', 'DENIED');
+        return;
+      case 'event-cancelled':
+        setStatus('invalid-barcode');
+        setInvalidReason('This event was cancelled. Nobody can be checked in.');
+        return;
+      case 'unknown-offline':
+        setStatus('not-found');
+        setInvalidReason(
+          "Not on this device's saved list, and the server can't be reached to check it. Ask the holder to wait until the connection is back, or check with a manager.",
+        );
+        return;
+      default:
+        setStatus('not-found');
+        if (id && canAudit) void writeScanReject('not-found', ctx.src, { ticketIdAttempted: id });
+    }
+  };
 
-    setStatus('searching');
-    setManualEntry(isBareManualEntry);
+  const handleCheckIn = async (e?: React.FormEvent, manualValue?: string, reason?: string, source: DoorSource = 'manual') => {
+    if (e) e.preventDefault();
+    const raw = (manualValue || searchId).trim();
+    if (!raw || !eventId || inFlightRef.current) return;
+    const src = source;
+    const code = parseDoorCode(raw, src);
+    const now = serverNow();
+    const docId = code.ticketId;
+    const cached = docId ? offlineRegistry[docId] : undefined;
+    const base: Omit<ScanDecisionInput, 'network' | 'verify'> = {
+      code,
+      source: src,
+      reason,
+      eventId,
+      entry: cached,
+      queued: !!docId && pendingUpdates.some((q) => q.ticketId === docId),
+      gate: doorGate(event),
+      now,
+      canOverride,
+      recent: lastReadRef.current,
+    };
+    // Duplicate camera reads are dropped before anything changes on screen.
+    const first = decideScan({ ...base, verify: null, network });
+    if (first.action === 'ignore') return;
+
+    inFlightRef.current = true;
+    setManualEntry(code.bare);
     setFoundTicket(null);
     setInvalidReason('');
     setDoorsBlocked(false);
     setUsedInfo(null);
     setTestScan(false);
-
-    // The ticket id inside the QR payload (signed 4-segment, legacy, or bare).
-    const docId = extractTicketIdFromAny(probeValue) || probeValue;
-    // Ticket ids are UUIDs — anything over 128 chars can't be one.
-    if (!docId || docId.length > 128) {
-      setStatus('not-found');
-      return;
-    }
-    const cached = offlineRegistry[docId];
-
-    // Typed override: owner / manager, with a reason (the server enforces both;
-    // this only saves a round trip).
-    if (isBareManualEntry && !reason) {
-      setBuyerName(cached?.name || '');
-      if (!canOverride) {
-        setStatus('invalid-barcode');
-        setInvalidReason(REFUSAL_TEXT['needs-manager']);
-        return;
-      }
-      setOverrideFor({ ticketId: docId, name: cached?.name || '' });
-      setOverrideReason('');
-      setStatus('needs-reason');
-      return;
-    }
-
-    if (cached) {
-      // Local checks against the downloaded list: a fast fail online, and all
-      // there is offline. The signature is checked on the server-corrected clock.
-      if (cached.barcodeSecret && !isBareManualEntry) {
-        const verify = await verifyBarcode(probeValue, cached.barcodeSecret, { now: serverNow() });
-        if (!verify.ok) {
-          setBuyerName(cached.name);
-          denyLocal(docId, cached.name, verify, src);
-          return;
-        }
-      }
-      if (cached.pendingTransferId || cached.voided) {
-        setStatus('invalid-barcode');
-        setInvalidReason(
-          cached.voided
-            ? 'This ticket was refunded. The holder should not be admitted with this ticket. Direct them to event support if there is a dispute.'
-            : 'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.',
-        );
-        setBuyerName(cached.name);
-        pushScan(docId, cached.name, 'DENIED');
-        void writeScanReject(cached.voided ? 'voided' : 'in-transfer', src, { ticketIdAttempted: docId });
-        return;
-      }
-      if (cached.used && isOffline) {
-        // Online, the server answers with when it was used (below).
-        setStatus('already-used');
-        setBuyerName(cached.name);
-        pushScan(docId, cached.name, 'DENIED');
-        void writeScanReject('used', src, { ticketIdAttempted: docId });
+    setAdmittedOffline(false);
+    let admittedId: string | null = null;
+    try {
+      // Local signature check against the downloaded list, on the
+      // server-corrected clock.
+      const verify = cached?.barcodeSecret && !code.bare ? await verifyBarcode(raw, cached.barcodeSecret, { now }) : null;
+      const name = cached?.name || '';
+      const ctx = { raw, src, reason, name, tier: cached?.tier, verify };
+      const d = decideScan({ ...base, recent: null, verify, network });
+      if (d.action === 'ignore') return;
+      if (d.action !== 'ask-server') {
+        applyLocalDecision(d, ctx);
+        if (d.action === 'admit') admittedId = d.ticketId;
         return;
       }
 
-      const localTicket = { id: docId, tierName: cached.tier } as Ticket;
-      if (!isOffline) {
-        try {
-          const result = await checkInTicket(
-            docId, src, isBareManualEntry ? 'manual' : 'verified',
-            isBareManualEntry ? undefined : probeValue, eventId, { reason, device },
-          );
-          if (!result.ok) {
-            showRefusal(result, docId, cached.name, src);
+      const ticketId = d.ticketId;
+      // Only a server round trip shows the spinner: a local verdict replaces
+      // the last one directly (and a spinner flashed for a few ms can leave
+      // the animated verdict stuck on "Verifying").
+      setStatus('searching');
+      try {
+        let scanTicket: ScanTicket | null = null;
+        if (!cached) {
+          // Staff-gated read. null when the ticket doesn't exist OR the caller
+          // isn't staff of its org — both are "not a valid ticket for this door".
+          scanTicket = await withDeadline(() => getTicketForScan(ticketId), DOOR_REQUEST_TIMEOUT_MS);
+          if (!scanTicket) {
+            setStatus('not-found');
+            void writeScanReject('not-found', src, { ticketIdAttempted: ticketId });
             return;
           }
-          admitted(localTicket, cached.name, result.reason === 'test-scan');
-          return;
-        } catch (err) {
-          console.error('Server check-in failed; admitting on the offline list and queuing the scan.', err);
+          // Wrong event: best-effort title of the other event so staff can route the holder.
+          if (scanTicket.eventId !== eventId) {
+            let otherTitle: string | undefined;
+            try {
+              const otherEvent = await withDeadline(() => getPublicEvent(scanTicket!.eventId), DOOR_REQUEST_TIMEOUT_MS);
+              otherTitle = otherEvent?.title;
+            } catch {
+              /* draft / private event — generic copy */
+            }
+            setStatus('invalid-barcode');
+            setInvalidReason(
+              otherTitle
+                ? `Wrong event — this ticket is for "${otherTitle}". Direct the holder to that event's door.`
+                : 'Wrong event — this ticket belongs to a different event. Direct the holder to the correct door.',
+            );
+            pushScan(ticketId, '—', 'DENIED');
+            void writeScanReject('wrong-event', src, {
+              ticketIdAttempted: ticketId,
+              wrongEventId: scanTicket.eventId,
+              wrongEventTitle: otherTitle,
+            });
+            return;
+          }
+          // Local signature check (fast fail) with the secret just read; the
+          // server re-checks it either way.
+          if (!code.bare && scanTicket.barcodeSecret) {
+            const v = await verifyBarcode(raw, scanTicket.barcodeSecret, { now: serverNow() });
+            if (!v.ok) {
+              setFoundTicket(scanTicket);
+              setBuyerName(scanTicket.ownerName);
+              denyLocal(scanTicket.id, scanTicket.ownerName, v, src);
+              return;
+            }
+          }
         }
-      }
-      // Offline (or the server was unreachable): admit on the downloaded list
-      // and queue the scan WITH its code and time. The upload re-checks the
-      // signature server-side, so a ticket transferred since the download
-      // comes back as a conflict.
-      queueScan({
-        ref: newClientRef(),
-        ticketId: docId,
-        payload: isBareManualEntry ? null : probeValue,
-        scannedAt: serverNow(),
-        source: src,
-        ...(reason ? { reason } : {}),
-      });
-      admitted(localTicket, cached.name, false);
-      return;
-    }
-
-    // Not on the downloaded list and offline: we can neither verify the ticket
-    // nor record the reject until the link returns.
-    if (isOffline) {
-      setStatus('not-found');
-      return;
-    }
-
-    try {
-      // Staff-gated read. null when the ticket doesn't exist OR the caller
-      // isn't staff of its org — both are "not a valid ticket for this door".
-      const scanTicket = await getTicketForScan(docId);
-      if (!scanTicket) {
-        setStatus('not-found');
-        void writeScanReject('not-found', src, { ticketIdAttempted: docId });
-        return;
-      }
-
-      // Wrong event: best-effort title of the other event so staff can route the holder.
-      if (scanTicket.eventId !== eventId) {
-        let otherTitle: string | undefined;
-        try {
-          const otherEvent = await getPublicEvent(scanTicket.eventId);
-          otherTitle = otherEvent?.title;
-        } catch {
-          /* draft / private event — generic copy */
-        }
-        setStatus('invalid-barcode');
-        setInvalidReason(
-          otherTitle
-            ? `Wrong event — this ticket is for "${otherTitle}". Direct the holder to that event's door.`
-            : 'Wrong event — this ticket belongs to a different event. Direct the holder to the correct door.',
+        const who = scanTicket?.ownerName ?? name;
+        const result = await withDeadline(
+          (signal) =>
+            checkInTicket(ticketId, src, code.bare ? 'manual' : 'verified', code.bare ? undefined : raw, eventId, {
+              reason,
+              device,
+              signal,
+            }),
+          DOOR_REQUEST_TIMEOUT_MS,
         );
-        pushScan(docId, '—', 'DENIED');
-        void writeScanReject('wrong-event', src, {
-          ticketIdAttempted: docId,
-          wrongEventId: scanTicket.eventId,
-          wrongEventTitle: otherTitle,
-        });
-        return;
-      }
-
-      // Local signature check (fast fail) when we could read the secret; the
-      // server re-checks it either way.
-      if (!isBareManualEntry && scanTicket.barcodeSecret) {
-        const verify = await verifyBarcode(probeValue, scanTicket.barcodeSecret, { now: serverNow() });
-        if (!verify.ok) {
-          setFoundTicket(scanTicket);
-          setBuyerName(scanTicket.ownerName);
-          denyLocal(scanTicket.id, scanTicket.ownerName, verify, src);
+        noteServerOk();
+        if (scanTicket) setFoundTicket(scanTicket);
+        if (!result.ok) {
+          showRefusal(result, ticketId, who, src);
           return;
         }
+        admitted(scanTicket ?? ({ id: ticketId, tierName: cached?.tier } as Ticket), who, result.reason === 'test-scan');
+        if (result.reason !== 'test-scan') admittedId = ticketId;
+      } catch (err) {
+        if (isServerAnswer(err)) {
+          // The server answered with an error (not authorized, session
+          // expired): never an offline admit.
+          console.error('check-in refused by the server', err);
+          setStatus('invalid-barcode');
+          setInvalidReason("The server refused this check-in for this account (signed out, or no longer door staff for this event). Sign in again or ask a manager.");
+          return;
+        }
+        // Timed out or unreachable: decide on the saved list with every
+        // offline rule (used, voided, mid-transfer, queued, doors), so flaky
+        // Wi-Fi never lets a known-used ticket in.
+        console.warn('Server check-in unreachable; deciding on the saved list.', err);
+        noteServerFailure();
+        const fb = decideScan({ ...base, recent: null, verify, network: 'unreachable' });
+        if (fb.action === 'ignore' || fb.action === 'ask-server') return;
+        applyLocalDecision(fb, ctx);
+        if (fb.action === 'admit' && !fb.test) admittedId = fb.ticketId;
       }
-
-      const result = await checkInTicket(
-        scanTicket.id, src, isBareManualEntry ? 'manual' : 'verified',
-        isBareManualEntry ? undefined : probeValue, eventId, { reason, device },
-      );
-      setFoundTicket(scanTicket);
-      if (!result.ok) {
-        showRefusal(result, scanTicket.id, scanTicket.ownerName, src);
-        return;
-      }
-      admitted(scanTicket, scanTicket.ownerName, result.reason === 'test-scan');
-    } catch (error) {
-      console.error(error);
-      setStatus('not-found');
+    } finally {
+      inFlightRef.current = false;
+      lastReadRef.current = { raw: code.raw, ticketId: docId, at: now, source: src, admitted: admittedId != null };
     }
   };
+  const handleCheckInRef = useRef(handleCheckIn);
+  handleCheckInRef.current = handleCheckIn;
 
   const submitOverride = (e: React.FormEvent) => {
     e.preventDefault();
@@ -937,7 +1104,9 @@ export default function OrganizerCheckIn() {
     if (!eventId) return;
     setEnablingTest(true);
     try {
-      await setCheckinTestWindow(eventId, 3);
+      const until = await setCheckinTestWindow(eventId, 3);
+      // Saved with the header, so an offline pre-doors scan is a test OK.
+      setEvent((ev) => (ev ? { ...ev, checkinTestMode: !!until, checkinTestUntil: until } : ev));
       setDoorsBlocked(false);
       setStatus('idle');
       setInvalidReason('');
@@ -950,9 +1119,39 @@ export default function OrganizerCheckIn() {
     }
   };
 
-  if (!event) return null;
+  if (!event) {
+    return (
+      <div className="bg-[#f2f4f7] min-h-screen">
+        <div className="max-w-xl mx-auto px-4 py-16 text-center">
+          {eventLoad === 'loading' ? (
+            <Loader2 className="w-8 h-8 text-slate-400 animate-spin mx-auto" aria-label="Loading" />
+          ) : (
+            <>
+              <WifiOff className="w-8 h-8 text-slate-400 mx-auto mb-4" aria-hidden="true" />
+              <h1 className="text-xl font-bold text-slate-900 mb-2">
+                {eventLoad === 'missing' ? 'Event not found' : 'No saved copy of this event'}
+              </h1>
+              <p className="text-sm text-slate-500 mb-6">
+                {eventLoad === 'missing'
+                  ? "This event doesn't exist or you're not door staff for it."
+                  : "This device is offline and hasn't saved this event yet. Connect once and open this page to save the list for offline check-in."}
+              </p>
+              <button
+                type="button"
+                onClick={() => { setEventLoad('loading'); void loadEventHeader(); }}
+                className="px-4 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest"
+              >
+                Try again
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const rejectCount = recentScans.filter((s) => s.status === 'DENIED').length;
+  const rosterCount = Object.keys(offlineRegistry).length;
 
   return (
     <div className="bg-[#f2f4f7] min-h-screen">
@@ -976,9 +1175,9 @@ export default function OrganizerCheckIn() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-           <div className={`flex items-center space-x-2 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest ${isOffline ? 'bg-red-50 text-red-500 border border-red-200' : 'bg-emerald-50 text-emerald-500 border border-emerald-200'}`}>
-              {isOffline ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
-              <span>{isOffline ? 'Offline' : 'Online'}</span>
+           <div className={`flex items-center space-x-2 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest ${effectiveOffline ? 'bg-red-50 text-red-500 border border-red-200' : 'bg-emerald-50 text-emerald-500 border border-emerald-200'}`}>
+              {effectiveOffline ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
+              <span>{isOffline ? 'Offline' : serverDown ? 'No server' : 'Online'}</span>
            </div>
            <button
              onClick={() => downloadRegistry()}
@@ -1000,14 +1199,29 @@ export default function OrganizerCheckIn() {
         </div>
       </div>
 
+      {effectiveOffline && (
+        <div role="status" className="mb-4 flex flex-wrap items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-[11px] font-bold text-red-700 uppercase tracking-widest">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          {rosterSavedAt != null && rosterCount > 0 ? (
+            <span>
+              {isOffline ? 'Offline' : "Server not answering"}, using list saved at {clockTime(rosterSavedAt)} ({rosterCount} ticket{rosterCount === 1 ? '' : 's'}). Check-ins upload when the connection is back.
+            </span>
+          ) : (
+            <span>
+              {isOffline ? 'Offline' : "Server not answering"}, and there is no saved list on this device: tickets can't be checked until the connection is back.
+            </span>
+          )}
+        </div>
+      )}
+
       {pendingUpdates.length > 0 && (
          <div className="mb-6 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
            <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest">
              {pendingUpdates.length} check-in{pendingUpdates.length === 1 ? '' : 's'} waiting to upload
            </div>
-           {!isOffline && (
+           {!effectiveOffline && (
              <button
-               onClick={syncPendingUpdates}
+               onClick={() => void syncPendingUpdates()}
                disabled={syncing}
                className="flex items-center text-[10px] font-black text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded transition-all uppercase tracking-widest disabled:opacity-50"
              >
@@ -1045,7 +1259,7 @@ export default function OrganizerCheckIn() {
       <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <GuestListDoor
           eventId={eventId}
-          isOffline={isOffline}
+          isOffline={effectiveOffline}
           extras={doorExtras}
           onExtrasChange={updateDoorExtras}
           onSync={() => void downloadDoorExtras()}
@@ -1201,7 +1415,11 @@ export default function OrganizerCheckIn() {
               </div>
               <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">{testScan ? 'Test scan OK' : 'Entry Allowed'}</h2>
               <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
-                {testScan ? 'Valid ticket · not checked in (test window)' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
+                {testScan
+                  ? `Valid ticket · not checked in (test window${admittedOffline ? ', checked on the saved list' : ''})`
+                  : admittedOffline
+                  ? 'Checked on the saved list · uploads when online'
+                  : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
               </p>
 
               {(doorExtras?.ticketAccess?.[foundTicket.id]?.length ?? 0) > 0 && (
@@ -1327,6 +1545,7 @@ export default function OrganizerCheckIn() {
               </div>
               <h2 className="text-2xl font-bold text-red-900 mb-1 leading-none uppercase tracking-tight">Invalid Ticket</h2>
               <p className="text-red-600 font-bold uppercase tracking-widest text-[10px] mb-6">Ticket not found or invalid for this event</p>
+              {invalidReason && <p className="text-slate-600 text-sm max-w-sm">{invalidReason}</p>}
 
               {/*
                 NOTE: A "Force Admit Pass" button used to live here. It pushed
@@ -1354,7 +1573,7 @@ export default function OrganizerCheckIn() {
               <p className="text-amber-700 font-bold uppercase tracking-widest text-[10px] mb-4">
                 {invalidReason || 'Signature did not match — possible screenshot or stale code.'}
               </p>
-              {doorsBlocked ? (
+              {doorsBlocked && !effectiveOffline ? (
                 <button
                   type="button"
                   onClick={enableTestWindow}
@@ -1383,7 +1602,7 @@ export default function OrganizerCheckIn() {
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">In</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
-              <p className="disp text-3xl tracking-tight text-slate-900" style={{ transform: 'skewX(-3deg)' }}>{event.totalTickets}</p>
+              <p className="disp text-3xl tracking-tight text-slate-900" style={{ transform: 'skewX(-3deg)' }}>{event.ticketsSold}</p>
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">Sold</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
@@ -1414,7 +1633,7 @@ export default function OrganizerCheckIn() {
                           <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : undone ? `${scan.name} · undone` : 'Rejected'}</p>
                           <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
                         </div>
-                        {ok && canOverride && !isOffline && undoKey !== scan.key ? (
+                        {ok && canOverride && !effectiveOffline && undoKey !== scan.key ? (
                           <button
                             type="button"
                             onClick={() => { setUndoKey(scan.key); setUndoReason(''); }}
