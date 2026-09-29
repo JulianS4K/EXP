@@ -326,6 +326,17 @@ export interface Event {
   seriesIndex?: number;
   // Venue access info shown on the event page (mig 20260926090000).
   accessibility?: import('./lib/accessibility').EventAccessibility;
+  // Store page content (mig 20260929120000). All undefined until the columns
+  // exist on the database this build talks to.
+  summary?: string;
+  descriptionMd?: string;
+  lineup?: import('./lib/storeContent').LineupEntry[];
+  faq?: import('./lib/storeContent').FaqEntry[];
+  gallery?: import('./lib/storeContent').GalleryImage[];
+  videoUrl?: string;
+  minAge?: import('./lib/storeContent').MinAge | null;
+  refundPolicy?: import('./lib/storeContent').RefundPolicy | null;
+  policyNotes?: string;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

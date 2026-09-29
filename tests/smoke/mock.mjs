@@ -18,6 +18,11 @@ export const tables = {
     performer_names: ['DJ Kay'], event_type: 'concert', category: 'music', genres: [], subgenres: [],
     image_url: null, branding: {}, purchase_limits: {}, total_tickets: 0, tickets_sold: 0,
     artist_links: {}, series_id: null, series_index: null,
+    // Store page content (mig 20260929120000); the markdown carries an XSS attempt.
+    summary: 'Four rooms of house till late.', lineup: [{ name: 'DJ Kay', role: 'headliner', set_at: '23:30', bio: 'Brooklyn house.' }],
+    description_md: '**Big** night. [bad](javascript:window.__xss=1) <img src=x onerror="window.__xss=1">',
+    faq: [{ q: 'Is there a coat check?', a: 'Yes, $3.' }], gallery: [], video_url: null,
+    min_age: 21, refund_policy: 'until_7d', policy_notes: 'No re-entry.',
   }],
   exos_public_tiers: [
     { id: TIER, event_id: EV, name: 'GA', description: '', price: 20, capacity: 100, sold: 0, ticket_type: 'paid',

@@ -15,6 +15,10 @@
 //     Purchase was ever reported.
 //   • The Google Maps JS API only loads where a map renders.
 //   • The embed is meant to be framed by any venue's site; nothing else is.
+//   • The organizer's YouTube / Vimeo video (exos_events.video_url) only
+//     frames on the event page, and only from the privacy-enhanced hosts
+//     (src/lib/storeContent.ts videoEmbedUrl). /bridge/e/<slug> redirects
+//     client-side to /bridge/event/<id> and keeps the first document's CSP.
 //   • The door scanner needs the camera, so /bridge allows camera=(self).
 
 const PIXEL_SCRIPT = ' https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com';
@@ -35,6 +39,9 @@ const MAPS_SCRIPT =
 const MAPS_CONNECT = ' https://*.googleapis.com https://*.google.com https://*.gstatic.com data: blob:';
 const MAPS_PREFIXES = ['/bridge/event/', '/bridge/map'];
 
+const VIDEO_FRAME = ' https://www.youtube-nocookie.com https://player.vimeo.com';
+const VIDEO_PREFIXES = ['/bridge/event/', '/bridge/e/'];
+
 const startsWithAny = (path: string, prefixes: string[]) => prefixes.some((p) => path.startsWith(p));
 
 export const isBridgePath = (path: string) => path === '/bridge' || path.startsWith('/bridge/');
@@ -45,6 +52,7 @@ export function bridgeCsp(path: string, search = ''): string {
     || isCheckoutReturn(path, search);
   const maps = startsWithAny(path, MAPS_PREFIXES);
   const embed = isEmbedPath(path);
+  const video = startsWithAny(path, VIDEO_PREFIXES);
   return (
     "default-src 'self'; " +
     "script-src 'self' https://js.stripe.com" +
@@ -59,7 +67,9 @@ export function bridgeCsp(path: string, search = ''): string {
     (pixels ? PIXEL_CONNECT : '') +
     (maps ? MAPS_CONNECT : '') +
     '; ' +
-    'frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com; ' +
+    'frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com' +
+    (video ? VIDEO_FRAME : '') +
+    '; ' +
     (maps ? "worker-src 'self' blob:; " : "worker-src 'self'; ") +
     "manifest-src 'self'; " +
     (embed ? 'frame-ancestors *; ' : "frame-ancestors 'none'; ") +

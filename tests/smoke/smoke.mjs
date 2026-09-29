@@ -43,6 +43,20 @@ await run('event page renders with directions', async (page) => {
   assert((await dir.getAttribute('href')).includes('google.com/maps/dir'), 'directions link');
 });
 
+await run('store page renders markdown safely, lineup, FAQ and good to know', async (page) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Four rooms of house till late.');
+  assert(await page.locator('strong', { hasText: 'Big' }).count() >= 1, 'markdown bold rendered');
+  assert(await page.locator('a[href^="javascript:"]').count() === 0, 'no javascript: link');
+  assert(await page.locator('img[src="x"]').count() === 0, 'raw HTML stays text');
+  assert(!(await page.evaluate(() => window.__xss)), 'no script ran');
+  await expectText(page, '23:30');
+  await page.getByText('Is there a coat check?').click();
+  await expectText(page, 'Yes, $3.');
+  await expectText(page, 'Ages 21+');
+  await expectText(page, 'Refunds available up to 7 days before the event.');
+});
+
 await run('checkout link pre-fills tier, quantity and add-on; survives reload', async (page, log) => {
   await page.goto(BASE + '/checkout?products=' + TIER2 + ':3,' + ADDON + ':2&promoter=dj-kay&utm_source=instagram');
   await page.waitForURL(/\/event\//, { timeout: 8000 });

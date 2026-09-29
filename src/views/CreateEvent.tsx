@@ -1,4 +1,7 @@
 import { useAccessColumns } from '../hooks/useAccessColumns';
+import { useStoreColumns } from '../hooks/useStoreColumns';
+import StoreContentEditor from '../components/StoreContentEditor';
+import { blankStore, coerceStoreDraft, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import { CHECKOUT_CURRENCIES } from '../lib/currency';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
@@ -87,6 +90,7 @@ function isSlugConflict(err: unknown): boolean {
 
 export default function CreateEvent() {
   const accessOk = useAccessColumns();
+  const storeOk = useStoreColumns();
   const { user } = useAuth();
   // Bridge multi-tenant: every new event must belong to the active org.
   // Falls back to legacy uid-only path if the user has no orgs yet so
@@ -145,7 +149,9 @@ export default function CreateEvent() {
       maxPerAccount: '8'
     },
     distributionNetworks: [] as string[],
-    accessibility: {} as EventAccessibility
+    accessibility: {} as EventAccessibility,
+    // Store page (mig 20260929120000); saved only once the columns exist.
+    store: blankStore() as StoreDraft
   });
 
   // Tier draft shape carries the new fields as plain strings so empty
@@ -227,7 +233,7 @@ export default function CreateEvent() {
         Array.isArray(saved.ticketTiers)
       ) {
         if (window.confirm('You have an unsaved event draft. Restore it?')) {
-          setFormData((prev) => ({ ...prev, ...saved.formData }));
+          setFormData((prev) => ({ ...prev, ...saved.formData, store: coerceStoreDraft(saved.formData.store) }));
           setTicketTiers(saved.ticketTiers);
           draftAppliedRef.current = true;  // only set when user confirmed
         } else {
@@ -297,6 +303,7 @@ export default function CreateEvent() {
           performers: Array.isArray(src.performers) ? src.performers : [],
           artistLinks: Array.isArray(src.artistLinks) ? src.artistLinks : [],
           accessibility: parseAccessibility(src.accessibility),
+          store: storeFromEvent(ev),
           totalTickets: String(src.totalTickets ?? ''),
           price: String(src.price ?? ''),
           image: src.image || '',
@@ -496,6 +503,10 @@ export default function CreateEvent() {
 
     if (formData.description.length > DESCRIPTION_MAX) {
       return `Description must be ${DESCRIPTION_MAX} characters or fewer.`;
+    }
+    if (storeOk) {
+      const storeErr = validateStore(formData.store);
+      if (storeErr) return storeErr;
     }
 
     if (formData.location.length > LOCATION_MAX) {
@@ -757,6 +768,11 @@ export default function CreateEvent() {
           // Only sent when filled in (a plain event never needs the column).
           ...(accessOk && hasAccessInfo(serializeAccessibility(formData.accessibility ?? {}))
             ? { accessibility: serializeAccessibility(formData.accessibility ?? {}) } : {}),
+          // Store page; also derives the plain `description` from the markdown.
+          // A plain description typed before the editor appeared seeds it.
+          ...(storeOk
+            ? storeToInput({ ...formData.store, descriptionMd: formData.store.descriptionMd || formData.description })
+            : {}),
           tiers,
         });
         let created: { eventId: string };
@@ -1260,6 +1276,8 @@ export default function CreateEvent() {
               */}
             </div>
 
+            {/* With the store-page columns, the markdown "About" below replaces this. */}
+            {!storeOk && (
             <div className="md:col-span-2 space-y-2">
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Description</label>
               <textarea aria-label="Description"
@@ -1274,8 +1292,27 @@ export default function CreateEvent() {
                 {formData.description.length} / {DESCRIPTION_MAX}
               </p>
             </div>
+            )}
           </div>
         </div>
+
+        {/* Store page (mig 20260929120000): hidden until the columns exist. */}
+        {storeOk && (
+        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+          <div>
+            <h3 className="disp text-lg uppercase tracking-wide text-white">Store page</h3>
+            <p className="type text-xs text-white/50 mt-1">What buyers read on your event page. Everything here is optional.</p>
+          </div>
+          <StoreContentEditor
+            idPrefix="ce-store"
+            uploaderUid={user?.uid}
+            value={formData.store.descriptionMd || !formData.description
+              ? formData.store
+              : { ...formData.store, descriptionMd: formData.description }}
+            onChange={(next) => setFormData({ ...formData, store: next })}
+          />
+        </div>
+        )}
 
         {/* Ticket Tiers Section */}
         <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
@@ -1632,6 +1669,8 @@ export default function CreateEvent() {
               const hasInput =
                 formData.title.trim() ||
                 formData.description.trim() ||
+                formData.store.descriptionMd.trim() ||
+                formData.store.summary.trim() ||
                 formData.image ||
                 ticketTiers.some((t) => t.price || t.capacity || t.description);
               if (

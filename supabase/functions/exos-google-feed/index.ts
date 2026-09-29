@@ -35,6 +35,10 @@ const MAX_EVENTS = 2000;
 const EVENT_COLS =
   "id, slug, org_id, name, description, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_address, " +
   "primary_performer_name, performer_names, category, genres, image_url, tickets_sold";
+// Store page content (mig 20260929120000). Until the migration is on the
+// database the select fails on the missing columns, so the feed retries
+// without them rather than going dark.
+const STORE_COLS = ", summary, description_md, lineup, min_age";
 const TIER_COLS = "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule, exclusive_tax_percent";
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -74,9 +78,11 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   // Anything that could still be happening: started within the last day (long
   // shows; feedBlocker drops the ones that are over) or later.
   const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
-  const { data: evs, error } = await sb.from("exos_events").select(EVENT_COLS)
+  const readEvents = (cols: string) => sb.from("exos_events").select(cols)
     .in("status", ["published", "cancelled"]).gte("starts_at", since)
     .order("starts_at", { ascending: true }).limit(MAX_EVENTS);
+  let { data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS);
+  if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS)); // undefined_column
   if (error) throw new Error(`events: ${error.message}`);
   const events = (evs ?? []) as unknown as FeedEventRow[];
   const ids = events.map((e) => e.id);

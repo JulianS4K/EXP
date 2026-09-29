@@ -59,6 +59,27 @@ paid events can't be sold.**
 - **Shared capacity (quotas):** one pool several tiers draw from, e.g. a 300-person room split
   into GA and VIP. *There's no screen for this yet; support sets it up in SQL.*
 
+**Store page** (the "Store page" section of create and edit). Everything in it is optional and
+shows on your event page:
+
+- **Summary:** one line (160 characters) under the title. Search results and link previews use it.
+- **About:** the long description. It takes simple formatting: `**bold**`, `*italic*`,
+  `[link](https://…)`, `- ` lists, `## ` headings and `> ` quotes. Use **Preview** to check it.
+  Links must be `https://` or `mailto:`. Raw HTML shows as plain text, and images go in the gallery.
+- **Lineup:** each act's name, role (headliner, support, DJ, host), set time and a short bio.
+- **FAQ:** questions and answers, shown as a list buyers can expand.
+- **Gallery:** up to 12 extra photos (upload them or paste `https://` links). The cover image
+  stays the main one.
+- **Video:** a YouTube or Vimeo link. It plays on the event page in privacy-enhanced mode.
+- **Age limit** (all ages, 16+, 18+, 21+) shows as a badge. Marketplace listings and Google use it
+  too.
+- **Refund policy** and **Good to know** (dress code, bag policy, re-entry) show together near
+  the bottom. The refund policy is what you tell buyers. Refunds themselves are still yours to
+  issue from the event dashboard.
+
+*This section appears once the store-page database update is live. Until then the form shows the
+plain description box.*
+
 **Recurring and timed-entry events** (`/dashboard/event/:eventId/series`): clone an event, with its
 tiers and discount codes, into a series of dates.
 

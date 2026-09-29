@@ -10,6 +10,7 @@
 
 import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
+import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
@@ -102,7 +103,34 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     seriesIndex: row.series_index ?? undefined,
     // undefined when the column isn't there yet (mig 20260926090000 not applied).
     accessibility: 'accessibility' in row ? parseAccessibility(row.accessibility) : undefined,
+    // Store page content: likewise undefined until mig 20260929120000 is applied.
+    ...('lineup' in row
+      ? {
+          summary: row.summary ?? undefined,
+          descriptionMd: row.description_md ?? undefined,
+          lineup: parseLineup(row.lineup),
+          faq: parseFaq(row.faq),
+          gallery: parseGallery(row.gallery),
+          videoUrl: row.video_url ?? undefined,
+          minAge: parseMinAge(row.min_age),
+          refundPolicy: parseRefundPolicy(row.refund_policy),
+          policyNotes: row.policy_notes ?? undefined,
+        }
+      : {}),
   };
+}
+
+// Whether mig 20260929120000 is on this database. One cheap probe per page
+// load (a column that doesn't exist fails the select); the store-page editor
+// stays hidden, and its fields unsent, until it answers yes.
+let storeColumns: Promise<boolean> | null = null;
+export function hasStoreColumns(): Promise<boolean> {
+  if (!storeColumns) {
+    storeColumns = Promise.resolve(
+      supabase.from('exos_public_events').select('description_md').limit(1),
+    ).then(({ error }) => !error, () => false);
+  }
+  return storeColumns;
 }
 
 // --- Public reads (anon + signed-in buyers) — column-narrowed views --------
@@ -277,6 +305,17 @@ export interface EventInput {
   allowHolderRelease?: boolean;
   releaseCutoffHours?: number;
   accessibility?: EventAccessibility;
+  // Store page content (mig 20260929120000). The jsonb lists go as stored
+  // (snake_case keys); lib/storeContent.storeToInput builds them.
+  summary?: string | null;
+  descriptionMd?: string | null;
+  lineup?: Array<{ name: string; role: string; set_at?: string; bio?: string }>;
+  faq?: Array<{ q: string; a: string }>;
+  gallery?: Array<{ url: string; alt?: string }>;
+  videoUrl?: string | null;
+  minAge?: number | null;
+  refundPolicy?: string | null;
+  policyNotes?: string | null;
   tiers?: TierInput[];
 }
 
@@ -291,6 +330,9 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
   ['purchaseLimits', 'purchase_limits'], ['distributionNetworks', 'distribution_networks'],
   ['allowHolderRelease', 'allow_holder_release'], ['releaseCutoffHours', 'release_cutoff_hours'],
   ['accessibility', 'accessibility'],
+  ['summary', 'summary'], ['descriptionMd', 'description_md'], ['lineup', 'lineup'], ['faq', 'faq'],
+  ['gallery', 'gallery'], ['videoUrl', 'video_url'], ['minAge', 'min_age'], ['refundPolicy', 'refund_policy'],
+  ['policyNotes', 'policy_notes'],
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {

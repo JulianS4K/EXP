@@ -81,6 +81,8 @@ import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
+import StoreContentEditor from '../components/StoreContentEditor';
+import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import Dialog from '../components/Dialog';
 
 export default function EditEvent() {
@@ -100,6 +102,10 @@ export default function EditEvent() {
   // Accessibility fields show (and save) only once the columns exist: the
   // loaded event carries `accessibility` then (mig 20260926090000).
   const accessSupported = eventData.accessibility !== undefined;
+  // Store page (mig 20260929120000): same rule, keyed on `lineup` (the mapper
+  // sets it only when the row has the column). Its own draft state, seeded on load.
+  const storeSupported = eventData.lineup !== undefined;
+  const [store, setStore] = useState<StoreDraft>(blankStore());
   // Snapshot of the original tier ids so we can compute additions/removals
   // and write the matching tierSales sub-collection updates atomically.
   const [originalTierIds, setOriginalTierIds] = useState<string[]>([]);
@@ -163,6 +169,7 @@ export default function EditEvent() {
         return;
       }
       setEventData(data);
+      if (data.lineup !== undefined) setStore(storeFromEvent(data));
       setOriginalTierIds((data.ticketTiers || []).map((t) => t.id));
       setOriginalTiers((data.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalCodes(data.discountCodes || []);
@@ -235,6 +242,10 @@ export default function EditEvent() {
     }
     if ((eventData.subgenres || []).length > SUBGENRES_MAX_COUNT) {
       return `Please choose at most ${SUBGENRES_MAX_COUNT} subgenres.`;
+    }
+    if (storeSupported) {
+      const storeErr = validateStore(store);
+      if (storeErr) return storeErr;
     }
     if ((eventData.performers || []).length > 10) {
       return 'Please list at most 10 performers.';
@@ -525,6 +536,8 @@ export default function EditEvent() {
         distributionNetworks: ed.distributionNetworks,
         // Only once the column exists (the loaded row had it).
         ...(accessSupported ? { accessibility: serializeAccessibility(ed.accessibility ?? {}) } : {}),
+        // Store page; also derives the plain `description` from the markdown.
+        ...(storeSupported ? storeToInput(store) : {}),
       });
 
       // 2. Tier diff: update existing, add new, delete removed. (Seam tier CRUD
@@ -817,6 +830,8 @@ export default function EditEvent() {
               </div>
            </div>
 
+           {/* With the store-page columns, the markdown "About" below replaces this. */}
+           {!storeSupported && (
            <div className="space-y-2">
               <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Narrative Description</label>
               <textarea 
@@ -826,7 +841,18 @@ export default function EditEvent() {
                 onChange={(e) => setEventData({ ...eventData, description: e.target.value })}
               />
            </div>
+           )}
         </section>
+
+        {storeSupported && (
+          <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+            <div>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Store page</h2>
+              <p className="type text-xs text-white/50 mt-2">What buyers read on your event page. Saved with the rest of the form.</p>
+            </div>
+            <StoreContentEditor idPrefix="ee-store" uploaderUid={user?.uid} value={store} onChange={setStore} />
+          </section>
+        )}
 
         {/* Seating and Logistics Section */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">

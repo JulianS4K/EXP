@@ -26,6 +26,17 @@ describe('bridgeCsp', () => {
     expect(bridgeCsp('/bridge/dashboard')).toContain("worker-src 'self';");
   });
 
+  it('frames the organizer video only on the event page, privacy-enhanced hosts only', () => {
+    for (const path of ['/bridge/event/1', '/bridge/e/late-night']) {
+      expect(bridgeCsp(path)).toContain('frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com https://www.youtube-nocookie.com https://player.vimeo.com;');
+    }
+    for (const path of ['/bridge/', '/bridge/dashboard', '/bridge/embed/event/1', '/bridge/o/nights']) {
+      expect(bridgeCsp(path)).not.toContain('youtube-nocookie');
+      expect(bridgeCsp(path)).not.toContain('player.vimeo.com');
+    }
+    expect(bridgeCsp('/bridge/event/1')).not.toContain('https://www.youtube.com');
+  });
+
   it('lets only the embed be framed', () => {
     expect(bridgeCsp('/bridge/embed/event/1')).toContain('frame-ancestors *;');
     expect(bridgeCsp('/bridge/event/1')).toContain("frame-ancestors 'none';");

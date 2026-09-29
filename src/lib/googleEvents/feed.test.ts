@@ -97,6 +97,29 @@ describe('Google events feed', () => {
     expect(e.offers[1].availability).toBe('https://schema.org/SoldOut');
   });
 
+  it('uses the store page content when the organizer set it', () => {
+    const { feed } = build([ev({
+      summary: 'Two sets of late jazz.',
+      description_md: '## Tonight\n\n**Two sets**, [menu](https://x.com/menu).\n\n- Bar opens early',
+      lineup: [{ name: 'The Trio' }, { name: 'Guest Horn' }, { nope: 1 } as never],
+      min_age: 18,
+    })], [tier()]);
+    const e = feed.events[0].event;
+    expect(e.description).toBe('Two sets of late jazz. Tonight Two sets, menu (https://x.com/menu). - Bar opens early');
+    expect(e.performer).toEqual([
+      { '@type': 'PerformingGroup', name: 'The Trio' },
+      { '@type': 'PerformingGroup', name: 'Guest Horn' },
+    ]);
+    expect(e.typicalAgeRange).toBe('18-'); // min_age wins over "(21+)" in the title
+    // All ages: no age range, even with "(21+)" in the title.
+    expect(build([ev({ min_age: 0 })], [tier()]).feed.events[0].event.typicalAgeRange).toBeUndefined();
+    // Empty store fields fall back to the legacy ones.
+    const legacy = build([ev({ summary: null, description_md: null, lineup: [], min_age: null })], [tier()]).feed.events[0].event;
+    expect(legacy.description).toBe('Two sets. Bar opens early.');
+    expect(legacy.performer).toEqual([{ '@type': 'PerformingGroup', name: 'The Trio' }]);
+    expect(legacy.typicalAgeRange).toBe('21-');
+  });
+
   it('uses the scheduled price in force and marks presales and ended sales', () => {
     const { feed } = build([ev()], [
       tier({ price: 20, price_schedule: [{ startsAt: '2026-09-01T00:00:00Z', price: 25 }], exclusive_tax_percent: 0 }),

@@ -31,6 +31,7 @@
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { ageLimit, marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
+import { mdToPlain } from '../richText.ts';
 
 export const GOOGLE_FEED_VERSION = 1;
 
@@ -54,6 +55,12 @@ export interface FeedEventRow {
   genres: string[] | null;
   image_url: string | null;
   tickets_sold: number | null;
+  // Store page content (mig 20260929120000). Optional: the edge function
+  // selects them only once the columns exist.
+  summary?: string | null;
+  description_md?: string | null;
+  lineup?: Array<{ name?: unknown }> | null;
+  min_age?: number | null;
 }
 
 export interface FeedTierRow {
@@ -247,6 +254,13 @@ function plainDescription(v: string | null): string | undefined {
   return s ? s.slice(0, 5000) : undefined;
 }
 
+// The summary leads, then the body: the markdown's plain text when the
+// organizer wrote one, else the legacy plain description.
+function eventDescription(e: FeedEventRow): string | undefined {
+  const body = e.description_md?.trim() ? mdToPlain(e.description_md) : (e.description ?? '');
+  return plainDescription([e.summary ?? '', body].filter((s) => s.trim()).join(' '));
+}
+
 function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: string, now: Date, cancelled: boolean): SchemaOffer {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
   const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0);
@@ -305,10 +319,12 @@ export function feedItem(
   const cancelled = e.status === 'cancelled';
   const cat = marketCategory(e);
   const url = eventPageUrl(opts.appBase, e);
-  const performers = (e.performer_names?.length ? e.performer_names : e.primary_performer_name ? [e.primary_performer_name] : [])
+  // The store lineup when set (it has every act), else the performer names.
+  const lineup = Array.isArray(e.lineup) ? e.lineup.map((a) => (typeof a?.name === 'string' ? a.name : '')).filter(Boolean) : [];
+  const performers = (lineup.length ? lineup : e.performer_names?.length ? e.performer_names : e.primary_performer_name ? [e.primary_performer_name] : [])
     .map((n) => text(n)).filter(Boolean).slice(0, 20);
   const offers = tiers.map((t) => offerFor(t, e, currency, opts.appBase, now, cancelled));
-  const age = ageLimit(e.name);
+  const age = ageLimit(e.name, e.min_age);
   const start = zonedIso(e.starts_at!, tz)!;
   const endIso = e.ends_at ? zonedIso(e.ends_at, tz) : null;
   const doors = e.doors_at ? zonedIso(e.doors_at, tz) : null;
@@ -319,7 +335,7 @@ export function feedItem(
     identifier: e.id,
     url,
     name: marketTitle(e),
-    ...(plainDescription(e.description) ? { description: plainDescription(e.description) } : {}),
+    ...(eventDescription(e) ? { description: eventDescription(e) } : {}),
     startDate: start,
     ...(endIso ? { endDate: endIso } : {}),
     ...(doors ? { doorTime: doors } : {}),

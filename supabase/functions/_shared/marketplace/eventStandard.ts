@@ -112,8 +112,13 @@ export function marketTitle(ev: Pick<StandardEventInput, 'name' | 'primary_perfo
   return s.slice(0, MAX_TITLE).trim();
 }
 
-/** 21+ / 18+ from the title, for the listing notes (marketplaces show age limits in notes). */
-export function ageLimit(name: string | null | undefined): string | null {
+/**
+ * 21+ / 18+ for the listing notes (marketplaces show age limits in notes).
+ * The organizer's exos_events.min_age wins (mig 20260929120000; 0 = all ages,
+ * so no limit); events without it fall back to the title ("… (21+)").
+ */
+export function ageLimit(name: string | null | undefined, minAge?: number | null): string | null {
+  if (minAge != null) return minAge > 0 ? `${minAge}+` : null;
   const m = AGE_RE.exec(String(name ?? ''));
   return m ? `${m[1]}+` : null;
 }
