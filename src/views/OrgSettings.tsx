@@ -24,6 +24,7 @@ import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import DeveloperSettings from '../components/DeveloperSettings';
 import { paymentsEnabled } from '../lib/payments';
+import { canSeeMoney } from '../lib/settlement';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -290,6 +291,14 @@ export default function OrgSettings() {
           >
             Limit flags
           </button>
+          {canSeeMoney(activeRole, isAdmin) && (
+            <button
+              onClick={() => navigate(`/orgs/${org.id}/payouts`)}
+              className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              Payouts
+            </button>
+          )}
           <span className="pb-3 text-sm font-bold text-slate-300 cursor-default">Billing</span>
         </div>
 

@@ -102,13 +102,17 @@ How we build it (techniques):
 1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate
    at checkout; Stripe's actual fee, net, transfer and balance-transaction ids after fulfilment (best-effort,
    backfilled by reconcile); `exos_order_money` view for owner / manager / finance.
-2. ⬜ Settlement report per event (gross, tax, refunds, disputes, fees, marketplace proceeds, commissions, net).
+2. ✅ Settlement report per event (gross, tax, refunds, fees, marketplace proceeds, commissions, net): "Money" on
+   the event report's Overview, read-only, aggregated in the browser from `exos_order_money`,
+   `exos_marketplace_order_money` and `exos_promoter_commissions` (`src/lib/settlement.ts`); card fees actual when
+   recorded, else the estimate; per-order CSV. Disputes aren't in it yet (item 7).
 3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
 4. ⬜ Credit notes on refund (`CN-` series); the invoice stays unchanged.
 5. ⬜ Printable invoice / receipt page with the seller's legal details.
 6. ⬜ Daily reconciliation against Stripe balance transactions.
 7. ⬜ Disputes: table, organizer alert, evidence, lost-dispute entry, recovery policy.
-8. ⬜ Payout statements and a Payouts page; journal CSV, then QuickBooks / Xero.
+8. ✅ Payout statements and a Payouts page (`/orgs/:orgId/payouts`: marketplace payouts with their lines and
+   statuses, CSV per line; owner / manager / finance). Journal CSV and QuickBooks / Xero not built.
 9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps.
 10. ✅ Refunds when the date changes (mig 20260929150000, not applied): a move to another day or by more than
     3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
@@ -160,14 +164,15 @@ signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent
 
 ## Apple Wallet + Google Wallet passes 2026-09-29
 
-- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, authored, not
-  applied / deployed; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
+- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, applied and
+  deployed; waits on Apple / Google credentials; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
   ticket they own. Passes carry a `W-` door code the scanner accepts: Google renders a TOTP `rotatingBarcode` (key
   derived from `barcode_secret`, never the secret), Apple a static code bound to the pass epoch. A transfer, refund
   or release voids the pass (trigger) and queues an update; the PassKit web service (register / serials / latest
   pass / log) and a cron push run deliver it. The holder can reissue to kill a screenshotted code. 503 "wallet not
-  configured" until the operator adds the Apple / Google credentials (no fake signatures). Next: SPA buttons
-  (TicketDetail), operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
+  configured" until the operator adds the Apple / Google credentials (no fake signatures).
+  ✅ SPA buttons ("Add to Apple Wallet" / "Add to Google Wallet" on the ticket page and My Tickets; Apple on iOS,
+  Google on Android, both on desktop; hidden after a once-per-session 503 probe; `docs/wallet.md`). Next: operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
   APNs client certificates work on the edge runtime (pushes are a dry run until then), schedule the push cron.
 
 ## Venue POS scaffold (Phase 3) 2026-09-29
@@ -419,7 +424,7 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
 - [~] Native Apple / Google Wallet passes (the "open pass" is still a web page). Backend authored
-  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons + operator credentials still to do.
+  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons done; operator credentials still to do.
 
 ## SeatGeek 2026-09-27
 

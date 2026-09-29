@@ -29,6 +29,8 @@ import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
+import SettlementPanel from '../components/SettlementPanel';
+import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
@@ -288,6 +290,10 @@ export default function OrganizerEventReport() {
         </div>
 
         {tab === 'overview' && (<>
+        {/* Money: settlement summary + per-order CSV (owner / manager / finance;
+            hidden before the money views exist). Read-only. */}
+        <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
           <SalesChart organizerId={null} eventId={eventId!} fullHistory={true} />
