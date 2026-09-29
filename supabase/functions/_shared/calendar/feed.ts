@@ -12,6 +12,8 @@ export interface CalendarEventRow {
   slug: string | null;
   name: string;
   description: string | null;
+  /** Store-page one-liner (mig 20260929120000); shown before the description when present. */
+  summary?: string | null;
   status: string;
   starts_at: string | null;
   ends_at: string | null;
@@ -160,7 +162,7 @@ export function calendarEvent(row: CalendarEventRow, opts: CalendarFeedOptions):
   const cancelled = row.status === 'cancelled';
   const url = eventPageUrl(opts.appBase, row);
   const doors = row.doors_at ? localTime(row.doors_at, row.timezone) : null;
-  const body = plain(row.description, 1500);
+  const body = [plain(row.summary, 300), plain(row.description, 1500)].filter(Boolean).join('\n\n');
   const description = [
     cancelled ? 'This event was cancelled.' : `Tickets: ${url}`,
     row.has_tickets ? `You have tickets: ${opts.appBase}/my-tickets` : '',

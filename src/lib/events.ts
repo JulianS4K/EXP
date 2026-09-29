@@ -266,21 +266,12 @@ export interface TierInput {
   accessibleNote?: string | null;
 }
 
-export interface DiscountInput {
-  code: string;
-  type: 'percentage' | 'fixed';
-  value: number;
-  usageLimit?: number | null;
-  expiresAt?: string | null;
-}
-
 export interface EventInput {
   orgId: string;
   name: string;
   description?: string;
   status?: 'draft' | 'published' | 'cancelled';
   slug?: string | null;
-  discountCodes?: DiscountInput[];
   startsAt?: string | null;
   doorsAt?: string | null;
   endsAt?: string | null;
@@ -389,21 +380,6 @@ export async function createEvent(input: EventInput): Promise<{ eventId: string 
       .from('exos_ticket_tiers')
       .insert(input.tiers.map((t, i) => tierInsertRow(eventId, t, i)));
     if (tErr) throw tErr;
-  }
-  if (input.discountCodes?.length) {
-    // unlocks_tier_ids deferred to phase-2: the form references tiers by
-    // client id, but tiers get DB-generated uuids on insert — remapping is a
-    // phase-2 concern (hidden-tier unlock matters only at checkout, gated).
-    const rows = input.discountCodes.map((d) => ({
-      event_id: eventId,
-      code: d.code,
-      type: d.type,
-      value: d.value,
-      usage_limit: d.usageLimit ?? null,
-      expires_at: d.expiresAt ?? null,
-    }));
-    const { error: dErr } = await supabase.from('exos_discount_codes').insert(rows);
-    if (dErr) throw dErr;
   }
   return { eventId };
 }

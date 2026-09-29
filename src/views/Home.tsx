@@ -395,6 +395,9 @@ export default function Home() {
                         <div className="p-6">
                           <p className="type text-[11px] uppercase tracking-widest text-brand-primary mb-1">{eventMeta(event)}</p>
                           <h3 className="disp text-4xl md:text-5xl text-white leading-[0.9] tracking-tight mb-3">{event.title}</h3>
+                          {event.summary && (
+                            <p className="type text-[13px] text-white/60 line-clamp-1 -mt-1 mb-3">{event.summary}</p>
+                          )}
                           <div className="flex items-center justify-between border-t border-white/10 pt-3">
                             <span className="type text-[12px] uppercase tracking-wide text-white/60 truncate pr-3">{event.location}</span>
                             <span className="stamp text-brand-primary text-xl shrink-0">{priceStamp(event)}</span>
@@ -438,6 +441,9 @@ export default function Home() {
                               {`${eventDayLabel(event)} · ${eventTime(event)}`.toLowerCase()}
                             </p>
                             <h3 className="disp text-2xl text-white leading-[0.9] tracking-tight line-clamp-2">{event.title}</h3>
+                            {event.summary && (
+                              <p className="type text-[11px] text-white/60 line-clamp-1 mt-1">{event.summary}</p>
+                            )}
                           </div>
                         </div>
                         <div className="p-3 flex items-center justify-between">

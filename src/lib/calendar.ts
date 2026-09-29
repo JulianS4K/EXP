@@ -62,7 +62,7 @@ export function eventCalendarFields(event: Event): CalendarFields | null {
     .join(', ');
 
   const url = publicUrl(`event/${event.id}`);
-  const description = [event.description?.trim(), url].filter(Boolean).join('\n\n');
+  const description = [event.summary?.trim(), event.description?.trim(), url].filter(Boolean).join('\n\n');
 
   return { title: event.title || 'Event', start, end, location, description, url };
 }

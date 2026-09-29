@@ -89,9 +89,11 @@ How we build it (techniques):
 - ✅ **Store page content** (mig `20260929120000`, live in prod): summary, rich description (safe markdown),
   lineup with set times, FAQ, gallery, video, minimum age, refund policy and notes; feeds the Google events feed
   (summary, lineup, age range) and the marketplace age note. Shows in Create / Edit once the columns exist.
-- ⬜ Store page follow-ups: summary on event cards, FAQ structured data, MCP / calendar / SEO copy, `min_age` in
-  `exos-distribute`'s select, lineup feeding Performers, a length check on the old `description` column.
-- ⬜ Currency picker in Create Event (new events are always USD today); drop the dead `exclusivity` field.
+- 🟡 Store page follow-ups: ✅ summary on event cards (Home, org storefront, organizer profile, embed); ✅ MCP
+  (`get_event` / `fetch`) and add-to-calendar lead with the summary (the .ics feeds are ready but need
+  `exos_calendar_event_rows` to return `summary`, a migration); ✅ `min_age` in `exos-distribute`'s select.
+  Still ⬜: FAQ structured data, SEO copy, lineup feeding Performers, a length check on the old `description` column.
+- ✅ Currency picker in Create Event (shared with Edit). `exclusivity` stays: EditEvent and the marketplace SQL still read it.
 - ⬜ Rebuild or retire Terminal-2's `static/bridge` copy (it still has the removed promo-code editor) and add a
   CI check that it matches EXP main; one shared structured-data builder so `exos_seo.py` can retire.
 - ⬜ Online / hybrid events; post-checkout "what to bring" message; per-event `noindex`.

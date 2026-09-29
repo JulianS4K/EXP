@@ -23,6 +23,8 @@ export interface PublicEvent {
   slug: string | null;
   name: string;
   description: string | null;
+  /** Store-page one-liner (mig 20260929120000); absent on older rows or selects. */
+  summary?: string | null;
   starts_at: string | null;
   doors_at: string | null;
   timezone: string | null;
@@ -173,12 +175,18 @@ function eventSummary(e: PublicEvent, appBase: string) {
   };
 }
 
+// The summary line, then the plain description, capped for the tool output.
+function eventDescription(e: PublicEvent): string | null {
+  const out = [e.summary?.trim(), e.description?.trim()].filter(Boolean).join('\n\n');
+  return out ? out.slice(0, 4000) : null;
+}
+
 function eventText(e: PublicEvent, tiers: ReturnType<typeof tierView>[]): string {
   const cur = (e.currency || 'USD').toUpperCase();
   const lines = [
     e.name,
     [e.starts_at && `Starts ${e.starts_at}${e.timezone ? ` (${e.timezone})` : ''}`, e.venue_name, city(e.venue_address)].filter(Boolean).join(' · '),
-    e.description?.slice(0, 4000) ?? '',
+    eventDescription(e) ?? '',
     'Tickets (all-in):',
     ...tiers.map((t) => `- ${t.name}: ${t.free ? 'free' : `${t.price_all_in.toFixed(2)} ${cur}`} (${t.status.replace(/_/g, ' ')})`),
   ];
@@ -250,7 +258,7 @@ export function exosTools(data: ExosData, opts: ExosMcpOptions): ToolDefinition[
       const e = await requireEvent(data, str(args, 'event', { required: true, max: 100 })!);
       const at = now();
       const tiers = (await data.tiersFor(e.id)).map((t) => tierView(t, at));
-      return { ...eventSummary(e, base), description: e.description?.slice(0, 4000) ?? null, image_url: e.image_url, ticket_types: tiers };
+      return { ...eventSummary(e, base), description: eventDescription(e), image_url: e.image_url, ticket_types: tiers };
     },
   };
 

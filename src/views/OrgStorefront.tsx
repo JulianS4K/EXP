@@ -277,6 +277,9 @@ function StorefrontInner({ org }: ResolvedOrg) {
                       <h3 className="disp text-2xl leading-[0.9] tracking-tight uppercase">
                         {ev.title}
                       </h3>
+                      {ev.summary && (
+                        <p className="type text-[11px] text-white/60 line-clamp-1 mt-1">{ev.summary}</p>
+                      )}
                     </div>
                   </div>
                   <div className="p-3 flex items-center justify-between">

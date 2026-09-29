@@ -42,7 +42,7 @@ const PUBLIC_PER_MINUTE = 60;
 const KEY_PER_MINUTE = 120;
 
 const EVENT_COLS =
-  "id, slug, name, description, starts_at, doors_at, timezone, currency, venue_name, venue_address, " +
+  "id, slug, name, summary, description, starts_at, doors_at, timezone, currency, venue_name, venue_address, " +
   "primary_performer_name, performer_names, genres, category, image_url, total_tickets, tickets_sold";
 const TIER_COLS =
   "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule, exclusive_tax_percent, accessible";
