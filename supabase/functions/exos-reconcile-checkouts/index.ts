@@ -17,6 +17,12 @@
 //      20260925020000) so the sweep makes progress instead of re-reading the
 //      same newest rows.
 //
+//   3. Fee actuals backfill (mig 20260929131000): settled payments whose
+//      Stripe fee / net / transfer weren't recorded (the webhook's best-effort
+//      read failed or timed out, or the order was fulfilled by step 1) ->
+//      recordFeeActuals, the same helper the webhook uses. Read-only at
+//      Stripe; a failure just leaves the row for the next run.
+//
 // Required secrets (operator, at deploy): STRIPE_SECRET_KEY, CRON_SECRET,
 // SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (platform-injected). Deploy like the
 // other cron fns; scheduled by mig 20260702133000.
@@ -25,6 +31,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
+import { recordFeeActuals } from "../_shared/feeActuals.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -35,6 +42,10 @@ const stripe = new Stripe(stripeKey, {
 // Don't fight the normal webhook: only touch sessions older than this.
 const GRACE_MS = 15 * 60 * 1000;
 const BATCH = 100;
+// Fee backfill: a smaller batch, and only payments from the last 30 days
+// (older ones missing a fee record are for a manual look).
+const FEE_BATCH = 50;
+const FEE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
@@ -47,7 +58,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const out = { checked: 0, fulfilled: 0, expired: 0, swept: 0, refunded: 0, already_refunded: 0, errors: 0 };
+  const out = {
+    checked: 0, fulfilled: 0, expired: 0, swept: 0, refunded: 0, already_refunded: 0, errors: 0,
+    fees_recorded: 0, fees_pending: 0,
+  };
   const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
 
   // 1. Pending-but-maybe-paid: ask Stripe the source of truth.
@@ -203,6 +217,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
       out.errors++;
       await mark(row.session_id, false, `error: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // 3. Fee actuals backfill. Errors here are logged and counted in
+  //    fees_pending, never in errors: nothing about the order depends on them.
+  const { data: feeTodo, error: feeTodoErr } = await sb
+    .from("exos_order_payments")
+    .select("session_id, payment_intent")
+    .eq("status", "succeeded")
+    .eq("provider", "stripe")
+    .is("fees_recorded_at", null)
+    .not("payment_intent", "is", null)
+    .lt("created_at", cutoff)
+    .gt("created_at", new Date(Date.now() - FEE_WINDOW_MS).toISOString())
+    .order("created_at", { ascending: true })
+    .limit(FEE_BATCH);
+  if (feeTodoErr) {
+    // Before mig 20260929131000 there's no fees_recorded_at column: skip quietly.
+    console.error("reconcile: fee backfill skipped", feeTodoErr.message);
+  }
+  for (const row of feeTodo ?? []) {
+    const outcome = await recordFeeActuals(sb, stripe, row.session_id as string, row.payment_intent as string, {
+      log: (msg, err) => console.error(`reconcile: ${msg}`, err ?? ""),
+    });
+    if (outcome === "recorded") out.fees_recorded++;
+    else out.fees_pending++;
   }
 
   return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json" } });

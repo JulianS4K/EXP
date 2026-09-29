@@ -9,6 +9,20 @@
 
 import { supabase } from './supabase';
 import type { Attribution } from './attribution';
+import type { AdIds, MarketingConsent } from './adIds';
+
+/** Ad click ids / browser ids and consent for the checkout record (lib/adIds.ts). */
+interface CheckoutRecordInput {
+  adIds?: AdIds;
+  consent?: MarketingConsent;
+}
+
+function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consent?: MarketingConsent } {
+  return {
+    ad_ids: input.adIds && Object.keys(input.adIds).length > 0 ? input.adIds : undefined,
+    consent: input.consent,
+  };
+}
 
 /** The function's own error message ("sold out", "purchase limit…"), if any. */
 async function functionError(error: unknown, fallback: string): Promise<Error> {
@@ -36,7 +50,7 @@ export async function startCheckout(input: {
   attribution?: Attribution;
   /** Signed out: pay as a guest; tickets go to this email. */
   guestEmail?: string;
-}): Promise<string> {
+} & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
       event_id: input.eventId,
@@ -48,6 +62,7 @@ export async function startCheckout(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
+      ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
@@ -67,7 +82,7 @@ export async function claimFreeAsGuest(input: {
   cancelUrl: string;
   voucherCode?: string;
   attribution?: Attribution;
-}): Promise<{ issued: number; email: string }> {
+} & CheckoutRecordInput): Promise<{ issued: number; email: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
       event_id: input.eventId,
@@ -78,6 +93,7 @@ export async function claimFreeAsGuest(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail.trim().toLowerCase(),
+      ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not send your tickets.');
@@ -94,7 +110,7 @@ export async function startEmbeddedCheckout(input: {
   quantity: number;
   returnUrl: string;
   attribution?: Attribution;
-}): Promise<{ clientSecret: string; sessionId: string }> {
+} & CheckoutRecordInput): Promise<{ clientSecret: string; sessionId: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
       ui_mode: 'embedded',
@@ -103,6 +119,7 @@ export async function startEmbeddedCheckout(input: {
       quantity: input.quantity,
       return_url: input.returnUrl,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+      ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');

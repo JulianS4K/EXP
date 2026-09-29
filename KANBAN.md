@@ -45,9 +45,11 @@ How we build it (techniques):
   never replay as real check-ins; "Sold" tile; guest-list upload recovers after a drop.
 - ⬜ Roster delta RPC (instead of a full re-pull each minute); sync-health panel that stops and says so on an
   authorization error; encrypt the saved roster, then per-day door keys.
-- ⬜ **Will-call for parked tickets** (StubHub sales, guests without accounts, emailed comps are parked on the org
-  owner until claimed and are refused at the door today): door search by buyer name/email from the pending
-  transfer, ID check, manager-approved admit that completes the transfer to a door placeholder and checks in.
+- ✅ **Will-call for parked tickets** (mig `20260929130000`, not applied): the roster marks unclaimed marketplace,
+  guest and comp tickets with the buyer's name or masked email; an owner or manager admits after an ID check
+  (`exos_door_admit_parked`, logged as will-call, the claim link is cancelled); works offline through the queue.
+  Follow-ups: "you're in" mail to the buyer, a per-event switch letting scanners admit will-call, guest checkout
+  collecting a name.
 - ⬜ **Record offline admissions the server rejects** (keep attendance true, flag for review) and lock transfers once
   doors open.
 - ⬜ **Check-in lists / gates / re-entry** (pretix model): lists per gate or ticket type, validity windows, pass-out
@@ -59,8 +61,9 @@ How we build it (techniques):
 - ✅ **Paid Purchase pixel actually fires** (CSP allowed pixels only on listing pages, so the Stripe return never
   reported a Purchase) and carries the Stripe session id as the dedupe id (Meta eventID, TikTok event_id, GA4
   transaction_id). Link-in-bio pages allow pixels too.
-- ⬜ Capture every click id at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, _fbp/_fbc, GA client
-  id, IP/UA) and the consent state; InitiateCheckout event; GA4 items.
+- ✅ Every click id captured at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, msclkid, fbclid,
+  _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`, not
+  applied); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
 - ⬜ **Server-side conversions**: `exos_org_ad_credentials` (tokens in Vault, never in public `marketing`),
   `exos_marketing_conversions` outbox written by `exos_fulfill_checkout` / free claims / refunds, `exos-conversions-drain`
   cron → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit CAPI, Snap CAPI; Google Ads enhanced
@@ -82,8 +85,9 @@ How we build it (techniques):
 - ⬜ Online / hybrid events; post-checkout "what to bring" message; per-event `noindex`.
 
 ### Next (money records: ERP-lite)
-1. ⬜ Store the fee split per order (application fee, Exos fee, card fee estimate, then the actual Stripe fee,
-   net and transfer id from the balance transaction).
+1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate
+   at checkout; Stripe's actual fee, net, transfer and balance-transaction ids after fulfilment (best-effort,
+   backfilled by reconcile); `exos_order_money` view for owner / manager / finance.
 2. ⬜ Settlement report per event (gross, tax, refunds, disputes, fees, marketplace proceeds, commissions, net).
 3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
 4. ⬜ Credit notes on refund (`CN-` series); the invoice stays unchanged.

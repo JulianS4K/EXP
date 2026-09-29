@@ -3,7 +3,9 @@ import {
   EXOS_FEE_BPS,
   STRIPE_CARD_FEE,
   checkoutApplicationFeeCents,
+  checkoutFeeSplit,
   exosFeeBpsAt,
+  isFeeFreeAt,
   exosFeeCents,
   FEE_FREE_MONTHS,
   organizerNetCents,
@@ -50,5 +52,44 @@ describe('the Exos fee: 3% of every transaction, paid by the organizer', () => {
       const payout = payoutCents(ch, netEqualListCents(ch, 4000), 1);
       expect(organizerNetCents(payout), ch).toBe(3880);
     }
+  });
+});
+
+describe('checkoutFeeSplit: the application fee, broken down for the order record', () => {
+  it('splits a 40.00 order into 1.20 Exos + 1.46 card fee = 2.66', () => {
+    expect(checkoutFeeSplit(4000)).toEqual({ applicationFeeCents: 266, exosFeeCents: 120, cardFeeEstCents: 146, feeBps: 300 });
+  });
+
+  it('is card fee only in the fee-free window', () => {
+    expect(checkoutFeeSplit(4000, { bps: 0 })).toEqual({ applicationFeeCents: 146, exosFeeCents: 0, cardFeeEstCents: 146, feeBps: 0 });
+  });
+
+  it('always matches what Stripe is told, and the parts add up', () => {
+    const cards = [STRIPE_CARD_FEE, { bps: 340, fixedCents: 30 }, { bps: 0, fixedCents: 0 }];
+    for (const amount of [0, 1, 25, 30, 31, 99, 100, 1005, 4000, 10094, 123457, 999999]) {
+      for (const bps of [0, 150, 300, 1000]) {
+        for (const card of cards) {
+          const s = checkoutFeeSplit(amount, { bps, card });
+          expect(s.applicationFeeCents).toBe(checkoutApplicationFeeCents(amount, { bps, card }));
+          expect(s.exosFeeCents + s.cardFeeEstCents).toBe(s.applicationFeeCents);
+          expect(s.exosFeeCents).toBeGreaterThanOrEqual(0);
+          expect(s.applicationFeeCents).toBeLessThanOrEqual(Math.max(amount, 0));
+        }
+      }
+    }
+  });
+
+  it('covers the card fee first when the order cap bites', () => {
+    // 0.31: 3% = 1c, card = 1c + 30c = 31c -> capped at 31, all of it card fee.
+    expect(checkoutFeeSplit(31)).toEqual({ applicationFeeCents: 31, exosFeeCents: 0, cardFeeEstCents: 31, feeBps: 300 });
+    expect(checkoutFeeSplit(20)).toEqual({ applicationFeeCents: 20, exosFeeCents: 0, cardFeeEstCents: 20, feeBps: 300 });
+  });
+
+  it('knows the fee-free window', () => {
+    const now = new Date('2026-09-29T12:00:00Z');
+    expect(isFeeFreeAt('2027-03-29T00:00:00Z', now)).toBe(true);
+    expect(isFeeFreeAt('2026-09-01T00:00:00Z', now)).toBe(false);
+    expect(isFeeFreeAt(null, now)).toBe(false);
+    expect(isFeeFreeAt('not a date', now)).toBe(false);
   });
 });

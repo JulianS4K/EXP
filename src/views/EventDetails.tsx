@@ -25,7 +25,9 @@ import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
 import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
-import { rememberPendingCheckout } from '../lib/purchasePixel';
+import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from '../lib/purchasePixel';
+import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
+import { getConsent } from '../lib/consent';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
@@ -92,6 +94,8 @@ export default function EventDetails() {
   useEffect(() => {
     if (!id) return;
     setAttribution(captureAttribution(id, window.location.search));
+    // Ad click ids (gclid, ttclid, ...) for the checkout record, kept for the visit.
+    captureClickIds(id, window.location.search);
     setPrefill(readPrefill(id));
   }, [id]);
   const location = useLocation();
@@ -314,6 +318,8 @@ export default function EventDetails() {
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
         attribution,
+        adIds: checkoutAdIds(event.id),
+        consent: checkoutConsent(),
       });
       clearPrefill(event.id);
       setGuestOpen(false);
@@ -347,20 +353,28 @@ export default function EventDetails() {
         voucherCode: voucher?.code,
         attribution,
         guestEmail,
+        adIds: checkoutAdIds(event.id),
+        consent: checkoutConsent(),
       });
       clearPrefill(event.id);
       if (event.orgId) {
         // What the Purchase pixel falls back on when the session row isn't
         // readable on return (guests). Estimate only for the tier on screen.
         const estimate = tierId === selectedTier?.id ? priceToDisplay * quantity + addonSel.totalCents / 100 : undefined;
-        rememberPendingCheckout({
+        const pendingCheckout = {
           eventId: event.id,
           orgId: event.orgId,
           title: event.title,
           currency: event.currency || 'USD',
           quantity,
           value: estimate,
-        });
+          initiateEventId: newPixelEventId(),
+        };
+        rememberPendingCheckout(pendingCheckout);
+        // InitiateCheckout, deduped by the random id kept in the stash.
+        trackPixelEvent('InitiateCheckout', initiateCheckoutParams(pendingCheckout), pendingCheckout.initiateEventId);
+        // Give a live pixel a moment to send before the page unloads.
+        if (getConsent() === 'granted') await new Promise((r) => setTimeout(r, 300));
       }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {

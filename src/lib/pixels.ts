@@ -180,8 +180,14 @@ function fire(name: string, params?: Record<string, unknown>, eventId?: string):
     else window.fbq('track', name, params);
   }
   if (window.ttq) window.ttq.track(name, eventId ? { ...params, event_id: eventId } : params);
-  // GA4 has no fixed event taxonomy; lowercase the canonical name.
-  if (window.gtag) window.gtag('event', name.toLowerCase(), eventId && name === 'Purchase' ? { ...params, transaction_id: eventId } : params);
+  // GA4: its recommended name where there is one (begin_checkout), else the
+  // lowercased canonical name.
+  if (window.gtag) window.gtag('event', ga4EventName(name), eventId && name === 'Purchase' ? { ...params, transaction_id: eventId } : params);
+}
+
+/** GA4 event name for a canonical pixel event. */
+export function ga4EventName(name: string): string {
+  return name === 'InitiateCheckout' ? 'begin_checkout' : name.toLowerCase();
 }
 
 // Fire a conversion/interaction event across whichever providers are loaded.

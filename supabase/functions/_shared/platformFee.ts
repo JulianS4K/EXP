@@ -73,3 +73,44 @@ export function checkoutApplicationFeeCents(
   const fee = exosFeeCents(amountCents, opts.bps ?? EXOS_FEE_BPS) + stripeFeeCents(amountCents, opts.card ?? STRIPE_CARD_FEE);
   return Math.min(Math.round(amountCents), fee);
 }
+
+/** True while the org is inside its fee-free window (exos_org_billing.fee_free_until in the future). */
+export function isFeeFreeAt(feeFreeUntil: string | null | undefined, now: Date): boolean {
+  return exosFeeBpsAt(feeFreeUntil, now, 1) === 0;
+}
+
+/**
+ * What an Exos checkout's application fee is made of, recorded on the
+ * checkout session at create (mig 20260929131000) so Exos can answer "what
+ * did Exos earn / what did the organizer get" without asking Stripe.
+ *
+ *   applicationFeeCents  exactly checkoutApplicationFeeCents (what Stripe is told)
+ *   cardFeeEstCents      the Stripe card-fee part (estimate at `card` rates)
+ *   exosFeeCents         the rest: Exos's 3% (0 in the fee-free window)
+ *
+ * The parts always add up to the application fee. On a tiny order where the
+ * cap (never more than the order) bites, the card fee is covered first and
+ * Exos takes what is left.
+ */
+export interface CheckoutFeeSplit {
+  applicationFeeCents: number;
+  exosFeeCents: number;
+  cardFeeEstCents: number;
+  feeBps: number;
+}
+
+export function checkoutFeeSplit(
+  amountCents: number,
+  opts: { bps?: number; card?: CardFee } = {},
+): CheckoutFeeSplit {
+  const bps = opts.bps ?? EXOS_FEE_BPS;
+  const card = opts.card ?? STRIPE_CARD_FEE;
+  const applicationFeeCents = checkoutApplicationFeeCents(amountCents, { bps, card });
+  const cardFeeEstCents = Math.min(stripeFeeCents(amountCents, card), applicationFeeCents);
+  return {
+    applicationFeeCents,
+    exosFeeCents: applicationFeeCents - cardFeeEstCents,
+    cardFeeEstCents,
+    feeBps: Number.isFinite(bps) && bps > 0 ? Math.round(bps) : 0,
+  };
+}

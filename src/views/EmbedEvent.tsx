@@ -40,6 +40,7 @@ import { paymentsEnabled } from '../lib/payments';
 import { buyerTierPrice } from '../lib/pricing';
 import { attributionFromSearch, readAttribution, withAttribution, type Attribution } from '../lib/attribution';
 import { startEmbeddedCheckout } from '../lib/checkout';
+import { checkoutConsent, clickIdsFromSearch } from '../lib/adIds';
 import { EMBED_COMPLETE, buildEmbedReturnUrl, buyableTiers, maxQuantity, postToHost } from '../lib/embed';
 import { useEmbedHost, useEmbedResize } from '../hooks/useEmbedResize';
 import EmbedSignIn from '../components/EmbedSignIn';
@@ -96,6 +97,10 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
         quantity,
         returnUrl: buildEmbedReturnUrl(publicUrl('embed/return'), event.id, host),
         attribution,
+        // Click ids on the iframe's own URL only: cookies here are the venue
+        // site's third-party context, so browser ids aren't read.
+        adIds: clickIdsFromSearch(typeof window !== 'undefined' ? window.location.search : ''),
+        consent: checkoutConsent(),
       });
       setSession({ key, ...s });
       setStep('paying');
