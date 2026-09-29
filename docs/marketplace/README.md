@@ -474,4 +474,6 @@ Not built yet:
 - **Sending deliveries:** the planned fulfilment calls (`delivery_plan`) are
   stored, not sent; the buyer already gets their Exos claim links by email.
 - **Other marketplaces:** TickPick (no adapter) and Automatiq (a scaffold in
-  `exos-distribute`, skipped until `AUTOMATIQ_API_KEY` is set).
+  `exos-distribute`, skipped until `AUTOMATIQ_API_KEY` is set). Routing Exos
+  inventory through Automatiq instead of listing directly is designed in
+  [`automatiq.md`](automatiq.md): one route per event, never both.
