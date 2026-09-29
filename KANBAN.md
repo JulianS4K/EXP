@@ -4,11 +4,11 @@
 
 - **DB:** every Exos migration through `20260929080000_exos_rpc_hardening` is applied to prod (operator-approved;
   `…074000` and earlier md5-verified, `080000` verified by its patch markers and grants on 2026-09-29).
-  Authored, not applied: `20260929120000_exos_event_store_content` (store page, when it lands).
+  `20260929120000_exos_event_store_content` applied 2026-09-29 (operator-approved; columns, checks, grants and the
+  `exos_public_events` append verified live).
 - **Edge functions:** 16 deployed and smoke-tested through pg_net on 2026-09-28 (checkout, webhook, refund, mail,
   wallet, calendar, MCP, API, Google feed, payouts, POS, reconcile, webhook drain, geocode…). Held back:
-  `exos-distribute`, `exos-marketplace-sales`. `exos-checkout` in prod predates the "codes need an account" change
-  (guests can still try codes there, 120 misses / event / 10 min) until it's redeployed.
+  `exos-distribute`, `exos-marketplace-sales`. `exos-checkout` redeployed 2026-09-29 (v2: guests can't try codes).
 - **Crons live:** reconcile checkouts (15 min), webhook drain (3 min), mail drain (2 min), wallet push (5 min),
   mail follow-ups (hourly), geocode refresh and payouts (daily, dry-run).
 - **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (roll the test key first),
@@ -71,7 +71,7 @@ How we build it (techniques):
 - ⬜ SMS opt-in and blasts (already on the board).
 
 ### Next (event creation and the store page)
-- ✅ **Store page content** (mig `20260929120000`, not applied to prod): summary, rich description (safe markdown),
+- ✅ **Store page content** (mig `20260929120000`, live in prod): summary, rich description (safe markdown),
   lineup with set times, FAQ, gallery, video, minimum age, refund policy and notes; feeds the Google events feed
   (summary, lineup, age range) and the marketplace age note. Shows in Create / Edit once the columns exist.
 - ⬜ Store page follow-ups: summary on event cards, FAQ structured data, MCP / calendar / SEO copy, `min_age` in
