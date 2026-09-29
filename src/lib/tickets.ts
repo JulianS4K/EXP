@@ -22,6 +22,7 @@ import { Event, Ticket, Transfer } from '../types';
 import { estimateOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
 import { fetchAllPages } from './door/roster';
+import { parseListState, type ListState } from './door/lists';
 
 const toTs = (iso?: string | null): Timestamp =>
   Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
@@ -295,6 +296,10 @@ export interface RegistryEntry {
   claimName: string | null;
   /** Masked (j***@gmail.com); the roster never carries the full address. */
   claimEmailMasked: string | null;
+  /** Ticket type id and last direction per re-entry list (mig
+   *  20260929140000); absent before it. */
+  tierId: string | null;
+  listState?: ListState;
 }
 
 /** Every ticket for an event, for the offline check-in registry (staff RLS).
@@ -332,6 +337,8 @@ export async function listEventTicketsForRegistry(eventId: string): Promise<Regi
     parked: r.parked === true,
     claimName: r.claim_name ?? null,
     claimEmailMasked: r.claim_email_masked ?? null,
+    tierId: r.tier_id ?? null,
+    listState: parseListState(r.list_state),
   }));
 }
 
@@ -388,6 +395,16 @@ export interface CheckinRow {
   source: string | null;
   verification: string | null;
   scannedAt: Timestamp;
+  /** When the door admitted them, for an offline scan (else null). */
+  offlineScannedAt: Timestamp | null;
+  device: string | null;
+  /** Check-in lists (mig 20260929140000); defaults before it. */
+  listId: string | null;
+  direction: 'entry' | 'exit';
+  gate: string | null;
+  /** An offline admission the server refused, recorded so attendance is true. */
+  forced: boolean;
+  conflict: string | null;
 }
 
 export async function listEventCheckins(eventId: string): Promise<CheckinRow[]> {
@@ -404,17 +421,26 @@ export async function listEventCheckins(eventId: string): Promise<CheckinRow[]> 
     source: r.source,
     verification: r.verification,
     scannedAt: toTs(r.scanned_at),
+    offlineScannedAt: r.offline_scanned_at ? toTs(r.offline_scanned_at) : null,
+    device: r.device ?? null,
+    listId: r.list_id ?? null,
+    direction: r.direction === 'exit' ? 'exit' : 'entry',
+    gate: r.gate ?? null,
+    forced: r.forced === true,
+    conflict: r.conflict ?? null,
   }));
 }
 
-// Count of tickets scanned in (checked in) for an event = "inside venue".
-// One row per check-in in exos_event_checkins (the flip is one-shot), so a
-// head count is the authoritative attendance number. Org-staff RLS gated.
+// Tickets checked in for an event (the door's "In"): tickets whose status is
+// used. The first entry uses a ticket; exits and re-entries on a re-entry list
+// (mig 20260929140000) don't change it, so this counts people who came, not
+// scan rows. Org-staff RLS gated.
 export async function countEventCheckins(eventId: string): Promise<number> {
   const { count, error } = await supabase
-    .from('exos_event_checkins')
-    .select('*', { count: 'exact', head: true })
-    .eq('event_id', eventId);
+    .from('exos_tickets')
+    .select('id', { count: 'exact', head: true })
+    .eq('event_id', eventId)
+    .eq('status', 'used');
   if (error) throw error;
   return count ?? 0;
 }
@@ -467,6 +493,22 @@ export interface CheckInResult {
   conflict?: boolean;
   /** Offline replay: this scan's ref was already answered. */
   duplicate?: boolean;
+  /** Offline replay refused, but the admission was recorded (forced check-in,
+   *  mig 20260929140000) with this reason. */
+  forced?: boolean;
+  conflict_reason?: string;
+  /** Re-entry list: this entry follows an exit. */
+  reentry?: boolean;
+  /** The list that refused ('wrong-list', 'invalid-time', 'already-inside'). */
+  list?: string;
+}
+
+/** Which check-in list and direction a scan is for (mig 20260929140000). Only
+ *  sent when the database has lists: the calls then go to the list-aware
+ *  overloads (every argument given, so they never collide with the old ones). */
+export interface DoorScanTarget {
+  listId: string | null;
+  direction: 'entry' | 'exit';
 }
 
 /** Atomic check-in (status flip + audit). Returns {ok,reason}; reason is one
@@ -481,9 +523,10 @@ export async function checkInTicket(
   verification: 'verified' | 'legacy' | 'manual',
   barcodePayload?: string,
   eventId?: string,
-  opts: { reason?: string; device?: string; signal?: AbortSignal } = {},
+  opts: { reason?: string; device?: string; signal?: AbortSignal; door?: DoorScanTarget } = {},
 ): Promise<CheckInResult> {
   const call = supabase.rpc('exos_check_in_ticket', {
+    ...(opts.door ? { p_list_id: opts.door.listId, p_direction: opts.door.direction, p_scanned_at: null } : {}),
     p_ticket_id: ticketId,
     p_source: source,
     p_verification: verification,
@@ -513,14 +556,17 @@ export async function checkInOffline(
   device?: string,
 ): Promise<CheckInResult> {
   // A check-in by name replays through its own RPC, with the same ref rules.
+  const door: DoorScanTarget | undefined = scan.direction ? { listId: scan.listId ?? null, direction: scan.direction } : undefined;
   if (scan.kind === 'name') {
     return checkInByName(scan.ticketId, eventId, scan.reason ?? null, {
       device,
       scannedAt: scan.scannedAt,
       clientRef: scan.ref,
+      door,
     });
   }
   const { data, error } = await supabase.rpc('exos_check_in_offline', {
+    ...(door ? { p_list_id: door.listId, p_direction: door.direction } : {}),
     p_client_ref: scan.ref,
     p_ticket_id: scan.ticketId,
     p_event_id: eventId,
@@ -548,9 +594,10 @@ export async function checkInByName(
   ticketId: string,
   eventId: string,
   note: string | null,
-  opts: { device?: string; scannedAt?: number; clientRef?: string; signal?: AbortSignal } = {},
+  opts: { device?: string; scannedAt?: number; clientRef?: string; signal?: AbortSignal; door?: DoorScanTarget } = {},
 ): Promise<CheckInResult & { by_name?: boolean; parked?: boolean; name?: string }> {
   const call = supabase.rpc('exos_door_checkin_by_name', {
+    ...(opts.door ? { p_list_id: opts.door.listId, p_direction: opts.door.direction } : {}),
     p_ticket_id: ticketId,
     p_event_id: eventId,
     p_note: note && note.trim() ? note.trim() : null,

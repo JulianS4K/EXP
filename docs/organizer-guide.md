@@ -137,7 +137,7 @@ tiers and discount codes, into a series of dates.
   refused and logged.
 - **Offline mode:** download the roster before doors open. The device can then admit tickets
   without a connection and syncs when it's back online.
-  - Anything the server rejects on sync is flagged to staff.
+  - Anything the server rejects on sync is flagged to staff (see **Offline conflicts** below).
   - **Sign out of shared devices after the event.** Signing out clears the cached roster.
 - Doors can't be scanned before the event's doors time. An owner or manager can open a 3-hour
   test window for rehearsals. Test scans check the ticket ("Test scan OK") but don't use it up, so
@@ -174,6 +174,56 @@ list. It works for every active ticket of the event, claimed or not.
   the same way as other offline conflicts.
 - The scan report counts check-ins by name, and lists each one with verification `name` and the
   note.
+
+### Check-in lists and re-entry
+
+**Re-entry is off unless you turn it on.** By default every ticket gets in once, at any door, and a
+second scan says **Already used**. Nothing on this page is required: an event with no lists works
+exactly like that.
+
+Add lists in **Edit event → Venue & seating → Check-in lists** when the door needs more than that:
+
+- **A list is a gate or an area**, for example *Main door*, *VIP deck* or *Late entrance*. Give it
+  a name and pick the ticket types it admits (all of them, or some). A ticket type that isn't on the
+  list is refused at that list's door: "This ticket type isn't on this check-in list".
+- **Opens / Closes** (optional) limit when the list admits people, in the event's time zone.
+  Outside that window entries are refused ("isn't open right now").
+- **Allow re-entry** (off by default). When it's on, staff scan people **out** when they leave and
+  back **in** when they return:
+  - The scanner shows an **Entry / Exit** switch for that list. Use Exit when someone leaves.
+  - A second entry without an exit in between is refused: **Already inside**. Scan them out first.
+  - Each list keeps its own in / out state, so a guest inside the main room can still enter the
+    VIP deck once.
+  - Exits are refused on a list without re-entry, and when the device isn't scanning for a list.
+- **Ticket counts don't change.** The first entry marks a ticket used, as always; leaving and coming
+  back doesn't. "Checked in", sold and no-show numbers still count tickets that came in, not people
+  inside right now. The scan report also shows re-entries and exits.
+- **On the door device** each scanner picks its list at the top of the scanner (the choice is
+  remembered on that device). "Any ticket, no list" admits every ticket once, as without lists.
+- Check in by name follows the same list: wrong ticket type, closed window and "Already inside" are
+  refused the same as a scan. With Exit selected, the button reads **Check out by name**.
+- Deleting a list doesn't remove its past check-ins; the scan report keeps the list's name.
+
+### Offline conflicts and sync health
+
+- A scan admitted while the device was offline is uploaded later. If the server refuses it then
+  (the ticket was refunded, was transferred after the list was downloaded, the list doesn't admit
+  that ticket type, doors weren't open, or the upload came more than 48 hours after the event
+  ended), the person is still **recorded as attended**, marked as an **offline conflict** with the
+  reason. The ticket itself isn't changed, so a transferred ticket's new holder can still get in.
+  A true double entry ("Already used" at another door) is only logged as a refusal.
+- The scanner's **Sync health** panel shows how old the offline list is, how many scans are waiting
+  to upload and since when, the last successful upload, how far the device's clock is from the
+  server's, and the conflicts from the last uploads. **Re-download** and **Upload now** are there
+  too.
+- If the server says the signed-in account may no longer upload (for example it was removed as
+  door staff), the device stops retrying and says **Not authorized to upload N scans**. The scans
+  stay on the device: hand it to a manager, or sign in as door staff for the event and tap
+  **Upload now**. Signing out while scans are waiting asks for confirmation first.
+- The offline list is encrypted on the device with a key that can't be copied off it. Browsers that
+  can't do that (some private windows, very old browsers) keep it unencrypted and the scanner says
+  so. Signing out deletes the list and the key.
+- The **scan report** lists offline conflicts separately, with the reason, the list and the device.
 
 ## 6. After a sale
 

@@ -14,10 +14,12 @@ import {
   setCheckinTestWindow,
   syncServerClock,
   type CheckInResult,
+  type DoorScanTarget,
   type ScanTicket,
 } from '../lib/tickets';
+import { supabase } from '../lib/supabase';
 import { Ticket } from '../types';
-import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw, LogOut, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 // html5-qrcode (~330KB) is loaded on demand when the scanner opens, so it
 // never ships on other routes or before the camera is actually needed.
@@ -26,7 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { verifyBarcode, type VerifyResult } from '../lib/barcode';
-import { describeSkew, serverNow } from '../lib/serverClock';
+import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
 import {
   deviceLabel,
   enqueueScan,
@@ -36,7 +38,7 @@ import {
   type QueuedScan,
 } from '../lib/offlineCheckins';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
-import { joinCheckinChannel } from '../lib/checkinChannel';
+import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
@@ -61,7 +63,20 @@ import {
   type ScanDecisionInput,
 } from '../lib/door/decide';
 import { DOOR_REQUEST_TIMEOUT_MS, isServerAnswer, withDeadline } from '../lib/door/net';
-import { doorKV, safeLocalStorage } from '../lib/door/kv';
+import { doorCipherShared, doorKV, safeLocalStorage } from '../lib/door/kv';
+import {
+  NO_LIST,
+  effectiveDirection,
+  loadDirection,
+  loadListChoice,
+  pickList,
+  saveDirection,
+  saveListChoice,
+  sortLists,
+  withDirection,
+  type DoorDirection,
+} from '../lib/door/lists';
+import { classifyReplayError, conflictText, syncHealth, type ReplayConflict } from '../lib/door/health';
 import {
   ROSTER_REFRESH_MS,
   addMark,
@@ -80,6 +95,7 @@ import {
   type DoorEvent,
   type DoorRosterEntry,
   type RosterMarks,
+  type RosterProtection,
 } from '../lib/door/roster';
 import { fetchDoorEvent, pingServer } from '../lib/door/api';
 
@@ -129,7 +145,12 @@ const REFUSAL_TEXT: Record<string, string> = {
   'needs-manager': 'Needs a manager. Typing a ticket in (no live code) is an override only an owner or manager can make.',
   'reason-required': 'Give a reason for the override (at least 3 characters).',
   'not-assigned': "You're not assigned to scan this event. Ask an owner or manager to add it to your events.",
-  'bad-scan-time': 'This offline scan is too old to upload (more than 24 hours).',
+  'bad-scan-time': 'This offline scan is too old to upload (more than 48 hours after the event ended).',
+  'wrong-list': "This ticket type isn't on this check-in list. Send them to the right door, or switch the list if this device covers it.",
+  'invalid-time': "This check-in list isn't open right now (outside its hours).",
+  'exit-not-allowed': "This list doesn't allow re-entry, so there's nothing to scan out. Switch to Entry.",
+  'unknown-list': 'This check-in list no longer exists. Pick another list.',
+  'already-inside': 'Already inside on this list. Scan them out first if they are leaving.',
   'name-needs-manager': 'Ask a manager. This event lets only owners and managers check people in by name.',
   'name-checkin-off':
     'Check-in by name is off for this event (QR only). Ask the holder to open their ticket and show the live code.',
@@ -143,7 +164,7 @@ const VOIDED_TEXT =
 const IN_TRANSFER_TEXT =
   'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.';
 
-type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' };
+type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' | 'OUT' };
 
 export default function OrganizerCheckIn() {
   const { eventId } = useParams();
@@ -159,7 +180,10 @@ export default function OrganizerCheckIn() {
   const [searchId, setSearchId] = useState('');
   const [status, setStatus] = useState<'idle' | 'searching' | 'success' | 'not-found' | 'already-used' | 'invalid-barcode' | 'needs-reason' | 'by-name'>('idle');
   // "Already used": when (and on which device) the ticket was checked in.
-  const [usedInfo, setUsedInfo] = useState<{ at?: string; device?: string } | null>(null);
+  // inside = a re-entry list's "already inside" (scan them out first).
+  const [usedInfo, setUsedInfo] = useState<{ at?: string; device?: string; inside?: boolean } | null>(null);
+  // The last admit was an exit (re-entry list).
+  const [exitScan, setExitScan] = useState(false);
   // A typed override waiting for its reason (owner / manager only).
   const [overrideFor, setOverrideFor] = useState<{ ticketId: string; name: string } | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
@@ -210,6 +234,9 @@ export default function OrganizerCheckIn() {
   const effectiveOffline = isOffline || serverDown;
   const network: DoorNetwork = isOffline ? 'offline' : serverDown ? 'unreachable' : 'online';
   const [offlineRegistry, setOfflineRegistry] = useState<Record<string, OfflineTicketEntry>>({});
+  // For callbacks registered once (the realtime channel).
+  const offlineRegistryRef = useRef(offlineRegistry);
+  offlineRegistryRef.current = offlineRegistry;
   // When the roster in use was downloaded (ms), for the offline banner.
   const [rosterSavedAt, setRosterSavedAt] = useState<number | null>(null);
   const rosterSavedAtRef = useRef<number | null>(null);
@@ -219,6 +246,21 @@ export default function OrganizerCheckIn() {
   const [syncing, setSyncing] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<QueuedScan[]>([]);
   const [recentScans, setRecentScans] = useState<ScanRow[]>([]);
+  // Check-in lists (mig 20260929140000): which list this device scans for
+  // and in which direction, remembered per device and event.
+  const [listChoice, setListChoice] = useState<string | null>(() => (eventId ? loadListChoice(safeLocalStorage(), eventId) : null));
+  const [wantedDirection, setWantedDirection] = useState<DoorDirection>(() =>
+    eventId ? loadDirection(safeLocalStorage(), eventId) : 'entry',
+  );
+  // Sync health (door audit #10).
+  const [conflicts, setConflicts] = useState<ReplayConflict[]>([]);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  // The server refused this account's uploads (42501): stop retrying, keep them.
+  const [authBlocked, setAuthBlocked] = useState(false);
+  const [clockOffset, setClockOffsetState] = useState<number | null>(getMeasuredOffset());
+  const [healthTick, setHealthTick] = useState(0);
+  // How the saved list is kept on this device (encrypted unless the browser can't).
+  const [rosterProtection, setRosterProtection] = useState<RosterProtection | null>(null);
   // This scanner's label, recorded on each check-in ("already used at Door 7F3A").
   const device = React.useMemo(() => {
     try {
@@ -235,6 +277,24 @@ export default function OrganizerCheckIn() {
   // null = the database doesn't have it yet: no check-in by name.
   const nameMode = event?.nameCheckin ?? null;
   const nameAccess = nameMode ? nameCheckinAccess(nameMode, canOverride) : 'off';
+  // null = the database has no lists yet: the old RPCs, exactly as before.
+  const checkinLists = event?.checkinLists ?? null;
+  const activeList = pickList(checkinLists, listChoice);
+  const direction = effectiveDirection(activeList, wantedDirection);
+  const doorTarget: DoorScanTarget | undefined = checkinLists ? { listId: activeList?.id ?? null, direction } : undefined;
+  const chooseList = (id: string) => {
+    const next = id === NO_LIST ? null : id;
+    setListChoice(id);
+    if (eventId) saveListChoice(safeLocalStorage(), eventId, next);
+  };
+  // Nothing more to do for this ticket on this list: used (no re-entry), or
+  // inside and scanning entries (re-entry list).
+  const doneHere = (e: DoorRosterEntry): boolean =>
+    activeList?.allowReentry ? direction === 'entry' && e.lists?.[activeList.id] === 'entry' : e.used;
+  const chooseDirection = (d: DoorDirection) => {
+    setWantedDirection(d);
+    if (eventId) saveDirection(safeLocalStorage(), eventId, d);
+  };
   // "Inside venue" = tickets actually scanned in (exos_event_checkins count),
   // NOT tickets sold. Seeded on mount; refreshed by the realtime channel below
   // as scans land (this lane + others).
@@ -293,7 +353,11 @@ export default function OrganizerCheckIn() {
       try {
         const ev = await withDeadline((signal) => fetchDoorEvent(eventId, signal), 8_000);
         if (ev) {
-          setEvent(ev);
+          // Lists that failed to load (undefined) keep the ones we had.
+          const saved = ev.checkinLists === undefined ? loadDoorEvent(safeLocalStorage(), eventId, Date.now()) : null;
+          setEvent((prev) =>
+            ev.checkinLists !== undefined ? ev : { ...ev, checkinLists: prev?.checkinLists ?? saved?.event.checkinLists ?? null },
+          );
           setEventLoad('ready');
           return;
         }
@@ -344,7 +408,11 @@ export default function OrganizerCheckIn() {
     if (eventId) {
       marksRef.current = loadMarks(safeLocalStorage(), eventId, now);
       void pruneRosters(doorKV(), now)
-        .then(() => loadRoster(doorKV(), safeLocalStorage(), eventId, now))
+        .then(() => doorCipherShared())
+        .then((cipher) => {
+          setRosterProtection(cipher ? 'encrypted' : 'plaintext');
+          return loadRoster(doorKV(), safeLocalStorage(), eventId, now, cipher);
+        })
         .then((stored) => {
           // Don't clobber a download that finished first.
           if (cancelled || !stored || (rosterSavedAtRef.current ?? 0) > stored._savedAt) return;
@@ -363,7 +431,7 @@ export default function OrganizerCheckIn() {
     }
     // Measure this device's clock against the server (offline scans record the
     // corrected time, and the local code check uses it).
-    void syncServerClock();
+    void syncServerClock().then(() => setClockOffsetState(getMeasuredOffset()));
 
     return () => {
       cancelled = true;
@@ -375,18 +443,24 @@ export default function OrganizerCheckIn() {
   }, [eventId]);
 
   useEffect(() => {
-    if (!effectiveOffline && pendingUpdates.length > 0) {
+    if (!effectiveOffline && !authBlocked && pendingUpdates.length > 0) {
       void syncRef.current();
     }
-  }, [effectiveOffline, pendingUpdates.length]);
+  }, [effectiveOffline, authBlocked, pendingUpdates.length]);
 
   // Scans that failed to upload (server hiccup) retry on a timer, not only
   // when the network flips or the queue grows.
   useEffect(() => {
-    if (effectiveOffline || pendingUpdates.length === 0) return undefined;
+    if (effectiveOffline || authBlocked || pendingUpdates.length === 0) return undefined;
     const t = setInterval(() => void syncRef.current(), REPLAY_RETRY_MS);
     return () => clearInterval(t);
-  }, [effectiveOffline, pendingUpdates.length]);
+  }, [effectiveOffline, authBlocked, pendingUpdates.length]);
+
+  // The health panel's ages tick while the page is open.
+  useEffect(() => {
+    const t = setInterval(() => setHealthTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   // Leave "server unreachable" as soon as the server answers again.
   useEffect(() => {
@@ -404,12 +478,16 @@ export default function OrganizerCheckIn() {
   }, [serverDown, isOffline]);
 
   const syncingRef = useRef(false);
-  const syncPendingUpdates = async () => {
+  const syncPendingUpdates = async (opts: { manual?: boolean } = {}) => {
     if (pendingUpdates.length === 0 || syncingRef.current || !eventId) return;
+    // Uploads stopped on "not authorized": only a manual retry tries again.
+    if (authBlocked && !opts.manual) return;
     syncingRef.current = true;
     setSyncing(true);
+    if (opts.manual) setAuthBlocked(false);
     const answered: string[] = [];
-    const conflicts: { id: string; reason: string }[] = [];
+    const found: ReplayConflict[] = [];
+    let blocked = false;
     try {
       // Per-item try/catch so one failing replay doesn't abort the rest of the
       // queue. Each scan replays with the code it read and when
@@ -424,15 +502,38 @@ export default function OrganizerCheckIn() {
           // A timed-out online check-in can still have landed: the server then
           // answers 'used' by THIS device, which isn't a conflict.
           const ownEarlierScan = result.reason === 'used' && result.device === device;
-          // The server logs refusals to the scan report itself.
-          if (!result.ok && !ownEarlierScan) conflicts.push({ id: scan.ticketId, reason: result.reason ?? 'unknown' });
+          // The server logs refusals to the scan report itself; a refused
+          // entry the door admitted is also recorded as a forced check-in.
+          if (!result.ok && !ownEarlierScan) {
+            found.push({
+              ticketId: scan.ticketId,
+              name: offlineRegistry[scan.ticketId]?.name,
+              reason: result.reason ?? 'unknown',
+              forced: result.forced === true,
+              scannedAt: scan.scannedAt,
+              at: Date.now(),
+            });
+          }
           answered.push(scan.ref);
           noteServerOk();
+          setLastSyncAt(Date.now());
         } catch (err) {
           console.error(`Error syncing offline scan ${scan.ref}:`, err);
-          if (!isServerAnswer(err)) {
+          const kind = classifyReplayError(err);
+          if (kind === 'network') {
             noteServerFailure();
             break; // the rest would wait out the same dead link
+          }
+          if (kind === 'session') {
+            // Signed-in session expired: refresh it; the timer retries.
+            await supabase.auth.refreshSession().catch(() => {});
+            break;
+          }
+          if (kind === 'auth') {
+            // This account may not upload these scans (no longer door staff,
+            // or another account signed in). Keep them; don't loop.
+            blocked = true;
+            break;
           }
         }
       }
@@ -445,10 +546,15 @@ export default function OrganizerCheckIn() {
       });
       syncingRef.current = false;
       setSyncing(false);
-      if (conflicts.length > 0) {
+      if (blocked) setAuthBlocked(true);
+      if (found.length > 0) {
+        setConflicts((prev) => [...found, ...prev].slice(0, 50));
+        const recorded = found.filter((c) => c.forced).length;
         toast({
           kind: 'error',
-          message: `${conflicts.length} ticket(s) admitted while offline were refused on sync (${[...new Set(conflicts.map((c) => c.reason))].join(', ')}). Check the scan report.`,
+          message: `${found.length} ticket(s) admitted while offline were refused on upload (${[...new Set(found.map((c) => c.reason))].join(', ')})${
+            recorded > 0 ? `; ${recorded} still counted as attended` : ''
+          }. See Sync health and the scan report.`,
         });
       }
     }
@@ -585,14 +691,24 @@ export default function OrganizerCheckIn() {
       marksRef.current = marksSince(marksRef.current, startedAt);
       saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
       const merged = { ...applyMarks(roster, marksRef.current) };
-      // Admitted here but not uploaded yet: the server's copy says active.
+      // Admitted here but not uploaded yet: the server's copy says active (or
+      // outside, on a re-entry list). Replayed in queue order.
       for (const q of pendingUpdates) {
-        if (merged[q.ticketId]) merged[q.ticketId] = { ...merged[q.ticketId], used: true };
+        const cur = merged[q.ticketId];
+        if (!cur) continue;
+        const dir = q.direction ?? 'entry';
+        merged[q.ticketId] = {
+          ...cur,
+          ...(dir === 'entry' ? { used: true } : {}),
+          ...(q.listId ? { lists: withDirection(cur.lists, q.listId, dir) } : {}),
+        };
       }
       setOfflineRegistry(merged);
       rosterSavedAtRef.current = startedAt;
       setRosterSavedAt(startedAt);
-      const saved = await saveRoster(doorKV(), eventId, roster, startedAt);
+      const cipher = await doorCipherShared();
+      setRosterProtection(cipher ? 'encrypted' : 'plaintext');
+      const saved = await saveRoster(doorKV(), eventId, roster, startedAt, cipher);
       if (!saved && !silent) {
         toast({ kind: 'warn', message: 'This device is out of storage: the list works while this page stays open, but not after a reload.' });
       }
@@ -623,16 +739,27 @@ export default function OrganizerCheckIn() {
   // refused. Authoritative + RLS-gated (org staff only) via postgres_changes.
   useEffect(() => {
     if (!eventId) return undefined;
-    const ch = joinCheckinChannel(eventId, (ticketId) => {
-      markLocal(ticketId, { used: true });
-      // A check-in landed (this lane or another) — bump the live count by one
-      // rather than re-running a count(*) per scan. A count(*) per realtime tick
-      // per lane doesn't scale at a busy multi-lane gate; postgres_changes emits
-      // exactly one event per check-in row (incl. our own), so +1 is accurate.
-      // Reconciled against the authoritative head-count on reconnect below.
-      setInsideVenue((n) => n + 1);
+    let recount: ReturnType<typeof setTimeout> | null = null;
+    const ch = joinCheckinChannel(eventId, (row: RemoteCheckin) => {
+      // An exit on a re-entry list re-opens the ticket on that list only.
+      if (row.direction === 'exit') {
+        if (row.listId) markListDirection(row.ticketId, row.listId, 'exit');
+      } else if (!row.forced) {
+        markLocal(row.ticketId, { used: true });
+        if (row.listId) markListDirection(row.ticketId, row.listId, 'entry');
+      }
+      // "In" counts tickets checked in, not scan rows (exits, re-entries and
+      // forced records are rows too): re-count once the burst settles rather
+      // than once per row, so a busy gate isn't a count(*) per scan.
+      if (recount) clearTimeout(recount);
+      recount = setTimeout(() => {
+        countEventCheckins(eventId).then(setInsideVenue).catch(() => {});
+      }, 3_000);
     });
-    return () => ch.leave();
+    return () => {
+      if (recount) clearTimeout(recount);
+      ch.leave();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
@@ -729,7 +856,10 @@ export default function OrganizerCheckIn() {
 
   const queueScan = (scan: QueuedScan) =>
     setPendingUpdates((prev) => {
-      const next = enqueueScan(prev, scan);
+      // With lists in the database, the scan replays through the list-aware
+      // RPCs (a refused entry is still recorded as attended).
+      const withList: QueuedScan = doorTarget ? { ...scan, listId: doorTarget.listId, direction: doorTarget.direction } : scan;
+      const next = enqueueScan(prev, withList);
       savePending(eventId, next);
       return next;
     });
@@ -746,6 +876,13 @@ export default function OrganizerCheckIn() {
     if (!eventId) return;
     marksRef.current = addMark(marksRef.current, ticketId, patch, Date.now());
     saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
+  };
+
+  // A scan on a re-entry list: the ticket's last direction on it.
+  const markListDirection = (ticketId: string, listId: string, dir: DoorDirection) => {
+    const entry = offlineRegistryRef.current[ticketId];
+    if (!entry) return;
+    markLocal(ticketId, { lists: withDirection(entry.lists, listId, dir) });
   };
 
   // Why the local signature check refused a code. A correctly signed code from
@@ -784,12 +921,18 @@ export default function OrganizerCheckIn() {
       return;
     }
     pushScan(ticketId, name, 'DENIED');
-    if (result.reason === 'used') {
-      setUsedInfo({ at: result.check_in_at, device: result.device });
+    if (result.reason === 'used' || result.reason === 'already-inside') {
+      const inside = result.reason === 'already-inside';
+      setUsedInfo({ at: result.check_in_at, device: result.device, inside });
       markLocal(ticketId, { used: true });
+      if (inside && activeList) markListDirection(ticketId, activeList.id, 'entry');
       setStatus('already-used');
-      void writeScanReject('used', src, { ticketIdAttempted: ticketId });
+      void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: inside ? 'already-inside' : undefined });
       return;
+    }
+    // The list changed since the header was saved (deleted, re-tiered): pick it up.
+    if (result.reason === 'unknown-list' || result.reason === 'wrong-list' || result.reason === 'invalid-time') {
+      void loadEventHeader({ quiet: true });
     }
     // The server is the authority: bring the saved list in line with it.
     if (result.reason === 'voided') markLocal(ticketId, { voided: true });
@@ -816,7 +959,10 @@ export default function OrganizerCheckIn() {
       return;
     }
     // Who may do what is not a problem with the ticket: not audited.
-    if (result.reason === 'needs-manager' || result.reason === 'name-needs-manager' || result.reason === 'name-checkin-off') return;
+    if (
+      result.reason === 'needs-manager' || result.reason === 'name-needs-manager' || result.reason === 'name-checkin-off' ||
+      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list'
+    ) return;
     const audit =
       result.reason === 'barcode-expired' ? 'expired-code'
       : result.reason === 'barcode-rejected' ? 'invalid-barcode'
@@ -825,14 +971,16 @@ export default function OrganizerCheckIn() {
     void writeScanReject(audit, src, { ticketIdAttempted: ticketId, reasonDetail: result.reason });
   };
 
-  const admitted = (ticket: Ticket, name: string, test: boolean, offline = false) => {
+  const admitted = (ticket: Ticket, name: string, test: boolean, offline = false, dir: DoorDirection = 'entry') => {
     setTestScan(test);
     setAdmittedOffline(offline);
+    setExitScan(dir === 'exit');
     setBuyerName(name || 'Anonymous attendee');
     setFoundTicket(ticket);
     if (!test) {
-      pushScan(ticket.id, name, 'SUCCESS');
-      markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
+      pushScan(ticket.id, name, dir === 'exit' ? 'OUT' : 'SUCCESS');
+      if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
+      if (activeList?.allowReentry) markListDirection(ticket.id, activeList.id, dir);
     }
     setStatus('success');
     setSearchId('');
@@ -888,7 +1036,7 @@ export default function OrganizerCheckIn() {
           kind: 'name',
         });
       }
-      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true);
+      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true, d.direction ?? 'entry');
       return;
     }
     if (d.action === 'admit') {
@@ -907,7 +1055,7 @@ export default function OrganizerCheckIn() {
       }
       // A pre-doors test-window scan is never queued: replayed after doors it
       // would check the ticket in for real.
-      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true);
+      admitted({ id: d.ticketId, tierName: ctx.tier } as Ticket, ctx.name, d.test, true, d.direction ?? 'entry');
       return;
     }
     const id = d.ticketId;
@@ -915,9 +1063,26 @@ export default function OrganizerCheckIn() {
     const canAudit = !effectiveOffline;
     switch (d.reason) {
       case 'used':
+      case 'already-inside':
+        setUsedInfo(d.reason === 'already-inside' ? { inside: true } : null);
         setStatus('already-used');
         if (id) pushScan(id, ctx.name, 'DENIED');
-        if (canAudit) void writeScanReject('used', ctx.src, { ticketIdAttempted: id });
+        if (canAudit) {
+          void writeScanReject('used', ctx.src, {
+            ticketIdAttempted: id,
+            reasonDetail: d.reason === 'already-inside' ? 'already-inside' : undefined,
+          });
+        }
+        return;
+      case 'wrong-list':
+      case 'invalid-time':
+      case 'exit-not-allowed':
+        setStatus('invalid-barcode');
+        setInvalidReason(REFUSAL_TEXT[d.reason]);
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        if (canAudit && d.reason !== 'exit-not-allowed') {
+          void writeScanReject('not-found', ctx.src, { ticketIdAttempted: id, reasonDetail: d.reason });
+        }
         return;
       case 'invalid-barcode':
         if (id && ctx.verify) denyLocal(id, ctx.name, ctx.verify, ctx.src);
@@ -1004,6 +1169,8 @@ export default function OrganizerCheckIn() {
       now,
       canOverride,
       recent: lastReadRef.current,
+      list: activeList,
+      direction,
     };
     // Duplicate camera reads are dropped before anything changes on screen.
     const first = decideScan({ ...base, verify: null, network });
@@ -1018,6 +1185,7 @@ export default function OrganizerCheckIn() {
     setUsedInfo(null);
     setTestScan(false);
     setAdmittedOffline(false);
+    setExitScan(false);
     let admittedId: string | null = null;
     try {
       // Local signature check against the downloaded list, on the
@@ -1041,7 +1209,7 @@ export default function OrganizerCheckIn() {
         setStatus('searching');
         try {
           const result = await withDeadline(
-            (signal) => checkInByName(ticketId, eventId, opts.note ?? null, { device, signal }),
+            (signal) => checkInByName(ticketId, eventId, opts.note ?? null, { device, signal, door: doorTarget }),
             DOOR_REQUEST_TIMEOUT_MS,
           );
           noteServerOk();
@@ -1058,7 +1226,8 @@ export default function OrganizerCheckIn() {
             );
             return;
           }
-          admitted({ id: ticketId, tierName: cached?.tier } as Ticket, who, result.reason === 'test-scan');
+          admitted({ id: ticketId, tierName: cached?.tier } as Ticket, who, result.reason === 'test-scan', false,
+            result.reason === 'checked-out' ? 'exit' : 'entry');
           if (result.reason !== 'test-scan') admittedId = ticketId;
         } catch (err) {
           if (isServerAnswer(err)) {
@@ -1133,6 +1302,7 @@ export default function OrganizerCheckIn() {
               reason,
               device,
               signal,
+              door: doorTarget,
             }),
           DOOR_REQUEST_TIMEOUT_MS,
         );
@@ -1142,7 +1312,8 @@ export default function OrganizerCheckIn() {
           showRefusal(result, ticketId, who, src);
           return;
         }
-        admitted(scanTicket ?? ({ id: ticketId, tierName: cached?.tier } as Ticket), who, result.reason === 'test-scan');
+        admitted(scanTicket ?? ({ id: ticketId, tierName: cached?.tier } as Ticket), who, result.reason === 'test-scan', false,
+          result.reason === 'checked-out' ? 'exit' : 'entry');
         if (result.reason !== 'test-scan') admittedId = ticketId;
       } catch (err) {
         if (isServerAnswer(err)) {
@@ -1191,16 +1362,18 @@ export default function OrganizerCheckIn() {
     if (why.length < 3) return;
     const finish = (message: string) => {
       setRecentScans((prev) => prev.map((r) => (r.key === row.key ? { ...r, status: 'UNDONE' } : r)));
-      markLocal(row.ticketId, { used: false });
+      // Undo removes every scan of the ticket (exits too).
+      markLocal(row.ticketId, { used: false, lists: undefined });
       setUndoKey(null);
       setUndoReason('');
       toast({ kind: 'success', message });
     };
-    // Still waiting to upload: just drop it from the queue.
-    const queued = pendingUpdates.find((q) => q.ticketId === row.ticketId);
-    if (queued) {
+    // Still waiting to upload: just drop it (and any later exit / re-entry of
+    // the ticket) from the queue.
+    const queued = pendingUpdates.filter((q) => q.ticketId === row.ticketId);
+    if (queued.length > 0) {
       setPendingUpdates((prev) => {
-        const next = removeRefs(prev, [queued.ref]);
+        const next = removeRefs(prev, queued.map((q) => q.ref));
         savePending(eventId, next);
         return next;
       });
@@ -1284,6 +1457,22 @@ export default function OrganizerCheckIn() {
 
   const rejectCount = recentScans.filter((s) => s.status === 'DENIED').length;
   const rosterCount = Object.keys(offlineRegistry).length;
+  void healthTick; // re-render ages
+  const health = syncHealth({
+    now: Date.now(),
+    online: !effectiveOffline,
+    rosterSavedAt,
+    rosterCount,
+    ticketsSold: event.ticketsSold,
+    pending: pendingUpdates,
+    lastSyncAt,
+    clockOffsetMs: clockOffset,
+    conflicts: conflicts.length,
+    authBlocked,
+    plaintextRoster: rosterProtection === 'plaintext' && rosterCount > 0,
+  });
+  const levelCls = (l: 'ok' | 'warn' | 'bad') =>
+    l === 'bad' ? 'text-red-600' : l === 'warn' ? 'text-amber-600' : 'text-slate-700';
 
   return (
     <div className="bg-[#f2f4f7] min-h-screen">
@@ -1346,6 +1535,21 @@ export default function OrganizerCheckIn() {
         </div>
       )}
 
+      {rosterProtection === 'plaintext' && rosterCount > 0 && (
+        <div role="status" className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-[11px] font-bold text-amber-800">
+          This browser can't encrypt the saved door list, so it is stored unencrypted on this device. Use an up-to-date browser
+          (not a private window) if you can, and sign out when the doors close.
+        </div>
+      )}
+
+      {authBlocked && pendingUpdates.length > 0 && (
+        <div role="alert" className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-[11px] font-bold text-red-700">
+          Not authorized to upload {pendingUpdates.length} scan{pendingUpdates.length === 1 ? '' : 's'}. This account is no longer door
+          staff for this event (or another account is signed in). The scans stay saved on this device: hand it to a manager, or
+          sign in as door staff for this event and tap Upload now.
+        </div>
+      )}
+
       {pendingUpdates.length > 0 && (
          <div className="mb-6 flex flex-wrap items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
            <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest">
@@ -1353,7 +1557,7 @@ export default function OrganizerCheckIn() {
            </div>
            {!effectiveOffline && (
              <button
-               onClick={() => void syncPendingUpdates()}
+               onClick={() => void syncPendingUpdates({ manual: true })}
                disabled={syncing}
                className="flex items-center text-[10px] font-black text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 px-3 py-1.5 rounded transition-all uppercase tracking-widest disabled:opacity-50"
              >
@@ -1367,6 +1571,53 @@ export default function OrganizerCheckIn() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* SCANNER STAGE */}
         <div className="lg:col-span-2 space-y-6">
+      {checkinLists && checkinLists.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-end gap-4">
+          <div className="min-w-0 flex-1">
+            <label htmlFor="door-list" className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+              Check-in list
+            </label>
+            <select
+              id="door-list"
+              value={activeList?.id ?? NO_LIST}
+              onChange={(e) => chooseList(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
+            >
+              {sortLists(checkinLists).map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}{l.allowReentry ? ' · re-entry' : ''}
+                </option>
+              ))}
+              <option value={NO_LIST}>Any ticket, no list</option>
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {activeList
+                ? `${activeList.tierIds ? `${activeList.tierIds.length} ticket type${activeList.tierIds.length === 1 ? '' : 's'}` : 'All ticket types'} · ${
+                    activeList.allowReentry ? 'people can leave and come back (scan them out)' : 'one entry per ticket'
+                  }`
+                : 'Every ticket, one entry each (as without lists).'}
+            </p>
+          </div>
+          {activeList?.allowReentry && (
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="radiogroup" aria-label="Scan direction">
+              {(['entry', 'exit'] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  role="radio"
+                  aria-checked={direction === d}
+                  onClick={() => chooseDirection(d)}
+                  className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                    direction === d ? (d === 'exit' ? 'bg-sky-600 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  {d === 'entry' ? 'Entry' : 'Exit'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
         {(['tickets', 'guests'] as const).map((m) => (
           <button
@@ -1413,7 +1664,8 @@ export default function OrganizerCheckIn() {
                   <div className="checkin-scanline absolute left-2 right-2 h-0.5 bg-brand-primary shadow-[0_0_12px_#00FF00]"></div>
                 </div>
                 <div className="pointer-events-none absolute top-4 left-4 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/80">
-                  <span className="w-2 h-2 bg-brand-primary rounded-full animate-ping"></span> Scanning…
+                  <span className="w-2 h-2 bg-brand-primary rounded-full animate-ping"></span>{' '}
+                  {direction === 'exit' ? 'Scanning OUT…' : activeList ? `Scanning · ${activeList.name}` : 'Scanning…'}
                 </div>
                 <div className="pointer-events-none absolute bottom-4 left-0 right-0 text-center type text-[11px] uppercase tracking-widest text-white/40">point camera at the rotating QR pass</div>
               </div>
@@ -1451,7 +1703,7 @@ export default function OrganizerCheckIn() {
                  if (!isFullTicketId(searchId)) {
                    e.preventDefault();
                    const m = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
-                   if (m.length === 1 && !m[0][1].used && !m[0][1].voided && nameAccess === 'allowed') {
+                   if (m.length === 1 && !doneHere(m[0][1]) && !m[0][1].voided && nameAccess === 'allowed') {
                      setSearchId('');
                      openByName(m[0][0]);
                    }
@@ -1507,8 +1759,10 @@ export default function OrganizerCheckIn() {
                        </div>
                        {entry.voided ? (
                          <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
-                       ) : entry.used ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">In</span>
+                       ) : doneHere(entry) ? (
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                           {activeList?.allowReentry ? 'Inside' : 'In'}
+                         </span>
                        ) : nameAccess === 'allowed' ? (
                          // Claimed or not: the event lets this person check in by name.
                          <button
@@ -1516,7 +1770,7 @@ export default function OrganizerCheckIn() {
                            onClick={() => { setSearchId(''); openByName(id); }}
                            className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700 whitespace-nowrap"
                          >
-                           Check in by name
+                           {direction === 'exit' ? 'Check out by name' : 'Check in by name'}
                          </button>
                        ) : nameMode === null && canOverride ? (
                          // The database doesn't have name check-in yet: the
@@ -1567,10 +1821,14 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-green-200">
                  <CheckCircle2 className="w-10 h-10" />
               </div>
-              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">{testScan ? 'Test scan OK' : 'Entry Allowed'}</h2>
+              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">
+                {testScan ? 'Test scan OK' : exitScan ? 'Exit recorded' : 'Entry Allowed'}
+              </h2>
               <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
                 {testScan
                   ? `Valid ticket · not checked in (test window${admittedOffline ? ', checked on the saved list' : ''})`
+                  : exitScan
+                  ? `Can come back in${activeList ? ` on ${activeList.name}` : ''}${admittedOffline ? ' · uploads when online' : ''}`
                   : admittedOffline
                   ? 'Checked on the saved list · uploads when online'
                   : checkedByName ? 'Checked in by name' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
@@ -1619,7 +1877,9 @@ export default function OrganizerCheckIn() {
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               className="bg-green-50/50 p-8 rounded-[2.5rem] border border-green-100 flex flex-col items-center text-center"
             >
-              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">Check in by name</h2>
+              <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">
+                {direction === 'exit' ? 'Check out by name' : 'Check in by name'}
+              </h2>
               <p className="text-green-700 font-bold uppercase tracking-widest text-[10px] mb-4">
                 No live code · …{nameFor.ticketId.slice(-6)}
               </p>
@@ -1656,7 +1916,7 @@ export default function OrganizerCheckIn() {
                     autoFocus
                     className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
                   >
-                    Check in
+                    {direction === 'exit' ? 'Check out' : 'Check in'}
                   </button>
                   <button
                     type="button"
@@ -1723,8 +1983,12 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-orange-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-orange-200">
                  <XCircle className="w-10 h-10" />
               </div>
-              <h2 className="text-2xl font-bold text-orange-900 mb-1 leading-none uppercase tracking-tight">Already Used</h2>
-              <p className="text-orange-600 font-bold uppercase tracking-widest text-[10px] mb-6">Ticket already checked in</p>
+              <h2 className="text-2xl font-bold text-orange-900 mb-1 leading-none uppercase tracking-tight">
+                {usedInfo?.inside ? 'Already inside' : 'Already Used'}
+              </h2>
+              <p className="text-orange-600 font-bold uppercase tracking-widest text-[10px] mb-6">
+                {usedInfo?.inside ? 'No exit since their last entry on this list' : 'Ticket already checked in'}
+              </p>
               
               <p className="text-slate-500 text-sm font-medium mb-4">
                 Checked in at: <br />
@@ -1822,6 +2086,68 @@ export default function OrganizerCheckIn() {
             </div>
           </div>
 
+          <details
+            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden group"
+            open={health.level !== 'ok' || undefined}
+          >
+            <summary className="px-5 py-4 flex items-center justify-between cursor-pointer list-none">
+              <span className="flex items-center gap-2 text-sm font-black text-slate-900 uppercase tracking-widest">
+                <Activity className="w-4 h-4" aria-hidden="true" /> Sync health
+              </span>
+              <span className={`text-[10px] font-black uppercase tracking-widest ${levelCls(health.level)}`}>
+                {health.level === 'ok' ? 'good' : health.level === 'warn' ? 'check' : 'action needed'}
+              </span>
+            </summary>
+            <dl className="px-5 pb-4 space-y-2 text-xs">
+              {health.lines.map((l) => (
+                <div key={l.label} className="flex items-baseline justify-between gap-3">
+                  <dt className="text-slate-400 font-bold uppercase tracking-widest text-[10px] shrink-0">{l.label}</dt>
+                  <dd className={`font-bold text-right ${levelCls(l.level)}`}>{l.value}</dd>
+                </div>
+              ))}
+            </dl>
+            {conflicts.length > 0 && (
+              <div className="px-5 pb-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Refused on upload</p>
+                <ul className="space-y-1.5 max-h-48 overflow-y-auto" aria-label="Scans the server refused on upload">
+                  {conflicts.map((c, i) => (
+                    <li key={`${c.ticketId}-${c.at}-${i}`} className="text-xs text-slate-700">
+                      <span className="font-bold">{c.name || `…${c.ticketId.slice(-6)}`}</span>{' '}
+                      <span className="text-slate-500">
+                        · {conflictText(c)} · admitted {clockTime(c.scannedAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => setConflicts([])}
+                  className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+            <div className="px-5 pb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => downloadRegistry()}
+                disabled={downloading || effectiveOffline}
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Re-download
+              </button>
+              <button
+                type="button"
+                onClick={() => void syncPendingUpdates({ manual: true })}
+                disabled={syncing || effectiveOffline || pendingUpdates.length === 0}
+                className="px-3 py-1.5 bg-white border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Upload now
+              </button>
+            </div>
+          </details>
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
               <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Scan log</h2>
@@ -1833,15 +2159,16 @@ export default function OrganizerCheckIn() {
               <ul className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
                 {recentScans.map((scan) => {
                   const ok = scan.status === 'SUCCESS';
+                  const out = scan.status === 'OUT';
                   const undone = scan.status === 'UNDONE';
                   return (
                     <li key={scan.key} className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : undone ? 'bg-slate-100 text-slate-400' : 'bg-rose-50 text-rose-500'}`}>
-                          {ok ? <CheckCircle2 className="w-4 h-4" /> : undone ? <RefreshCw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : out ? 'bg-sky-50 text-sky-600' : undone ? 'bg-slate-100 text-slate-400' : 'bg-rose-50 text-rose-500'}`}>
+                          {ok ? <CheckCircle2 className="w-4 h-4" /> : out ? <LogOut className="w-4 h-4" /> : undone ? <RefreshCw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : undone ? `${scan.name} · undone` : 'Rejected'}</p>
+                          <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : out ? `${scan.name} · out` : undone ? `${scan.name} · undone` : 'Rejected'}</p>
                           <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
                         </div>
                         {ok && canOverride && !effectiveOffline && undoKey !== scan.key ? (

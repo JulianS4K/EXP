@@ -22,16 +22,26 @@
 //     successful scans (the OrganizerCheckIn flow surfaces failures
 //     locally via toast). To track rejects we'd need a separate
 //     write path on the scanner side, which is a future addition.
+//   * Check-in lists (mig 20260929140000): a ticket can have several rows
+//     (re-entries and exits on a re-entry list, and forced rows for offline
+//     admissions the server refused). "Checked in" counts tickets; the
+//     rate chart and station / staff tables count entries; exits and
+//     offline conflicts are listed separately.
 //   * Buyer name / email. We have the ticketId, but the ticket doc
 //     would need a join. Skipped for now — the ticketId is enough
 //     for cross-referencing with the existing CSV export.
 
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { listEventCheckins } from '../lib/tickets';
-import { Activity, Clock, MapPin, User as UserIcon } from 'lucide-react';
+import { doorTotals, type DoorScanRow } from '../lib/door/report';
+import { conflictText } from '../lib/door/health';
+import { Activity, AlertTriangle, Clock, MapPin, User as UserIcon } from 'lucide-react';
 
-interface CheckIn {
+interface CheckIn extends DoorScanRow {
+  id: string;
   ticketId: string;
+  gate: string | null;
+  device: string | null;
   // Firebase Auth uid of the staff member whose device scanned. We
   // only persist the uid in the audit log (not displayName) — the
   // report displays the trailing slice for visual differentiation.
@@ -77,11 +87,17 @@ export default function ScanReport({ eventId, totalSold }: Props) {
         const rows = await listEventCheckins(eventId);
         if (cancelled) return;
         const next: CheckIn[] = rows.map((r) => ({
+          id: r.id,
           ticketId: r.ticketId,
           scanner: r.scannedBy || 'unknown',
-          station: r.source || 'unknown',
+          station: r.gate || r.source || 'unknown',
           verification: r.verification || 'unknown',
-          at: r.scannedAt ? r.scannedAt.toDate() : null,
+          at: r.offlineScannedAt ? r.offlineScannedAt.toDate() : r.scannedAt ? r.scannedAt.toDate() : null,
+          direction: r.direction,
+          forced: r.forced,
+          conflict: r.conflict,
+          gate: r.gate,
+          device: r.device,
         }));
         // Newest-first for the timeline; the bucket math is order-agnostic.
         next.sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0));
@@ -104,7 +120,12 @@ export default function ScanReport({ eventId, totalSold }: Props) {
     };
   }, [eventId]);
 
-  const stats = useMemo(() => deriveStats(checkIns), [checkIns]);
+  // Entries drive the rate chart and the station / staff tables; exits and
+  // forced records are counted on their own.
+  const entries = useMemo(() => checkIns.filter((c) => c.direction === 'entry' && !c.forced), [checkIns]);
+  const stats = useMemo(() => deriveStats(entries), [entries]);
+  const totals = useMemo(() => doorTotals(checkIns), [checkIns]);
+  const forcedRows = useMemo(() => checkIns.filter((c) => c.forced), [checkIns]);
 
   if (loading) {
     return (
@@ -128,11 +149,17 @@ export default function ScanReport({ eventId, totalSold }: Props) {
   }
 
   const checkInRate = totalSold && totalSold > 0
-    ? Math.round((checkIns.length / totalSold) * 100)
+    ? Math.round((totals.checkedIn / totalSold) * 100)
     : null;
-  // Checked in by name at the door, no live code (mig 20260929130000).
-  const byName = checkIns.filter((c) => c.verification === 'name').length;
-  const totalSub = [checkInRate !== null ? `${checkInRate}% checked in` : null, byName > 0 ? `${byName} by name` : null]
+  // Checked in by name at the door, no live code (mig 20260929130000);
+  // re-entries, exits and recorded offline conflicts (mig 20260929140000).
+  const totalSub = [
+    checkInRate !== null ? `${checkInRate}% checked in` : null,
+    totals.byName > 0 ? `${totals.byName} by name` : null,
+    totals.reentries > 0 ? `${totals.reentries} re-entr${totals.reentries === 1 ? 'y' : 'ies'}` : null,
+    totals.exits > 0 ? `${totals.exits} exit${totals.exits === 1 ? '' : 's'}` : null,
+    totals.forced > 0 ? `${totals.forced} offline conflict${totals.forced === 1 ? '' : 's'}` : null,
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -144,8 +171,8 @@ export default function ScanReport({ eventId, totalSold }: Props) {
           label="Total Scanned"
           value={
             checkInRate !== null
-              ? `${checkIns.length} / ${totalSold}`
-              : `${checkIns.length}`
+              ? `${totals.checkedIn} / ${totalSold}`
+              : `${totals.checkedIn}`
           }
           sub={totalSub || undefined}
           icon={<Activity size={16} />}
@@ -217,6 +244,33 @@ export default function ScanReport({ eventId, totalSold }: Props) {
         </div>
       </div>
 
+      {/* Offline admissions the server refused, recorded so attendance is true. */}
+      {forcedRows.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
+            <AlertTriangle size={14} /> Offline conflicts ({forcedRows.length})
+          </h3>
+          <p className="text-xs text-slate-400 mb-3">
+            Admitted by a door while offline, then refused on upload. They count as checked in; the ticket itself was not
+            changed. {totals.conflicts.map((c) => `${c.count} ${conflictText({ reason: c.reason, forced: false })}`).join(' · ')}
+          </p>
+          <div className="space-y-2">
+            {forcedRows.slice(0, RECENT_SCANS_DEFAULT).map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-3 py-2 border-b border-slate-50 last:border-b-0">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-mono text-slate-700 truncate">{c.ticketId}</div>
+                  <div className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">
+                    {conflictText({ reason: c.conflict || 'unknown', forced: false })}
+                    {c.gate ? ` · ${c.gate}` : ''}{c.device ? ` · ${c.device}` : ''}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500 font-mono flex-shrink-0">{c.at ? formatClockTime(c.at) : '—'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent scans timeline */}
       <div className="bg-white rounded-2xl p-6 shadow-sm">
         <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
@@ -225,12 +279,13 @@ export default function ScanReport({ eventId, totalSold }: Props) {
         <div className="space-y-2">
           {checkIns.slice(0, RECENT_SCANS_DEFAULT).map((c) => (
             <div
-              key={c.ticketId}
+              key={c.id}
               className="flex items-center justify-between gap-3 py-2 border-b border-slate-50 last:border-b-0"
             >
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-mono text-slate-700 truncate">{c.ticketId}</div>
                 <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                  {c.direction === 'exit' ? 'exit · ' : ''}{c.forced ? 'offline conflict · ' : ''}
                   {c.station} · {c.scanner.slice(0, 12)}{c.scanner.length > 12 ? '…' : ''}
                 </div>
               </div>

@@ -86,3 +86,23 @@ describe('deviceLabel', () => {
     expect(deviceLabel(null, () => 0)).toBe('Door 0000');
   });
 });
+
+describe('parseQueue: check-in lists (mig 20260929140000)', () => {
+  const REF = '11111111-1111-4111-8111-111111111111';
+  const TID = '22222222-2222-4222-8222-222222222222';
+  const LIST = '33333333-3333-4333-8333-333333333333';
+  const base = { ref: REF, ticketId: TID, payload: null, scannedAt: 1, source: 'camera' };
+  it('keeps the list and direction of a list-aware scan', () => {
+    expect(parseQueue(JSON.stringify([{ ...base, listId: LIST, direction: 'exit' }]), 0)[0]).toMatchObject({ listId: LIST, direction: 'exit' });
+    expect(parseQueue(JSON.stringify([{ ...base, listId: null, direction: 'entry' }]), 0)[0]).toMatchObject({ listId: null, direction: 'entry' });
+  });
+  it('an old scan (no direction) stays old: it replays through the old RPC', () => {
+    const q = parseQueue(JSON.stringify([{ ...base, listId: LIST }]), 0)[0];
+    expect(q.direction).toBeUndefined();
+    expect(q.listId).toBeUndefined();
+  });
+  it('drops a malformed list id and an unknown direction', () => {
+    expect(parseQueue(JSON.stringify([{ ...base, listId: 'nope', direction: 'entry' }]), 0)[0].listId).toBeNull();
+    expect(parseQueue(JSON.stringify([{ ...base, direction: 'sideways' }]), 0)[0].direction).toBeUndefined();
+  });
+});

@@ -43,19 +43,31 @@ How we build it (techniques):
   on bad Wi-Fi); the saved list is a hint when online and refreshes every minute; roster downloaded in pages and
   kept in IndexedDB; camera stays open, camera scans recorded as camera, duplicate reads ignored; test-window scans
   never replay as real check-ins; "Sold" tile; guest-list upload recovers after a drop.
-- ⬜ Roster delta RPC (instead of a full re-pull each minute); sync-health panel that stops and says so on an
-  authorization error; encrypt the saved roster, then per-day door keys.
+- ✅ **Sync-health panel** (`src/lib/door/health.ts`): list age, uploads waiting (and the oldest), last upload,
+  clock vs server, refused-on-upload conflicts; on "not authorized" the uploads stop, say "not authorized to upload
+  N scans" and keep the queue; sign-out asks first when scans are waiting.
+- ✅ **Encrypted saved roster** (`src/lib/door/kv.ts`): AES-GCM under a non-extractable per-device WebCrypto key kept
+  in IndexedDB; plain-text rosters are sealed on first load; plain text with a warning where the browser can't;
+  sign-out wipes the list and the key.
+- ⬜ Roster delta RPC (instead of a full re-pull each minute); per-day door keys (stop shipping raw per-ticket
+  secrets).
 - ✅ **Name check-in** (mig `20260929130000`, not applied): door staff check anyone in by name, claimed or not
   (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
   staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the
   roster shows unclaimed tickets' buyer name and masked email; works offline through the queue; the scan report
   counts by-name check-ins.
-- ⬜ **Record offline admissions the server rejects** (keep attendance true, flag for review) and lock transfers once
-  doors open.
-- ⬜ **Check-in lists / gates / re-entry** (pretix model): lists per gate or ticket type, validity windows, pass-out
-  and re-entry.
-- ⬜ Door phones stop holding raw per-ticket secrets (derive per-event verify keys); sync-health panel; end-of-night
-  door summary; attendee QR available offline in the app.
+- ✅ **Record offline admissions the server rejects** (mig `20260929140000`, not applied): a refused offline entry
+  (voided, transferred after the download, wrong list, outside the list's hours, before doors, too old) is still
+  recorded as a forced check-in with the reason, next to the scan-reject row; the ticket isn't changed; the door's
+  sync-health panel and the scan report list them. The replay window is now the event's end + 48 h.
+- ⬜ Lock transfers once doors open.
+- ✅ **Check-in lists / gates / re-entry** (pretix model, mig `20260929140000`, not applied): lists per gate or area
+  with ticket types, an optional time window and **re-entry off unless turned on** (operator decision: "Keep reentry
+  optional"); entry / exit scans on re-entry lists (`already-inside`), the first entry still marks the ticket used;
+  a list picker and Entry / Exit switch on the scanner, decided offline too; the editor in Edit event. Old clients
+  keep the old RPCs unchanged.
+- ⬜ Door phones stop holding raw per-ticket secrets (derive per-event verify keys); end-of-night door summary;
+  attendee QR available offline in the app.
 
 ### Next (sell more: marketing)
 - ✅ **Paid Purchase pixel actually fires** (CSP allowed pixels only on listing pages, so the Stripe return never

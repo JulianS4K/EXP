@@ -22,11 +22,28 @@
 //     with kind 'name'. A parked ticket (minted for an email with no account
 //     and held on the org until the buyer claims it) has no code of its own
 //     for the buyer to show, so reading it goes to the by-name confirmation.
+//   * Check-in lists (mig 20260929140000): when the device scans for a list,
+//     a ticket type the list doesn't admit is 'wrong-list', an entry outside
+//     the list's window is 'invalid-time'. Re-entry is OFF unless the list
+//     allows it; then "used" means the last scan on THIS list was an entry
+//     ('already-inside'), and an exit scan lets the ticket back in. Exits are
+//     refused anywhere else ('exit-not-allowed'). Online the server decides;
+//     offline (or with this ticket's scans still queued on a re-entry list,
+//     which the server hasn't seen yet) the saved list and this device's
+//     marks do.
 //   * The same read twice within DUPLICATE_READ_MS is ignored (camera double
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
 
 import { extractTicketIdFromAny } from '../barcode';
+import {
+  effectiveDirection,
+  listAdmitsTier,
+  listWindow,
+  type DoorCheckinList,
+  type DoorDirection,
+  type ListState,
+} from './lists';
 
 export const DUPLICATE_READ_MS = 2_000;
 export const SAME_TICKET_HOLD_MS = 8_000;
@@ -63,6 +80,10 @@ export interface DoorCachedTicket {
   parked?: boolean;
   /** Set when the entry came from a single-ticket server read. */
   eventId?: string;
+  /** Ticket type (roster tier_id); unknown on rosters from before lists. */
+  tierId?: string | null;
+  /** Last direction per re-entry list (roster list_state + local marks). */
+  lists?: ListState;
 }
 
 export interface DoorGate {
@@ -120,6 +141,10 @@ export interface ScanDecisionInput {
   now: number;
   canOverride: boolean;
   recent?: RecentRead | null;
+  /** The check-in list this device scans for (null / absent = no list). */
+  list?: DoorCheckinList | null;
+  /** Entry (default) or exit; exits only on a re-entry list. */
+  direction?: DoorDirection;
 }
 
 export type DoorRejectReason =
@@ -136,7 +161,15 @@ export type DoorRejectReason =
   /** Check in by name: the event allows it for owners / managers only. */
   | 'name-needs-manager'
   /** Check in by name is off for this event (QR only). */
-  | 'name-off';
+  | 'name-off'
+  /** The list this device scans for doesn't admit this ticket type. */
+  | 'wrong-list'
+  /** Outside the list's time window. */
+  | 'invalid-time'
+  /** Re-entry list: the last scan on it was an entry (no exit since). */
+  | 'already-inside'
+  /** An exit where the list doesn't allow re-entry (or there is no list). */
+  | 'exit-not-allowed';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -144,7 +177,8 @@ export type ScanDecision =
   /** An unclaimed ticket was read: show the by-name confirmation. */
   | { action: 'confirm-name'; ticketId: string }
   | { action: 'ask-server'; ticketId: string; byName?: boolean }
-  | { action: 'admit'; ticketId: string; test: boolean; queue: boolean; byName?: boolean }
+  /** `direction: 'exit'` is set only for an exit; an entry leaves it out. */
+  | { action: 'admit'; ticketId: string; test: boolean; queue: boolean; byName?: boolean; direction?: 'exit' }
   | { action: 'reject'; ticketId: string | null; reason: DoorRejectReason; opensAt?: number };
 
 export function isDuplicateRead(
@@ -192,11 +226,19 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     return { action: 'reject', ticketId, reason: 'wrong-event' };
   }
 
+  const list = input.list ?? null;
+  if ((input.direction ?? 'entry') === 'exit' && !list?.allowReentry) {
+    return { action: 'reject', ticketId, reason: 'exit-not-allowed' };
+  }
+  const reentry = !!list?.allowReentry;
+
   // Admitted on this device and not uploaded yet: used, whatever the network.
-  if (input.queued) return { action: 'reject', ticketId, reason: 'used' };
+  // On a re-entry list the device's own marks say inside / outside instead,
+  // and they are ahead of the server until the queue uploads.
+  if (input.queued && !reentry) return { action: 'reject', ticketId, reason: 'used' };
 
   const v = input.verify;
-  if (input.network === 'online') {
+  if (input.network === 'online' && !(reentry && input.queued)) {
     // A signature that doesn't match the CACHED secret may just mean the
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
@@ -211,16 +253,44 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
   if (gate.cancelled) return { action: 'reject', ticketId, reason: 'event-cancelled' };
   if (!entry) return { action: 'reject', ticketId, reason: 'unknown-offline' };
   if (v && !v.ok) return { action: 'reject', ticketId, reason: 'invalid-barcode' };
-  if (entry.voided) return { action: 'reject', ticketId, reason: 'voided' };
-  if (entry.pendingTransferId) return { action: 'reject', ticketId, reason: 'in-transfer' };
-  if (entry.used) return { action: 'reject', ticketId, reason: 'used' };
-  if (gate.opensAt != null && now < gate.opensAt) {
-    if (gate.testUntil != null && now < gate.testUntil) {
-      return { action: 'admit', ticketId, test: true, queue: false };
-    }
-    return { action: 'reject', ticketId, reason: 'doors-not-open', opensAt: gate.opensAt };
+  return decideOnSavedList(input, ticketId, entry, false);
+}
+
+/** Every local rule, in the server's order: list (ticket type, exits,
+ *  window), voided, exit, mid-transfer, used / inside, doors. */
+function decideOnSavedList(
+  input: ScanDecisionInput,
+  ticketId: string,
+  entry: DoorCachedTicket,
+  byName: boolean,
+): ScanDecision {
+  const { gate, now } = input;
+  const list = input.list ?? null;
+  const direction = effectiveDirection(list, input.direction ?? 'entry');
+  const named = byName ? { byName: true } : {};
+  if (list && !listAdmitsTier(list, entry.tierId)) return { action: 'reject', ticketId, reason: 'wrong-list' };
+  if (direction === 'entry' && list && listWindow(list, now) !== 'open') {
+    return { action: 'reject', ticketId, reason: 'invalid-time' };
   }
-  return { action: 'admit', ticketId, test: false, queue: true };
+  if (entry.voided) return { action: 'reject', ticketId, reason: 'voided' };
+  const preDoors = gate.opensAt != null && now < gate.opensAt;
+  const testWindow = preDoors && gate.testUntil != null && now < gate.testUntil;
+  if (direction === 'exit') {
+    // Exits aren't held by the doors time; in the test window nothing counts.
+    if (testWindow) return { action: 'admit', ticketId, test: true, queue: false, ...named, direction: 'exit' };
+    return { action: 'admit', ticketId, test: false, queue: true, ...named, direction: 'exit' };
+  }
+  if (entry.pendingTransferId && !(byName && entry.parked)) return { action: 'reject', ticketId, reason: 'in-transfer' };
+  if (list?.allowReentry) {
+    if (entry.lists?.[list.id] === 'entry') return { action: 'reject', ticketId, reason: 'already-inside' };
+  } else if (entry.used) {
+    return { action: 'reject', ticketId, reason: 'used' };
+  }
+  if (preDoors) {
+    if (testWindow) return { action: 'admit', ticketId, test: true, queue: false, ...named };
+    return { action: 'reject', ticketId, reason: 'doors-not-open', opensAt: gate.opensAt as number };
+  }
+  return { action: 'admit', ticketId, test: false, queue: true, ...named };
 }
 
 /** "Check in by name", confirmed. Any active ticket of the event, claimed or
@@ -229,24 +299,20 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
  *  is queued (replayed with its client ref). A holder's own pending transfer
  *  is refused: the ticket may already be the friend's. */
 function decideByName(input: ScanDecisionInput, ticketId: string): ScanDecision {
-  const { entry, gate, now } = input;
+  const { entry, gate } = input;
   const access = nameCheckinAccess(input.nameCheckin ?? 'staff', input.canOverride);
   if (access === 'off') return { action: 'reject', ticketId, reason: 'name-off' };
   if (access === 'needs-manager') return { action: 'reject', ticketId, reason: 'name-needs-manager' };
   if (entry?.eventId && entry.eventId !== input.eventId) return { action: 'reject', ticketId, reason: 'wrong-event' };
+  const list = input.list ?? null;
+  if ((input.direction ?? 'entry') === 'exit' && !list?.allowReentry) {
+    return { action: 'reject', ticketId, reason: 'exit-not-allowed' };
+  }
+  const reentry = !!list?.allowReentry;
   // Checked in on this device and not uploaded yet: used, whatever the network.
-  if (input.queued) return { action: 'reject', ticketId, reason: 'used' };
-  if (input.network === 'online') return { action: 'ask-server', ticketId, byName: true };
+  if (input.queued && !reentry) return { action: 'reject', ticketId, reason: 'used' };
+  if (input.network === 'online' && !(reentry && input.queued)) return { action: 'ask-server', ticketId, byName: true };
   if (gate.cancelled) return { action: 'reject', ticketId, reason: 'event-cancelled' };
   if (!entry) return { action: 'reject', ticketId, reason: 'unknown-offline' };
-  if (entry.voided) return { action: 'reject', ticketId, reason: 'voided' };
-  if (entry.used) return { action: 'reject', ticketId, reason: 'used' };
-  if (entry.pendingTransferId && !entry.parked) return { action: 'reject', ticketId, reason: 'in-transfer' };
-  if (gate.opensAt != null && now < gate.opensAt) {
-    if (gate.testUntil != null && now < gate.testUntil) {
-      return { action: 'admit', ticketId, test: true, queue: false, byName: true };
-    }
-    return { action: 'reject', ticketId, reason: 'doors-not-open', opensAt: gate.opensAt };
-  }
-  return { action: 'admit', ticketId, test: false, queue: true, byName: true };
+  return decideOnSavedList(input, ticketId, entry, true);
 }

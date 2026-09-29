@@ -3,6 +3,7 @@
 import { supabase } from '../supabase';
 import { DOOR_REQUEST_TIMEOUT_MS, withDeadline } from './net';
 import { mapDoorEventRow, type DoorEvent } from './roster';
+import { listCheckinLists } from '../checkinLists';
 
 /** The event header for the scanner. Staff RLS on exos_events lets door staff
  *  read the event in any status. null when it doesn't exist or isn't visible. */
@@ -11,7 +12,17 @@ export async function fetchDoorEvent(eventId: string, signal?: AbortSignal): Pro
   if (signal) q = q.abortSignal(signal);
   const { data, error } = await q.maybeSingle();
   if (error) throw error;
-  return data ? mapDoorEventRow(data as Record<string, unknown>) : null;
+  if (!data) return null;
+  const ev = mapDoorEventRow(data as Record<string, unknown>);
+  // Check-in lists (mig 20260929140000), saved with the header for offline.
+  // A failed read leaves it undefined: the page keeps the lists it had.
+  try {
+    ev.checkinLists = await listCheckinLists(eventId, signal);
+  } catch (err) {
+    console.warn('check-in lists unavailable', err);
+    ev.checkinLists = undefined;
+  }
+  return ev;
 }
 
 /** Is the server answering? A cheap call used to leave "unreachable" mode. */

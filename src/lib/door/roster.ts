@@ -3,8 +3,11 @@
 // event header the scanner needs to start with no network.
 //
 // Storage layout (keys all start with `registry_`, so sign-out wipes them):
-//   registry_{event}         roster, { _savedAt, data }   DoorKV (IndexedDB)
-//                            written only when a download finishes
+//   registry_{event}         roster, { _savedAt, sealed } DoorKV (IndexedDB),
+//                            AES-GCM under the device key (lib/door/kv
+//                            doorCipher); { _savedAt, data } in plain text
+//                            only where the browser can't encrypt. Written
+//                            only when a download finishes.
 //   registry_marks_{event}   { _savedAt, data: {ticketId: {patch, at}} }
 //                            localStorage, small, written per scan
 //   registry_event_{event}   { _savedAt, event, role }    localStorage
@@ -15,7 +18,8 @@
 
 import { isRegistryFresh } from '../offlineCheckins';
 import { parseNameCheckinMode, type DoorGate, type NameCheckinMode } from './decide';
-import { storageKeys, type DoorKV, type StorageLike } from './kv';
+import { DEVICE_KEY, isSealed, storageKeys, type DoorCipher, type DoorKV, type SealedBlob, type StorageLike } from './kv';
+import type { DoorCheckinList, ListState } from './lists';
 
 export const ROSTER_PAGE_SIZE = 1000;
 /** Safety stop: 1000 pages of 1000 = a million tickets. */
@@ -66,6 +70,10 @@ export interface DoorRosterEntry {
   claimName?: string | null;
   /** The buyer's email, masked (j***@gmail.com). Never the full address. */
   claimEmailMasked?: string | null;
+  /** Ticket type id (mig 20260929140000), for check-in lists offline. */
+  tierId?: string | null;
+  /** Last direction per re-entry list (roster list_state + this device). */
+  lists?: ListState;
 }
 
 export type DoorRoster = Record<string, DoorRosterEntry>;
@@ -82,6 +90,8 @@ export interface RosterRow {
   parked?: boolean;
   claimName?: string | null;
   claimEmailMasked?: string | null;
+  tierId?: string | null;
+  listState?: ListState;
 }
 
 export function buildRoster(rows: RosterRow[]): DoorRoster {
@@ -99,6 +109,8 @@ export function buildRoster(rows: RosterRow[]): DoorRoster {
       ...(e.parked
         ? { parked: true, claimName: e.claimName ?? null, claimEmailMasked: e.claimEmailMasked ?? null }
         : {}),
+      ...(e.tierId ? { tierId: e.tierId } : {}),
+      ...(e.listState ? { lists: e.listState } : {}),
     };
   }
   return out;
@@ -109,9 +121,18 @@ export interface StoredRoster {
   data: DoorRoster;
 }
 
+/** What is written to the store when the device can encrypt. */
+interface SealedRoster {
+  _savedAt: number;
+  sealed: SealedBlob;
+}
+
+/** How the saved list is kept on this device (the scanner warns on plain). */
+export type RosterProtection = 'encrypted' | 'plaintext';
+
 /** A stored roster, or null when missing, malformed or past its TTL. Older
  *  builds stored a bare Record<id, entry> with no timestamp: stale by
- *  definition. */
+ *  definition. (A sealed roster is opened by loadRoster.) */
 export function parseStoredRoster(raw: unknown, now: number): StoredRoster | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Partial<StoredRoster>;
@@ -119,23 +140,51 @@ export function parseStoredRoster(raw: unknown, now: number): StoredRoster | nul
   return { _savedAt: r._savedAt as number, data: r.data };
 }
 
+function parseSealedRoster(raw: unknown, now: number): SealedRoster | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<SealedRoster>;
+  if (!isRegistryFresh(r._savedAt, now) || !isSealed(r.sealed)) return null;
+  return { _savedAt: r._savedAt as number, sealed: r.sealed };
+}
+
 /** Load this event's roster: the door store first, then a copy an older build
- *  left in localStorage (moved into the store). Stale copies are deleted. */
+ *  left in localStorage (moved into the store). Stale copies are deleted.
+ *  With a cipher, a sealed copy is opened and a plain-text one (saved before
+ *  encryption, or where it wasn't available) is sealed in place. A copy this
+ *  device can't open (another key) is dropped: the next download replaces it. */
 export async function loadRoster(
   kv: DoorKV,
   legacy: StorageLike | null,
   eventId: string,
   now: number,
+  cipher: DoorCipher | null = null,
 ): Promise<StoredRoster | null> {
   const key = rosterKey(eventId);
-  const stored = parseStoredRoster(await kv.get(key), now);
-  if (stored) return stored;
+  const raw = await kv.get(key);
+  const sealed = parseSealedRoster(raw, now);
+  if (sealed) {
+    if (cipher) {
+      try {
+        const data = await cipher.open<DoorRoster>(sealed.sealed);
+        if (data && typeof data === 'object') return { _savedAt: sealed._savedAt, data };
+      } catch (err) {
+        console.warn('door cache: the saved list could not be decrypted on this device', err);
+      }
+    }
+    await kv.del(key);
+    return null;
+  }
+  const stored = parseStoredRoster(raw, now);
+  if (stored) {
+    if (cipher) await saveRoster(kv, eventId, stored.data, stored._savedAt, cipher);
+    return stored;
+  }
   await kv.del(key);
   let old: StoredRoster | null = null;
   try {
-    const raw = legacy?.getItem(key);
-    if (raw) {
-      old = parseStoredRoster(JSON.parse(raw), now);
+    const rawOld = legacy?.getItem(key);
+    if (rawOld) {
+      old = parseStoredRoster(JSON.parse(rawOld), now);
       legacy?.removeItem(key);
     }
   } catch {
@@ -145,11 +194,25 @@ export async function loadRoster(
       /* storage blocked */
     }
   }
-  if (old) await kv.set(key, old);
+  if (old) await saveRoster(kv, eventId, old.data, old._savedAt, cipher);
   return old;
 }
 
-export async function saveRoster(kv: DoorKV, eventId: string, data: DoorRoster, now: number): Promise<boolean> {
+export async function saveRoster(
+  kv: DoorKV,
+  eventId: string,
+  data: DoorRoster,
+  now: number,
+  cipher: DoorCipher | null = null,
+): Promise<boolean> {
+  if (cipher) {
+    try {
+      return await kv.set(rosterKey(eventId), { _savedAt: now, sealed: await cipher.seal(data) } satisfies SealedRoster);
+    } catch (err) {
+      console.warn('door cache: sealing the list failed; it is not saved', err);
+      return false;
+    }
+  }
   return kv.set(rosterKey(eventId), { _savedAt: now, data } satisfies StoredRoster);
 }
 
@@ -157,7 +220,8 @@ export async function saveRoster(kv: DoorKV, eventId: string, data: DoorRoster, 
 export async function pruneRosters(kv: DoorKV, now: number): Promise<void> {
   for (const k of await kv.keys('registry_')) {
     if (k.startsWith('registry_marks_') || k.startsWith('registry_event_')) continue;
-    if (!parseStoredRoster(await kv.get(k), now)) await kv.del(k);
+    const raw = await kv.get(k);
+    if (!parseStoredRoster(raw, now) && !parseSealedRoster(raw, now)) await kv.del(k);
   }
 }
 
@@ -233,6 +297,10 @@ export interface DoorEvent {
    *  door knows offline whether name check-in is allowed. null = the
    *  database doesn't have the column yet. */
   nameCheckin: NameCheckinMode | null;
+  /** The event's check-in lists (mig 20260929140000), saved with the header
+   *  so the picker works offline. [] = none (the implicit everyone-once
+   *  list); null = the database doesn't have lists yet (old RPCs only). */
+  checkinLists?: DoorCheckinList[] | null;
 }
 
 export function mapDoorEventRow(row: Record<string, unknown>): DoorEvent {
@@ -322,7 +390,9 @@ export function pruneLocalDoorCaches(storage: StorageLike | null, now: number): 
   }
 }
 
-/** Sign-out: the roster holds every ticket's barcode secret. */
+/** Sign-out: the roster holds every ticket's barcode secret. The device key
+ *  goes too (a new one is made on the next download). */
 export async function wipeDoorRosters(kv: DoorKV): Promise<void> {
   for (const k of await kv.keys('registry_')) await kv.del(k);
+  await kv.del(DEVICE_KEY);
 }

@@ -84,6 +84,7 @@ import { EventAccessInfoEditor } from '../components/Accessibility';
 import StoreContentEditor from '../components/StoreContentEditor';
 import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import Dialog from '../components/Dialog';
+import CheckinListsEditor from '../components/CheckinListsEditor';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -1001,6 +1002,16 @@ export default function EditEvent() {
                  ticket nobody has claimed yet.
                </p>
              </div>
+           )}
+
+           {/* Check-in lists / gates and optional re-entry (mig 20260929140000);
+               hidden until the database has them. Saves on its own buttons. */}
+           {eventId && (
+             <CheckinListsEditor
+               eventId={eventId}
+               timezone={eventData.timezone}
+               tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))}
+             />
            )}
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

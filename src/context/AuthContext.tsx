@@ -3,8 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { AppUser, toAppUser, isAdminUser, setCurrentAppUser } from '../lib/auth';
-import { doorKV } from '../lib/door/kv';
+import { doorKV, forgetDoorCipher } from '../lib/door/kv';
 import { wipeDoorRosters } from '../lib/door/roster';
+import { signOutWarning } from '../lib/door/health';
+import { pendingScanCount } from '../lib/offlineCheckins';
 import AuthModal, { type AuthView } from '../components/AuthModal';
 
 interface AuthContextType {
@@ -16,7 +18,9 @@ interface AuthContextType {
   isAdmin: boolean;
   signIn: () => void; // Keeps the same method name but just opens the modal
   // Signs out this browser only.
-  logout: () => Promise<void>;
+  /** Asks first when door check-ins are still waiting to upload on this
+   *  device (skipDoorCheck: account deletion, where they can't upload). */
+  logout: (opts?: { skipDoorCheck?: boolean }) => Promise<void>;
   // Revokes every session the account has (all devices), then this one.
   logoutEverywhere: () => Promise<boolean>;
   // Force a session refresh so a freshly-granted app_metadata claim is picked
@@ -141,10 +145,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     // The roster itself lives in IndexedDB (lib/door/kv).
     await wipeDoorRosters(doorKV()).catch(() => {});
+    forgetDoorCipher();
     return !error;
   };
 
-  const logout = async () => {
+  // Door scans waiting to upload stay on the device after sign-out, but only
+  // door staff of the event can upload them: say so before signing out.
+  const doorScansOk = (): boolean => {
+    let storage: Storage | null = null;
+    try {
+      storage = localStorage;
+    } catch {
+      return true;
+    }
+    const warn = signOutWarning(pendingScanCount(storage));
+    return !warn || typeof window === 'undefined' || window.confirm(warn);
+  };
+
+  const logout = async (opts: { skipDoorCheck?: boolean } = {}) => {
+    if (!opts.skipDoorCheck && !doorScansOk()) return;
     await signOutScoped('local');
   };
   const logoutEverywhere = () => signOutScoped('global');

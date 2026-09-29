@@ -16,6 +16,9 @@ const MAX_RTT_MS = 10_000;
 const MIN_OFFSET_MS = 1_500;
 
 let offsetMs = 0;
+/** The last measured offset, before small ones are rounded to zero (the
+ *  door's sync-health panel shows it). null until a measurement succeeds. */
+let measuredMs: number | null = null;
 
 /** Offset (server minus device) from one request: sent at t0, answered with
  *  the server's time, received at t1 (device ms). null when the round trip
@@ -30,7 +33,13 @@ export function estimateOffset(t0: number, serverMs: number, t1: number): number
 /** Record a measured offset (small ones are treated as zero). */
 export function setClockOffset(ms: number | null): void {
   if (ms == null || !Number.isFinite(ms)) return;
+  measuredMs = ms;
   offsetMs = Math.abs(ms) < MIN_OFFSET_MS ? 0 : ms;
+}
+
+/** Server minus device as last measured (ms), or null when never measured. */
+export function getMeasuredOffset(): number | null {
+  return measuredMs;
 }
 
 export function getClockOffset(): number {
