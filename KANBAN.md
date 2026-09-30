@@ -76,13 +76,26 @@ How we build it (techniques):
 - ✅ Every click id captured at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, msclkid, fbclid,
   _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`, not
   applied); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
-- ⬜ **Server-side conversions**: `exos_org_ad_credentials` (tokens in Vault, never in public `marketing`),
-  `exos_marketing_conversions` outbox written by `exos_fulfill_checkout` / free claims / refunds, `exos-conversions-drain`
-  cron → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit CAPI, Snap CAPI; Google Ads enhanced
-  conversions through the Data Manager API.
-- ⬜ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control.
-- ⬜ `exos-catalog-feed` (events as products for Meta / TikTok / Google dynamic ads, YouTube via Google Ads).
-- ⬜ Reddit, Snap, X pixels; UTM / source report for organizers; hashed custom-audience export (consent-gated).
+- ✅ **Server-side conversions** (mig `20260930100000`, not applied; `exos-conversions-drain` not deployed or
+  scheduled; dry-run until `EXOS_CONVERSIONS_LIVE=true`): `exos_org_ad_credentials` (tokens in Vault, never in public
+  `marketing`; Settings → Ads & conversions, owner / manager), `exos_marketing_conversions` outbox written by triggers
+  when a paid checkout is fulfilled (consent granted + platform enabled; free claims skipped) and on succeeded
+  refunds (GA4 `refund`), drained with a lease → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit
+  CAPI, Snap CAPI, all deduped on the Stripe session id. Google Ads (Data Manager API) is planned only (needs a
+  Google OAuth flow); Reddit / Snap / Google request shapes need a test send (`docs/marketing-conversions.md`).
+- ✅ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control: Accept all /
+  Reject all / Choose, "Cookie settings" in the footer, the old single choice still honored; checkout's
+  `consent_marketing` is the advertising choice (`lib/consent.ts`, `lib/pixels.ts`, `ConsentBanner`).
+- ✅ `exos-catalog-feed` (events as products for Meta / TikTok / Google dynamic ads, YouTube via Google Ads):
+  `/<org_slug>.csv|.xml?format=meta|tiktok|google`, public views only, all-in "from" price, availability, UTM
+  links; Settings → Catalog feed shows the URLs (`docs/marketing-catalog.md`; **not deployed**).
+- ✅ Reddit, Snap, X pixels (PageView / ViewContent / InitiateCheckout / Purchase with the shared dedupe id; ids
+  validated in Settings; CSP hosts added).
+- ✅ UTM / source report for organizers: event report → Marketing → Sources (UTM, promoter, ad platform from click
+  ids, Direct / unknown), CSV (`lib/sourceReport.ts`, `SourcesPanel`).
+- ✅ Hashed custom-audience export (consent-gated): `exos_org_audience_export` returns SHA-256 of email / phone
+  only, owner / manager, logged and throttled; Settings → Audience export writes the Meta / Google / TikTok CSV
+  (mig `20260930101000`, **not applied**; `docs/marketing-catalog.md`).
 - ⬜ SMS opt-in and blasts (already on the board).
 
 ### Next (event creation and the store page)

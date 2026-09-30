@@ -6,7 +6,7 @@
 // missing ones), so this module is the single source of truth.
 //
 // Why the policy varies by page:
-//   • Marketing pixels (Meta / GA4 / TikTok) only load on public listing
+//   • Marketing pixels (Meta / GA4 / TikTok / Reddit / Snap / X) only load on public listing
 //     pages, behind the organizer's consent gate (src/lib/pixels.ts
 //     isPixelRoute mirrors PIXEL_PREFIXES), plus the page a buyer lands on
 //     back from Stripe (My Tickets ?checkout=success&session_id=cs_…), which
@@ -21,10 +21,19 @@
 //     client-side to /bridge/event/<id> and keeps the first document's CSP.
 //   • The door scanner needs the camera, so /bridge allows camera=(self).
 
-const PIXEL_SCRIPT = ' https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com';
+// Meta, GA4, TikTok, Reddit (redditstatic.com loader; alb.reddit.com events,
+// pixel-config.reddit.com config), Snap (sc-static.net loader; tr.snapchat.com
+// events) and X (static.ads-twitter.com loader; analytics.twitter.com and
+// t.co events). Image beacons are already covered by img-src https:.
+const PIXEL_SCRIPT =
+  ' https://connect.facebook.net https://www.googletagmanager.com https://analytics.tiktok.com' +
+  ' https://www.redditstatic.com https://sc-static.net https://static.ads-twitter.com';
 const PIXEL_CONNECT =
   ' https://www.facebook.com https://*.google-analytics.com https://*.analytics.google.com' +
-  ' https://www.googletagmanager.com https://analytics.tiktok.com';
+  ' https://www.googletagmanager.com https://analytics.tiktok.com' +
+  ' https://alb.reddit.com https://pixel-config.reddit.com' +
+  ' https://tr.snapchat.com https://tr-shadow.snapchat.com' +
+  ' https://analytics.twitter.com https://t.co';
 const PIXEL_PREFIXES = ['/bridge/event/', '/bridge/e/', '/bridge/o/', '/bridge/organizer/', '/bridge/embed/event/', '/bridge/l/'];
 
 /** The Stripe return: /bridge/my-tickets?checkout=success&session_id=cs_… */

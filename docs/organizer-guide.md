@@ -99,7 +99,11 @@ tiers and discount codes, into a series of dates.
   - Fans who share after buying pass the promoter's credit along.
 
 - Share links and the venue embed (`/embed/event/:eventId`).
-- Tracking pixels, which only load after the visitor consents.
+- Tracking pixels (Settings → Marketing & socials): Meta, GA4, TikTok, Reddit, Snap and X. They
+  only load after the visitor consents: GA4 needs analytics consent, the others advertising
+  consent, and browsers that send Global Privacy Control get no advertising pixels unless the
+  visitor turns them on. Settings checks each id's format before saving. X needs one event id per
+  conversion (view content, checkout, purchase) from X Events Manager.
   - They only see your public pages: the event page, your storefront and your profile.
   - They never see buyers' tickets, accounts or the door scanner, and never another
     organizer's pages.
@@ -116,6 +120,12 @@ tiers and discount codes, into a series of dates.
 
 - **Analytics:** sold, used, no-show and released counts; sales by day in the event's timezone;
   breakdowns by tier, promoter and channel; scan and reject rollups. CSV export.
+- **Sources report** (Marketing tab; owner, manager and finance): paid orders, tickets and gross
+  grouped by UTM source / medium / campaign, promoter code and the ad platform the buyer clicked
+  through from (Google, Meta, TikTok, Reddit, Snap, X, Microsoft, read from the click id), with
+  everything else under "Direct / unknown". Switch the grouping to one dimension at a time, and
+  export the full breakdown as CSV. Tag your ad links with `utm_source`, `utm_medium` and
+  `utm_campaign` so they show up here. Free claims aren't in it.
 - **Comps:** tickets to a list of emails, with an optional org-wide **comp budget**. People without
   an account get a claim-by-email link. Comps respect capacity, shared quotas and seats held in
   other people's carts; a full tier shows up as "sold-out" for that recipient.

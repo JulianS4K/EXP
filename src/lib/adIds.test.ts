@@ -20,8 +20,11 @@ vi.stubGlobal('sessionStorage', {
   clear: () => store.clear(),
 });
 
-const consent = vi.hoisted(() => ({ state: 'unset' as 'granted' | 'denied' | 'unset' }));
-vi.mock('./consent', () => ({ getConsent: () => consent.state }));
+type Cat = 'granted' | 'denied' | 'unset';
+const consent = vi.hoisted(() => ({ state: 'unset' as 'granted' | 'denied' | 'unset', analytics: undefined as undefined | 'granted' | 'denied' | 'unset' }));
+vi.mock('./consent', () => ({
+  getConsentState: () => ({ advertising: consent.state, analytics: (consent.analytics ?? consent.state) as Cat, gpc: false, decided: true }),
+}));
 
 import { captureClickIds, checkoutAdIds, checkoutConsent, clickIdsFromSearch } from './adIds';
 
@@ -97,6 +100,7 @@ describe('client capture (lib/adIds)', () => {
   beforeEach(() => {
     sessionStorage.clear();
     consent.state = 'unset';
+    consent.analytics = undefined;
   });
 
   it('reads click ids off the URL, never UTM or browser ids', () => {
@@ -124,6 +128,21 @@ describe('client capture (lib/adIds)', () => {
     expect(checkoutConsent()).toBe('denied');
     consent.state = 'granted';
     expect(checkoutAdIds('ev1', '', jar)).toEqual({ gclid: 'g1', fbp: 'fb.1.1690000000000.987', ga_client_id: '5.6' });
+    expect(checkoutConsent()).toBe('granted');
+  });
+
+  it('reads each browser id only with its own category', () => {
+    captureClickIds('ev1', '?gclid=g1');
+    const jar = '_fbp=fb.1.1690000000000.987; _ga=GA1.1.5.6';
+    // Analytics only: the GA client id, no Meta cookie; checkout consent = advertising = denied.
+    consent.state = 'denied';
+    consent.analytics = 'granted';
+    expect(checkoutAdIds('ev1', '', jar)).toEqual({ gclid: 'g1', ga_client_id: '5.6' });
+    expect(checkoutConsent()).toBe('denied');
+    // Advertising only: the Meta cookie, no GA client id.
+    consent.state = 'granted';
+    consent.analytics = 'denied';
+    expect(checkoutAdIds('ev1', '', jar)).toEqual({ gclid: 'g1', fbp: 'fb.1.1690000000000.987' });
     expect(checkoutConsent()).toBe('granted');
   });
 });

@@ -23,8 +23,12 @@ import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import DeveloperSettings from '../components/DeveloperSettings';
+import PixelIdsEditor, { pixelIdsSavable } from '../components/PixelIdsEditor';
 import { paymentsEnabled } from '../lib/payments';
 import { canSeeMoney } from '../lib/settlement';
+import CatalogFeedPanel from '../components/CatalogFeedPanel';
+import AudienceExportPanel from '../components/AudienceExportPanel';
+import AdConversionsSettings from '../components/AdConversionsSettings';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -165,6 +169,10 @@ export default function OrgSettings() {
     if (!canEdit) return;
     if (name.trim().length === 0 || name.length > 100) {
       toast({ kind: 'error', message: 'Org name is required (max 100 chars).' });
+      return;
+    }
+    if (!pixelIdsSavable(marketing.pixels)) {
+      toast({ kind: 'error', message: 'Fix the pixel ids marked in red (Marketing & socials).' });
       return;
     }
     // Field-level validation for theme colors. Empty is fine (clears
@@ -516,22 +524,24 @@ export default function OrgSettings() {
                   mention your handles, and story posters print them.
                 </span>
               </label>
-              <div className="grid grid-cols-3 gap-3">
-                {(([['Meta Pixel','meta','000000000000000'],['GA4','ga4','G-XXXXXXXXXX'],['TikTok Pixel','tiktok','CXXXXXXXXXXXXXXXXXXX']]) as readonly (readonly [string, 'meta'|'ga4'|'tiktok', string])[]).map(([label, key, hint]) => (
-                  <label key={key} className="block">
-                    <span className="text-[10px] text-slate-400 uppercase tracking-widest">{label}</span>
-                    <input
-                      type="text"
-                      className={`${FLD} mt-1`}
-                      value={marketing.pixels?.[key] ?? ''}
-                      onChange={(e) => setMarketing((m) => ({ ...m, pixels: { ...m.pixels, [key]: e.target.value } }))}
-                      disabled={!canEdit}
-                      placeholder={hint}
-                    />
-                  </label>
-                ))}
-              </div>
+              <PixelIdsEditor
+                pixels={marketing.pixels}
+                onChange={(pixels) => setMarketing((m) => ({ ...m, pixels }))}
+                disabled={!canEdit}
+                fieldClass={FLD}
+              />
             </div>
+
+            {/* Server-side ad conversions (docs/marketing-conversions.md). Owner / manager. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+              <AdConversionsSettings orgId={org.id} canEdit />
+            )}
+
+            {/* Catalog feed + hashed audience export (docs/marketing-catalog.md). */}
+            {org.slug && <CatalogFeedPanel orgSlug={org.slug} />}
+            {org.slug && (activeRole === 'owner' || activeRole === 'manager') && (
+              <AudienceExportPanel orgId={org.id} orgSlug={org.slug} />
+            )}
 
             {/*
               Embed snippet — venues paste this on their own website to

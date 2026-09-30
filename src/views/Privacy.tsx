@@ -28,7 +28,7 @@ export default function Privacy() {
               <li><strong>Transfers and waitlists:</strong> the email of anyone you send a ticket to, and your place on an event’s waitlist.</li>
               <li><strong>Organizers and promoters:</strong> organization details, team members, social handles you add, and (once payments are live) payout details held by our payment processor.</li>
               <li><strong>Technical data:</strong> the log data our hosting providers record (such as IP address and browser), and items your browser stores to keep you signed in and, for door staff, to scan offline.</li>
-              <li><strong>Marketing pixels:</strong> an event’s organizer may add Meta, Google or TikTok pixels to its public pages. They load only if you accept them in the cookie banner.</li>
+              <li><strong>Marketing pixels:</strong> an event’s organizer may add analytics (Google Analytics) and advertising pixels (Meta, TikTok, Reddit, Snapchat, X) to its public pages. Each kind loads only if you allow it in the cookie banner. If your browser sends Global Privacy Control, advertising pixels stay off unless you turn them on.</li>
             </ul>
           ),
         },
@@ -71,7 +71,7 @@ export default function Privacy() {
             <>
               <ul>
                 <li><strong>Delete your account</strong> at any time from your <Link className="text-brand-primary" to="/profile">profile</Link> (“delete my account”).</li>
-                <li><strong>Marketing pixels:</strong> decline them in the cookie banner. We never load them before you accept.</li>
+                <li><strong>Marketing pixels:</strong> allow or decline analytics and advertising separately in the cookie banner, and change your choice any time from “Cookie settings” at the bottom of the page. We never load them before you allow them.</li>
                 <li><strong>Access or correction:</strong> email {mail} and we’ll respond within the time the law requires.</li>
               </ul>
               <p>Depending on where you live (including California and the EU/UK), you may have further rights, such as to object to certain processing. Email us to use them.</p>
