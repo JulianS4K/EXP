@@ -1,19 +1,24 @@
 // Google Ads offline click conversions through the Data Manager API.
 //
-// PLANNED ONLY: exos-conversions-drain builds this request and stores it in
-// payload_planned but never sends it, even with EXOS_CONVERSIONS_LIVE=true.
-// Two things are missing:
-//   1. OAuth. The Data Manager API takes an OAuth 2.0 access token (scope
-//      https://www.googleapis.com/auth/datamanager) for a Google account with
-//      access to the Ads account. The org's stored secret is meant to be a
-//      refresh token; exchanging it needs an Exos OAuth client (id + secret)
-//      and a consent flow (an exos-oauth-google function), not built yet.
-//   2. Verification. Google moved offline conversion imports from the Google
-//      Ads API ConversionUploadService to the Data Manager API (cut-over
-//      2026-06-15, per the marketing audit). The shape below follows the
-//      public reference as far as it could be read from search results
-//      (developers.google.com was not reachable from the build environment);
-//      check every field against the live reference with validateOnly: true.
+// Sent only when the Exos Google OAuth client is configured
+// (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET, see googleOAuth.ts);
+// without it the request is built and stored in payload_planned but not sent
+// (plannedOnly in send.ts). The org's stored secret is the refresh token from
+// "Connect Google Ads" (exos-oauth-google); the drain swaps it for an access
+// token once per org per run and puts that in the Authorization header
+// (withBearer). The builder below only writes a placeholder.
+//
+// Auth: an OAuth 2.0 access token with the Data Manager scope
+// https://www.googleapis.com/auth/datamanager, for a Google account with
+// access to the Ads account. No developer token and no login-customer-id
+// header: the Data Manager API takes the accounts from `destinations`.
+//
+// Verification: Google moved offline conversion imports from the Google Ads
+// API ConversionUploadService to the Data Manager API (cut-over 2026-06-15,
+// per the marketing audit). The shape below follows the public reference as
+// far as it could be read from search results (developers.google.com was not
+// reachable from the build environment); check every field against the live
+// reference with validateOnly: true (the org's test code) before relying on it.
 //
 //   POST https://datamanager.googleapis.com/v1/events:ingest
 //   Authorization: Bearer <OAuth access token>
@@ -38,9 +43,6 @@ import {
 } from "./common.ts";
 
 export const DATA_MANAGER_INGEST_URL = "https://datamanager.googleapis.com/v1/events:ingest";
-
-/** Always true: the Google Ads sender is planned only (see the header). */
-export const GOOGLE_ADS_PLANNED_ONLY = true;
 
 export function buildGoogleAds(row: ConversionRow, cred: Credential, ctx: BuildContext): BuildResult {
   if (row.event_name !== "Purchase") return skip("google_ads: refunds are retractions, not sent");
@@ -78,8 +80,8 @@ export function buildGoogleAds(row: ConversionRow, cred: Credential, ctx: BuildC
     request: {
       method: "POST",
       url: DATA_MANAGER_INGEST_URL,
-      // The real token comes from an OAuth exchange that isn't built; the
-      // stored refresh token is never put in the request.
+      // The drain swaps in the real access token (withBearer) just before
+      // sending; the stored refresh token is never put in the request.
       headers: { "content-type": "application/json", Authorization: "Bearer <oauth access token>" },
       body: compact({
         destinations: [compact({

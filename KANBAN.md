@@ -81,8 +81,14 @@ How we build it (techniques):
   `marketing`; Settings → Ads & conversions, owner / manager), `exos_marketing_conversions` outbox written by triggers
   when a paid checkout is fulfilled (consent granted + platform enabled; free claims skipped) and on succeeded
   refunds (GA4 `refund`), drained with a lease → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit
-  CAPI, Snap CAPI, all deduped on the Stripe session id. Google Ads (Data Manager API) is planned only (needs a
-  Google OAuth flow); Reddit / Snap / Google request shapes need a test send (`docs/marketing-conversions.md`).
+  CAPI, Snap CAPI, all deduped on the Stripe session id. Reddit / Snap / Google request shapes need a test send
+  (`docs/marketing-conversions.md`).
+- ✅ **Connect Google Ads** (mig `20260930102000`, not applied; `exos-oauth-google` not deployed; no Google Cloud
+  OAuth client yet): Settings → Ads & conversions → Google Ads → "Connect Google Ads" runs a Google sign-in (Data
+  Manager scope, offline, single-use hashed state bound to the starting user, 10 min), the refresh token goes to
+  Vault as the org's `google_ads` secret; the drain refreshes an access token per org per run and sends to the Data
+  Manager API when `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` are set (no developer token needed). Operator steps:
+  `docs/marketing-conversions.md` → Google Ads.
 - ✅ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control: Accept all /
   Reject all / Choose, "Cookie settings" in the footer, the old single choice still honored; checkout's
   `consent_marketing` is the advertising choice (`lib/consent.ts`, `lib/pixels.ts`, `ConsentBanner`).

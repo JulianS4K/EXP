@@ -86,6 +86,9 @@ export const ALLOWED_HOSTS: ReadonlySet<string> = new Set([
   "ads-api.reddit.com",
   "tr.snapchat.com",
   "datamanager.googleapis.com",
+  // Google's OAuth token endpoint: the drain swaps each org's Google Ads
+  // refresh token for an access token here (googleOAuth.ts).
+  "oauth2.googleapis.com",
 ]);
 
 const DAY = 86_400_000;

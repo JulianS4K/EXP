@@ -195,8 +195,12 @@ describe('Reddit, Snap, Google Ads', () => {
     expect(body.events[0]).toMatchObject({
       adIdentifiers: { gclid: 'Cj0KCQ' }, conversionValue: 50, currency: 'USD', transactionId: 'cs_test_abc123',
     });
+    // Planned only until the Exos Google OAuth client is configured.
     expect(plannedOnly('google_ads')).toBe(true);
+    expect(plannedOnly('google_ads', { googleOAuthConfigured: true })).toBe(false);
     expect(plannedOnly('meta')).toBe(false);
+    expect(r.request.headers.Authorization).toBe('Bearer <oauth access token>');
+    expect(r.request.headers).not.toHaveProperty('developer-token');
   });
 });
 

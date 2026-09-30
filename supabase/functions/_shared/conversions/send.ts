@@ -12,7 +12,7 @@ import { buildTikTok } from "./tiktok.ts";
 import { buildGa4 } from "./ga4.ts";
 import { buildReddit } from "./reddit.ts";
 import { buildSnap } from "./snap.ts";
-import { buildGoogleAds, GOOGLE_ADS_PLANNED_ONLY } from "./googleAds.ts";
+import { buildGoogleAds } from "./googleAds.ts";
 
 const BUILDERS: Record<Platform, (row: ConversionRow, cred: Credential, ctx: BuildContext) => BuildResult> = {
   meta: buildMeta,
@@ -23,9 +23,13 @@ const BUILDERS: Record<Platform, (row: ConversionRow, cred: Credential, ctx: Bui
   google_ads: buildGoogleAds,
 };
 
-/** Platforms whose request is built and stored but never sent (needs work first). */
-export function plannedOnly(platform: Platform): boolean {
-  return platform === "google_ads" && GOOGLE_ADS_PLANNED_ONLY;
+/**
+ * Platforms whose request is built and stored but not sent. Google Ads needs
+ * the Exos Google OAuth client (GOOGLE_OAUTH_CLIENT_ID / _SECRET) to turn the
+ * org's refresh token into an access token; without it, it stays planned only.
+ */
+export function plannedOnly(platform: Platform, opts: { googleOAuthConfigured?: boolean } = {}): boolean {
+  return platform === "google_ads" && !opts.googleOAuthConfigured;
 }
 
 export function buildConversionRequest(row: ConversionRow, cred: Credential, ctx: BuildContext): BuildResult {

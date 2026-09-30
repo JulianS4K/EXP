@@ -24,8 +24,10 @@ export interface AdPlatformInfo {
   secretLabel: string;
   /** Where the organizer finds the ids and the token. */
   help: string;
-  /** Not sent yet even when enabled (Google Ads: OAuth + verification pending). */
+  /** Not sent yet even when enabled. */
   plannedOnly?: boolean;
+  /** The token comes from a sign-in ("Connect Google Ads"), not a pasted field. */
+  oauth?: boolean;
   /** Label of the optional test code field (null: the platform has none). */
   testLabel: string | null;
 }
@@ -60,9 +62,9 @@ export const AD_PLATFORMS: readonly AdPlatformInfo[] = [
       { key: 'conversion_action_id', label: 'Conversion action ID', placeholder: '987654321', pattern: /^[0-9]{1,20}$/, required: true },
       { key: 'login_customer_id', label: 'Manager (MCC) ID, optional', placeholder: '1234567890', pattern: /^[0-9]{10}$/, required: false },
     ],
-    secretLabel: 'OAuth refresh token',
-    help: 'Uploads go through Google’s Data Manager API. Not sent yet: the Google sign-in step is still being built.',
-    plannedOnly: true,
+    secretLabel: 'Google sign-in',
+    help: 'Connect with a Google account that can manage this Ads account, then add the customer id and the conversion action (Google Ads → Goals → Conversions → the action → its id in the URL, ctId). Uploads go through Google’s Data Manager API.',
+    oauth: true,
     testLabel: 'Validate only (any value)',
   },
   {
@@ -151,4 +153,53 @@ export async function saveAdCredential(orgId: string, platform: AdPlatform, inpu
     p_test_event_code: input.testEventCode?.trim() || null,
   });
   if (error) throw error;
+}
+
+// ---- Connect Google Ads (exos-oauth-google) -------------------------------
+
+const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+
+function oauthBase(): string {
+  const url = (env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
+  return url ? `${url}/functions/v1/exos-oauth-google` : '';
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
+  const jwt = data.session?.access_token;
+  if (!jwt) throw Object.assign(new Error('sign in first'), { reason: 'auth' });
+  return { ...(anon ? { apikey: anon } : {}), Authorization: `Bearer ${jwt}` };
+}
+
+/** An error with the server's reason code (googleAdsErrorMessage). */
+function oauthError(status: number, body: any): Error {
+  const reason = status === 503 ? 'not_configured' : status === 403 ? 'forbidden' : status === 401 ? 'auth'
+    : typeof body?.reason === 'string' ? body.reason : 'unknown';
+  return Object.assign(new Error(typeof body?.error === 'string' ? body.error : `http ${status}`), { reason });
+}
+
+/** Google's consent URL for this org (owner / manager). The caller navigates to it. */
+export async function startGoogleAdsConnect(orgId: string): Promise<string> {
+  const base = oauthBase();
+  if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
+  const res = await fetch(`${base}/start?org=${encodeURIComponent(orgId)}`, { headers: await authHeaders() });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || typeof body?.url !== 'string' || !body.url.startsWith('https://accounts.google.com/')) {
+    throw oauthError(res.status, body);
+  }
+  return body.url;
+}
+
+/** Finish the sign-in after Google sent the browser back (?google_ads=finish). */
+export async function finishGoogleAdsConnect(state: string): Promise<void> {
+  const base = oauthBase();
+  if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
+  const res = await fetch(`${base}/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+    body: JSON.stringify({ state }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.connected !== true) throw oauthError(res.status, body);
 }

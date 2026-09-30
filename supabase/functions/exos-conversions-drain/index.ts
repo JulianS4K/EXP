@@ -1,6 +1,6 @@
 // exos-conversions-drain — send queued server-side ad conversions (Meta CAPI,
-// TikTok Events API, GA4 Measurement Protocol, Reddit, Snap; Google Ads is
-// planned only) from exos_marketing_conversions (mig 20260930100000).
+// TikTok Events API, GA4 Measurement Protocol, Reddit, Snap, Google Ads via
+// the Data Manager API) from exos_marketing_conversions (mig 20260930100000).
 //
 // Cron-invoked (requireCronSecret), e.g. every 5 minutes; not scheduled yet
 // (docs/marketing-conversions.md has the cron.schedule call for the operator).
@@ -17,8 +17,13 @@
 // 'skipped' with last_error "dry-run: …" (so it isn't re-claimed every run).
 // To send dry-run rows after going live, requeue the recent ones (SQL in the
 // doc); the platforms refuse events older than their window anyway.
-// Google Ads rows are always planned only (OAuth exchange + API verification
-// pending, see _shared/conversions/googleAds.ts).
+// Google Ads rows are planned only unless the Exos Google OAuth client is set
+// (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET). With it, a live run
+// swaps each org's stored refresh token (from "Connect Google Ads",
+// exos-oauth-google) for an access token at oauth2.googleapis.com, once per
+// org per run (createAccessTokenCache), and sends with Authorization: Bearer.
+// No developer token: the Data Manager API doesn't take one. A revoked
+// refresh token (invalid_grant) fails the row with "reconnect Google Ads".
 //
 // Secrets: each org's token comes from Supabase Vault through the claim RPC
 // (service role only). It is sent only to the platform's pinned host
@@ -27,13 +32,15 @@
 //
 // Env: CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 //      EXOS_CONVERSIONS_LIVE ("true" to send), EXOS_APP_BASE_URL (https://…,
-//      for event_source_url; optional).
+//      for event_source_url; optional), GOOGLE_OAUTH_CLIENT_ID +
+//      GOOGLE_OAUTH_CLIENT_SECRET (Google Ads; optional).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import type { ConversionRow, Credential, Platform } from "../_shared/conversions/common.ts";
-import { buildConversionRequest, plannedOnly, redactRequest, sendConversion } from "../_shared/conversions/send.ts";
+import { buildConversionRequest, plannedOnly, redactRequest, scrubSecret, sendConversion } from "../_shared/conversions/send.ts";
+import { createAccessTokenCache, googleOAuthConfig, withBearer } from "../_shared/conversions/googleOAuth.ts";
 
 const MAX_ATTEMPTS = 6;
 const BATCH = 25;
@@ -59,6 +66,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const appBase = (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, "");
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const started = Date.now();
+  const googleCfg = googleOAuthConfig((k) => Deno.env.get(k), false);
+  const googleToken = googleCfg ? createAccessTokenCache(googleCfg, (u, i) => fetch(u, i)) : null;
 
   const { data, error } = await sb.rpc("exos_conversions_claim_batch", {
     p_limit: BATCH, p_max_attempts: MAX_ATTEMPTS, p_lease_minutes: LEASE_MINUTES,
@@ -105,24 +114,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     const planned = redactRequest(built.request, row.secret);
 
-    if (!live || plannedOnly(row.platform)) {
+    if (!live || plannedOnly(row.platform, { googleOAuthConfigured: !!googleToken })) {
       const why = !live ? "dry-run: EXOS_CONVERSIONS_LIVE is not true" : `planned only: ${row.platform} sender not enabled`;
       await mark(row, "skipped", { error: why, planned });
       counts.dry_run++;
       continue;
     }
 
-    const out = await sendConversion(built.request, row.secret, (u, i) => fetch(u, i), TIMEOUT_MS);
+    let request = built.request;
+    let sendSecret = row.secret;
+    if (row.platform === "google_ads" && googleToken) {
+      // The stored secret is a refresh token; the request needs an access token.
+      const tok = await googleToken(row.org_id, row.secret);
+      if ("error" in tok) {
+        const result = tok.kind === "retry" ? "retry" : "failed";
+        const why = tok.kind === "revoked"
+          ? `google_ads: the Google connection was revoked or expired; reconnect Google Ads (${tok.error})`
+          : `google_ads: ${tok.error}`;
+        await mark(row, result, { error: why, planned });
+        counts[result]++;
+        continue;
+      }
+      request = withBearer(built.request, tok.accessToken);
+      sendSecret = tok.accessToken;
+    }
+
+    const out = await sendConversion(request, sendSecret, (u, i) => fetch(u, i), TIMEOUT_MS);
     if (out.result === "sent") {
       await mark(row, "sent", { status: out.status, planned });
       counts.sent++;
     } else {
-      await mark(row, out.result, { error: out.error, status: out.status, planned });
+      // Scrub the stored secret too (for Google Ads the access token was sent).
+      await mark(row, out.result, { error: scrubSecret(out.error, row.secret), status: out.status, planned });
       counts[out.result]++;
     }
   }
 
-  return json({ live, processed: claimed.length, ...counts });
+  return json({ live, google_ads_oauth: !!googleToken, processed: claimed.length, ...counts });
 });
 
 function json(body: unknown, status = 200): Response {

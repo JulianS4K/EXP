@@ -85,7 +85,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929140000_exos_door_lists \
          20260929150000_exos_reschedule_refunds \
          20260930100000_exos_marketing_conversions \
-         20260930101000_exos_audience_export; do
+         20260930101000_exos_audience_export \
+         20260930102000_exos_oauth_google; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -188,7 +189,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929140000_exos_door_lists \
          20260929150000_exos_reschedule_refunds \
          20260930100000_exos_marketing_conversions \
-         20260930101000_exos_audience_export; do
+         20260930101000_exos_audience_export \
+         20260930102000_exos_oauth_google; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -202,3 +204,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_list
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_reschedule_refunds.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketing_conversions.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_audience_export.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_oauth_google.sql"
