@@ -7,6 +7,9 @@ export const HIDDEN = '22222222-2222-4222-8222-444444444444';
 export const ADDON = '33333333-3333-4333-8333-333333333333';
 export const ORG = '44444444-4444-4444-8444-444444444444';
 export const TOKEN = '55555555-5555-4555-8555-555555555555';
+// The signed-in test user (smoke.mjs SESSION) and their ticket.
+export const UID = '66666666-6666-4666-8666-666666666666';
+export const TICKET = '77777777-7777-4777-8777-777777777777';
 const future = new Date(Date.now() + 7 * 864e5).toISOString();
 
 export const tables = {
@@ -57,11 +60,92 @@ export const rpcs = {
     exclusive_tax_percent: 0 }] : [],
 };
 
+// Signed-in fixtures: the user owns ORG (org dashboards, settings, report).
+const created = '2026-09-01T12:00:00Z';
+export const ORG_ROW = {
+  id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights', owner_uid: UID, created_at: created, updated_at: created,
+  description: 'Parties.', followers_count: 0, country: 'US', currency: 'USD', comp_budget: null, theme: {}, marketing: {},
+};
+// The private exos_events row (staff read) behind the public event.
+export const EVENT_ROW = {
+  ...tables.exos_public_events[0], status: 'published', created_by: UID, total_tickets: 120, tickets_sold: 0,
+};
+export const ownerTables = {
+  exos_orgs: [ORG_ROW],
+  // PostgREST embeds (org:exos_orgs(*)) are stored on the row.
+  exos_org_memberships: [{ id: 'm1', org_id: ORG, user_id: UID, role: 'owner', disabled: false, created_at: created, added_by: UID, org: ORG_ROW }],
+  exos_events: [EVENT_ROW],
+  exos_ticket_tiers: [],
+};
+
+// Columns of the tables and views the money / marketing screens read, as the
+// migrations define them (supabase/migrations). A select or filter naming a
+// column that isn't here answers like PostgREST does (400, 42703), so a query
+// drifting from the real schema fails the smoke test instead of passing on a
+// forgiving mock. Tables not listed here aren't checked.
+const cols = (s) => s.split(/\s+/).filter(Boolean);
+export const schema = {
+  // 20260523170000 + addons, vouchers, tax, attribution, webhook claim, guest, checkout records.
+  exos_checkout_sessions: cols(`session_id event_id tier_id org_id buyer_uid buyer_email quantity amount_cents currency status
+    ticket_ids payment_intent failure_reason created_at fulfilled_at addons voucher_id tax_cents promoter_id attribution
+    reconcile_attempts reconcile_checked_at reconcile_next_at reconcile_done_at reconcile_note dispute_id dispute_status
+    disputed_at dispute_closed_at guest ad_ids consent_marketing client_ip_hash user_agent application_fee_cents
+    exos_fee_cents card_fee_est_cents fee_bps fee_free`),
+  // View, 20260929131000.
+  exos_order_money: cols(`session_id org_id event_id status currency created_at fulfilled_at gross_cents tax_cents
+    application_fee_cents exos_fee_cents card_fee_est_cents card_fee_actual_cents fee_bps fee_free organizer_net_cents
+    platform_net_cents refunded_cents payment_intent transfer_id balance_txn_id`),
+  // View, 20260929070000.
+  exos_marketplace_order_money: cols(`order_id org_id event_id channel external_order_id quantity currency proceeds exos_fee
+    organizer_net received reported paid_amount payout_status clawback_amount state`),
+  // 20260926192000 + fees, sale note, attention.
+  exos_marketplace_orders: cols(`id channel external_order_id external_event_id external_listing_id distribution_listing_id
+    event_id org_id tier_id quantity buyer_email proceeds currency sale_status status attention_reason ticket_ids transfer_ids
+    delivery_plan confirm_by ship_by sold_at raw created_at updated_at exos_fee organizer_net sale_note handled_at handled_by
+    handled_reason handled_note links_resent_at links_resent_by`),
+  // 20260926020000.
+  exos_promoter_commissions: cols(`id org_id promoter_id event_id ticket_id currency gross_cents base_cents rate_bps flat_cents
+    terms_source commission_cents status accrued_at reversed_at reversed_reason payout_id paid_at recovered_payout_id updated_at`),
+  // 20260929070000.
+  exos_org_payouts: cols('id org_id currency amount status stripe_transfer_id idempotency_key error created_at updated_at sent_at'),
+  exos_org_payout_lines: cols('id payout_id org_id order_id kind amount created_at'),
+  // Only the embedded column the payouts page asks for is checked.
+  exos_events: null,
+};
+
+// Split a PostgREST select on top-level commas: "a, b, x:t(c, d)".
+function splitTop(sel) {
+  const out = []; let depth = 0; let cur = '';
+  for (const ch of sel) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** Columns in a select (embeds checked against their own table) not in the schema. */
+export function unknownColumns(table, select, filters = []) {
+  const known = schema[table];
+  const bad = [];
+  for (const part of splitTop(select || '*')) {
+    const embed = part.match(/^(?:(\w+):)?(\w+)(?:!\w+)?\((.*)\)$/s);
+    if (embed) { bad.push(...unknownColumns(embed[2], embed[3]).map((c) => `${embed[2]}.${c}`)); continue; }
+    const col = part.replace(/^\w+:/, '').replace(/::\w+$/, '');
+    if (known && col !== '*' && !known.includes(col)) bad.push(col);
+  }
+  if (known) for (const f of filters) if (!known.includes(f)) bad.push(f);
+  return bad;
+}
+
 function filterRows(rows, params) {
   let out = rows;
   for (const [k, v] of params) {
-    if (['select', 'order', 'limit', 'offset'].includes(k)) continue;
+    if (['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'].includes(k)) continue;
     if (v.startsWith('eq.')) out = out.filter((r) => String(r[k]) === v.slice(3));
+    else if (v.startsWith('neq.')) out = out.filter((r) => String(r[k]) !== v.slice(4));
+    else if (v === 'is.null') out = out.filter((r) => r[k] == null);
     else if (v.startsWith('in.(')) {
       const vals = v.slice(4, -1).split(',').map((x) => x.replace(/^"|"$/g, ''));
       out = out.filter((r) => vals.includes(String(r[k])));
@@ -70,7 +154,10 @@ function filterRows(rows, params) {
   return out;
 }
 
-export async function handle(route, log) {
+// `over` (per test) adds or replaces tables, RPCs and edge-function answers:
+//   { tables: { name: rows }, rpcs: { name: (body) => data }, fns: { 'exos-wallet/pass': (body) => ({ status, body }) } }
+// An RPC mock may return { __status, __body } to answer with an error.
+export async function handle(route, log, over = {}) {
   const req = route.request();
   const url = new URL(req.url());
   const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -78,18 +165,38 @@ export async function handle(route, log) {
   if (url.pathname.startsWith('/rest/v1/rpc/')) {
     const fn = url.pathname.split('/').pop();
     const body = req.postDataJSON?.() ?? {};
-    log.push(`rpc ${fn}`);
-    const f = rpcs[fn];
-    return f ? json(f(body)) : json({ message: `no mock for rpc ${fn}` }, 404);
+    log.push(`rpc ${fn} ${JSON.stringify(body)}`);
+    const f = over.rpcs?.[fn] ?? rpcs[fn];
+    if (!f) return json({ message: `no mock for rpc ${fn}` }, 404);
+    const out = f(body);
+    return out && out.__status ? json(out.__body ?? {}, out.__status) : json(out);
   }
   if (url.pathname.startsWith('/rest/v1/')) {
     const table = url.pathname.split('/').pop();
-    log.push(`get ${table}${url.search}`);
-    const rows = filterRows(tables[table] ?? [], url.searchParams);
+    log.push(`${req.method()} ${table}${url.search}${req.method() === 'GET' ? '' : ' ' + (req.postData() ?? '')}`);
+    const filters = [...url.searchParams.keys()].filter((k) => !['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'].includes(k));
+    const bad = req.method() === 'GET' ? unknownColumns(table, url.searchParams.get('select'), filters) : [];
+    if (bad.length) return json({ code: '42703', message: `column ${table}.${bad[0]} does not exist` }, 400);
+    const source = over.tables?.[table] ?? tables[table];
+    if (source && source.__status) return json(source.__body ?? {}, source.__status);
+    let rows = filterRows(source ?? [], url.searchParams);
+    // .range(): offset/limit (paged reads stop on a short page).
+    const offset = Number(url.searchParams.get('offset') || 0);
+    const limit = url.searchParams.get('limit');
+    if (offset || limit) rows = rows.slice(offset, limit ? offset + Number(limit) : undefined);
     const single = (req.headers()['accept'] || '').includes('vnd.pgrst.object');
     if (single) return rows.length ? json(rows[0]) : json({ code: 'PGRST116', message: 'no rows' }, 406);
     return json(rows);
   }
-  if (url.pathname.startsWith('/functions/v1/')) { log.push(`fn ${url.pathname}`); return json({ ok: true }); }
+  if (url.pathname.startsWith('/functions/v1/')) {
+    const name = url.pathname.slice('/functions/v1/'.length);
+    log.push(`fn ${name} ${req.postData() ?? ''}`);
+    const f = over.fns?.[name];
+    if (f) {
+      const out = f(req.postDataJSON?.() ?? {});
+      return json(out.body ?? {}, out.status ?? 200);
+    }
+    return json({ ok: true });
+  }
   return json({ message: 'unmocked' }, 404);
 }

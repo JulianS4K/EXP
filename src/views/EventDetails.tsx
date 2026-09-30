@@ -552,6 +552,16 @@ export default function EventDetails() {
     return () => io.disconnect();
   }, [event?.id, loading]);
 
+  // The mobile "Get tickets" bar is fixed to the bottom: pad the page by its
+  // height while it shows, or it covers the footer's last row (Privacy,
+  // Terms, Cookie settings) with no way to scroll it clear (index.css).
+  const stickyBuyBar = !!event && !buyInView && (event.status ?? 'published') !== 'cancelled';
+  useEffect(() => {
+    if (!stickyBuyBar) return undefined;
+    document.body.classList.add('sticky-buy-bar');
+    return () => document.body.classList.remove('sticky-buy-bar');
+  }, [stickyBuyBar]);
+
   const handleShare = async () => {
     const shareData = {
       title: event?.title,

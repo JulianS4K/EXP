@@ -46,11 +46,13 @@ export default function WaitlistPanel({ eventId }: { eventId: string }) {
     }
   };
 
-  if (loading) return null;
+  // Still loading, or the summary couldn't be read (logged above): render
+  // nothing rather than crash the report tab.
+  if (loading || !summary) return null;
   // Nothing has ever hit the waitlist — keep the report clean.
-  if (summary && summary.waiting === 0 && summary.offered === 0 && summary.converted === 0) return null;
+  if (summary.waiting === 0 && summary.offered === 0 && summary.converted === 0) return null;
 
-  const s = summary!;
+  const s = summary;
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
       <div className="flex items-center gap-2 mb-1">
