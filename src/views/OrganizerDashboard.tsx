@@ -5,17 +5,18 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
+import { canSeeMoney } from '../lib/settlement';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
 export default function OrganizerDashboard() {
   const { user, isAdmin } = useAuth();
-  const { orgs, activeOrg } = useOrganization();
+  const { orgs, activeOrg, activeRole } = useOrganization();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   // Search + filter state. Both apply client-side over the loaded
@@ -136,6 +137,11 @@ export default function OrganizerDashboard() {
                 <Link to={`/orgs/${activeOrg.id}/flags`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                   <Flag className="w-4 h-4" /><span>Limit flags</span>
                 </Link>
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/payouts`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Landmark className="w-4 h-4" /><span>Payouts</span>
+                  </Link>
+                )}
               </>
             )}
             {orgs.length > 0 && (

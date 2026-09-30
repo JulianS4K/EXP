@@ -76,22 +76,43 @@ How we build it (techniques):
 - ✅ Every click id captured at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, msclkid, fbclid,
   _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`, not
   applied); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
-- ⬜ **Server-side conversions**: `exos_org_ad_credentials` (tokens in Vault, never in public `marketing`),
-  `exos_marketing_conversions` outbox written by `exos_fulfill_checkout` / free claims / refunds, `exos-conversions-drain`
-  cron → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit CAPI, Snap CAPI; Google Ads enhanced
-  conversions through the Data Manager API.
-- ⬜ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control.
-- ⬜ `exos-catalog-feed` (events as products for Meta / TikTok / Google dynamic ads, YouTube via Google Ads).
-- ⬜ Reddit, Snap, X pixels; UTM / source report for organizers; hashed custom-audience export (consent-gated).
+- ✅ **Server-side conversions** (mig `20260930100000`, not applied; `exos-conversions-drain` not deployed or
+  scheduled; dry-run until `EXOS_CONVERSIONS_LIVE=true`): `exos_org_ad_credentials` (tokens in Vault, never in public
+  `marketing`; Settings → Ads & conversions, owner / manager), `exos_marketing_conversions` outbox written by triggers
+  when a paid checkout is fulfilled (consent granted + platform enabled; free claims skipped) and on succeeded
+  refunds (GA4 `refund`), drained with a lease → Meta CAPI, TikTok Events API, GA4 Measurement Protocol, Reddit
+  CAPI, Snap CAPI, all deduped on the Stripe session id. Reddit / Snap / Google request shapes need a test send
+  (`docs/marketing-conversions.md`).
+- ✅ **Connect Google Ads** (mig `20260930102000`, not applied; `exos-oauth-google` not deployed; no Google Cloud
+  OAuth client yet): Settings → Ads & conversions → Google Ads → "Connect Google Ads" runs a Google sign-in (Data
+  Manager scope, offline, single-use hashed state bound to the starting user, 10 min), the refresh token goes to
+  Vault as the org's `google_ads` secret; the drain refreshes an access token per org per run and sends to the Data
+  Manager API when `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` are set (no developer token needed). Operator steps:
+  `docs/marketing-conversions.md` → Google Ads.
+- ✅ Consent split (analytics vs advertising) + Google Consent Mode v2 + Global Privacy Control: Accept all /
+  Reject all / Choose, "Cookie settings" in the footer, the old single choice still honored; checkout's
+  `consent_marketing` is the advertising choice (`lib/consent.ts`, `lib/pixels.ts`, `ConsentBanner`).
+- ✅ `exos-catalog-feed` (events as products for Meta / TikTok / Google dynamic ads, YouTube via Google Ads):
+  `/<org_slug>.csv|.xml?format=meta|tiktok|google`, public views only, all-in "from" price, availability, UTM
+  links; Settings → Catalog feed shows the URLs (`docs/marketing-catalog.md`; **not deployed**).
+- ✅ Reddit, Snap, X pixels (PageView / ViewContent / InitiateCheckout / Purchase with the shared dedupe id; ids
+  validated in Settings; CSP hosts added).
+- ✅ UTM / source report for organizers: event report → Marketing → Sources (UTM, promoter, ad platform from click
+  ids, Direct / unknown), CSV (`lib/sourceReport.ts`, `SourcesPanel`).
+- ✅ Hashed custom-audience export (consent-gated): `exos_org_audience_export` returns SHA-256 of email / phone
+  only, owner / manager, logged and throttled; Settings → Audience export writes the Meta / Google / TikTok CSV
+  (mig `20260930101000`, **not applied**; `docs/marketing-catalog.md`).
 - ⬜ SMS opt-in and blasts (already on the board).
 
 ### Next (event creation and the store page)
 - ✅ **Store page content** (mig `20260929120000`, live in prod): summary, rich description (safe markdown),
   lineup with set times, FAQ, gallery, video, minimum age, refund policy and notes; feeds the Google events feed
   (summary, lineup, age range) and the marketplace age note. Shows in Create / Edit once the columns exist.
-- ⬜ Store page follow-ups: summary on event cards, FAQ structured data, MCP / calendar / SEO copy, `min_age` in
-  `exos-distribute`'s select, lineup feeding Performers, a length check on the old `description` column.
-- ⬜ Currency picker in Create Event (new events are always USD today); drop the dead `exclusivity` field.
+- 🟡 Store page follow-ups: ✅ summary on event cards (Home, org storefront, organizer profile, embed); ✅ MCP
+  (`get_event` / `fetch`) and add-to-calendar lead with the summary (the .ics feeds are ready but need
+  `exos_calendar_event_rows` to return `summary`, a migration); ✅ `min_age` in `exos-distribute`'s select.
+  Still ⬜: FAQ structured data, SEO copy, lineup feeding Performers, a length check on the old `description` column.
+- ✅ Currency picker in Create Event (shared with Edit). `exclusivity` stays: EditEvent and the marketplace SQL still read it.
 - ⬜ Rebuild or retire Terminal-2's `static/bridge` copy (it still has the removed promo-code editor) and add a
   CI check that it matches EXP main; one shared structured-data builder so `exos_seo.py` can retire.
 - ⬜ Online / hybrid events; post-checkout "what to bring" message; per-event `noindex`.
@@ -100,13 +121,17 @@ How we build it (techniques):
 1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate
    at checkout; Stripe's actual fee, net, transfer and balance-transaction ids after fulfilment (best-effort,
    backfilled by reconcile); `exos_order_money` view for owner / manager / finance.
-2. ⬜ Settlement report per event (gross, tax, refunds, disputes, fees, marketplace proceeds, commissions, net).
+2. ✅ Settlement report per event (gross, tax, refunds, fees, marketplace proceeds, commissions, net): "Money" on
+   the event report's Overview, read-only, aggregated in the browser from `exos_order_money`,
+   `exos_marketplace_order_money` and `exos_promoter_commissions` (`src/lib/settlement.ts`); card fees actual when
+   recorded, else the estimate; per-order CSV. Disputes aren't in it yet (item 7).
 3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
 4. ⬜ Credit notes on refund (`CN-` series); the invoice stays unchanged.
 5. ⬜ Printable invoice / receipt page with the seller's legal details.
 6. ⬜ Daily reconciliation against Stripe balance transactions.
 7. ⬜ Disputes: table, organizer alert, evidence, lost-dispute entry, recovery policy.
-8. ⬜ Payout statements and a Payouts page; journal CSV, then QuickBooks / Xero.
+8. ✅ Payout statements and a Payouts page (`/orgs/:orgId/payouts`: marketplace payouts with their lines and
+   statuses, CSV per line; owner / manager / finance). Journal CSV and QuickBooks / Xero not built.
 9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps.
 10. ✅ Refunds when the date changes (mig 20260929150000, not applied): a move to another day or by more than
     3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
@@ -158,14 +183,15 @@ signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent
 
 ## Apple Wallet + Google Wallet passes 2026-09-29
 
-- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, authored, not
-  applied / deployed; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
+- 🟡 **Wallet pass backend** (`exos-wallet`, `_shared/wallet/`, `20260929072000_exos_wallet_passes`, applied and
+  deployed; waits on Apple / Google credentials; `docs/wallet.md`): the holder gets an Apple `.pkpass` or a "Save to Google Wallet" link for a
   ticket they own. Passes carry a `W-` door code the scanner accepts: Google renders a TOTP `rotatingBarcode` (key
   derived from `barcode_secret`, never the secret), Apple a static code bound to the pass epoch. A transfer, refund
   or release voids the pass (trigger) and queues an update; the PassKit web service (register / serials / latest
   pass / log) and a cron push run deliver it. The holder can reissue to kill a screenshotted code. 503 "wallet not
-  configured" until the operator adds the Apple / Google credentials (no fake signatures). Next: SPA buttons
-  (TicketDetail), operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
+  configured" until the operator adds the Apple / Google credentials (no fake signatures).
+  ✅ SPA buttons ("Add to Apple Wallet" / "Add to Google Wallet" on the ticket page and My Tickets; Apple on iOS,
+  Google on Android, both on desktop; hidden after a once-per-session 503 probe; `docs/wallet.md`). Next: operator setup (Apple Pass Type ID + certs, Google issuer), deploy with `--no-verify-jwt`, confirm
   APNs client certificates work on the edge runtime (pushes are a dry run until then), schedule the push cron.
 
 ## Venue POS scaffold (Phase 3) 2026-09-29
@@ -417,7 +443,7 @@ Audit drove every flow at 390px and 1280px against a mocked backend. Fixes are o
 - [ ] Supabase Auth → URL configuration must allow `https://<host>/bridge/**` as a redirect
   (sign-in now returns to the page the buyer started on, not the site root).
 - [~] Native Apple / Google Wallet passes (the "open pass" is still a web page). Backend authored
-  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons + operator credentials still to do.
+  2026-09-29 (`exos-wallet`, `docs/wallet.md`); SPA buttons done; operator credentials still to do.
 
 ## SeatGeek 2026-09-27
 

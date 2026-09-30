@@ -18,6 +18,8 @@ import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
 import MyCalendarFeed from '../components/MyCalendarFeed';
+import WalletButtons, { useAvailableWallets } from '../components/WalletButtons';
+import { walletEligible } from '../lib/walletButtons';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
 import {
   listMyRescheduleOffers,
@@ -417,6 +419,7 @@ export default function MyTickets() {
                         RECEIPTS
                       </button>
                     </div>
+                    <TicketWallets tickets={eventTickets} viewerId={user.uid} />
                   </div>
 
                 </motion.div>
@@ -525,4 +528,31 @@ function offersByEvent(offers: RescheduleOffer[]): [string, RescheduleOffer[]][]
 
 function guestEmailHint(): string | null {
   try { return localStorage.getItem('exos.guestEmail'); } catch { return null; }
+}
+
+/** Wallet buttons per pass the viewer can still use (active, not in transfer,
+ *  still theirs). One pass: the buttons; several: a list under a disclosure.
+ *  WalletButtons renders nothing where no wallet is set up. */
+function TicketWallets({ tickets, viewerId }: { tickets: Ticket[]; viewerId: string }) {
+  const usable = tickets.filter((tk) => walletEligible(tk, viewerId));
+  const { kinds } = useAvailableWallets(usable.length > 0);
+  if (usable.length === 0 || kinds.length === 0) return null;
+  if (usable.length === 1) return <WalletButtons ticket={usable[0]} compact className="mt-4" />;
+  return (
+    <details className="mt-4 group/wallet">
+      <summary className="type text-[11px] text-white/60 uppercase tracking-widest cursor-pointer hover:text-white">
+        add passes to a wallet ({usable.length})
+      </summary>
+      <ul className="mt-3 space-y-3">
+        {usable.map((tk, i) => (
+          <li key={tk.id}>
+            <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1.5">
+              pass {i + 1} · {tk.tierName || 'general'}
+            </p>
+            <WalletButtons ticket={tk} compact />
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }

@@ -104,6 +104,14 @@ describe('Exos tools', () => {
     expect(f).toMatchObject({ id: EV.id, title: 'Late Night Jazz', url: expect.stringContaining('/e/late-night-jazz') });
     expect(f.text).toMatch(/GA: 49\.50 USD \(on sale\)/);
   });
+  it('puts the store-page summary before the description when there is one', async () => {
+    const withSummary = exosMcpServer({ ...data, getEvent: async () => ({ ...EV, summary: 'Two sets of late jazz.' }) }, { appBase: 'https://x.test', version: '1', now: () => new Date('2026-10-15T00:00:00Z') });
+    const callOn = async (name: string, args: unknown) => ((await handleBody(withSummary, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }), anon)) as any).result.structuredContent;
+    expect((await callOn('get_event', { event: EV.id })).description).toBe(`Two sets of late jazz.\n\n${EV.description}`);
+    expect((await callOn('fetch', { id: EV.id })).text).toContain(`Two sets of late jazz.\n\n${EV.description}`);
+    // No summary: the description alone, as before.
+    expect((await call('get_event', { event: EV.id })).structuredContent.description).toBe(EV.description);
+  });
   it('organizer tools read only their own org', async () => {
     expect((await call('my_events', {}, org)).structuredContent.events).toHaveLength(1);
     expect(calls).toContain(`org:${ORG}`);

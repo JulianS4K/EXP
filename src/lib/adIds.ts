@@ -7,9 +7,12 @@
 //     an OAuth sign-in round trip (which drops the query string) doesn't lose
 //     them. A newer click for the same platform replaces the older one.
 //     They're never copied onto share links (lib/attribution.ts is).
-//   * Browser ids (_fbp, _fbc, the GA client id from _ga) are read from the
-//     vendors' first-party cookies only when marketing consent is granted.
-//   * The consent state at checkout goes along as granted / denied / unknown.
+//   * Browser ids are read from the vendors' first-party cookies only with the
+//     matching consent (lib/consent.ts): _fbp / _fbc with ADVERTISING consent,
+//     the GA client id (_ga) with ANALYTICS consent.
+//   * The consent state at checkout (exos_checkout_sessions.consent_marketing)
+//     is the ADVERTISING category, as granted / denied / unknown. Global
+//     Privacy Control without an explicit opt-in reads as denied.
 
 import {
   browserIdsFromCookies,
@@ -20,7 +23,7 @@ import {
   type AdIds,
   type MarketingConsent,
 } from '../../supabase/functions/_shared/adIds.ts';
-import { getConsent } from './consent';
+import { getConsentState } from './consent';
 
 export type { AdIds, MarketingConsent };
 
@@ -52,21 +55,29 @@ export function captureClickIds(eventId: string, search: string): AdIds {
   return merged;
 }
 
-/** Marketing consent as sent with a checkout. */
+/** Marketing (advertising) consent as sent with a checkout. */
 export function checkoutConsent(): MarketingConsent {
-  return normalizeConsent(getConsent());
+  return normalizeConsent(getConsentState().advertising);
 }
 
 /**
  * Everything to send with a checkout for this event: the stored (and current
- * URL's) click ids, plus browser ids from cookies when consent is granted.
+ * URL's) click ids, plus browser ids from cookies for each granted category.
  */
 export function checkoutAdIds(eventId: string, search = '', cookie?: string): AdIds {
   const clicks = captureClickIds(eventId, search);
-  if (checkoutConsent() !== 'granted') return clicks;
+  const consent = getConsentState();
+  const ads = consent.advertising === 'granted';
+  const analytics = consent.analytics === 'granted';
+  if (!ads && !analytics) return clicks;
   let jar = cookie;
   if (jar === undefined) {
     try { jar = typeof document !== 'undefined' ? document.cookie : ''; } catch { jar = ''; }
   }
-  return { ...clicks, ...browserIdsFromCookies(jar) };
+  const { fbp, fbc, ga_client_id } = browserIdsFromCookies(jar);
+  const out: AdIds = { ...clicks };
+  if (ads && fbp) out.fbp = fbp;
+  if (ads && fbc) out.fbc = fbc;
+  if (analytics && ga_client_id) out.ga_client_id = ga_client_id;
+  return out;
 }

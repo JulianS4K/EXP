@@ -1,9 +1,9 @@
 # Apple Wallet and Google Wallet passes
 
-Status (2026-09-29): backend authored, **not applied or deployed**. Migration
+Status (2026-09-29): backend **live in prod** (migration applied, `exos-wallet` deployed). Migration
 `20260929072000_exos_wallet_passes`, edge function `exos-wallet`, pure builders in
 `supabase/functions/_shared/wallet/`, tests in `src/lib/wallet/` and
-`tests/exos/test_wallet_passes.sql`. The SPA buttons (TicketDetail) aren't built yet.
+`tests/exos/test_wallet_passes.sql`. The SPA buttons are built (see "The buttons" below).
 Until the operator adds credentials, every wallet route answers **503 "wallet not
 configured"**, and nothing is ever signed with a made-up key.
 
@@ -21,6 +21,29 @@ whatever the phone's zone), the venue, the tier and section, and the attendee na
 one is set. They don't show the buyer's email, the price or any account id beyond what
 the door code already carries (the ticket id and the holder's user id, the same as the
 app's QR).
+
+## The buttons (SPA)
+
+"Add to Apple Wallet" and "Add to Google Wallet" appear on the ticket page (`/ticket/:id`, under "add
+to calendar") and on each event card in My Tickets (one pass: the buttons; several: a list under "add
+passes to a wallet"). Code: `src/components/WalletButtons.tsx`, `src/lib/walletApi.ts` (the calls) and
+`src/lib/walletButtons.ts` (pure rules, tested in `walletButtons.test.ts`).
+
+- **Which tickets:** only an `active` ticket the viewer owns and that isn't in a transfer. Voided,
+  used and given-away tickets get no buttons (the SQL refuses them anyway).
+- **Which device:** iPhone / iPad (any browser) → Apple; Android → Google; anything else (desktops,
+  macOS Safari included) → both. An iPad asking for the desktop site is still treated as iOS.
+- **Only when set up:** before showing a button, the SPA probes that wallet once per browser session
+  with `POST /exos-wallet/pass {ticket_id: "00000000-…", kind}`. `503` means not configured and the
+  button stays hidden; any other 2xx / 4xx (normally `403 not your ticket`, which writes nothing) means
+  it works. The answer is kept in `sessionStorage` (`exos.wallet.availability`); a network error isn't
+  cached. A later 503 on a real click hides the button too.
+- **Apple:** the `.pkpass` comes back as bytes. On iOS the page navigates to it, so Safari opens the
+  Wallet sheet; elsewhere it downloads as `exos-ticket-….pkpass`.
+- **Google:** the page goes to the returned `save_url` (only `https://pay.google.com/...` links are
+  followed).
+- Styling follows Apple's and Google's badge guidelines loosely: black, rounded, "Add to … Wallet"
+  text. No badge images from external hosts (the CSP wouldn't allow them).
 
 ## The door codes
 

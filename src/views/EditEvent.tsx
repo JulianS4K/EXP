@@ -1,5 +1,4 @@
 import { geocodeEvent } from '../lib/geo';
-import { CHECKOUT_CURRENCIES, isCheckoutCurrency } from '../lib/currency';
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
@@ -26,6 +25,7 @@ import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
+import CurrencySelect from '../components/CurrencySelect';
 import TableTierFields from '../components/TableTierFields';
 import { BLANK_TABLE_DRAFT, admissionsForTier, rowToTableDraft, validateTableDraft, type TableTierDraft } from '../lib/tables';
 import { getTierTableRows, saveTierTableConfig } from '../lib/tablesApi';
@@ -1162,27 +1162,18 @@ export default function EditEvent() {
                 />
               </div>
 
-              {/* Per-event currency picker. Mirrors CreateEvent —
-                  ISO 4217 three-letter codes, defaults to USD when
+              {/* Per-event currency picker, shared with CreateEvent
+                  (components/CurrencySelect). Defaults to USD when
                   absent. The Stripe session reads this via the
                   request body; see server.ts. */}
               <div className="space-y-2">
                 <label htmlFor="edit-event-currency" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Currency</label>
-                <select
+                <CurrencySelect
                   id="edit-event-currency"
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
-                  value={eventData.currency || 'USD'}
-                  onChange={(e) => setEventData({ ...eventData, currency: e.target.value })}
-                >
-                  {CHECKOUT_CURRENCIES.map(({ code: c }) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                  {!isCheckoutCurrency(eventData.currency || 'USD') && (
-                    <option value={(eventData.currency || 'USD').toUpperCase()}>
-                      {(eventData.currency || 'USD').toUpperCase()}
-                    </option>
-                  )}
-                </select>
+                  value={eventData.currency}
+                  onChange={(currency) => setEventData({ ...eventData, currency })}
+                />
               </div>
 
               {/* Per-event timezone picker. Required for the

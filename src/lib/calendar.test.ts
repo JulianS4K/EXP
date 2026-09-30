@@ -31,6 +31,12 @@ describe('eventCalendarFields', () => {
     expect(f.url).toBe('/event/abc-123');
   });
 
+  it('leads the description with the summary when there is one', () => {
+    expect(eventCalendarFields(makeEvent({ summary: 'Quest Tour, night one.' }))!.description)
+      .toBe('Quest Tour, night one.\n\nDoors 7pm.\nAll ages.\n\n/event/abc-123');
+    expect(eventCalendarFields(makeEvent())!.description).toBe('Doors 7pm.\nAll ages.\n\n/event/abc-123');
+  });
+
   it('returns null when there is no start instant', () => {
     expect(eventCalendarFields({ id: 'x', title: 'T' } as Event)).toBeNull();
   });

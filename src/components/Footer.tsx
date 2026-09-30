@@ -1,5 +1,6 @@
 import { TicketIcon, Twitter, Github, Instagram, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { openConsentSettings } from '../lib/consent';
 
 export default function Footer() {
   return (
@@ -58,6 +59,7 @@ export default function Footer() {
           <div className="flex gap-6">
             <Link to="/privacy" className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Privacy</Link>
             <Link to="/terms" className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Terms</Link>
+            <button type="button" onClick={openConsentSettings} className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Cookie settings</button>
           </div>
         </div>
       </div>

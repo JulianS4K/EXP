@@ -2,7 +2,7 @@ import { useAccessColumns } from '../hooks/useAccessColumns';
 import { useStoreColumns } from '../hooks/useStoreColumns';
 import StoreContentEditor from '../components/StoreContentEditor';
 import { blankStore, coerceStoreDraft, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
-import { CHECKOUT_CURRENCIES } from '../lib/currency';
+import CurrencySelect from '../components/CurrencySelect';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createEvent, getEventForEdit, type EventInput } from '../lib/events';
@@ -73,13 +73,6 @@ import { slugify } from '../lib/orgs';
 const AUTOMATIQ_ENABLED =
   (import.meta as any).env?.VITE_AUTOMATIQ_ENABLED === 'true';
 
-
-// ISO 4217 currency codes the UI exposes. Stripe processing for
-// non-USD currencies is wired up by the payments team — this just
-// stores the picker value alongside the event so prices render in
-// the right symbol everywhere.
-// Two-decimal currencies only (lib/currency.ts): amounts are minor units x 100.
-const SUPPORTED_CURRENCIES: readonly { code: string; label: string }[] = CHECKOUT_CURRENCIES;
 
 // A unique violation (23505) on the events slug: the only failure a new
 // slug can fix. Anything else (including a later tier insert) is rethrown.
@@ -1159,6 +1152,18 @@ export default function CreateEvent() {
                   onChange={(e) => setFormData({ ...formData, totalTickets: e.target.value })}
                 />
               </div>
+            </div>
+
+            {/* Shared with EditEvent; the options are the checkout currencies
+                (lib/currency.ts). USD unless changed or cloned. */}
+            <div className="space-y-2">
+              <label htmlFor="event-currency" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Currency</label>
+              <CurrencySelect
+                id="event-currency"
+                className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
+                value={formData.currency}
+                onChange={(currency) => setFormData({ ...formData, currency })}
+              />
             </div>
 
             <div className="md:col-span-2 space-y-2">

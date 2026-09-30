@@ -13,6 +13,7 @@ import { signBarcode, currentBucket } from '../lib/barcode';
 import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { motion, AnimatePresence } from 'motion/react';
 import AddToCalendar from '../components/AddToCalendar';
+import WalletButtons from '../components/WalletButtons';
 import { shareEventToStory } from '../lib/poster';
 import { useToast } from '../context/ToastContext';
 import ShareModal from '../components/ShareModal';
@@ -495,14 +496,18 @@ export default function TicketDetail() {
                     <div className="flex gap-4">
                        <AddToCalendar event={event} variant="button" className="flex-1" />
                     </div>
+                    {/* Apple / Google Wallet (exos-wallet, docs/wallet.md). Hidden
+                        unless this holder can use the ticket and the wallet is
+                        set up (probed once per session). */}
+                    <WalletButtons ticket={currentTicket} />
                     {/* OPEN PASS — fullscreen browser pass with rotating
                         QR + screen wake-lock. Use case: holder hands their
                         phone to the door staff at max brightness. Status
                         overlays (REDEEMED, REFUNDED, IN TRANSFER) refresh on
                         a short poll, so a void issued by the organizer
-                        mid-walk-up flips the screen within ~15s. Native
-                        Apple/Google Wallet integrations are scaffolded in
-                        Commit 14 but not enabled yet. */}
+                        mid-walk-up flips the screen within ~15s. The native
+                        wallet buttons above are the add-on for holders who
+                        want the ticket in Apple / Google Wallet. */}
                     <Link
                       to={`/wallet/pass/${currentTicket.id}`}
                       className="type flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white/60 py-4 text-[11px] uppercase tracking-widest hover:border-white hover:text-white transition-colors"

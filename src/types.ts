@@ -95,7 +95,12 @@ export interface Organization {
   // pages behind the consent gate (lib/consent.ts + lib/pixels.ts).
   marketing?: {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
-    pixels?: { meta?: string; ga4?: string; tiktok?: string };
+    /** Public pixel ids (formats: lib/pixelIds.ts). x* are X event ids (tw-<pixel>-<event>). */
+    pixels?: {
+      meta?: string; ga4?: string; tiktok?: string;
+      reddit?: string; snap?: string; x?: string;
+      xViewContent?: string; xInitiateCheckout?: string; xPurchase?: string;
+    };
     shareImageUrl?: string;
     /** Shares by fans and promoters @-tag the org (lib/socialTags.ts). Default on. */
     allowTagging?: boolean;

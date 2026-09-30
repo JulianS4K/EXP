@@ -168,6 +168,9 @@ export default function OrganizerProfile() {
                               </div>
                            </div>
                            <div className="p-5">
+                              {event.summary && (
+                                <p className="type text-[12px] text-white/60 line-clamp-1 mb-3">{event.summary}</p>
+                              )}
                               <div className="flex items-center text-white/50 text-[10px] uppercase tracking-widest type mb-1 gap-2">
                                 <Calendar className="w-3 h-3 text-brand-primary" />
                                 <span>{event.date ? formatInTz((event.date as any).toDate(), event.timezone, { dateStyle: 'medium' }) : 'Date TBD'}</span>

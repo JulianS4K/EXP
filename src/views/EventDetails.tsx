@@ -24,10 +24,9 @@ import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
-import { initOrgPixels, trackPixelEvent } from '../lib/pixels';
+import { initOrgPixels, pixelsLive, trackPixelEvent } from '../lib/pixels';
 import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from '../lib/purchasePixel';
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
-import { getConsent } from '../lib/consent';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
 import { captureAttribution, type Attribution } from '../lib/attribution';
@@ -374,7 +373,7 @@ export default function EventDetails() {
         // InitiateCheckout, deduped by the random id kept in the stash.
         trackPixelEvent('InitiateCheckout', initiateCheckoutParams(pendingCheckout), pendingCheckout.initiateEventId);
         // Give a live pixel a moment to send before the page unloads.
-        if (getConsent() === 'granted') await new Promise((r) => setTimeout(r, 300));
+        if (pixelsLive()) await new Promise((r) => setTimeout(r, 300));
       }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
@@ -552,6 +551,16 @@ export default function EventDetails() {
     io.observe(el);
     return () => io.disconnect();
   }, [event?.id, loading]);
+
+  // The mobile "Get tickets" bar is fixed to the bottom: pad the page by its
+  // height while it shows, or it covers the footer's last row (Privacy,
+  // Terms, Cookie settings) with no way to scroll it clear (index.css).
+  const stickyBuyBar = !!event && !buyInView && (event.status ?? 'published') !== 'cancelled';
+  useEffect(() => {
+    if (!stickyBuyBar) return undefined;
+    document.body.classList.add('sticky-buy-bar');
+    return () => document.body.classList.remove('sticky-buy-bar');
+  }, [stickyBuyBar]);
 
   const handleShare = async () => {
     const shareData = {

@@ -165,6 +165,11 @@ describe('calendarEvent (Exos row → VEVENT)', () => {
     const summer = calendarEvent(row({ doors_at: '2026-07-01T23:30:00Z', timezone: 'America/Los_Angeles' }), { appBase: BASE })!;
     expect(summer.description).toContain('Doors: 4:30 PM PDT');
   });
+  it('puts the store-page summary before the description when present', () => {
+    expect(calendarEvent(row({ summary: 'Two sets, one late.' }), { appBase: BASE })!.description)
+      .toContain('Two sets, one late.\n\nTwo sets.\nBar opens early & late.');
+    expect(calendarEvent(row(), { appBase: BASE })!.description).not.toContain('Two sets, one late.');
+  });
   it('links ticket holders to their tickets in the /me feed', () => {
     expect(calendarEvent(row({ has_tickets: true }), { appBase: BASE })!.description).toContain(`You have tickets: ${BASE}/my-tickets`);
   });

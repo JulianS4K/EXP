@@ -179,6 +179,10 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
           </div>
         )}
 
+        {step !== 'paying' && event.summary && (
+          <p className="type text-[13px] text-white/60 line-clamp-1 -mt-2 mb-4">{event.summary}</p>
+        )}
+
         {soldOut && step === 'card' ? (
           <div className="px-6 py-3 bg-white/5 text-white/40 text-center disp text-lg tracking-wide">
             SOLD OUT

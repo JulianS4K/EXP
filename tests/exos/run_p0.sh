@@ -47,6 +47,8 @@ done
 $PSQL -f "$DIR/prereq_distribution.sql"
 # Prod's mail RPCs that mig 20260929080000 patches (they predate this chain).
 $PSQL -f "$DIR/prereq_rpc_hardening.sql"
+# Supabase Vault stub (ad-conversion tokens, mig 20260930100000).
+$PSQL -f "$DIR/prereq_vault.sql"
 for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_request \
          20260926191000_exos_channel_event_links 20260926192000_exos_marketplace_orders \
          20260926193000_exos_channel_allocations 20260926194000_exos_listing_plan_account_flags \
@@ -81,7 +83,10 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20260929130000_exos_door_name_checkin \
          20260929131000_exos_checkout_records \
          20260929140000_exos_door_lists \
-         20260929150000_exos_reschedule_refunds; do
+         20260929150000_exos_reschedule_refunds \
+         20260930100000_exos_marketing_conversions \
+         20260930101000_exos_audience_export \
+         20260930102000_exos_oauth_google; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -182,7 +187,10 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20260929130000_exos_door_name_checkin \
          20260929131000_exos_checkout_records \
          20260929140000_exos_door_lists \
-         20260929150000_exos_reschedule_refunds; do
+         20260929150000_exos_reschedule_refunds \
+         20260930100000_exos_marketing_conversions \
+         20260930101000_exos_audience_export \
+         20260930102000_exos_oauth_google; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -194,3 +202,6 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_name
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_checkout_records.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_lists.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_reschedule_refunds.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_marketing_conversions.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_audience_export.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_oauth_google.sql"

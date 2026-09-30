@@ -10,6 +10,28 @@ describe('bridgeCsp', () => {
     expect(bridgeCsp('/bridge/l/bk-nights/dj-kay')).toContain('connect.facebook.net');
   });
 
+  it('allows the Reddit, Snap and X pixels wherever the other pixels load', () => {
+    const vendorHosts = [
+      'https://www.redditstatic.com', 'https://alb.reddit.com', 'https://pixel-config.reddit.com',
+      'https://sc-static.net', 'https://tr.snapchat.com',
+      'https://static.ads-twitter.com', 'https://analytics.twitter.com', 'https://t.co',
+    ];
+    const pages: [string, string?][] = [
+      ['/bridge/event/1'], ['/bridge/l/bk-nights/dj-kay'],
+      ['/bridge/my-tickets', '?checkout=success&session_id=cs_test_a1B2c3D4e5'],
+    ];
+    for (const [path, search] of pages) {
+      const csp = bridgeCsp(path, search);
+      for (const h of vendorHosts) expect(csp).toContain(h);
+      // Loaders are scripts; event endpoints are connect-only.
+      expect(csp.split('; ').find((d) => d.startsWith('script-src'))).toContain('https://sc-static.net');
+      expect(csp.split('; ').find((d) => d.startsWith('script-src'))).not.toContain('https://tr.snapchat.com');
+    }
+    for (const path of ['/bridge/checkin/abc', '/bridge/my-tickets', '/bridge/dashboard']) {
+      for (const h of vendorHosts) expect(bridgeCsp(path)).not.toContain(h);
+    }
+  });
+
   it('allows pixels on the Stripe return so the paid Purchase fires', () => {
     expect(bridgeCsp('/bridge/my-tickets', '?checkout=success&session_id=cs_test_a1B2c3D4e5')).toContain('connect.facebook.net');
     expect(bridgeCsp('/bridge/my-tickets', '?checkout=success&guest=1&session_id=cs_live_a1B2c3D4e5')).toContain('analytics.tiktok.com');

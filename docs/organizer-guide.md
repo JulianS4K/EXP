@@ -99,7 +99,11 @@ tiers and discount codes, into a series of dates.
   - Fans who share after buying pass the promoter's credit along.
 
 - Share links and the venue embed (`/embed/event/:eventId`).
-- Tracking pixels, which only load after the visitor consents.
+- Tracking pixels (Settings → Marketing & socials): Meta, GA4, TikTok, Reddit, Snap and X. They
+  only load after the visitor consents: GA4 needs analytics consent, the others advertising
+  consent, and browsers that send Global Privacy Control get no advertising pixels unless the
+  visitor turns them on. Settings checks each id's format before saving. X needs one event id per
+  conversion (view content, checkout, purchase) from X Events Manager.
   - They only see your public pages: the event page, your storefront and your profile.
   - They never see buyers' tickets, accounts or the door scanner, and never another
     organizer's pages.
@@ -116,6 +120,12 @@ tiers and discount codes, into a series of dates.
 
 - **Analytics:** sold, used, no-show and released counts; sales by day in the event's timezone;
   breakdowns by tier, promoter and channel; scan and reject rollups. CSV export.
+- **Sources report** (Marketing tab; owner, manager and finance): paid orders, tickets and gross
+  grouped by UTM source / medium / campaign, promoter code and the ad platform the buyer clicked
+  through from (Google, Meta, TikTok, Reddit, Snap, X, Microsoft, read from the click id), with
+  everything else under "Direct / unknown". Switch the grouping to one dimension at a time, and
+  export the full breakdown as CSV. Tag your ad links with `utm_source`, `utm_medium` and
+  `utm_campaign` so they show up here. Free claims aren't in it.
 - **Comps:** tickets to a list of emails, with an optional org-wide **comp budget**. People without
   an account get a claim-by-email link. Comps respect capacity, shared quotas and seats held in
   other people's carts; a full tier shows up as "sold-out" for that recipient.
@@ -271,6 +281,35 @@ Add lists in **Edit event → Venue & seating → Check-in lists** when the door
 - **Disputes** void the tickets.
 - **Transfers:** a holder sends a ticket to an email address. The recipient claims it, the barcode
   is reissued, and the sender's old code stops working. Only one transfer can be pending per ticket.
+
+## 7. Money and payouts
+
+Owners, managers and finance see money; other roles don't get these screens (and the database refuses
+them anyway).
+
+- **Per event** (`/dashboard/event/:eventId`, Overview → **Money**): a settlement summary.
+  - **Exos checkout:** tickets sold, gross, tax (included in the price), refunds, the Exos fee, card
+    fees, your net (gross less the application fee, which is the Exos fee plus the card-fee estimate),
+    and your net after refunds (a refund returns the fees in proportion). Card fees show Stripe's
+    **actual** fee once it's recorded for an order, otherwise the **estimate** taken at checkout; the
+    label says which (or both, when the orders are mixed).
+  - **Marketplaces:** tickets, proceeds (after the marketplace's own fee), the Exos fee, your net, and
+    how much of it has been paid out. Cancelled orders aren't counted.
+  - **Promoter commissions** accrued for the event, and the organizer net for all channels before and
+    after them.
+  - **Orders CSV:** one row per order (Exos checkouts, then marketplace orders) with the same columns.
+  - Exos checkout money is paid out **by Stripe, directly to your connected account**, on Stripe's
+    schedule. Exos never holds it.
+  - Orders from before fee recording started have no fee split; the summary says how many and leaves
+    them out of the fee and net totals.
+- **Per org** (`/orgs/:orgId/payouts`, the **Payouts** button on the dashboard or the tab in org
+  settings): what Exos pays you for **marketplace** sales, after the marketplace pays us
+  (`docs/payouts.md`). Each payout shows its status (planned, sending, sent, failed, cancelled), the
+  orders it covers and any clawbacks (a cancelled order that was already paid, taken off a later
+  payout). **Export CSV** gives one row per payout line. Accounting-software export (QuickBooks, Xero)
+  isn't built.
+- Both screens are read-only. If your database doesn't have the money views yet, the Money section and
+  the Payouts page stay hidden or say they aren't available.
 
 ## Not built yet (tracked in `KANBAN.md`)
 

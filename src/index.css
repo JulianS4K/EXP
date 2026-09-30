@@ -138,6 +138,13 @@
 .anim-slide-in { animation: anim-slide-in 0.35s ease-out both; }
 .anim-fade-in { animation: anim-fade-in 0.2s ease-out both; }
 .anim-pop-in { animation: anim-pop-in 0.25s ease-out both; }
+/* EventDetails' fixed mobile buy bar (lg:hidden): keep the footer reachable. */
+@media (max-width: 1023.98px) {
+  body.sticky-buy-bar {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-slide-in, .anim-fade-in, .anim-pop-in { animation: none; }
 }
