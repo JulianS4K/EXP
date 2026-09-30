@@ -3,7 +3,9 @@
 // the organizer's connected account directly. Marketplace sales are paid by
 // Exos (exos-payouts) once the marketplace has paid us; each payout lists the
 // orders it covers and any clawbacks. Owner / manager / finance (RLS on
-// exos_org_payouts / _lines enforces it); a CSV export per line.
+// exos_org_payouts / _lines enforces it); a CSV export per line. Below them,
+// the org's chargebacks on Exos checkout orders (DisputesPanel, mig
+// 20261001101000).
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -13,6 +15,7 @@ import { useOrganization } from '../context/OrganizationContext';
 import { formatCents } from '../lib/refunds';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import { getOrgPayouts } from '../lib/settlementApi';
+import DisputesPanel from '../components/DisputesPanel';
 import {
   canSeeMoney,
   groupPayouts,
@@ -177,6 +180,11 @@ export default function OrgPayouts() {
             </ul>
           </>
         )}
+
+        {/* Chargebacks on the org's Exos checkout orders (mig 20261001101000). */}
+        <div className="mt-10">
+          <DisputesPanel orgId={orgId} canView={allowed} />
+        </div>
       </div>
     </div>
   );

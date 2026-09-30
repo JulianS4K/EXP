@@ -28,7 +28,8 @@ function (Resend). Nothing sends mail directly.
   addresses, and the ledger outlives `exos_mail` purges. A retried trigger, a re-run cron or two overlapping runs
   queue nothing new.
 - **No buyer PII in organizer mail.** Organizer mails carry counts, amounts and event facts. No buyer names, emails
-  or order references (the SQL test checks this).
+  or order references (the SQL test checks this). Dispute mails follow it too: they link to the event's Money
+  section, where the order is listed for staff who may see it.
 - **Organizer text is escaped.** Event names, venues, org names and cancel reasons are stored raw in the payload
   and escaped by the renderer. Subjects are plain text with line breaks stripped.
 - **All-in prices.** Buyer mail shows what the buyer paid, tax included, and says no fees were added.
@@ -76,6 +77,8 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `marketplace-attention` | A marketplace order needs a person | O | T | per order + reason | SQL |
 | `payout-sent`, `payout-pending` | `exos_queue_payout_mail(org, amount_cents, currency, period, status, reference)`, for the payout ledger to call | O + finance | T | per org + status + reference (or period) + person | TS |
 | `fee-free-ending` | Cron: 14 days and 1 day before `exos_org_billing.fee_free_until` | O + finance | T | per org + end date + stage + person | TS |
+| `dispute-opened` | `stripe-webhook` → `exos_record_dispute_event` (mig 20261001101000): a chargeback or inquiry opened | owner + finance | T | per dispute + person (`dispute-opened:<dispute id>:<user>`), whatever Stripe sends after | TS: amount, reason in words, the Stripe fee, evidence deadline and what to send; links to the event's Money section and (for Exos staff) the dispute in the Stripe dashboard, the one link outside the app, built from a checked `dp_` / `du_` id |
+| `dispute-won`, `dispute-lost` | The dispute closed won / lost | owner + finance | T | per dispute + person | TS: lost says the order's tickets are void and, per `exos_org_billing.recover_lost_disputes`, either that nothing is taken from payouts or the amount + fee that can be (`docs/payouts.md`) |
 | `org-welcome` | Cron: org created < 2 days ago | owner | T | per org | TS |
 | `org-first-event` | Cron: day 3-7, only while the org has no event | owner | M | per org | TS |
 | `org-connect-stripe` | Cron: day 7-14, only while Stripe can't take payments (`exos_org_secrets.payments.chargesEnabled`) | owner | M | per org | TS |

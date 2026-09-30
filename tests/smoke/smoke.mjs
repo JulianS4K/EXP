@@ -352,11 +352,23 @@ const money = (id, gross, refunded, extra = {}) => ({
   card_fee_actual_cents: null, fee_bps: 500, fee_free: false, organizer_net_cents: gross - Math.round(gross * 0.08), platform_net_cents: null,
   refunded_cents: refunded, payment_intent: 'pi_' + id, transfer_id: null, balance_txn_id: null, ...extra,
 });
+// Chargebacks (mig 20261001101000), as exos_disputes rows.
+const dispute = (id, extra = {}) => ({
+  id, org_id: ORG, event_id: EV, session_id: 'cs_1', payment_intent: 'pi_cs_1', charge_id: 'ch_1', dispute_id: 'du_' + id,
+  amount_cents: 4000, fee_cents: 1500, currency: 'usd', reason: 'fraudulent', status: 'needs_response', evidence_due_by: null,
+  evidence_submitted: false, livemode: true, created_at: '2026-09-24T12:00:00Z', updated_at: '2026-09-24T12:00:00Z', closed_at: null,
+  last_event_id: 'evt_1', recovery_status: 'none', recovery_candidate_cents: null, raw: null, ...extra,
+});
 const reportMock = ownerMock({ tables: {
   exos_tickets: [], exos_discount_codes: [],
   exos_checkout_sessions: SESSIONS,
   exos_order_money: [money('cs_1', 4000, 0), money('cs_2', 2000, 0), money('cs_3', 2000, 2000), money('cs_4', 2000, 0)],
   exos_marketplace_order_money: [], exos_promoter_commissions: [],
+  exos_disputes: [
+    dispute('d1', { session_id: 'cs_1', status: 'needs_response', evidence_due_by: new Date(Date.now() + 5 * 864e5 + 36e5).toISOString() }),
+    dispute('d2', { session_id: 'cs_2', dispute_id: 'du_lost2', status: 'lost', amount_cents: 2000, reason: 'product_not_received',
+      closed_at: '2026-09-25T00:00:00Z', recovery_status: 'recovery_pending', recovery_candidate_cents: 3500 }),
+  ],
 } });
 
 await run('event report: Sources by UTM, promoter and ad platform, with CSV', async (page, log) => {
@@ -392,6 +404,21 @@ await run('event report: Money summary from the order money view', async (page, 
   assert(firstLines(csv).length >= 5, 'one row per order');
 }, { signedIn: true, mock: reportMock });
 
+await run('event report: Disputes block with status, amount, due date and Stripe link', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Disputes' }) });
+  await section.waitFor({ timeout: 8000 });
+  await section.getByText('Needs response').waitFor({ timeout: 8000 });
+  const text = (await section.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('$40.00') && text.includes('Fraudulent'), 'open dispute row: ' + text);
+  assert(/Due \w+ \d+ \(in 5 days\)/.test(text), 'evidence due date: ' + text);
+  assert(/\bLOST\b/i.test(text) && text.includes('Product not received') && text.includes('$35.00 may be taken from a later payout'), 'lost row + recovery: ' + text);
+  assert(/Open\s*1\s*\$40\.00 at stake/i.test(text), 'open summary: ' + text);
+  assert(await section.locator('a[href="https://dashboard.stripe.com/disputes/du_d1"]').count() === 1, 'Stripe link');
+  const read = log.find((l) => l.startsWith('GET exos_disputes'));
+  assert(read && read.includes('event_id=eq.' + EV) && read.includes('evidence_due_by'), 'disputes read: ' + read);
+}, { signedIn: true, mock: reportMock });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });
@@ -401,7 +428,10 @@ await run('payouts page lists payouts and their lines', async (page) => {
   await page.getByRole('button', { name: /\$120\.00/ }).click();
   await expectText(page, 'SH-991');
   await expectText(page, 'Stripe transfer tr_123');
-  const table = await page.locator('table').innerText();
+  const disputes = page.locator('section', { has: page.getByRole('heading', { name: 'Disputes' }) });
+  await disputes.getByText('Under review').waitFor({ timeout: 8000 });
+  assert((await disputes.innerText()).includes('Fall Party'), 'dispute row names the event');
+  const table = await page.locator('table').first().innerText();
   assert(table.includes('Fall Party') && table.includes('clawback') && table.includes('-$30.00'), 'lines: ' + table.replace(/\s+/g, ' '));
   const { text } = await download(page, () => page.getByRole('button', { name: /Export CSV/ }).click());
   assert(firstLines(text)[0].startsWith('payout_id,payout_status'), 'payouts CSV header');
@@ -418,6 +448,7 @@ await run('payouts page lists payouts and their lines', async (page) => {
     { id: 'pl_2', payout_id: 'po_1', org_id: ORG, order_id: '88888888-8888-4888-8888-888888888882', kind: 'clawback', amount: -30, created_at: '2026-09-25T12:00:01Z',
       order: { channel: 'seatgeek', external_order_id: 'SG-12', event_id: EV, event: { name: 'Fall Party' } } },
   ],
+  exos_disputes: [dispute('p1', { status: 'under_review', evidence_submitted: true, event: { name: 'Fall Party' } })],
 } }) });
 
 // Wallet buttons on My Tickets.

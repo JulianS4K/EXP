@@ -12,6 +12,7 @@ const ORG = '33333333-3333-4333-8333-333333333333';
 const TIER = '44444444-4444-4444-8444-444444444444';
 const TOKEN = 'a'.repeat(64);
 const EVIL = `<script>alert("x")</script> & 'co'`;
+const STRIPE_DISPUTE = /^https:\/\/dashboard\.stripe\.com\/(test\/)?disputes\/(dp|du)_[A-Za-z0-9]+$/;
 
 const event = (over: Record<string, unknown> = {}) => ({
   id: EV, name: 'Show <One> & "Friends"', starts_at: '2026-10-02T00:00:00+00:00', timezone: 'America/New_York',
@@ -48,6 +49,21 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     org, from: '2026-09-27T00:00:00+00:00', to: '2026-09-28T00:00:00+00:00', marketing: true, unsubscribe_token: TOKEN,
     events: [{ id: EV, name: 'Show <One>', currency: 'usd', orders: 1, tickets: 2, gross_cents: 16000 }],
     totals: [{ currency: 'usd', orders: 1, tickets: 2, gross_cents: 16000 }],
+  },
+  'dispute-opened': {
+    org, event: event(), dispute_id: 'du_1Abc', livemode: false, amount_cents: 5000, fee_cents: 1500, currency: 'usd',
+    reason: 'fraudulent', status: 'needs_response', evidence_due_by: '2026-10-15T23:59:59+00:00', evidence_submitted: false,
+    recovery_status: 'none', recovery_candidate_cents: null, marketing: false,
+  },
+  'dispute-won': {
+    org, event: event(), dispute_id: 'du_1Abc', livemode: true, amount_cents: 5000, fee_cents: 1500, currency: 'usd',
+    reason: 'product_not_received', status: 'won', evidence_due_by: null, evidence_submitted: true,
+    recovery_status: 'none', recovery_candidate_cents: null, marketing: false,
+  },
+  'dispute-lost': {
+    org, event: event(), dispute_id: 'du_1Abc', livemode: true, amount_cents: 5000, fee_cents: 1500, currency: 'usd',
+    reason: 'fraudulent', status: 'lost', evidence_due_by: null, evidence_submitted: false,
+    recovery_status: 'not_recovered', recovery_candidate_cents: 6500, marketing: false,
   },
   'org-weekly-summary': {
     org, from: '2026-09-21T00:00:00+00:00', to: '2026-09-28T00:00:00+00:00', marketing: true, unsubscribe_token: TOKEN,
@@ -99,7 +115,8 @@ describe('renderTemplate', () => {
       expect(r.html).not.toContain('{{app_url}}');
       const hrefs = [...r.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
       expect(hrefs.length).toBeGreaterThan(0);
-      for (const h of hrefs) expect(h.startsWith(`${APP}/`)).toBe(true);
+      // The one link out of the app: Stripe's page for a dispute (dispute mails only).
+      for (const h of hrefs) expect(h.startsWith(`${APP}/`) || (template.startsWith('dispute-') && STRIPE_DISPUTE.test(h))).toBe(true);
     });
   }
 
@@ -178,6 +195,46 @@ describe('renderTemplate', () => {
     expect(ok('inventory-low').html).toContain(`href="${APP}/edit-event/${EV}"`);
     expect(ok('inventory-sold-out').subject).toBe('Sold out: GA for Show <One> & "Friends"');
     expect(ok('event-published').html).toContain(`href="${APP}/dashboard/event/${EV}/promote"`);
+  });
+
+  it('dispute mails: amount, reason, deadline, links; no buyer data; recovery wording', () => {
+    const o = ok('dispute-opened');
+    expect(o.subject).toBe('Chargeback: $50.00 for Show <One> & "Friends"');
+    expect(o.html).toContain('disputed a <strong>$50.00</strong> payment');
+    expect(o.html).toContain('the cardholder says they didn&#39;t make the purchase');
+    expect(o.html).toContain('Evidence is due Thursday, October 15 at 11:59 PM UTC');
+    expect(o.html).toContain('$15.00 dispute fee');
+    expect(o.html).toContain(`href="${APP}/dashboard/event/${EV}"`);
+    expect(o.html).toContain('href="https://dashboard.stripe.com/test/disputes/du_1Abc"');
+    expect(o.html).toContain('because you help run Org &lt;7f&gt; &amp; Co on Exos');
+    expect(o.html).not.toContain('unsubscribe');
+    const inquiry = ok('dispute-opened', { ...PAYLOADS['dispute-opened'], status: 'warning_needs_response', evidence_due_by: null, reason: 'odd_new_reason' });
+    expect(inquiry.subject).toBe('Payment inquiry: $50.00 for Show <One> & "Friends"');
+    expect(inquiry.html).toContain('Reason: odd new reason.');
+    expect(inquiry.html).not.toContain('Evidence is due');
+    const noEvent = ok('dispute-opened', { ...PAYLOADS['dispute-opened'], event: null });
+    expect(noEvent.subject).toBe('Chargeback: $50.00');
+    expect(noEvent.html).toContain(`href="${APP}/dashboard"`);
+
+    const w = ok('dispute-won');
+    expect(w.subject).toBe('Chargeback won: $50.00 for Show <One> & "Friends"');
+    expect(w.html).toContain('href="https://dashboard.stripe.com/disputes/du_1Abc"');
+    expect(w.html).toContain("Stripe's $15.00 dispute fee isn't returned");
+
+    const l = ok('dispute-lost');
+    expect(l.subject).toBe('Chargeback lost: $50.00 for Show <One> & "Friends"');
+    expect(l.html).toContain('tickets are now void');
+    expect(l.html).toContain('Nothing is taken from your payouts');
+    const rec = ok('dispute-lost', { ...PAYLOADS['dispute-lost'], recovery_status: 'recovery_pending' });
+    expect(rec.html).toContain('$65.00 (the amount plus the dispute fee) can be taken from a later payout');
+
+    // A dispute id that isn't one never becomes a link.
+    expect(renderTemplate('dispute-opened', { ...PAYLOADS['dispute-opened'], dispute_id: 'x"><script>' }, APP)).toEqual({
+      ok: false, error: 'dispute-opened: dispute_id is not a dispute id',
+    });
+    expect(renderTemplate('dispute-lost', { ...PAYLOADS['dispute-lost'], amount_cents: undefined }, APP)).toEqual({
+      ok: false, error: 'dispute-lost: amount_cents missing',
+    });
   });
 
   it('refuses rows it cannot render safely', () => {

@@ -205,6 +205,59 @@ const REFUND_TEXT: Record<string, (paid: string, refunded: string) => string> = 
   none: () => `This ticket was free, so there's nothing to refund.`,
 };
 
+// Disputes (mig 20261001101000). The dispute lives on the Exos platform's
+// Stripe account (destination charges), so the one link out of the app is
+// Stripe's own dashboard page for that dispute, built from a checked id.
+const DISPUTE_ID = /^(dp|du)_[A-Za-z0-9]{1,200}$/;
+const DISPUTE_REASONS: Record<string, string> = {
+  bank_cannot_process: "the bank couldn't process the payment",
+  credit_not_processed: "the buyer says a promised refund wasn't made",
+  customer_initiated: "the buyer asked their bank to reverse it",
+  debit_not_authorized: "the buyer says they didn't authorize the debit",
+  duplicate: "the buyer says they were charged twice",
+  fraudulent: "the cardholder says they didn't make the purchase",
+  general: "no specific reason given",
+  incorrect_account_details: "incorrect account details",
+  insufficient_funds: "insufficient funds",
+  product_not_received: "the buyer says they didn't get their tickets",
+  product_unacceptable: "the buyer says the event wasn't as described",
+  subscription_canceled: "the buyer says they cancelled",
+  unrecognized: "the buyer doesn't recognize the charge",
+};
+function disputeReason(p: Obj): string {
+  const r = opt(p, "reason");
+  if (!r) return "no reason given";
+  return DISPUTE_REASONS[r] ?? r.replace(/_/g, " ");
+}
+interface DisputeView {
+  org: { id: string; name: string };
+  ev: Ev | null;
+  amount: string;
+  fee: string | null;
+  stripeUrl: string;
+  eventLine: string;
+}
+function disputeView(ctx: Ctx): DisputeView {
+  const o = org(ctx.p);
+  const id = str(ctx.p, "dispute_id");
+  if (!DISPUTE_ID.test(id)) throw new PayloadError("dispute_id is not a dispute id");
+  const cur = str(ctx.p, "currency", "usd");
+  const feeCents = num(ctx.p, "fee_cents", 0);
+  const ev = isObj(ctx.p.event) ? event(ctx.p) : null;
+  return {
+    org: o,
+    ev,
+    amount: formatMoney(num(ctx.p, "amount_cents"), cur),
+    fee: feeCents > 0 ? formatMoney(feeCents, cur) : null,
+    stripeUrl: `https://dashboard.stripe.com/${ctx.p.livemode === false ? "test/" : ""}disputes/${id}`,
+    eventLine: ev ? eventBlock(ev) : "",
+  };
+}
+function disputeLinks(ctx: Ctx, v: DisputeView): string {
+  return (v.ev ? button(ctx, `/dashboard/event/${v.ev.id}`, "See it in the event's Money") : button(ctx, "/dashboard", "Your dashboard")) +
+    `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in Stripe</a>.</p>`;
+}
+
 const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
   // ── buyer ──
   "event-cancelled": (ctx) => {
@@ -432,6 +485,60 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
         `<p>A payout of <strong>${esc(amount)}</strong> for ${esc(str(ctx.p, "period"))} is being prepared for ${esc(o.name)}.</p>` +
         `<p>We'll email you again when it's sent.</p>` +
         button(ctx, "/dashboard", "Your dashboard"),
+    };
+  },
+
+  "dispute-opened": (ctx) => {
+    const v = disputeView(ctx);
+    const inquiry = str(ctx.p, "status", "needs_response").startsWith("warning_");
+    const due = opt(ctx.p, "evidence_due_by");
+    const dueText = due ? formatWhen(due, "UTC") : "";
+    return {
+      audience: "organizer",
+      orgName: v.org.name,
+      subject: `${inquiry ? "Payment inquiry" : "Chargeback"}: ${v.amount}${v.ev ? ` for ${v.ev.name}` : ""}`,
+      body:
+        `<p>A buyer's bank ${inquiry ? "opened an inquiry into" : "disputed"} a <strong>${esc(v.amount)}</strong> payment` +
+        `${v.ev ? "" : ` to ${esc(v.org.name)}`}. Reason: ${esc(disputeReason(ctx.p))}.</p>` +
+        v.eventLine +
+        (inquiry ? "" : `<p>The bank has taken the money back while it decides${v.fee ? `, and Stripe charged a ${esc(v.fee)} dispute fee` : ""}. The tickets stay valid in the meantime.</p>`) +
+        (dueText
+          ? `<p><strong>Evidence is due ${esc(dueText)}.</strong> Send the Exos team anything that shows the buyer got what they paid for: the check-in record, a ticket transfer, messages with the buyer, your refund policy. We submit it to the bank from Stripe.</p>`
+          : `<p>Send the Exos team anything that shows the buyer got what they paid for: the check-in record, a ticket transfer, messages with the buyer, your refund policy.</p>`) +
+        disputeLinks(ctx, v),
+    };
+  },
+
+  "dispute-won": (ctx) => {
+    const v = disputeView(ctx);
+    return {
+      audience: "organizer",
+      orgName: v.org.name,
+      subject: `Chargeback won: ${v.amount}${v.ev ? ` for ${v.ev.name}` : ""}`,
+      body:
+        `<p>The bank decided in your favour: the <strong>${esc(v.amount)}</strong> dispute is closed and the money is back.</p>` +
+        v.eventLine +
+        (v.fee ? `<p>Stripe's ${esc(v.fee)} dispute fee isn't returned.</p>` : "") +
+        disputeLinks(ctx, v),
+    };
+  },
+
+  "dispute-lost": (ctx) => {
+    const v = disputeView(ctx);
+    const cur = str(ctx.p, "currency", "usd");
+    const recovery = str(ctx.p, "recovery_status", "not_recovered");
+    const candidate = formatMoney(num(ctx.p, "recovery_candidate_cents", 0), cur);
+    return {
+      audience: "organizer",
+      orgName: v.org.name,
+      subject: `Chargeback lost: ${v.amount}${v.ev ? ` for ${v.ev.name}` : ""}`,
+      body:
+        `<p>The bank sided with the buyer: the <strong>${esc(v.amount)}</strong> payment went back to them, and the order's tickets are now void.</p>` +
+        v.eventLine +
+        (recovery === "recovery_pending"
+          ? `<p>Under your Exos terms, ${esc(candidate)} (the amount${v.fee ? " plus the dispute fee" : ""}) can be taken from a later payout.</p>`
+          : `<p>Nothing is taken from your payouts for this one.</p>`) +
+        disputeLinks(ctx, v),
     };
   },
 
