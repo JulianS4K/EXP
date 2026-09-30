@@ -27,6 +27,7 @@ const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
 const TicketDetail = lazy(() => import('./views/TicketDetail'));
 const WalletPass = lazy(() => import('./views/WalletPass'));
+const InvoiceView = lazy(() => import('./views/InvoiceView'));
 const TransferTicket = lazy(() => import('./views/TransferTicket'));
 const ClaimTicket = lazy(() => import('./views/ClaimTicket'));
 const OrganizerDashboard = lazy(() => import('./views/OrganizerDashboard'));
@@ -96,6 +97,9 @@ function ChromeLayout({ children }: { children: ReactNode }) {
   const isBare =
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||
+    // Printable receipts / credit notes: the page is the document.
+    location.pathname.startsWith('/invoice/') ||
+    location.pathname.startsWith('/credit-note/') ||
     // White-label org storefront (/o/:slug) supplies its own org-branded
     // nav + footer, so the platform chrome is suppressed here too.
     location.pathname.startsWith('/o/');
@@ -151,6 +155,8 @@ export default function App() {
                     <Route path="/alerts" element={<Notifications />} />
                     <Route path="/ticket/:id" element={<TicketDetail />} />
                     <Route path="/wallet/pass/:ticketId" element={<WalletPass />} />
+                    <Route path="/invoice/:id" element={<InvoiceView kind="invoice" />} />
+                    <Route path="/credit-note/:id" element={<InvoiceView kind="credit_note" />} />
                     <Route path="/transfer/:id" element={<TransferTicket />} />
                     <Route path="/claim/:transferId" element={<ClaimTicket />} />
                     <Route path="/dashboard" element={<OrganizerDashboard />} />

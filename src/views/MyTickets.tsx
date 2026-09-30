@@ -29,6 +29,8 @@ import {
   type RescheduleOffer,
 } from '../lib/rescheduleRefunds';
 import { formatCents } from '../lib/refunds';
+import { listMyInvoices, type MyInvoice } from '../lib/invoicesApi';
+import { formatDocNumber, invoicePath } from '../lib/invoices';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
@@ -49,6 +51,8 @@ export default function MyTickets() {
   // account holds or paid for. Refunds go back to the card that paid.
   const [offers, setOffers] = useState<RescheduleOffer[]>([]);
   const [offerBusy, setOfferBusy] = useState<string | null>(null);
+  // Receipts (mig 20261001100000): order (checkout session) id → invoice.
+  const [invoices, setInvoices] = useState<Map<string, MyInvoice>>(new Map());
 
   const reloadOffers = async () => setOffers(await listMyRescheduleOffers());
 
@@ -140,15 +144,17 @@ export default function MyTickets() {
         // Tickets (with event joined) + both pending-transfer directions.
         // The transfer rows carry denormalised event title/image, so no
         // ticket/event dereference is needed (the old Firestore N+1 is gone).
-        const [ticketsWithEvents, inbound, outbound, saved, dateOffers] = await Promise.all([
+        const [ticketsWithEvents, inbound, outbound, saved, dateOffers, myInvoices] = await Promise.all([
           listMyTickets(),
           listInboundTransfers(),
           listOutboundTransfers(),
           listSavedEvents(),
           listMyRescheduleOffers(),
+          listMyInvoices(),
         ]);
         if (cancelled) return;
         setOffers(dateOffers);
+        setInvoices(new Map(myInvoices.filter((i) => i.sessionId).map((i) => [i.sessionId as string, i])));
 
         setTickets(ticketsWithEvents);
         setSavedEvents(saved);
@@ -494,7 +500,9 @@ export default function MyTickets() {
                      }
                      receiptsMap.get(key)!.tickets.push(t);
                    });
-                   return Array.from(receiptsMap.values()).map(({ tickets, firstTicket }) => (
+                   return Array.from(receiptsMap.values()).map(({ tickets, firstTicket }) => {
+                    const invoice = firstTicket.orderId ? invoices.get(firstTicket.orderId) : undefined;
+                    return (
                     <div key={firstTicket.id} className="bg-white/5 p-6 border border-white/10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 group hover:border-brand-primary transition-all">
                        <div>
                           <p className="type text-[11px] text-brand-primary uppercase tracking-widest mb-1">receipt id: {firstTicket.orderId?.slice(0, 8) || 'LEGACY_SYNC'}</p>
@@ -502,8 +510,22 @@ export default function MyTickets() {
                              {firstTicket.tierName || 'GENERAL'} <span className="type text-white/60 text-xs ml-2 normal-case tracking-normal">× {tickets.length}</span>
                           </h4>
                           <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">{firstTicket.purchaseDate ? format(firstTicket.purchaseDate.toDate(), 'PPP p') : 'N/A'}</p>
+                          {invoice && (
+                            <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">
+                              {formatDocNumber(invoice.number)} · {formatCents(invoice.totalCents, invoice.currency)}
+                              {invoice.refundedCents > 0 && ` · ${formatCents(invoice.refundedCents, invoice.currency)} refunded`}
+                            </p>
+                          )}
                        </div>
-                       <div className="flex items-center space-x-4 w-full md:w-auto">
+                       <div className="flex items-center gap-4 w-full md:w-auto">
+                          {invoice && (
+                            <Link
+                              to={invoicePath(invoice.id)}
+                              className="disp flex-1 md:flex-none px-6 py-3 border border-white/20 text-white text-base tracking-wide hover:border-white transition-colors text-center"
+                            >
+                              RECEIPT
+                            </Link>
+                          )}
                           <Link
                             to={`/ticket/${firstTicket.id}`}
                             className="disp flex-1 md:flex-none px-6 py-3 bg-white text-black text-base tracking-wide hover:bg-brand-primary transition-colors text-center"
@@ -512,7 +534,8 @@ export default function MyTickets() {
                           </Link>
                        </div>
                     </div>
-                   ));
+                    );
+                   });
                  })()}
               </div>
       </Dialog>

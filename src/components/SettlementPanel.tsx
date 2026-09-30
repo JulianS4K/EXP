@@ -6,24 +6,33 @@
 // Exos fee, organizer net), promoter commissions, and the organizer's net;
 // plus a per-order CSV. Aggregation is src/lib/settlement.ts; reads are
 // src/lib/settlementApi.ts. Renders nothing for other roles or when the money
-// views aren't on this database yet (mig 20260929131000).
+// views aren't on this database yet (mig 20260929131000). Per-order invoice
+// numbers (links to the printable receipt) and the CSV's invoice_number come
+// from exos_invoice_totals (mig 20261001100000) when it's there.
 
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Download, Landmark } from 'lucide-react';
 import { Event } from '../types';
 import { formatCents } from '../lib/refunds';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import { getEventMoney, type EventMoneyData } from '../lib/settlementApi';
 import { SETTLEMENT_CSV_HEADER, settlementCsvRows, summarizeSettlement } from '../lib/settlement';
+import { formatDocNumber, invoicePath, invoicesBySession, type EventInvoiceRow } from '../lib/invoices';
+import { listEventInvoices } from '../lib/invoicesApi';
 
 export default function SettlementPanel({ event, canView }: { event: Event; canView: boolean }) {
   const [data, setData] = useState<EventMoneyData | null>(null);
+  const [invoices, setInvoices] = useState<EventInvoiceRow[]>([]);
 
   useEffect(() => {
     if (!canView) return undefined;
     let cancelled = false;
     void getEventMoney(event.id).then((d) => {
       if (!cancelled) setData(d);
+    });
+    void listEventInvoices(event.id).then((rows) => {
+      if (!cancelled) setInvoices(rows);
     });
     return () => {
       cancelled = true;
@@ -47,7 +56,8 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
   const exportCsv = () => {
     downloadCsv(
       csvFileName(['settlement', event.title]),
-      toCsv(SETTLEMENT_CSV_HEADER, settlementCsvRows(data.orders, data.marketplace)),
+      toCsv(SETTLEMENT_CSV_HEADER, settlementCsvRows(data.orders, data.marketplace,
+        new Map([...invoicesBySession(invoices)].map(([sid, i]) => [sid, i.number])))),
     );
   };
 
@@ -110,6 +120,40 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
         {stat('Organizer net', money(s.organizerNetCents), 'after refunds, all channels')}
         {stat('After commissions', money(s.organizerNetAfterCommissionsCents))}
       </div>
+
+      {invoices.length > 0 && (
+        <details className="mt-4">
+          <summary className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-slate-600">
+            Receipts ({invoices.length})
+          </summary>
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                  <th className="py-2 font-black">Invoice</th>
+                  <th className="py-2 font-black">Order</th>
+                  <th className="py-2 font-black">Date</th>
+                  <th className="py-2 font-black text-right">Total</th>
+                  <th className="py-2 font-black text-right">Refunded</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((i) => (
+                  <tr key={i.id} className="border-b border-slate-50 last:border-b-0">
+                    <td className="py-2">
+                      <Link to={invoicePath(i.id)} className="font-mono text-tm-blue hover:underline">{formatDocNumber(i.number)}</Link>
+                    </td>
+                    <td className="py-2 font-mono text-xs text-slate-500 break-all">{i.session_id ?? '—'}</td>
+                    <td className="py-2 text-slate-600 text-xs">{i.issued_at ? new Date(i.issued_at).toLocaleDateString() : ''}</td>
+                    <td className="py-2 text-right">{formatCents(i.total_cents, i.currency)}</td>
+                    <td className="py-2 text-right text-slate-500">{i.refunded_cents ? formatCents(i.refunded_cents, i.currency) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       {(s.exos.ordersWithoutFees > 0 || s.marketplace.unpricedOrders > 0 || s.mixedCurrencies) && (
         <ul className="text-xs text-amber-700 space-y-1 mt-3">

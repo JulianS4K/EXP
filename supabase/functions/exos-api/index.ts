@@ -116,9 +116,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (seg[0] === "invoices" && seg.length === 1) {
+      // exos_invoice_totals (mig 20261001100000): invoices are immutable and
+      // refunds are credit notes; `status` is derived ('issued',
+      // 'partially_refunded', 'refunded', 'cancelled'), refunded_cents added.
       const { data, error } = await sb
-        .from("exos_invoices")
-        .select("number, event_id, session_id, buyer_email, currency, subtotal_cents, tax_cents, total_cents, status, issued_at")
+        .from("exos_invoice_totals")
+        .select("number, event_id, session_id, buyer_email, currency, subtotal_cents, tax_cents, total_cents, status, refunded_cents, issued_at")
         .eq("org_id", orgId)
         .order("issued_at", { ascending: false })
         .limit(500);
