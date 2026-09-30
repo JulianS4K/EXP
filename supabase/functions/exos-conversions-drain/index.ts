@@ -98,7 +98,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const cred: Credential = { config: row.config ?? {}, secret: row.secret, test_event_code: row.test_event_code };
     const built = buildConversionRequest(row, cred, { appBase, now: new Date() });
-    if (!built.ok) {
+    if ("skip" in built) {
       await mark(row, "skipped", { error: built.skip });
       counts.skipped++;
       continue;
