@@ -29,6 +29,7 @@ import { canSeeMoney } from '../lib/settlement';
 import CatalogFeedPanel from '../components/CatalogFeedPanel';
 import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
+import OrgLegalSettings from '../components/OrgLegalSettings';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -542,6 +543,9 @@ export default function OrgSettings() {
             {org.slug && (activeRole === 'owner' || activeRole === 'manager') && (
               <AudienceExportPanel orgId={org.id} orgSlug={org.slug} />
             )}
+
+            {/* Seller details on receipts / credit notes (docs/invoices.md). Owner / manager / finance. */}
+            {canSeeMoney(activeRole) && <OrgLegalSettings orgId={org.id} orgName={org.name} />}
 
             {/*
               Embed snippet — venues paste this on their own website to

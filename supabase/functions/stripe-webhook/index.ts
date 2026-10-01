@@ -31,6 +31,14 @@
 //   charge.dispute.closed -> record; if the dispute was LOST the money is gone,
 //                       so treat it like a full refund (exos_refund_checkout
 //                       voids the tickets). Won / warning_closed: record only.
+//                       Since mig 20261001101000 every dispute event goes
+//                       through exos_record_dispute_event: the same session
+//                       record, plus an exos_disputes row (fee from the
+//                       dispute's balance transactions, evidence deadline,
+//                       reason, charge; evidence / buyer data stripped by
+//                       _shared/disputes.ts) and the organizer mail
+//                       (dispute-opened / -won / -lost, once per dispute and
+//                       person). A mail problem never fails the event.
 //   account.updated  -> exos_record_org_stripe() (Connect onboarding status).
 //
 // Fee actuals (mig 20260929131000): after a settled session is fulfilled and
@@ -62,6 +70,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
+import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -416,14 +425,44 @@ Deno.serve(async (req: Request): Promise<Response> => {
           console.error(`stripe-webhook: dispute — no session for PI ${pi}`);
           break;
         }
-        const { data: stored, error: dErr } = await sb.rpc("exos_record_dispute", {
+        let fields: DisputeFields;
+        try {
+          fields = disputeFields(dispute);
+        } catch (e) {
+          // A malformed id / status won't get better on a retry.
+          console.error(`stripe-webhook: dispute ${dispute.id} unusable, ignored`, e);
+          break;
+        }
+        // exos_record_dispute_event (mig 20261001101000) = exos_record_dispute
+        // (session columns, same return) + the exos_disputes row + the
+        // organizer mail. Until that migration is applied the function isn't
+        // there (PGRST202), so fall back to the plain recorder.
+        let { data: stored, error: dErr } = await sb.rpc("exos_record_dispute_event", {
           p_session_id: sessionId,
-          p_dispute_id: dispute.id,
-          p_status: dispute.status,
-          p_reason: dispute.reason ?? null,
-          p_amount_cents: dispute.amount ?? null,
+          p_dispute_id: fields.dispute_id,
+          p_status: fields.status,
+          p_reason: fields.reason,
+          p_amount_cents: fields.amount_cents,
           p_provider_event_id: event.id,
+          p_charge_id: fields.charge_id,
+          p_payment_intent: fields.payment_intent ?? pi,
+          p_fee_cents: fields.fee_cents,
+          p_currency: fields.currency,
+          p_evidence_due_by: fields.evidence_due_by,
+          p_evidence_submitted: fields.evidence_submitted,
+          p_livemode: fields.livemode,
+          p_raw: fields.raw,
         });
+        if (dErr?.code === "PGRST202") {
+          ({ data: stored, error: dErr } = await sb.rpc("exos_record_dispute", {
+            p_session_id: sessionId,
+            p_dispute_id: dispute.id,
+            p_status: dispute.status,
+            p_reason: dispute.reason ?? null,
+            p_amount_cents: dispute.amount ?? null,
+            p_provider_event_id: event.id,
+          }));
+        }
         if (dErr) {
           console.error(`stripe-webhook: record_dispute failed for ${sessionId}`, dErr);
           return new Response("dispute handling error", { status: 500 });

@@ -311,6 +311,17 @@ them anyway).
 - Both screens are read-only. If your database doesn't have the money views yet, the Money section and
   the Payouts page stay hidden or say they aren't available.
 
+### Receipts, invoices and credit notes
+
+- Every paid order gets an invoice numbered per organization (`INV-000001`, …). Buyers see it as a
+  **receipt** in My Tickets → Receipts, and can print it or save it as a PDF. Free orders get none.
+- A refund, full or partial, gets a **credit note** (`CN-000001`, …) with its share of the tax. The
+  original receipt never changes; it lists its credit notes and the balance.
+- **Settings → Legal & invoices** (owner, manager, finance): the legal name, address, tax ID and footer
+  printed as the seller. Fill them in before you sell; each receipt keeps the details it was issued with.
+- **Money → Receipts** on the event report lists each order's invoice number and links to it; the Orders
+  CSV has an `invoice_number` column. Details: `docs/invoices.md`.
+
 ## Not built yet (tracked in `KANBAN.md`)
 
 - A screen for managing quotas.

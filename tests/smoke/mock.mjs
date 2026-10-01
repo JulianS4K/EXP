@@ -109,6 +109,15 @@ export const schema = {
   // 20260929070000.
   exos_org_payouts: cols('id org_id currency amount status stripe_transfer_id idempotency_key error created_at updated_at sent_at'),
   exos_org_payout_lines: cols('id payout_id org_id order_id kind amount created_at'),
+  // View, 20261001100000 (exos_invoices + credited amounts).
+  exos_invoice_totals: cols(`id org_id event_id number session_id buyer_id buyer_email currency subtotal_cents tax_cents
+    total_cents issued_at refunded_cents refunded_tax_cents net_cents credit_notes status`),
+  // 20261001100000.
+  exos_org_legal: cols('org_id legal_name legal_address tax_id invoice_footer updated_at updated_by'),
+  // 20261001101000.
+  exos_disputes: cols(`id org_id event_id session_id payment_intent charge_id dispute_id amount_cents fee_cents currency
+    reason status evidence_due_by evidence_submitted livemode created_at updated_at closed_at last_event_id
+    recovery_status recovery_candidate_cents raw`),
   // Only the embedded column the payouts page asks for is checked.
   exos_events: null,
 };

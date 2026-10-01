@@ -231,6 +231,16 @@ describe('settlementCsvRows', () => {
     expect(m1.slice(6, 14)).toEqual(['31.51', '', '', '0.95', '', 'none', '30.56', '30.56']);
     expect(m2[13]).toBe('0.00');
   });
+  it('adds the invoice number of each checkout (none for marketplace orders)', () => {
+    const rows = settlementCsvRows(
+      [order({ session_id: 'a' }), order({ session_id: 'free', created_at: '2026-09-23T00:00:00Z' })],
+      [mkt()],
+      new Map([['a', 'INV-000007']]),
+    );
+    const col = SETTLEMENT_CSV_HEADER.indexOf('invoice_number');
+    expect(col).toBe(SETTLEMENT_CSV_HEADER.length - 1);
+    expect(rows.map((r) => r[col])).toEqual(['INV-000007', '', '']);
+  });
   it('zero orders: no rows, and the CSV is just the header', () => {
     expect(settlementCsvRows([])).toEqual([]);
     expect(toCsv(SETTLEMENT_CSV_HEADER, [])).toBe(SETTLEMENT_CSV_HEADER.join(','));

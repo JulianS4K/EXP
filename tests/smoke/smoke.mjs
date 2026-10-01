@@ -352,11 +352,23 @@ const money = (id, gross, refunded, extra = {}) => ({
   card_fee_actual_cents: null, fee_bps: 500, fee_free: false, organizer_net_cents: gross - Math.round(gross * 0.08), platform_net_cents: null,
   refunded_cents: refunded, payment_intent: 'pi_' + id, transfer_id: null, balance_txn_id: null, ...extra,
 });
+// Chargebacks (mig 20261001101000), as exos_disputes rows.
+const dispute = (id, extra = {}) => ({
+  id, org_id: ORG, event_id: EV, session_id: 'cs_1', payment_intent: 'pi_cs_1', charge_id: 'ch_1', dispute_id: 'du_' + id,
+  amount_cents: 4000, fee_cents: 1500, currency: 'usd', reason: 'fraudulent', status: 'needs_response', evidence_due_by: null,
+  evidence_submitted: false, livemode: true, created_at: '2026-09-24T12:00:00Z', updated_at: '2026-09-24T12:00:00Z', closed_at: null,
+  last_event_id: 'evt_1', recovery_status: 'none', recovery_candidate_cents: null, raw: null, ...extra,
+});
 const reportMock = ownerMock({ tables: {
   exos_tickets: [], exos_discount_codes: [],
   exos_checkout_sessions: SESSIONS,
   exos_order_money: [money('cs_1', 4000, 0), money('cs_2', 2000, 0), money('cs_3', 2000, 2000), money('cs_4', 2000, 0)],
   exos_marketplace_order_money: [], exos_promoter_commissions: [],
+  exos_disputes: [
+    dispute('d1', { session_id: 'cs_1', status: 'needs_response', evidence_due_by: new Date(Date.now() + 5 * 864e5 + 36e5).toISOString() }),
+    dispute('d2', { session_id: 'cs_2', dispute_id: 'du_lost2', status: 'lost', amount_cents: 2000, reason: 'product_not_received',
+      closed_at: '2026-09-25T00:00:00Z', recovery_status: 'recovery_pending', recovery_candidate_cents: 3500 }),
+  ],
 } });
 
 await run('event report: Sources by UTM, promoter and ad platform, with CSV', async (page, log) => {
@@ -392,6 +404,21 @@ await run('event report: Money summary from the order money view', async (page, 
   assert(firstLines(csv).length >= 5, 'one row per order');
 }, { signedIn: true, mock: reportMock });
 
+await run('event report: Disputes block with status, amount, due date and Stripe link', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Disputes' }) });
+  await section.waitFor({ timeout: 8000 });
+  await section.getByText('Needs response').waitFor({ timeout: 8000 });
+  const text = (await section.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('$40.00') && text.includes('Fraudulent'), 'open dispute row: ' + text);
+  assert(/Due \w+ \d+ \(in 5 days\)/.test(text), 'evidence due date: ' + text);
+  assert(/\bLOST\b/i.test(text) && text.includes('Product not received') && text.includes('$35.00 may be taken from a later payout'), 'lost row + recovery: ' + text);
+  assert(/Open\s*1\s*\$40\.00 at stake/i.test(text), 'open summary: ' + text);
+  assert(await section.locator('a[href="https://dashboard.stripe.com/disputes/du_d1"]').count() === 1, 'Stripe link');
+  const read = log.find((l) => l.startsWith('GET exos_disputes'));
+  assert(read && read.includes('event_id=eq.' + EV) && read.includes('evidence_due_by'), 'disputes read: ' + read);
+}, { signedIn: true, mock: reportMock });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });
@@ -401,7 +428,10 @@ await run('payouts page lists payouts and their lines', async (page) => {
   await page.getByRole('button', { name: /\$120\.00/ }).click();
   await expectText(page, 'SH-991');
   await expectText(page, 'Stripe transfer tr_123');
-  const table = await page.locator('table').innerText();
+  const disputes = page.locator('section', { has: page.getByRole('heading', { name: 'Disputes' }) });
+  await disputes.getByText('Under review').waitFor({ timeout: 8000 });
+  assert((await disputes.innerText()).includes('Fall Party'), 'dispute row names the event');
+  const table = await page.locator('table').first().innerText();
   assert(table.includes('Fall Party') && table.includes('clawback') && table.includes('-$30.00'), 'lines: ' + table.replace(/\s+/g, ' '));
   const { text } = await download(page, () => page.getByRole('button', { name: /Export CSV/ }).click());
   assert(firstLines(text)[0].startsWith('payout_id,payout_status'), 'payouts CSV header');
@@ -418,6 +448,7 @@ await run('payouts page lists payouts and their lines', async (page) => {
     { id: 'pl_2', payout_id: 'po_1', org_id: ORG, order_id: '88888888-8888-4888-8888-888888888882', kind: 'clawback', amount: -30, created_at: '2026-09-25T12:00:01Z',
       order: { channel: 'seatgeek', external_order_id: 'SG-12', event_id: EV, event: { name: 'Fall Party' } } },
   ],
+  exos_disputes: [dispute('p1', { status: 'under_review', evidence_submitted: true, event: { name: 'Fall Party' } })],
 } }) });
 
 // Wallet buttons on My Tickets.
@@ -453,6 +484,127 @@ await run('wallet buttons show on an owned active ticket when the probe gets 403
   const probe = log.find((l) => l.startsWith('fn exos-wallet/pass'));
   assert(probe.includes('00000000-0000-0000-0000-000000000000') && !probe.includes(TICKET), 'the probe asks for the nil ticket: ' + probe);
 }, { signedIn: true, mock: walletMock(403) });
+
+// Receipts, invoices and credit notes (mig 20261001100000).
+const INV_ID = '99999999-9999-4999-8999-999999999991';
+const CN_ID = '99999999-9999-4999-8999-999999999992';
+const CN = { id: CN_ID, number: 'CN-000001', amount_cents: 3333, tax_cents: 303, currency: 'usd', reason: 'requested_by_customer', created_at: '2026-09-25T12:00:00Z' };
+const INVOICE_DOC = {
+  invoice: { id: INV_ID, number: 'INV-000001', issued_at: '2026-09-20T12:00:00Z', currency: 'usd',
+    subtotal_cents: 10000, tax_cents: 1000, total_cents: 11000, status: 'issued', session_id: 'cs_1' },
+  seller: { name: 'Brooklyn Nights', legal_name: 'BK Nights LLC', legal_address: '1 Main St\nBrooklyn, NY 11201',
+    tax_id: 'EIN 12-3456789', invoice_footer: 'Thanks for coming.' },
+  buyer: { name: null, email: 'fan@example.com' },
+  event: { id: EV, name: 'Fall Party', starts_at: EVENT_ROW.starts_at, timezone: 'America/New_York', venue_name: 'Elsewhere' },
+  order: { session_id: 'cs_1', paid_at: '2026-09-20T12:00:00Z', quantity: 2 },
+  lines: [
+    { kind: 'ticket', name: 'GA', quantity: 2, unit_cents: 5000, total_cents: 10000, tax_cents: 1000, tax_included: true, tax_name: 'Sales tax 10%', tax_rate: 10 },
+    { kind: 'addon', name: 'Poster', quantity: 1, unit_cents: 1000, total_cents: 1000, tax_cents: 0, tax_included: false, tax_name: null, tax_rate: null },
+  ],
+  credit_notes: [CN],
+  viewer: 'buyer',
+};
+const invoiceMock = ownerMock({ rpcs: {
+  exos_invoice_document: (b) => (b.p_invoice_id === INV_ID ? INVOICE_DOC : { __status: 403, __body: { code: '42501', message: 'exos_invoice_document: not found' } }),
+  exos_credit_note_document: (b) => (b.p_credit_note_id === CN_ID ? { ...INVOICE_DOC, credit_note: CN } : { __status: 403, __body: { code: '42501', message: 'not found' } }),
+} });
+
+await run('receipt page: seller, lines, tax per rate, credit notes, print', async (page, log) => {
+  await page.goto(BASE + '/invoice/' + INV_ID);
+  await page.getByRole('heading', { name: 'Receipt' }).waitFor({ timeout: 8000 });
+  const doc = page.locator('article');
+  const text = (await doc.innerText()).replace(/\s+/g, ' ');
+  for (const t of ['INV-000001', 'BK Nights LLC', 'trading as Brooklyn Nights', 'Brooklyn, NY 11201', 'Tax ID: EIN 12-3456789',
+    'fan@example.com', 'Fall Party', 'GA', 'Poster', 'Sales tax 10%', '$110.00', 'CN-000001', '−$33.33', '$76.67', 'Thanks for coming.']) {
+    assert(text.includes(t), 'receipt shows ' + t + ': ' + text);
+  }
+  assert(/Subtotal \(excl\. tax\)\s*\$100\.00/.test(text), 'subtotal excl. tax');
+  assert(await page.locator('nav').count() === 0, 'bare layout: no navbar');
+  assert(await page.getByRole('button', { name: /Print/ }).isVisible(), 'print button');
+  assert(await page.title() === 'receipt-INV-000001', 'print file name: ' + await page.title());
+  await page.emulateMedia({ media: 'print' });
+  assert(!(await page.getByRole('button', { name: /Print/ }).isVisible()), 'print hides the buttons');
+  await page.emulateMedia({ media: 'screen' });
+  assert(log.some((l) => l.startsWith('rpc exos_invoice_document') && l.includes(INV_ID)), 'reads the document RPC');
+  await doc.getByRole('link', { name: 'CN-000001' }).click();
+  await page.getByRole('heading', { name: 'Credit note' }).waitFor({ timeout: 8000 });
+  const cn = (await page.locator('article').innerText()).replace(/\s+/g, ' ');
+  assert(cn.includes('Refund on invoice INV-000001') && cn.includes('−$3.03') && cn.includes('requested by customer'), 'credit note: ' + cn);
+}, { signedIn: true, mock: invoiceMock });
+
+await run('receipt page: someone else\'s receipt says not found', async (page) => {
+  await page.goto(BASE + '/invoice/99999999-9999-4999-8999-999999999999');
+  await page.getByRole('heading', { name: 'Not found' }).waitFor({ timeout: 8000 });
+}, { signedIn: true, mock: invoiceMock });
+
+await run('my tickets: Receipt link per order', async (page) => {
+  await page.goto(BASE + '/my-tickets');
+  await expectText(page, 'Fall Party');
+  await page.getByRole('button', { name: 'RECEIPTS' }).click();
+  await expectText(page, 'INV-000001 · $110.00 · $33.33 refunded');
+  await page.getByRole('link', { name: 'RECEIPT', exact: true }).click();
+  await page.waitForURL(/\/invoice\//, { timeout: 8000 });
+  await page.getByRole('heading', { name: 'Receipt' }).waitFor({ timeout: 8000 });
+}, { signedIn: true, mock: ownerMock({
+  tables: {
+    exos_tickets: [{
+      id: TICKET, event_id: EV, org_id: ORG, tier_id: null, tier_name: 'GA', buyer_id: UID, owner_id: UID, status: 'active',
+      price_paid: 50, order_ref: 'cs_1', channel_source: 'direct', promoter_id: null, pending_transfer_id: null, transfer_id: null,
+      voided_at: null, voided_by: null, voided_reason: null, released_at: null, check_in_at: null, last_reissue_at: null,
+      created_at: '2026-09-20T12:00:00Z', updated_at: '2026-09-20T12:00:00Z', attendee_name: null, event: EVENT_ROW,
+    }],
+    exos_ticket_barcode_secrets: [], exos_transfers: [], exos_event_saves: [],
+  },
+  rpcs: {
+    exos_my_reschedule_offers: () => [],
+    exos_my_invoices: () => [{ id: INV_ID, number: 'INV-000001', session_id: 'cs_1', event_id: EV, total_cents: 11000,
+      currency: 'usd', issued_at: '2026-09-20T12:00:00Z', refunded_cents: 3333 }],
+    exos_invoice_document: () => INVOICE_DOC,
+  },
+  fns: { 'exos-wallet/pass': () => ({ status: 503, body: { error: 'wallet not configured' } }) },
+}) });
+
+await run('event report: Money lists receipts and the CSV has invoice numbers', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Money' }) });
+  await section.waitFor({ timeout: 8000 });
+  await section.getByText('Receipts (2)').click();
+  const link = section.getByRole('link', { name: 'INV-000001' });
+  assert((await link.getAttribute('href')).endsWith('/invoice/' + INV_ID), 'links to the receipt');
+  assert(log.some((l) => l.startsWith('GET exos_invoice_totals') && l.includes('refunded_cents')), 'reads exos_invoice_totals');
+  const { text } = await download(page, () => section.getByRole('button', { name: /Orders CSV/ }).click());
+  const lines = firstLines(text);
+  assert(lines[0].endsWith(',invoice_number'), 'CSV header: ' + lines[0]);
+  assert(lines.some((l) => l.startsWith('exos,cs_1,') && l.endsWith(',INV-000001')), 'cs_1 has its invoice number');
+  assert(lines.some((l) => l.startsWith('exos,cs_2,') && l.endsWith(',INV-000002')), 'cs_2 has its invoice number');
+}, { signedIn: true, mock: { ...reportMock, tables: { ...reportMock.tables, exos_invoice_totals: [
+  { id: INV_ID, org_id: ORG, event_id: EV, number: 'INV-000001', session_id: 'cs_1', total_cents: 4000, currency: 'usd',
+    issued_at: '2026-09-20T12:00:00Z', refunded_cents: 0 },
+  { id: '99999999-9999-4999-8999-999999999993', org_id: ORG, event_id: EV, number: 'INV-000002', session_id: 'cs_2',
+    total_cents: 2000, currency: 'usd', issued_at: '2026-09-20T12:00:00Z', refunded_cents: 0 },
+] } } });
+
+await run('org settings: Legal & invoices saves the seller details', async (page, log) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/settings');
+  const card = settingsCard(page, 'Legal & invoices');
+  await card.waitFor({ timeout: 8000 });
+  await waitFor(seen(log, 'GET exos_org_legal'), 'legal details read');
+  assert(await card.getByLabel('Tax ID (EIN, VAT or sales-tax number)').inputValue() === 'EIN 12-3456789', 'shows the saved tax id');
+  await card.getByLabel('Legal name').fill('BK Nights Holdings LLC');
+  await card.getByLabel('Receipt footer').fill('x'.repeat(501));
+  await expectText(page, 'At most 500 characters');
+  await card.getByRole('button', { name: 'Save legal details' }).click();
+  await expectText(page, 'Shorten the fields marked in red.');
+  assert(!log.some((l) => l.startsWith('POST exos_org_legal')), 'nothing saved while too long');
+  await card.getByLabel('Receipt footer').fill('Thanks!');
+  await card.getByRole('button', { name: 'Save legal details' }).click();
+  await expectText(page, 'Legal details saved.');
+  const post = log.find((l) => l.startsWith('POST exos_org_legal'));
+  assert(post && post.includes('on_conflict=org_id') && post.includes('"legal_name":"BK Nights Holdings LLC"')
+    && post.includes('"invoice_footer":"Thanks!"') && post.includes('"tax_id":"EIN 12-3456789"'), 'upsert: ' + post);
+}, { signedIn: true, mock: ownerMock({ tables: { exos_org_legal: [
+  { org_id: ORG, legal_name: 'BK Nights LLC', legal_address: '1 Main St', tax_id: 'EIN 12-3456789', invoice_footer: null, updated_at: '2026-09-30T12:00:00Z' },
+] } }) });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

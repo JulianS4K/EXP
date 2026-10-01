@@ -273,9 +273,18 @@ export const SETTLEMENT_CSV_HEADER = [
   'source', 'order_id', 'status', 'created_at', 'currency', 'tickets',
   'gross', 'tax', 'refunded', 'exos_fee', 'card_fee', 'card_fee_basis',
   'organizer_net', 'organizer_net_after_refunds', 'stripe_payment_intent', 'stripe_transfer',
+  'invoice_number',
 ];
 
-export function settlementCsvRows(orders: OrderMoneyRow[], marketplace: MarketplaceMoneyRow[] = []): (string | number | null)[][] {
+/**
+ * @param invoiceNumbers checkout session id → invoice number (mig
+ *   20261001100000); free orders and marketplace orders have none.
+ */
+export function settlementCsvRows(
+  orders: OrderMoneyRow[],
+  marketplace: MarketplaceMoneyRow[] = [],
+  invoiceNumbers: ReadonlyMap<string, string> = new Map(),
+): (string | number | null)[][] {
   const rows: (string | number | null)[][] = [];
   const paid = [...orders].filter(isPaid).sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
   for (const o of paid) {
@@ -298,6 +307,7 @@ export function settlementCsvRows(orders: OrderMoneyRow[], marketplace: Marketpl
       centsToDecimal(orderNetAfterRefunds(o)),
       o.payment_intent ?? '',
       o.transfer_id ?? '',
+      invoiceNumbers.get(o.session_id) ?? '',
     ]);
   }
   for (const m of marketplace) {
@@ -316,6 +326,7 @@ export function settlementCsvRows(orders: OrderMoneyRow[], marketplace: Marketpl
       'none',
       centsToDecimal(dollarsToCents(m.organizer_net)),
       isCancelledMarketplace(m) ? '0.00' : centsToDecimal(dollarsToCents(m.organizer_net)),
+      '',
       '',
       '',
     ]);

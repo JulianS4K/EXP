@@ -423,7 +423,13 @@ BEGIN
   ASSERT st='offered', 'buyer2 auto-offered, got '||st;
   ASSERT vcode IS NOT NULL, 'offer minted a voucher';
   SELECT status INTO inv_st FROM public.exos_invoices WHERE session_id='B-s1';
-  ASSERT inv_st='refunded', 'invoice refunded';
+  -- From mig 20261001100000 invoices are immutable (refunds get credit notes,
+  -- tests/exos/test_invoices_credit_notes.sql); before it, a refund flipped them.
+  IF to_regclass('public.exos_credit_notes') IS NOT NULL THEN
+    ASSERT inv_st='issued', 'invoice stays issued (credit notes), got '||inv_st;
+  ELSE
+    ASSERT inv_st='refunded', 'invoice refunded';
+  END IF;
   SELECT count(*) INTO refw FROM public.exos_webhook_deliveries WHERE org_id='bbbbbbbb-0000-0000-0000-000000000001' AND event_type='order.refunded';
   ASSERT refw=1, 'order.refunded webhook';
   RAISE NOTICE 'B step 4: refund → auto-offer + invoice flip + webhook OK';

@@ -30,6 +30,7 @@ import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
+import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
@@ -294,6 +295,8 @@ export default function OrganizerEventReport() {
         {/* Money: settlement summary + per-order CSV (owner / manager / finance;
             hidden before the money views exist). Read-only. */}
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
+        <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
