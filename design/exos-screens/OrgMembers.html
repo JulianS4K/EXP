@@ -56,11 +56,11 @@
 <script>
   const roleColor={Owner:'bg-slate-900 text-white',Manager:'bg-blue-50 text-tm-blue border border-blue-100',Finance:'bg-emerald-50 text-emerald-700 border border-emerald-100',Scanner:'bg-amber-50 text-amber-700 border border-amber-100',Content:'bg-violet-50 text-violet-700 border border-violet-100'};
   const members=[
-    { n:'Kaya Reyes', e:'kaya@knockdown.nyc', role:'Owner', s:'active', init:'K' },
-    { n:'Marcus Vale', e:'marcus@knockdown.nyc', role:'Manager', s:'active', init:'M' },
-    { n:'Priya Anand', e:'priya@knockdown.nyc', role:'Finance', s:'active', init:'P' },
-    { n:'Door Team', e:'door@knockdown.nyc', role:'Scanner', s:'active', init:'D' },
-    { n:'—', e:'social@knockdown.nyc', role:'Content', s:'pending', init:'?' },
+    { n:'Kaya Reyes', e:'kaya@venue.example', role:'Owner', s:'active', init:'K' },
+    { n:'Marcus Vale', e:'marcus@venue.example', role:'Manager', s:'active', init:'M' },
+    { n:'Priya Anand', e:'priya@venue.example', role:'Finance', s:'active', init:'P' },
+    { n:'Door Team', e:'door@venue.example', role:'Scanner', s:'active', init:'D' },
+    { n:'—', e:'social@venue.example', role:'Content', s:'pending', init:'?' },
   ];
   document.getElementById('mem').innerHTML = members.map(m=>`
     <tr class="hover:bg-slate-50/50">

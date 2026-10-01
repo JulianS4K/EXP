@@ -18,7 +18,7 @@
 //   * Ivy    — buyer #8, races Hana
 //   * Jules  — adversarial actor, multiple probes
 //   * Kit    — door staff, runs the scanner
-//   * Lo     — platform admin (s4kent.com)
+//   * Lo     — platform admin
 //
 // The venue:
 //   * Capacity 250 across two tiers — GA (200) + VIP (50)
