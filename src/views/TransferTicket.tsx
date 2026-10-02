@@ -8,6 +8,7 @@ import { queueEmail } from '../lib/mail';
 import { publicUrl } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
+import { eventIsOver } from '../lib/transferExpiry';
 
 export default function TransferTicket() {
   const { id } = useParams();
@@ -160,7 +161,7 @@ export default function TransferTicket() {
               </button>
             </div>
             <p className="type text-[12px] text-white/45 leading-relaxed">
-              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them.
+              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them. If nobody claims it before the event ends, the link expires and the ticket comes back to you.
             </p>
           </div>
 
@@ -236,9 +237,15 @@ export default function TransferTicket() {
                <p className="type text-[12px] text-white/45 leading-relaxed">Warning: Sending this ticket permanently removes it from your account. The recipient receives it instantly once you authorize. This cannot be undone.</p>
             </div>
 
+            {eventIsOver(event) && (
+              <p role="alert" className="type text-[12px] text-brand-accent leading-relaxed">
+                This event has ended, so its tickets can't be transferred.
+              </p>
+            )}
+
             <button
               type="submit"
-              disabled={sending}
+              disabled={sending || eventIsOver(event)}
               className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide hover:scale-[1.01] transition-transform disabled:opacity-20"
             >
               {sending ? 'SENDING…' : 'SEND TICKET'}

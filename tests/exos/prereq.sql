@@ -86,7 +86,8 @@ CREATE TABLE public.exos_tickets (
 CREATE TABLE public.exos_transfers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_id uuid NOT NULL, org_id uuid NOT NULL, sender_id uuid,
-  receiver_email text, status text NOT NULL DEFAULT 'pending',
+  receiver_email text, status text NOT NULL DEFAULT 'pending'
+    CONSTRAINT exos_transfers_status_check CHECK (status IN ('pending','completed','cancelled')),  -- prod (read 2026-10-02)
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()   -- prod shape; catches NULL writes via jsonb_populate_record
 );

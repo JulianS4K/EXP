@@ -168,7 +168,7 @@ BEGIN
     RAISE EXCEPTION 'A3 FAIL: resend not recorded';
   END IF;
   -- Once claimed, a ticket's link isn't resent.
-  UPDATE public.exos_transfers SET status = 'claimed' WHERE id = o.transfer_ids[1];
+  UPDATE public.exos_transfers SET status = 'completed' WHERE id = o.transfer_ids[1];
   UPDATE public.exos_marketplace_orders SET links_resent_at = now() - interval '1 hour' WHERE id = o.id;
   PERFORM pg_temp.as_user('5b000000-0000-0000-0000-0000000000a1', '5b-manager@x.com');
   IF public.exos_resend_marketplace_claim_links(o.id) <> 1 THEN RAISE EXCEPTION 'A3 FAIL: claimed link resent'; END IF;

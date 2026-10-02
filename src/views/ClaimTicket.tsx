@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTransfer, claimTransfer } from '../lib/tickets';
+import { transferExpired } from '../lib/transferExpiry';
 import { getPublicEvent } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { Event, Transfer } from '../types';
@@ -116,14 +117,17 @@ export default function ClaimTicket() {
     );
   }
 
-  if (!transfer || transfer.status !== 'pending') {
+  const expiredByEvent = transferExpired(transfer, event);
+  if (!transfer || transfer.status !== 'pending' || expiredByEvent) {
     return (
       <div className="wall min-h-screen">
         <div className="max-w-xl mx-auto px-4 py-24 text-center">
           <XCircle className="w-20 h-20 text-white/20 mx-auto mb-8" />
           <h1 className="disp text-5xl tracking-tight leading-none mb-4" style={{ transform: 'skewX(-4deg)' }}>{t('claim.expired')}</h1>
           <p className="type text-white/40 text-sm mb-10">
-            This transfer link has expired or the ticket was already claimed.
+            {expiredByEvent
+              ? 'This link expired when the event ended. Unclaimed tickets go back to whoever sent them.'
+              : 'This transfer link has expired or the ticket was already claimed.'}
           </p>
           <button
             onClick={() => navigate('/')}
