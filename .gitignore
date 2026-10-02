@@ -37,6 +37,20 @@ firebase-adminsdk-*.json
 *service-account*.json
 *credentials*.json
 
+# Keys and certificates (Apple Wallet signing cert, Google service keys,
+# TLS). Wallet certs are Supabase secrets, never files in the repo.
+*.pem
+*.p12
+*.p8
+*.pfx
+*.key
+*.keystore
+
+# Data exports (attendee lists, audience CSVs, payout reports) and DB dumps
+*.dump
+*.sql.gz
+exports/
+
 # Common backup files left by editors / OneDrive sync
 *.bak
 *.fixed

@@ -21,6 +21,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Secret scan (tracked files)
+        run: python3 scripts/check-secrets.py
+
       - name: Type check (tsc --noEmit)
         run: npm run lint
 

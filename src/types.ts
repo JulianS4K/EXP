@@ -476,7 +476,9 @@ export interface Transfer {
   ticketId: string;
   senderId: string;
   receiverEmail: string;
-  status: 'pending' | 'completed' | 'cancelled';
+  // 'expired': not claimed before the event ended; the ticket went back to the
+  // sender (mig 20261002101500).
+  status: 'pending' | 'completed' | 'cancelled' | 'expired';
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   // Denormalised event/tier metadata — written when the transfer is created

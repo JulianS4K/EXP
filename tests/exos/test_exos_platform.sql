@@ -13,7 +13,7 @@
 
 -- Common actors.
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
-  ('11111111-1111-1111-1111-111111111111','owner@s4kent.com',now()),
+  ('11111111-1111-1111-1111-111111111111','owner@exos.test',now()),
   ('22222222-2222-2222-2222-222222222222','buyer@x.com',now());
 
 -- ============================================================================
@@ -287,7 +287,7 @@ END $$;
 INSERT INTO public.exos_tickets(id,event_id,org_id,owner_id,buyer_id,status,barcode_secret) VALUES
   ('aaaaaaaa-0000-0000-0000-0000000000f4','aaaaaaaa-0000-0000-0000-0000000000e9','aaaaaaaa-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','22222222-2222-2222-2222-222222222222','active','secret-f4');
 SELECT set_config('app.uid','11111111-1111-1111-1111-111111111111',false);
-SELECT set_config('app.jwt','{"email":"owner@s4kent.com"}',false);
+SELECT set_config('app.jwt','{"email":"owner@exos.test"}',false);
 DO $$
 DECLARE r jsonb;
 BEGIN
@@ -810,14 +810,14 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUE
   ('ffffffff-0000-0000-0000-0000000000d1','ffffffff-0000-0000-0000-0000000000e1','VIP',100,3,0);
 
 SELECT set_config('app.uid','11111111-1111-1111-1111-111111111111',false);
-SELECT set_config('app.jwt','{"email":"owner@s4kent.com"}',false);
+SELECT set_config('app.jwt','{"email":"owner@exos.test"}',false);
 DO $$
 DECLARE r record; n int; v_tr uuid;
 BEGIN
   -- F1. Mixed list: account holder, stranger, junk, duplicate, self.
   CREATE TEMP TABLE f_out ON COMMIT DROP AS
   SELECT * FROM public.exos_issue_comp_batch('ffffffff-0000-0000-0000-0000000000e1','ffffffff-0000-0000-0000-0000000000d1',
-    ARRAY['Buyer@X.com','  new.person@x.com ','nope','buyer@x.com','owner@s4kent.com'], 1, 'press');
+    ARRAY['Buyer@X.com','  new.person@x.com ','nope','buyer@x.com','owner@exos.test'], 1, 'press');
   SELECT count(*) INTO n FROM f_out; ASSERT n = 4, 'dedupe → 4 result rows, got '||n;
   SELECT * INTO r FROM f_out WHERE email='buyer@x.com';
   ASSERT r.outcome = 'issued' AND array_length(r.ticket_ids,1) = 1, 'account holder issued';
@@ -834,11 +834,11 @@ BEGIN
   ASSERT (SELECT receiver_email='new.person@x.com' AND status='pending' AND sender_id='11111111-1111-1111-1111-111111111111' FROM public.exos_transfers WHERE id = v_tr), 'transfer row addressed to the stranger';
   ASSERT (SELECT count(*) FROM public.exos_mail WHERE template='transfer-initiated' AND to_email='new.person@x.com') = 1, 'transfer-initiated mail';
   ASSERT (SELECT outcome FROM f_out WHERE email='nope') = 'invalid', 'junk invalid';
-  ASSERT (SELECT outcome FROM f_out WHERE email='owner@s4kent.com') = 'invalid', 'self invalid';
+  ASSERT (SELECT outcome FROM f_out WHERE email='owner@exos.test') = 'invalid', 'self invalid';
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id='ffffffff-0000-0000-0000-0000000000d1') = 2, 'tier sold 2';
   ASSERT (SELECT tickets_sold FROM public.exos_events WHERE id='ffffffff-0000-0000-0000-0000000000e1') = 2, 'event sold 2';
   ASSERT public.exos_org_comp_usage('aaaaaaaa-0000-0000-0000-000000000001') >= 2, 'usage counts comps';
-  ASSERT (SELECT detail FROM f_out WHERE email='owner@s4kent.com') LIKE '%cannot comp yourself%', 'self gets its own reason';
+  ASSERT (SELECT detail FROM f_out WHERE email='owner@exos.test') LIKE '%cannot comp yourself%', 'self gets its own reason';
   ASSERT (SELECT updated_at IS NOT NULL FROM public.exos_transfers WHERE id = v_tr), 'transfer row carries updated_at (NOT NULL DEFAULT in prod)';
   RAISE NOTICE 'F1 mixed batch OK';
   DROP TABLE f_out;

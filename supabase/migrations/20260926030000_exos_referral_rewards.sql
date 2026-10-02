@@ -195,7 +195,7 @@ $$;
 REVOKE ALL ON FUNCTION public.exos_rr_counted_tickets(text, boolean) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.exos_rr_counted_tickets(text, boolean) TO service_role;
 
--- "julian@s4kent.com" -> "ju***@s***.com". Staff-facing leaderboards only.
+-- "jane@example.com" -> "ja***@e***.com". Staff-facing leaderboards only.
 CREATE OR REPLACE FUNCTION public.exos_rr_mask_email(p_email text)
 RETURNS text
 LANGUAGE sql IMMUTABLE

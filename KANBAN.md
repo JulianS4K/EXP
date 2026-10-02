@@ -60,6 +60,11 @@ How we build it (techniques):
   (voided, transferred after the download, wrong list, outside the list's hours, before doors, too old) is still
   recorded as a forced check-in with the reason, next to the scan-reject row; the ticket isn't changed; the door's
   sync-health panel and the scan report list them. The replay window is now the event's end + 48 h.
+- ✅ **Transfers and claim links expire when the event ends** (mig `20261002101500`, not applied; operator
+  decision 2026-10-02): no claim and no new transfer once the event is over (end time, else start + 12 h); an
+  hourly sweep marks unclaimed links `expired` and gives the ticket back to the sender; the claim page says so
+  before the sweep; the transfer screen won't send for an ended event. Works through a trigger, so every claim
+  path (keyed link, guest checkout, comps, marketplace) is covered.
 - ⬜ Lock transfers once doors open.
 - ✅ **Check-in lists / gates / re-entry** (pretix model, mig `20260929140000`, not applied): lists per gate or area
   with ticket types, an optional time window and **re-entry off unless turned on** (operator decision: "Keep reentry
