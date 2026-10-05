@@ -89,6 +89,8 @@ plain description box.*
   - only people holding a valid ticket see it, on their ticket in the app;
   - it moves with the ticket when it's transferred, and a refunded or voided ticket loses it;
   - it never goes in an email or on the event page.
+  - Switching the event to in person hides the link but keeps it, so switching back restores it.
+    To remove it, empty the field while the event is online.
   - **Show the link** holds it back until 1 day, 2 hours, 1 hour or 15 minutes before the start, or
     the start itself. You and your staff always see it, so you can test it.
 - **What to bring:** a short note ("Photo ID. Bags no bigger than 12 × 12 in.") on the event page,

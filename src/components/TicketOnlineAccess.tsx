@@ -31,14 +31,19 @@ export default function TicketOnlineAccess({
   }, [eventId, online]);
 
   // When the link is held back, fetch again once it's due (tab left open).
+  // The server decides with its own clock; a phone clock that runs fast would
+  // make `wait` negative, so a re-check never comes sooner than 30 s.
   useEffect(() => {
     if (access?.state !== 'later' || !access.availableAt) return undefined;
     const wait = access.availableAt - Date.now() + 2000;
     if (wait > 24 * 3600 * 1000) return undefined;
+    let alive = true;
     const t = setTimeout(() => {
-      getOnlineAccess(eventId).then(setAccess).catch(() => undefined);
-    }, Math.max(wait, 1000));
-    return () => clearTimeout(t);
+      getOnlineAccess(eventId)
+        .then((a) => { if (alive) setAccess(a); })
+        .catch(() => undefined);
+    }, Math.max(wait, 30_000));
+    return () => { alive = false; clearTimeout(t); };
   }, [access, eventId]);
 
   const bring = whatToBring?.trim();

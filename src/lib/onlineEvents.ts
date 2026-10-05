@@ -100,9 +100,13 @@ export function onlineToInput(d: OnlineDraft): { format: EventFormat; whatToBrin
   return { format: d.format, whatToBring: d.whatToBring.trim() || null, noindex: d.noindex };
 }
 
-/** What to send to exos_set_event_online. An in-person event clears the link. */
-export function joinLinkFor(d: OnlineDraft): { url: string; note: string | null; revealMinutes: number | null } {
-  if (!isOnline(d.format)) return { url: '', note: null, revealMinutes: null };
+/**
+ * What to send to exos_set_event_online, or null to leave the saved link
+ * alone: an in-person event keeps it (the access RPC hands nothing out for
+ * in-person events), so switching back to online restores it.
+ */
+export function joinLinkFor(d: OnlineDraft): { url: string; note: string | null; revealMinutes: number | null } | null {
+  if (!isOnline(d.format)) return null;
   const n = d.reveal === '' ? null : Number(d.reveal);
   return {
     url: d.joinUrl.trim(),

@@ -135,7 +135,7 @@ export default function OnlineEventEditor({
         <span>
           Hide from search engines
           <span className="block text-[11px] text-white/40">
-            Keeps the event out of Google, the sitemap and public feeds. Anyone with the link can still open it.
+            Keeps the event out of Google, the sitemap, the ad catalog and AI-assistant search. Anyone with the link can still open it.
           </span>
         </span>
       </label>

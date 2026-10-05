@@ -200,9 +200,11 @@ export default function EditEvent() {
         setOnline(onlineFromEvent(data));
         getEventJoinLinkForStaff(eventId)
           .then((link) => {
-            const d = onlineFromEvent(data, link);
-            setOnline(d);
-            setSavedLink(JSON.stringify(joinLinkFor(d)));
+            // Merge only the link fields: the organizer may already be editing
+            // the format, what to bring or noindex.
+            const loaded = onlineFromEvent({ format: 'online' }, link);
+            setOnline((prev) => ({ ...prev, joinUrl: loaded.joinUrl, joinNote: loaded.joinNote, reveal: loaded.reveal }));
+            setSavedLink(JSON.stringify(joinLinkFor(loaded)));
             setLinkLoaded(true);
           })
           .catch((err) => console.warn('join link unavailable:', err));
@@ -664,14 +666,6 @@ export default function EditEvent() {
         ...(storeSupported ? storeToInput(store) : {}),
         ...(onlineSupported ? onlineToInput(online) : {}),
       });
-      // 1b. Private join link (own RPC), only when it was read and changed.
-      if (onlineSupported && linkLoaded) {
-        const link = joinLinkFor(online);
-        if (JSON.stringify(link) !== savedLink) {
-          await setEventJoinLink(eventId, link);
-          setSavedLink(JSON.stringify(link));
-        }
-      }
 
       // 2. Tier diff: update existing, add new, delete removed. (Seam tier CRUD
       //    is aliased to avoid the local addTier/removeTier form helpers.)
@@ -702,6 +696,21 @@ export default function EditEvent() {
       }
       for (const removedId of removed) {
         await seamDeleteTier(removedId);
+      }
+
+      // 3. Private join link (own RPC), only when it was read and changed. Last,
+      //    and on its own: a failure here mustn't skip the tier changes above.
+      if (onlineSupported && linkLoaded) {
+        const link = joinLinkFor(online);
+        if (link && JSON.stringify(link) !== savedLink) {
+          try {
+            await setEventJoinLink(eventId, link);
+            setSavedLink(JSON.stringify(link));
+          } catch (linkErr) {
+            console.error('join link save failed:', linkErr);
+            toast({ kind: 'error', message: 'Changes saved, but the join link did not save. Check it and save again.' });
+          }
+        }
       }
 
       // Discount-code editing + ticket-holder change-notification emails land

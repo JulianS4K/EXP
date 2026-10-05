@@ -812,9 +812,10 @@ export default function CreateEvent() {
           toast({ kind: 'error', message: 'Event saved, but the table settings did not save. Open Edit event to set them again.' });
         }
         // Private join link (online / hybrid): saved through its own RPC.
-        if (onlineOk && joinLinkFor(formData.online).url) {
+        const link = onlineOk ? joinLinkFor(formData.online) : null;
+        if (link?.url) {
           try {
-            await setEventJoinLink(created.eventId, joinLinkFor(formData.online));
+            await setEventJoinLink(created.eventId, link);
           } catch (linkErr) {
             console.error('join link save failed:', linkErr);
             toast({ kind: 'error', message: 'Event saved, but the join link did not save. Open Edit event to add it again.' });

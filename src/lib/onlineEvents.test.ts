@@ -36,8 +36,9 @@ describe('onlineEvents', () => {
       joinNote: ' pw 1 ', reveal: '60' };
     expect(onlineToInput(d)).toEqual({ format: 'hybrid', whatToBring: 'ID', noindex: false });
     expect(joinLinkFor(d)).toEqual({ url: 'https://s.tv/x', note: 'pw 1', revealMinutes: 60 });
-    expect(joinLinkFor({ ...d, reveal: '' }).revealMinutes).toBeNull();
-    expect(joinLinkFor({ ...d, format: 'in_person' })).toEqual({ url: '', note: null, revealMinutes: null });
+    expect(joinLinkFor({ ...d, reveal: '' })!.revealMinutes).toBeNull();
+    // In person: leave the saved link alone (switching back restores it).
+    expect(joinLinkFor({ ...d, format: 'in_person' })).toBeNull();
     expect(onlineToInput({ ...d, whatToBring: '   ' }).whatToBring).toBeNull();
   });
 
