@@ -236,3 +236,46 @@ describe('isLinkCrawler', () => {
     expect(isLinkCrawler(null)).toBe(false);
   });
 });
+
+describe('online events + noindex (mig 20261005090000)', () => {
+  const base = 'https://x.example';
+  it('marks online and hybrid events in the JSON-LD with the public page as the virtual location', async () => {
+    const online = await buildPreview(fake({
+      exos_public_events: [{ id: EV, name: 'Stream', format: 'online', venue_name: 'Online' }],
+    }), ['event', EV], base);
+    expect(online).toContain('OnlineEventAttendanceMode');
+    expect(online).toContain(`"VirtualLocation","url":"${base}/bridge/event/${EV}"`);
+    expect(online).not.toContain('"Place"');
+    const hybrid = await buildPreview(fake({
+      exos_public_events: [{ id: EV, name: 'Both', format: 'hybrid', venue_name: 'Elsewhere' }],
+    }), ['event', EV], base);
+    expect(hybrid).toContain('MixedEventAttendanceMode');
+    expect(hybrid).toContain('"Place"');
+    expect(hybrid).toContain('VirtualLocation');
+  });
+
+  it('keeps noindex events out of previews and the sitemap', async () => {
+    const hidden = await buildPreview(fake({
+      exos_public_events: [{ id: EV, name: 'Private', noindex: true }],
+    }), ['event', EV], base);
+    expect(hidden).toContain('noindex, nofollow');
+    expect(hidden).not.toContain('application/ld+json');
+    const xml = await buildSitemap(fake({
+      exos_public_events: [{ id: 'e-shown', starts_at: null }, { id: 'e-hidden', starts_at: null, noindex: true }],
+    }), base);
+    expect(xml).toContain('e-shown');
+    expect(xml).not.toContain('e-hidden');
+  });
+
+  it('falls back to the old columns on a database without the migration', async () => {
+    const old: PublicReader = async (table, cols, filter, limit) => {
+      if (cols.includes('noindex')) throw new Error('column exos_public_events.noindex does not exist');
+      return fake({
+        exos_public_events: [{ id: EV, name: 'Old DB', starts_at: null }],
+      })(table, cols, filter, limit);
+    };
+    expect(await buildPreview(old, ['event', EV], base)).toContain('OfflineEventAttendanceMode');
+    expect(await buildSitemap(old, base)).toContain(`/bridge/event/${EV}`);
+  });
+});
+

@@ -68,6 +68,8 @@ export interface CatalogEventRow {
   summary?: string | null;
   description_md?: string | null;
   gallery?: Array<{ url?: unknown }> | null;
+  // "Hide from search engines" (mig 20261005090000); absent before it.
+  noindex?: boolean | null;
 }
 
 /** A row of exos_public_tiers. */
@@ -246,6 +248,7 @@ function description(e: CatalogEventRow, title: string, when: string): string {
 
 /** Why an event can't be a catalog item, or null. */
 export function catalogBlocker(e: CatalogEventRow, tiers: CatalogTierRow[], now: Date): string | null {
+  if (e.noindex === true) return 'hidden from search by the organizer';
   if (!e.starts_at || Number.isNaN(Date.parse(e.starts_at))) return 'no start time';
   if (eventEnd(e) < now.getTime()) return 'already over';
   if (!tiers.length) return 'no public ticket types';

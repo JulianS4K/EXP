@@ -11,6 +11,10 @@
 // the injected `PublicReader`, and any miss returns null so a crawler never
 // sees less than the static card.
 
+import {
+  attendanceModeUrl, parseAttendanceFormat, schemaLocation, type AttendanceFormat,
+} from '../../../supabase/functions/_shared/attendance.ts';
+
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
 
@@ -139,6 +143,8 @@ export interface EventSummary {
   fromCents: number | null;
   currency: string;
   orgName?: string;
+  // In person / online / hybrid (mig 20261005090000); in person when absent.
+  format: AttendanceFormat;
 }
 
 type Row = Record<string, unknown>;
@@ -165,6 +171,7 @@ export function eventSummary(event: Row | null | undefined, tiers: TierRow[], or
     fromCents: cents,
     currency,
     orgName: str(org?.name),
+    format: parseAttendanceFormat(event.format),
   };
 }
 
@@ -212,18 +219,20 @@ export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: s
     url: canonicalUrl,
     image: [image],
     eventStatus: 'https://schema.org/EventScheduled',
-    eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    eventAttendanceMode: attendanceModeUrl(s.format),
   };
   if (s.startsAt) ld.startDate = s.startsAt;
-  if (s.venue) {
-    const loc: Record<string, unknown> = { '@type': 'Place', name: s.venue };
+  let place: Record<string, unknown> | null = null;
+  if (s.venue && s.format !== 'online') {
+    place = { '@type': 'Place', name: s.venue };
     const addr: Record<string, string> = {};
     if (s.street) addr.streetAddress = s.street;
     if (s.city) addr.addressLocality = s.city;
     if (s.region) addr.addressRegion = s.region;
-    if (Object.keys(addr).length) loc.address = { ...addr, '@type': 'PostalAddress' };
-    ld.location = loc;
+    if (Object.keys(addr).length) place.address = { ...addr, '@type': 'PostalAddress' };
   }
+  const location = schemaLocation(s.format, place, canonicalUrl);
+  if (location) ld.location = location;
   if (s.orgName) ld.organizer = { '@type': 'Organization', name: s.orgName };
   if (s.fromCents !== null) {
     ld.offers = {
@@ -273,6 +282,19 @@ export type PublicReader = (
 
 const EVENT_COLS =
   'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url';
+// Added by mig 20261005090000; read with a fallback until prod has it.
+const ONLINE_COLS = ',format,noindex';
+
+/** Read with the online-event columns, or without them on a database that lacks them. */
+async function readWithFallback(
+  read: PublicReader, cols: string, extra: string, filter: { col: string; val: string } | null, limit: number,
+): Promise<Row[]> {
+  try {
+    return await read('exos_public_events', cols + extra, filter, limit);
+  } catch {
+    return read('exos_public_events', cols, filter, limit);
+  }
+}
 
 /** Resolve a preview target against the public views and return the tag block, or null. */
 export async function buildPreview(read: PublicReader, target: PreviewTarget, baseUrl: string): Promise<string | null> {
@@ -290,7 +312,7 @@ export async function buildPreview(read: PublicReader, target: PreviewTarget, ba
     kind = 'event';
     key = String(tiers[0].event_id);
   }
-  const events = await read('exos_public_events', EVENT_COLS, { col: kind === 'event_slug' ? 'slug' : 'id', val: key }, 1);
+  const events = await readWithFallback(read, EVENT_COLS, ONLINE_COLS, { col: kind === 'event_slug' ? 'slug' : 'id', val: key }, 1);
   if (!events.length) return null;
   const ev = events[0];
   const tiers = await read('exos_public_tiers', 'price,price_schedule,exclusive_tax_percent', { col: 'event_id', val: String(ev.id) }, 50);
@@ -298,8 +320,9 @@ export async function buildPreview(read: PublicReader, target: PreviewTarget, ba
   const s = eventSummary(ev, tiers as TierRow[], orgs[0] ?? null);
   if (!s) return null;
   // Checkout and promoter links preview the event but point search engines at
-  // the event page, and promoter kits stay out of the index.
-  return eventTags(s, `${baseUrl}/bridge/event/${ev.id}`, defaultImage, target[0] === 'promoter');
+  // the event page, and promoter kits stay out of the index, as do events the
+  // organizer hid from search (mig 20261005090000).
+  return eventTags(s, `${baseUrl}/bridge/event/${ev.id}`, defaultImage, target[0] === 'promoter' || ev.noindex === true);
 }
 
 /**
@@ -310,7 +333,8 @@ export async function buildSitemap(read: PublicReader, baseUrl: string, now: Dat
   const cutoff = now.getTime() - 86_400_000;
   const ts = (v: unknown) => (typeof v === 'string' && v ? parseInstant(v) : NaN);
   const urls: string[] = [];
-  for (const ev of await read('exos_public_events', 'id,starts_at,ends_at', null, 5000)) {
+  for (const ev of await readWithFallback(read, 'id,starts_at,ends_at', ',noindex', null, 5000)) {
+    if (ev.noindex === true) continue;
     const end = ts(ev.ends_at);
     const when = Number.isNaN(end) ? ts(ev.starts_at) : end;
     if (!Number.isNaN(when) && when < cutoff) continue;

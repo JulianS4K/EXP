@@ -80,6 +80,25 @@ shows on your event page:
 *This section appears once the store-page database update is live. Until then the form shows the
 plain description box.*
 
+**Attending** (the "Attending" section of create and edit):
+
+- **In person, online or hybrid.** An online event doesn't need a venue (it shows as "Online"),
+  gets no map, and the event page says ticket holders get the join link on their ticket.
+- **Join link** (online and hybrid): the stream, Zoom or Discord address, plus optional joining
+  instructions. It is private:
+  - only people holding a valid ticket see it, on their ticket in the app;
+  - it moves with the ticket when it's transferred, and a refunded or voided ticket loses it;
+  - it never goes in an email or on the event page.
+  - **Show the link** holds it back until 1 day, 2 hours, 1 hour or 15 minutes before the start, or
+    the start itself. You and your staff always see it, so you can test it.
+- **What to bring:** a short note ("Photo ID. Bags no bigger than 12 × 12 in.") on the event page,
+  the ticket and the reminder email.
+- **Hide from search engines:** keeps the event out of Google, the sitemap, the Google events feed,
+  the ad catalog and AI-assistant search. Anyone with the link can still open it and buy, so it
+  isn't a password. Use it for private parties and tests.
+
+*This section appears once its database update (`20261005090000`) is live.*
+
 **Recurring and timed-entry events** (`/dashboard/event/:eventId/series`): clone an event, with its
 tiers and discount codes, into a series of dates.
 

@@ -83,6 +83,11 @@ import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibilit
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import StoreContentEditor from '../components/StoreContentEditor';
 import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
+import OnlineEventEditor from '../components/OnlineEventEditor';
+import {
+  blankOnline, isOnline, joinLinkFor, needsVenue, onlineFromEvent, onlineToInput, validateOnline, type OnlineDraft,
+} from '../lib/onlineEvents';
+import { getEventJoinLinkForStaff, setEventJoinLink } from '../lib/onlineEventsApi';
 import Dialog from '../components/Dialog';
 import CheckinListsEditor from '../components/CheckinListsEditor';
 import RefundOfferFields from '../components/RefundOfferFields';
@@ -111,6 +116,14 @@ export default function EditEvent() {
   // sets it only when the row has the column). Its own draft state, seeded on load.
   const storeSupported = eventData.lineup !== undefined;
   const [store, setStore] = useState<StoreDraft>(blankStore());
+  // Online / hybrid (mig 20261005090000): keyed on `format`, which the mapper
+  // sets only when the row has the column. The private join link loads
+  // separately (staff RPC); `linkLoaded` guards against overwriting a link
+  // we couldn't read, and `savedLink` skips the RPC when nothing changed.
+  const onlineSupported = eventData.format !== undefined;
+  const [online, setOnline] = useState<OnlineDraft>(blankOnline());
+  const [linkLoaded, setLinkLoaded] = useState(false);
+  const [savedLink, setSavedLink] = useState('');
   // Snapshot of the original tier ids so we can compute additions/removals
   // and write the matching tierSales sub-collection updates atomically.
   const [originalTierIds, setOriginalTierIds] = useState<string[]>([]);
@@ -183,6 +196,17 @@ export default function EditEvent() {
       }
       setEventData(data);
       if (data.lineup !== undefined) setStore(storeFromEvent(data));
+      if (data.format !== undefined) {
+        setOnline(onlineFromEvent(data));
+        getEventJoinLinkForStaff(eventId)
+          .then((link) => {
+            const d = onlineFromEvent(data, link);
+            setOnline(d);
+            setSavedLink(JSON.stringify(joinLinkFor(d)));
+            setLinkLoaded(true);
+          })
+          .catch((err) => console.warn('join link unavailable:', err));
+      }
       setOriginalTierIds((data.ticketTiers || []).map((t) => t.id));
       setOriginalTiers((data.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalCodes(data.discountCodes || []);
@@ -259,6 +283,10 @@ export default function EditEvent() {
     if (storeSupported) {
       const storeErr = validateStore(store);
       if (storeErr) return storeErr;
+    }
+    if (onlineSupported) {
+      const onlineErr = validateOnline(online);
+      if (onlineErr) return onlineErr;
     }
     if ((eventData.performers || []).length > 10) {
       return 'Please list at most 10 performers.';
@@ -609,8 +637,9 @@ export default function EditEvent() {
         endsAt: tsToIso(ed.timing?.endTime),
         timezone: tz,
         currency: (ed.currency || 'USD').toUpperCase(),
-        venueName: ed.location,
-        venueLocation: ed.location,
+        // A fully online event with no venue shows "Online" wherever a venue goes.
+        venueName: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
+        venueLocation: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
         venueAddress: ed.address as any,
         primaryPerformerName: ed.performers?.[0],
         performerNames: ed.performers,
@@ -633,7 +662,16 @@ export default function EditEvent() {
         ...(ed.doorNameCheckin !== undefined ? { doorNameCheckin: ed.doorNameCheckin } : {}),
         // Store page; also derives the plain `description` from the markdown.
         ...(storeSupported ? storeToInput(store) : {}),
+        ...(onlineSupported ? onlineToInput(online) : {}),
       });
+      // 1b. Private join link (own RPC), only when it was read and changed.
+      if (onlineSupported && linkLoaded) {
+        const link = joinLinkFor(online);
+        if (JSON.stringify(link) !== savedLink) {
+          await setEventJoinLink(eventId, link);
+          setSavedLink(JSON.stringify(link));
+        }
+      }
 
       // 2. Tier diff: update existing, add new, delete removed. (Seam tier CRUD
       //    is aliased to avoid the local addTier/removeTier form helpers.)
@@ -674,7 +712,7 @@ export default function EditEvent() {
       setOriginalTiers((ed.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalTierIds((ed.ticketTiers || []).map((t) => t.id));
       // Re-pin the venue if its address changed (server skips unchanged, fresh pins).
-      void geocodeEvent(eventId);
+      if (!onlineSupported || needsVenue(online.format)) void geocodeEvent(eventId);
       toast({ kind: 'success', message: 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {
@@ -952,6 +990,19 @@ export default function EditEvent() {
               <p className="type text-xs text-white/50 mt-2">What buyers read on your event page. Saved with the rest of the form.</p>
             </div>
             <StoreContentEditor idPrefix="ee-store" uploaderUid={user?.uid} value={store} onChange={setStore} />
+          </section>
+        )}
+
+        {onlineSupported && (
+          <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+            <div>
+              <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Attending</h2>
+              <p className="type text-xs text-white/50 mt-2">
+                In person, online or both, and what people should bring.
+                {!linkLoaded && isOnline(online.format) && ' The join link is loading (or could not be read); reload to edit it.'}
+              </p>
+            </div>
+            <OnlineEventEditor idPrefix="ee-online" value={online} onChange={setOnline} linkLocked={!linkLoaded} />
           </section>
         )}
 

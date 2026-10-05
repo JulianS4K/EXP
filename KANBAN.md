@@ -115,7 +115,16 @@ How we build it (techniques):
 - ✅ Currency picker in Create Event (shared with Edit). `exclusivity` stays: EditEvent and the marketplace SQL still read it.
 - ⬜ Rebuild or retire Terminal-2's `static/bridge` copy (it still has the removed promo-code editor) and add a
   CI check that it matches EXP main; one shared structured-data builder so `exos_seo.py` can retire.
-- ⬜ Online / hybrid events; post-checkout "what to bring" message; per-event `noindex`.
+- ✅ **Online / hybrid events, what to bring, per-event `noindex`** (mig `20261005090000`, **not applied**):
+  `exos_events.format` (in person / online / hybrid), `what_to_bring`, `noindex`; the join link lives in
+  `exos_event_online` with no grants, set by owner / manager (`exos_set_event_online`) and handed only to
+  current holders (active / used) and staff by `exos_event_online_access`, optionally held back until N minutes
+  before the start; never emailed. "Attending" section in Create / Edit; event page badge, no map for online,
+  "What to bring" in Good to know; join panel on the ticket; the reminder mail adds what to bring and an online
+  hint. `noindex` drops the event from link-preview JSON-LD (robots noindex), the sitemap, the Google events
+  feed, the ad catalog and MCP search; JSON-LD says Online / Mixed attendance with a VirtualLocation (the event
+  page, never the join link). Online-only events stay out of the Google feed (it needs a venue). Follow-ups:
+  wallet passes (drop the geofence for online events), calendar public feeds honoring `noindex`.
 
 ### Next (money records: ERP-lite)
 1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate

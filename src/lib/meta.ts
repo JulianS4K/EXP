@@ -16,6 +16,10 @@
 //     index.html defaults are what they see.
 //   * Sitemap generation. That's in server.ts.
 
+import {
+  attendanceModeUrl, schemaLocation, type AttendanceFormat,
+} from '../../supabase/functions/_shared/attendance.ts';
+
 export interface MetaInput {
   title: string;
   description?: string;
@@ -54,6 +58,10 @@ export interface SchemaEvent {
   };
   image?: string;
   description?: string;
+  // In person (default) / online / hybrid (mig 20261005090000). Online
+  // events point their VirtualLocation at `pageUrl` (the public page).
+  format?: AttendanceFormat;
+  pageUrl?: string;
 }
 
 export function applyMeta(input: MetaInput): void {
@@ -93,7 +101,8 @@ export function applyMeta(input: MetaInput): void {
 
   // Schema.org Event JSON-LD.
   // Single <script type="application/ld+json" id="vibepass-jsonld">.
-  if (input.event) {
+  // Skipped on noindex pages: no point describing what search shouldn't list.
+  if (input.event && !input.noindex) {
     const ld = buildEventJsonLd(input.event);
     let script = document.getElementById('vibepass-jsonld') as HTMLScriptElement | null;
     if (!script) {
@@ -120,25 +129,27 @@ function setOrCreateMeta(attr: 'name' | 'property', value: string, content: stri
   el.setAttribute('content', content);
 }
 
-function buildEventJsonLd(ev: SchemaEvent) {
+export function buildEventJsonLd(ev: SchemaEvent) {
+  const format = ev.format ?? 'in_person';
+  const place = {
+    '@type': 'Place',
+    name: ev.location.name,
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: ev.location.streetAddress,
+      addressLocality: ev.location.city,
+      addressRegion: ev.location.region,
+      postalCode: ev.location.postal,
+      addressCountry: ev.location.country,
+    },
+  };
   const out: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'Event',
     name: ev.name,
     startDate: ev.startDate,
-    location: {
-      '@type': 'Place',
-      name: ev.location.name,
-      address: {
-        '@type': 'PostalAddress',
-        streetAddress: ev.location.streetAddress,
-        addressLocality: ev.location.city,
-        addressRegion: ev.location.region,
-        postalCode: ev.location.postal,
-        addressCountry: ev.location.country,
-      },
-    },
-    eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    location: format !== 'in_person' && ev.pageUrl ? schemaLocation(format, place, ev.pageUrl) : place,
+    eventAttendanceMode: attendanceModeUrl(ev.pageUrl ? format : 'in_person'),
     eventStatus: 'https://schema.org/EventScheduled',
   };
   if (ev.endDate) out.endDate = ev.endDate;

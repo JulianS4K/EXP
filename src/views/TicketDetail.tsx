@@ -24,6 +24,7 @@ import { mentionsFor, withMentions } from '../lib/socialTags';
 import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import ReferralProgress from '../components/ReferralProgress';
+import TicketOnlineAccess from '../components/TicketOnlineAccess';
 import { useT } from '../context/LanguageContext';
 
 export default function TicketDetail() {
@@ -478,6 +479,11 @@ export default function TicketDetail() {
 
                  {currentTicket.status === 'active' && !(currentTicket as any).pendingTransferId && (
                    <TicketAccessNeeds ticketId={currentTicket.id} />
+                 )}
+
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used')
+                   && !(currentTicket as any).pendingTransferId && (
+                   <TicketOnlineAccess eventId={event.id} format={event.format} whatToBring={event.whatToBring} />
                  )}
 
                  <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />

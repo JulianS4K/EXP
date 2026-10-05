@@ -2,6 +2,13 @@ import { useAccessColumns } from '../hooks/useAccessColumns';
 import { useStoreColumns } from '../hooks/useStoreColumns';
 import StoreContentEditor from '../components/StoreContentEditor';
 import { blankStore, coerceStoreDraft, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
+import {
+  blankOnline, coerceOnlineDraft, isOnline, joinLinkFor, needsVenue, onlineFromEvent, onlineToInput, validateOnline,
+  type OnlineDraft,
+} from '../lib/onlineEvents';
+import { setEventJoinLink } from '../lib/onlineEventsApi';
+import { useOnlineColumns } from '../hooks/useOnlineColumns';
+import OnlineEventEditor from '../components/OnlineEventEditor';
 import CurrencySelect from '../components/CurrencySelect';
 import { geocodeEvent } from '../lib/geo';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
@@ -84,6 +91,7 @@ function isSlugConflict(err: unknown): boolean {
 export default function CreateEvent() {
   const accessOk = useAccessColumns();
   const storeOk = useStoreColumns();
+  const onlineOk = useOnlineColumns();
   const { user } = useAuth();
   // Bridge multi-tenant: every new event must belong to the active org.
   // Falls back to legacy uid-only path if the user has no orgs yet so
@@ -144,7 +152,9 @@ export default function CreateEvent() {
     distributionNetworks: [] as string[],
     accessibility: {} as EventAccessibility,
     // Store page (mig 20260929120000); saved only once the columns exist.
-    store: blankStore() as StoreDraft
+    store: blankStore() as StoreDraft,
+    // Online / hybrid, what to bring, noindex (mig 20261005090000).
+    online: blankOnline() as OnlineDraft
   });
 
   // Tier draft shape carries the new fields as plain strings so empty
@@ -226,7 +236,8 @@ export default function CreateEvent() {
         Array.isArray(saved.ticketTiers)
       ) {
         if (window.confirm('You have an unsaved event draft. Restore it?')) {
-          setFormData((prev) => ({ ...prev, ...saved.formData, store: coerceStoreDraft(saved.formData.store) }));
+          setFormData((prev) => ({ ...prev, ...saved.formData, store: coerceStoreDraft(saved.formData.store),
+            online: coerceOnlineDraft(saved.formData.online) }));
           setTicketTiers(saved.ticketTiers);
           draftAppliedRef.current = true;  // only set when user confirmed
         } else {
@@ -297,6 +308,8 @@ export default function CreateEvent() {
           artistLinks: Array.isArray(src.artistLinks) ? src.artistLinks : [],
           accessibility: parseAccessibility(src.accessibility),
           store: storeFromEvent(ev),
+          // The private join link isn't copied; set it on the copy.
+          online: onlineFromEvent(ev),
           totalTickets: String(src.totalTickets ?? ''),
           price: String(src.price ?? ''),
           image: src.image || '',
@@ -501,6 +514,13 @@ export default function CreateEvent() {
       const storeErr = validateStore(formData.store);
       if (storeErr) return storeErr;
     }
+
+    if (onlineOk) {
+      const onlineErr = validateOnline(formData.online);
+      if (onlineErr) return onlineErr;
+    }
+    const venueRequired = !onlineOk || needsVenue(formData.online.format);
+    if (venueRequired && !formData.location.trim()) return 'Please enter a venue.';
 
     if (formData.location.length > LOCATION_MAX) {
       return `Location must be ${LOCATION_MAX} characters or fewer.`;
@@ -733,8 +753,9 @@ export default function CreateEvent() {
           endsAt: endUtc ? endUtc.toISOString() : null,
           timezone: tz,
           currency: formData.currency.toUpperCase(),
-          venueName: formData.location.trim(),
-          venueLocation: formData.location.trim(),
+          // A fully online event with no venue shows "Online" wherever a venue goes.
+          venueName: formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
+          venueLocation: formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
           venueAddress: addr,
           primaryPerformerName: formData.performers[0],
           performerNames: formData.performers.length > 0 ? formData.performers : undefined,
@@ -766,6 +787,7 @@ export default function CreateEvent() {
           ...(storeOk
             ? storeToInput({ ...formData.store, descriptionMd: formData.store.descriptionMd || formData.description })
             : {}),
+          ...(onlineOk ? onlineToInput(formData.online) : {}),
           tiers,
         });
         let created: { eventId: string };
@@ -789,8 +811,17 @@ export default function CreateEvent() {
           console.error('table tier setup failed:', tableErr);
           toast({ kind: 'error', message: 'Event saved, but the table settings did not save. Open Edit event to set them again.' });
         }
+        // Private join link (online / hybrid): saved through its own RPC.
+        if (onlineOk && joinLinkFor(formData.online).url) {
+          try {
+            await setEventJoinLink(created.eventId, joinLinkFor(formData.online));
+          } catch (linkErr) {
+            console.error('join link save failed:', linkErr);
+            toast({ kind: 'error', message: 'Event saved, but the join link did not save. Open Edit event to add it again.' });
+          }
+        }
         // Pin the venue for the map (server-side geocode; best-effort).
-        void geocodeEvent(created.eventId);
+        if (!onlineOk || needsVenue(formData.online.format)) void geocodeEvent(created.eventId);
       } catch (commitErr) {
         // exos_events.slug is UNIQUE — a collision surfaces as a unique violation.
         if (customSlug && isSlugConflict(commitErr)) {
@@ -1171,10 +1202,10 @@ export default function CreateEvent() {
               <div className="relative">
                 <MapPin className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4" aria-hidden="true" />
                 <input aria-label="Venue"
-                  required
+                  required={!onlineOk || needsVenue(formData.online.format)}
                   type="text"
                   maxLength={LOCATION_MAX}
-                  placeholder="e.g. Brooklyn Steel"
+                  placeholder={onlineOk && !needsVenue(formData.online.format) ? 'Optional for online events' : 'e.g. Brooklyn Steel'}
                   className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
@@ -1315,6 +1346,21 @@ export default function CreateEvent() {
               ? formData.store
               : { ...formData.store, descriptionMd: formData.description }}
             onChange={(next) => setFormData({ ...formData, store: next })}
+          />
+        </div>
+        )}
+
+        {/* How people attend (mig 20261005090000): hidden until the columns exist. */}
+        {onlineOk && (
+        <div className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">
+          <div>
+            <h3 className="disp text-lg uppercase tracking-wide text-white">Attending</h3>
+            <p className="type text-xs text-white/50 mt-1">In person, online or both, and what people should bring.</p>
+          </div>
+          <OnlineEventEditor
+            idPrefix="ce-online"
+            value={formData.online}
+            onChange={(next) => setFormData({ ...formData, online: next })}
           />
         </div>
         )}

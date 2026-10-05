@@ -345,6 +345,11 @@ export interface Event {
   minAge?: import('./lib/storeContent').MinAge | null;
   refundPolicy?: import('./lib/storeContent').RefundPolicy | null;
   policyNotes?: string;
+  // Online / hybrid events, what to bring, noindex (mig 20261005090000).
+  // Undefined until the columns exist. The join link is never on the event.
+  format?: import('./lib/onlineEvents').EventFormat;
+  whatToBring?: string;
+  noindex?: boolean;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

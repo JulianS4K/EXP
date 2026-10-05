@@ -39,6 +39,8 @@ const EVENT_COLS =
 // database the select fails on the missing columns, so the feed retries
 // without them rather than going dark.
 const STORE_COLS = ", summary, description_md, lineup, min_age";
+// Online / hybrid + noindex (mig 20261005090000), with the same fallback.
+const ONLINE_COLS = ", format, noindex";
 const TIER_COLS = "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule, exclusive_tax_percent";
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -81,8 +83,9 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   const readEvents = (cols: string) => sb.from("exos_events").select(cols)
     .in("status", ["published", "cancelled"]).gte("starts_at", since)
     .order("starts_at", { ascending: true }).limit(MAX_EVENTS);
-  let { data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS);
-  if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS)); // undefined_column
+  let { data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS + ONLINE_COLS);
+  if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS)); // undefined_column
+  if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS));
   if (error) throw new Error(`events: ${error.message}`);
   const events = (evs ?? []) as unknown as FeedEventRow[];
   const ids = events.map((e) => e.id);

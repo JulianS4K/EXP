@@ -38,6 +38,8 @@ export interface PublicEvent {
   image_url: string | null;
   total_tickets: number | null;
   tickets_sold: number | null;
+  /** in_person / online / hybrid (mig 20261005090000); absent before it. */
+  format?: string | null;
 }
 
 export interface PublicTier {
@@ -168,6 +170,7 @@ function eventSummary(e: PublicEvent, appBase: string) {
     timezone: e.timezone,
     venue: e.venue_name,
     city: city(e.venue_address),
+    attendance: e.format === 'online' || e.format === 'hybrid' ? e.format : 'in_person',
     performers: e.performer_names?.length ? e.performer_names : e.primary_performer_name ? [e.primary_performer_name] : [],
     genres: e.genres ?? [],
     currency: (e.currency || 'USD').toUpperCase(),
@@ -185,7 +188,8 @@ function eventText(e: PublicEvent, tiers: ReturnType<typeof tierView>[]): string
   const cur = (e.currency || 'USD').toUpperCase();
   const lines = [
     e.name,
-    [e.starts_at && `Starts ${e.starts_at}${e.timezone ? ` (${e.timezone})` : ''}`, e.venue_name, city(e.venue_address)].filter(Boolean).join(' · '),
+    [e.starts_at && `Starts ${e.starts_at}${e.timezone ? ` (${e.timezone})` : ''}`, e.venue_name, city(e.venue_address),
+      e.format === 'online' ? 'Online (join link on the ticket)' : e.format === 'hybrid' ? 'Also online' : null].filter(Boolean).join(' · '),
     eventDescription(e) ?? '',
     'Tickets (all-in):',
     ...tiers.map((t) => `- ${t.name}: ${t.free ? 'free' : `${t.price_all_in.toFixed(2)} ${cur}`} (${t.status.replace(/_/g, ' ')})`),

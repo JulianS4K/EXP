@@ -102,10 +102,11 @@ export function EventVideo({ url, title }: { url?: string; title: string }) {
 }
 
 export function EventGoodToKnow({
-  minAge, refundPolicy, policyNotes,
-}: { minAge?: MinAge | null; refundPolicy?: RefundPolicy | null; policyNotes?: string }) {
+  minAge, refundPolicy, policyNotes, whatToBring,
+}: { minAge?: MinAge | null; refundPolicy?: RefundPolicy | null; policyNotes?: string; whatToBring?: string }) {
   const refund = refundPolicy ? refundPolicyText(refundPolicy) : '';
-  if (minAge == null && !refund && !policyNotes) return null;
+  const bring = whatToBring?.trim();
+  if (minAge == null && !refund && !policyNotes && !bring) return null;
   return (
     <section aria-labelledby="good-to-know-heading" className="mb-14 border border-white/10 bg-[#111] p-6 md:p-8">
       <h2 id="good-to-know-heading" className="disp text-2xl tracking-wide text-white mb-4">Good to know</h2>
@@ -122,6 +123,11 @@ export function EventGoodToKnow({
           </li>
         )}
       </ul>
+      {bring && (
+        <p className="type text-sm text-white/80 leading-relaxed whitespace-pre-line mt-4">
+          <span className="text-white font-bold">What to bring: </span>{bring}
+        </p>
+      )}
       {policyNotes && <p className="type text-sm text-white/70 leading-relaxed whitespace-pre-line mt-4">{policyNotes}</p>}
     </section>
   );

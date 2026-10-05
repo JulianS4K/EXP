@@ -61,6 +61,9 @@ export interface FeedEventRow {
   description_md?: string | null;
   lineup?: Array<{ name?: unknown }> | null;
   min_age?: number | null;
+  // Online / hybrid + noindex (mig 20261005090000); likewise optional.
+  format?: string | null;
+  noindex?: boolean | null;
 }
 
 export interface FeedTierRow {
@@ -167,7 +170,7 @@ export interface SchemaEvent {
   endDate?: Iso;
   doorTime?: Iso;
   eventStatus: 'https://schema.org/EventScheduled' | 'https://schema.org/EventCancelled';
-  eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode';
+  eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode' | 'https://schema.org/MixedEventAttendanceMode';
   location: {
     '@type': 'Place';
     name: string;
@@ -293,6 +296,9 @@ function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: st
 /** Why an event can't go in the feed, or null. */
 export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date): string | null {
   if (e.status !== 'published' && e.status !== 'cancelled') return 'not published';
+  if (e.noindex === true) return 'hidden from search by the organizer';
+  // Google's ticketing feed lists events at a place; a stream has none.
+  if (e.format === 'online') return 'online-only event (the feed needs a venue)';
   if (!e.starts_at || Number.isNaN(Date.parse(e.starts_at))) return 'no start time';
   const end = e.ends_at && !Number.isNaN(Date.parse(e.ends_at)) ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 6 * 3600_000;
   if (end < now.getTime()) return 'already over';
@@ -340,7 +346,9 @@ export function feedItem(
     ...(endIso ? { endDate: endIso } : {}),
     ...(doors ? { doorTime: doors } : {}),
     eventStatus: cancelled ? 'https://schema.org/EventCancelled' : 'https://schema.org/EventScheduled',
-    eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    eventAttendanceMode: e.format === 'hybrid'
+      ? 'https://schema.org/MixedEventAttendanceMode'
+      : 'https://schema.org/OfflineEventAttendanceMode',
     location: {
       '@type': 'Place',
       name: text(e.venue_name).slice(0, 200),
