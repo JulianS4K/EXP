@@ -1,20 +1,48 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-09-29)
+## Prod state vs this repo (updated 2026-10-06)
 
-- **DB:** every Exos migration through `20260929080000_exos_rpc_hardening` is applied to prod (operator-approved;
-  `…074000` and earlier md5-verified, `080000` verified by its patch markers and grants on 2026-09-29).
-  `20260929120000_exos_event_store_content` applied 2026-09-29 (operator-approved; columns, checks, grants and the
-  `exos_public_events` append verified live).
-- **Edge functions:** 16 deployed and smoke-tested through pg_net on 2026-09-28 (checkout, webhook, refund, mail,
-  wallet, calendar, MCP, API, Google feed, payouts, POS, reconcile, webhook drain, geocode…). Held back:
-  `exos-distribute`, `exos-marketplace-sales`. `exos-checkout` redeployed 2026-09-29 (v2: guests can't try codes).
-- **Crons live:** reconcile checkouts (15 min), webhook drain (3 min), mail drain (2 min), wallet push (5 min),
-  mail follow-ups (hourly), geocode refresh and payouts (daily, dry-run).
+- **DB:** every Exos migration through `20260929150000_exos_reschedule_refunds` is applied to prod
+  (operator-approved; `130000`–`150000` applied 2026-09-29, checked against `schema_migrations` 2026-10-06).
+  **Not applied** (waiting on operator OK, in order):
+  `20260930100000_exos_marketing_conversions`, `20260930101000_exos_audience_export`,
+  `20260930102000_exos_oauth_google`, `20261001100000_exos_invoices_credit_notes`,
+  `20261001101000_exos_disputes_reconciliation`, and `20261005090000_exos_online_events` (EXP #28, open).
+  `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
+- **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
+  onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
+  deployed: `exos-distribute`, `exos-marketplace-sales`, `exos-conversions-drain`, `exos-oauth-google`,
+  `exos-catalog-feed`, `exos-reconcile-stripe`; `stripe-webhook`'s dispute handling (#26) and the MCP / Google-feed
+  `noindex` changes (#28) need a redeploy once their migrations are applied.
+- **Crons live:** expire holds, checkout reminders, event reminders, mail follow-ups, reconcile checkouts (15 min),
+  webhook drain (3 min), mail drain (2 min), wallet push (5 min), geocode refresh and payouts (daily, dry-run).
 - **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (roll the test key first),
   `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`, `EXOS_APP_BASE_URL`, `GOOGLE_MAPS_SERVER_KEY`.
 - **Hosting:** `exos-web` on Render serves `/bridge/` from main; Terminal-2 reverse-proxies to it when `EXOS_ORIGIN`
-  is set. Terminal-2's own `static/bridge` fallback copy is 66 commits behind (see the build plan below).
+  is set. Terminal-2's own `static/bridge` fallback is EXP `198ef91` (Terminal-2 #1016, 2026-09-29); EXP #25 and
+  #26 aren't in it yet.
+
+## Waiting on the operator (2026-10-06)
+
+1. OK to apply the six migrations above (then redeploy `stripe-webhook`, `exos-mcp`, `exos-google-feed`).
+2. Stripe test mode: keys + webhook (`docs/payments-go-live.md`).
+3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
+4. Supabase Auth redirect allowlist: add `/bridge/**`.
+5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base.
+6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
+7. Ship a new `/bridge` bundle to Terminal-2 (#25, #26, and #28 once merged).
+8. Review / merge EXP #28 (online and hybrid events).
+
+## Next to build (2026-10-06, pick order)
+
+1. **Door:** end-of-night door summary; roster delta RPC (instead of a full re-pull each minute); per-day door keys
+   (stop shipping raw per-ticket secrets to door phones).
+2. **Online events follow-ups:** wallet passes drop the geofence for online events; public calendar feeds honor
+   `noindex`.
+3. **Group buy v1:** host pays, friends get claim links plus a pay-back link.
+4. **Money:** minimal double-entry journal; sales-tax report; order rows for free claims and comps.
+5. **Reachable by crawlers and AI:** `llms.txt`, prerendered event pages, FAQ structured data.
+6. Rebuild-or-retire check for Terminal-2's `static/bridge` (CI check that it matches EXP main).
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 
@@ -51,17 +79,17 @@ How we build it (techniques):
   sign-out wipes the list and the key.
 - ⬜ Roster delta RPC (instead of a full re-pull each minute); per-day door keys (stop shipping raw per-ticket
   secrets).
-- ✅ **Name check-in** (mig `20260929130000`, not applied): door staff check anyone in by name, claimed or not
+- ✅ **Name check-in** (mig `20260929130000`, live): door staff check anyone in by name, claimed or not
   (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
   staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the
   roster shows unclaimed tickets' buyer name and masked email; works offline through the queue; the scan report
   counts by-name check-ins.
-- ✅ **Record offline admissions the server rejects** (mig `20260929140000`, not applied): a refused offline entry
+- ✅ **Record offline admissions the server rejects** (mig `20260929140000`, live): a refused offline entry
   (voided, transferred after the download, wrong list, outside the list's hours, before doors, too old) is still
   recorded as a forced check-in with the reason, next to the scan-reject row; the ticket isn't changed; the door's
   sync-health panel and the scan report list them. The replay window is now the event's end + 48 h.
 - ⬜ Lock transfers once doors open.
-- ✅ **Check-in lists / gates / re-entry** (pretix model, mig `20260929140000`, not applied): lists per gate or area
+- ✅ **Check-in lists / gates / re-entry** (pretix model, mig `20260929140000`, live): lists per gate or area
   with ticket types, an optional time window and **re-entry off unless turned on** (operator decision: "Keep reentry
   optional"); entry / exit scans on re-entry lists (`already-inside`), the first entry still marks the ticket used;
   a list picker and Entry / Exit switch on the scanner, decided offline too; the editor in Edit event. Old clients
@@ -127,7 +155,7 @@ How we build it (techniques):
   wallet passes (drop the geofence for online events), calendar public feeds honoring `noindex`.
 
 ### Next (money records: ERP-lite)
-1. ✅ Fee split stored per order (mig `20260929131000`, not applied): application fee, Exos fee, card-fee estimate
+1. ✅ Fee split stored per order (mig `20260929131000`, live): application fee, Exos fee, card-fee estimate
    at checkout; Stripe's actual fee, net, transfer and balance-transaction ids after fulfilment (best-effort,
    backfilled by reconcile); `exos_order_money` view for owner / manager / finance.
 2. ✅ Settlement report per event (gross, tax, refunds, fees, marketplace proceeds, commissions, net): "Money" on
@@ -158,7 +186,7 @@ How we build it (techniques):
    statuses, CSV per line; owner / manager / finance). Journal CSV and QuickBooks / Xero not built.
 9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps. (Free orders no longer get a $0
    invoice, mig `20261001100000`; free claims and comps still have no order row.)
-10. ✅ Refunds when the date changes (mig 20260929150000, not applied): a move to another day or by more than
+10. ✅ Refunds when the date changes (mig 20260929150000, live): a move to another day or by more than
     3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
     start − 24 h). Holders get an `event-rescheduled` mail with a per-ticket refund / release link; buyers refund
     themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
