@@ -102,8 +102,8 @@ How we build it (techniques):
   reported a Purchase) and carries the Stripe session id as the dedupe id (Meta eventID, TikTok event_id, GA4
   transaction_id). Link-in-bio pages allow pixels too.
 - ✅ Every click id captured at checkout (gclid/gbraid/wbraid, ttclid, rdt_cid, ScCid, twclid, msclkid, fbclid,
-  _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`, not
-  applied); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
+  _fbp/_fbc and GA client id when consented), consent state, hashed IP and user agent (mig `20260929131000`,
+  live); InitiateCheckout fires before Stripe; GA4 `items` on Purchase.
 - ✅ **Server-side conversions** (mig `20260930100000`, not applied; `exos-conversions-drain` not deployed or
   scheduled; dry-run until `EXOS_CONVERSIONS_LIVE=true`): `exos_org_ad_credentials` (tokens in Vault, never in public
   `marketing`; Settings → Ads & conversions, owner / manager), `exos_marketing_conversions` outbox written by triggers
