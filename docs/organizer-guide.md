@@ -291,6 +291,23 @@ Add lists in **Edit event → Venue & seating → Check-in lists** when the door
   can't do that (some private windows, very old browsers) keep it unencrypted and the scanner says
   so. Signing out deletes the list and the key.
 - The **scan report** lists offline conflicts separately, with the reason, the list and the device.
+- While online, the door refreshes its list every minute with only what changed since the last
+  refresh, and downloads the whole list every 10 minutes (or when you tap **Download for offline**).
+
+### End-of-night door summary
+
+The event report's **Overview** has an **End-of-night door summary** (owners and managers also get a
+**Door summary** button on the scanner). It shows:
+- checked in out of sold, the show-up rate and no-shows;
+- first and last entry, the busiest 15 minutes, and entries per hour in the event's time zone;
+- the breakdown by ticket type, list, staff member and how people got in (QR code, by name, manual);
+- what needs a look: manual overrides and their reasons, offline admissions refused on upload, and
+  scans refused at the door by reason;
+- on events with a re-entry list, how many people are inside now.
+
+**Copy** puts it on the clipboard as plain text, for a message to the team or the venue. **CSV**
+downloads the same numbers. It has no buyer names or emails. Owners, managers, finance and the event's
+door staff can see it.
 
 ## 6. After a sale
 

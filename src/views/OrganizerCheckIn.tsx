@@ -5,6 +5,8 @@ import { getPublicEvent } from '../lib/events';
 import {
   getTicketForScan,
   listEventTicketsForRegistry,
+  listEventTicketsChangedSince,
+  fetchServerTimeMs,
   checkInTicket,
   checkInOffline,
   checkInByName,
@@ -62,7 +64,7 @@ import {
   type ScanDecision,
   type ScanDecisionInput,
 } from '../lib/door/decide';
-import { DOOR_REQUEST_TIMEOUT_MS, isServerAnswer, withDeadline } from '../lib/door/net';
+import { DOOR_REQUEST_TIMEOUT_MS, isMissingRpc, isServerAnswer, withDeadline } from '../lib/door/net';
 import { doorCipherShared, doorKV, safeLocalStorage } from '../lib/door/kv';
 import {
   NO_LIST,
@@ -82,6 +84,10 @@ import {
   addMark,
   applyMarks,
   buildRoster,
+  listsSignature,
+  mergeRosterDelta,
+  planRosterRefresh,
+  type RosterSync,
   doorGate,
   loadDoorEvent,
   loadMarks,
@@ -241,6 +247,13 @@ export default function OrganizerCheckIn() {
   const [rosterSavedAt, setRosterSavedAt] = useState<number | null>(null);
   const rosterSavedAtRef = useRef<number | null>(null);
   const marksRef = useRef<RosterMarks>({});
+  // Incremental roster refresh (mig 20261008090000): the last server copy and
+  // its cursor. false once the delta RPC turns out to be missing here.
+  const rosterSyncRef = useRef<RosterSync | null>(null);
+  const deltaOkRef = useRef(true);
+  useEffect(() => {
+    rosterSyncRef.current = null;
+  }, [eventId]);
   const [downloading, setDownloading] = useState(false);
   const downloadingRef = useRef(false);
   const [syncing, setSyncing] = useState(false);
@@ -683,10 +696,42 @@ export default function OrganizerCheckIn() {
     if (!silent) setDownloading(true);
     const startedAt = Date.now();
     try {
-      // listEventTicketsForRegistry resolves owner display names + carries the
-      // per-ticket barcode_secret (staff RLS) so the offline HMAC check works.
-      const entries = await listEventTicketsForRegistry(eventId);
-      const roster = buildRoster(entries);
+      // The cursor for the next refresh: the server's clock, read before the
+      // pull starts. Unreadable = full pulls only.
+      let cursor: number | null = null;
+      try {
+        cursor = await withDeadline(() => fetchServerTimeMs(), DOOR_REQUEST_TIMEOUT_MS);
+      } catch {
+        cursor = null;
+      }
+      const lists = listsSignature(event?.checkinLists);
+      const prev = rosterSyncRef.current;
+      const plan = planRosterRefresh(prev, {
+        now: startedAt,
+        deltaSupported: deltaOkRef.current && cursor !== null,
+        lists,
+        // A tap on "download" always gets the whole list.
+        force: !silent,
+      });
+      let roster: Record<string, OfflineTicketEntry> | null = null;
+      if (plan.kind === 'delta' && prev) {
+        try {
+          // Only the tickets that changed since the last pull.
+          roster = mergeRosterDelta(prev.base, await listEventTicketsChangedSince(eventId, plan.since));
+        } catch (err) {
+          if (!isMissingRpc(err)) throw err;
+          deltaOkRef.current = false;
+        }
+      }
+      const full = roster === null;
+      if (!roster) {
+        // listEventTicketsForRegistry resolves owner display names + carries the
+        // per-ticket barcode_secret (staff RLS) so the offline HMAC check works.
+        roster = buildRoster(await listEventTicketsForRegistry(eventId));
+      }
+      const count = Object.keys(roster).length;
+      rosterSyncRef.current =
+        cursor === null ? null : { base: roster, cursor, fullAt: full ? startedAt : (prev?.fullAt ?? startedAt), lists };
       // What this device changed while the download ran stays on top of it.
       marksRef.current = marksSince(marksRef.current, startedAt);
       saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
@@ -719,7 +764,7 @@ export default function OrganizerCheckIn() {
       if (!silent) {
         toast({
           kind: 'success',
-          message: `Synced ${entries.length} ticket(s) for offline check-in.`,
+          message: `Synced ${count} ticket(s) for offline check-in.`,
         });
       }
       return merged;
@@ -1517,6 +1562,15 @@ export default function OrganizerCheckIn() {
               <Download className="w-3 h-3" aria-hidden="true" />
               <span>Export CSV</span>
            </button>
+           {canOverride && eventId && (
+             <button
+               type="button"
+               onClick={() => navigate(`/dashboard/event/${eventId}`)}
+               className="flex items-center space-x-2 px-3 py-2 bg-white text-slate-900 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
+             >
+                <span>Door summary</span>
+             </button>
+           )}
         </div>
       </div>
 

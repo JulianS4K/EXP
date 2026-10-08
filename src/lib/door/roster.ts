@@ -24,8 +24,17 @@ import type { DoorCheckinList, ListState } from './lists';
 export const ROSTER_PAGE_SIZE = 1000;
 /** Safety stop: 1000 pages of 1000 = a million tickets. */
 const MAX_PAGES = 1000;
-/** While the page is open and online, the roster is re-pulled this often. */
+/** While the page is open and online, the roster is refreshed this often:
+ *  only what changed (exos_event_checkin_roster_since, mig 20261008090000),
+ *  with a full pull every ROSTER_FULL_EVERY_MS as a backstop. */
 export const ROSTER_REFRESH_MS = 60_000;
+export const ROSTER_FULL_EVERY_MS = 10 * 60_000;
+/** A delta asks from this long before the last cursor: a write committed
+ *  after the cursor by a transaction that started before it carries the
+ *  earlier time. */
+export const ROSTER_DELTA_OVERLAP_MS = 2 * 60_000;
+/** The server refuses older cursors (7 days); stay well inside. */
+const ROSTER_DELTA_MAX_AGE_MS = 24 * 60 * 60_000;
 
 export const rosterKey = (eventId: string) => `registry_${eventId}`;
 export const marksKey = (eventId: string) => `registry_marks_${eventId}`;
@@ -114,6 +123,50 @@ export function buildRoster(rows: RosterRow[]): DoorRoster {
     };
   }
   return out;
+}
+
+/** Where incremental refreshes stand for one event, kept in memory only. */
+export interface RosterSync {
+  /** The server roster as last pulled (no local marks or queued scans). */
+  base: DoorRoster;
+  /** Server time (ms) read just before the last pull started. */
+  cursor: number;
+  /** Device time of the last full pull. */
+  fullAt: number;
+  /** Lists signature at the last full pull (see listsSignature). */
+  lists: string;
+}
+
+/** The parts of the check-in lists the roster depends on: which lists
+ *  allow re-entry. A change there (or a list removed) needs a full pull. */
+export function listsSignature(lists: DoorCheckinList[] | null | undefined): string {
+  if (!lists) return '';
+  return lists
+    .map((l) => `${l.id}:${l.allowReentry ? 1 : 0}`)
+    .sort()
+    .join(',');
+}
+
+export type RosterPlan = { kind: 'full' } | { kind: 'delta'; since: number };
+
+/** Full or incremental? Full when there is nothing to build on, the delta RPC
+ *  is missing, the last full pull is old, the cursor is too old, or the
+ *  re-entry lists changed. Pure. */
+export function planRosterRefresh(
+  sync: RosterSync | null,
+  opts: { now: number; deltaSupported: boolean; lists: string; force?: boolean },
+): RosterPlan {
+  if (opts.force || !opts.deltaSupported || !sync) return { kind: 'full' };
+  if (opts.now - sync.fullAt >= ROSTER_FULL_EVERY_MS) return { kind: 'full' };
+  if (opts.now - sync.cursor >= ROSTER_DELTA_MAX_AGE_MS) return { kind: 'full' };
+  if (sync.lists !== opts.lists) return { kind: 'full' };
+  return { kind: 'delta', since: sync.cursor - ROSTER_DELTA_OVERLAP_MS };
+}
+
+/** The base roster with the changed rows replaced or added. */
+export function mergeRosterDelta(base: DoorRoster, changed: RosterRow[]): DoorRoster {
+  if (changed.length === 0) return base;
+  return { ...base, ...buildRoster(changed) };
 }
 
 export interface StoredRoster {

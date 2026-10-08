@@ -302,6 +302,52 @@ export interface RegistryEntry {
   listState?: ListState;
 }
 
+function mapRegistryRow(r: any): RegistryEntry {
+  return {
+    id: r.ticket_id,
+    status: r.status,
+    ownerId: r.owner_id ?? '',
+    name: r.owner_name || 'Anonymous',
+    tier: r.tier_name || 'Standard',
+    barcodeSecret: r.barcode_secret || '',
+    promoterId: r.promoter_id || '',
+    pendingTransferId: r.pending_transfer_id ?? null,
+    parked: r.parked === true,
+    claimName: r.claim_name ?? null,
+    claimEmailMasked: r.claim_email_masked ?? null,
+    tierId: r.tier_id ?? null,
+    listState: parseListState(r.list_state),
+  };
+}
+
+/** Tickets of the event that changed at or after `sinceMs` (server clock),
+ *  same rows as listEventTicketsForRegistry (exos_event_checkin_roster_since,
+ *  mig 20261008090000). Paged the same way. */
+export async function listEventTicketsChangedSince(eventId: string, sinceMs: number): Promise<RegistryEntry[]> {
+  const since = new Date(sinceMs).toISOString();
+  const rows = await fetchAllPages<any>(
+    async (from, to) => {
+      const { data, error } = await supabase
+        .rpc('exos_event_checkin_roster_since', { p_event_id: eventId, p_since: since })
+        .order('ticket_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return data ?? [];
+    },
+    (r) => String(r.ticket_id),
+  );
+  return rows.map(mapRegistryRow);
+}
+
+/** The database clock (exos_server_time), ms. */
+export async function fetchServerTimeMs(): Promise<number> {
+  const { data, error } = await supabase.rpc('exos_server_time');
+  if (error) throw error;
+  const t = Date.parse(String(data));
+  if (!Number.isFinite(t)) throw new Error('exos_server_time: unreadable answer');
+  return t;
+}
+
 /** Every ticket for an event, for the offline check-in registry (staff RLS).
  *  One SECURITY DEFINER call (exos_event_checkin_roster, migration
  *  20260702240000) that authorizes the whole roster with a single org-role
@@ -325,21 +371,7 @@ export async function listEventTicketsForRegistry(eventId: string): Promise<Regi
     },
     (r) => String(r.ticket_id),
   );
-  return rows.map((r: any) => ({
-    id: r.ticket_id,
-    status: r.status,
-    ownerId: r.owner_id ?? '',
-    name: r.owner_name || 'Anonymous',
-    tier: r.tier_name || 'Standard',
-    barcodeSecret: r.barcode_secret || '',
-    promoterId: r.promoter_id || '',
-    pendingTransferId: r.pending_transfer_id ?? null,
-    parked: r.parked === true,
-    claimName: r.claim_name ?? null,
-    claimEmailMasked: r.claim_email_masked ?? null,
-    tierId: r.tier_id ?? null,
-    listState: parseListState(r.list_state),
-  }));
+  return rows.map(mapRegistryRow);
 }
 
 /** All tickets for an event (event report). Staff RLS; buyer emails only for

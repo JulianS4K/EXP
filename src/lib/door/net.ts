@@ -41,3 +41,11 @@ export function isServerAnswer(err: unknown): boolean {
   if (typeof code !== 'string') return false;
   return /^[0-9A-Z]{5}$/.test(code) || /^PGRST\d+$/.test(code);
 }
+
+/** The RPC isn't on this database yet (PostgREST schema cache miss, or
+ *  Postgres "function does not exist"): use the older call. */
+export function isMissingRpc(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  return code === 'PGRST202' || code === '42883';
+}

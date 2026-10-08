@@ -1,13 +1,14 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-10-06)
+## Prod state vs this repo (updated 2026-10-08)
 
 - **DB:** every Exos migration through `20260929150000_exos_reschedule_refunds` is applied to prod
   (operator-approved; `130000`–`150000` applied 2026-09-29, checked against `schema_migrations` 2026-10-06).
   **Not applied** (waiting on operator OK, in order):
   `20260930100000_exos_marketing_conversions`, `20260930101000_exos_audience_export`,
   `20260930102000_exos_oauth_google`, `20261001100000_exos_invoices_credit_notes`,
-  `20261001101000_exos_disputes_reconciliation`, and `20261005090000_exos_online_events` (EXP #28, open).
+  `20261001101000_exos_disputes_reconciliation`, `20261005090000_exos_online_events` (EXP #28, merged) and
+  `20261008090000_exos_door_delta_summary` (roster delta + door summary).
   `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
 - **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
   onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
@@ -16,29 +17,30 @@
   `noindex` changes (#28) need a redeploy once their migrations are applied.
 - **Crons live:** expire holds, checkout reminders, event reminders, mail follow-ups, reconcile checkouts (15 min),
   webhook drain (3 min), mail drain (2 min), wallet push (5 min), geocode refresh and payouts (daily, dry-run).
-- **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (roll the test key first),
-  `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`, `EXOS_APP_BASE_URL`, `GOOGLE_MAPS_SERVER_KEY`.
+- **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (test key set 2026-10-08),
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET`, `EXOS_REDIRECT_ORIGINS`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`, `EXOS_APP_BASE_URL`, `GOOGLE_MAPS_SERVER_KEY`.
 - **Hosting:** `exos-web` on Render serves `/bridge/` from main; Terminal-2 reverse-proxies to it when `EXOS_ORIGIN`
   is set. Terminal-2's own `static/bridge` fallback is EXP `198ef91` (Terminal-2 #1016, 2026-09-29); EXP #25 and
   #26 aren't in it yet.
 
-## Waiting on the operator (2026-10-06)
+## Waiting on the operator (2026-10-08)
 
-1. OK to apply the six migrations above (then redeploy `stripe-webhook`, `exos-mcp`, `exos-google-feed`).
-2. Stripe test mode: keys + webhook (`docs/payments-go-live.md`).
+1. OK to apply the seven migrations above (then redeploy `stripe-webhook`, `exos-mcp`, `exos-google-feed`).
+2. Stripe test mode (`docs/payments-go-live.md`): the test secret key is in; still to do: the two webhook
+   endpoints and their `whsec_…` secrets, `EXOS_REDIRECT_ORIGINS`, and `VITE_STRIPE_PUBLISHABLE_KEY` (`pk_test_…`)
+   on the `exos-web` build.
 3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
 4. Supabase Auth redirect allowlist: add `/bridge/**`.
 5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
 7. Ship a new `/bridge` bundle to Terminal-2 (#25, #26, and #28 once merged).
-8. Review / merge EXP #28 (online and hybrid events + AI discovery, which stays off until launch).
-9. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, redeploy `exos-checkout`, decide the training-crawler
+8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, redeploy `exos-checkout`, decide the training-crawler
    policy (allow all today).
 
 ## Next to build (2026-10-06, pick order)
 
-1. **Door:** end-of-night door summary; roster delta RPC (instead of a full re-pull each minute); per-day door keys
-   (stop shipping raw per-ticket secrets to door phones).
+1. **Door:** ✅ end-of-night door summary and roster delta RPC (built 2026-10-08, mig `20261008090000`, not
+   applied); still open: per-day door keys (stop shipping raw per-ticket secrets to door phones).
 2. **Online events follow-ups:** wallet passes drop the geofence for online events; public calendar feeds honor
    `noindex`.
 3. **Group buy v1:** host pays, friends get claim links plus a pay-back link.
@@ -83,8 +85,11 @@ How we build it (techniques):
 - ✅ **Encrypted saved roster** (`src/lib/door/kv.ts`): AES-GCM under a non-extractable per-device WebCrypto key kept
   in IndexedDB; plain-text rosters are sealed on first load; plain text with a warning where the browser can't;
   sign-out wipes the list and the key.
-- ⬜ Roster delta RPC (instead of a full re-pull each minute); per-day door keys (stop shipping raw per-ticket
-  secrets).
+- ✅ **Roster delta** (mig `20261008090000`, not applied): `exos_event_checkin_roster_since` returns only the tickets
+  that changed (ticket row, pending transfer, holder name, or a scan) since a server-clock cursor; the door asks for
+  that each minute with a 2-minute overlap and does a full pull every 10 minutes, on a tap of "Download", or when
+  a list's re-entry switch changes. Falls back to full pulls on a database without it.
+- ⬜ Per-day door keys (stop shipping raw per-ticket secrets).
 - ✅ **Name check-in** (mig `20260929130000`, live): door staff check anyone in by name, claimed or not
   (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
   staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the
@@ -100,8 +105,13 @@ How we build it (techniques):
   optional"); entry / exit scans on re-entry lists (`already-inside`), the first entry still marks the ticket used;
   a list picker and Entry / Exit switch on the scanner, decided offline too; the editor in Edit event. Old clients
   keep the old RPCs unchanged.
-- ⬜ Door phones stop holding raw per-ticket secrets (derive per-event verify keys); end-of-night door summary;
-  attendee QR available offline in the app.
+- ✅ **End-of-night door summary** (mig `20261008090000`, not applied): `exos_event_door_summary` → the event
+  report's Overview (and a "Door summary" button on the scanner for owners / managers): checked in / sold, no-shows,
+  first / last entry, busiest 15 minutes, entries per hour in the event's zone, by ticket type / list / staff / method,
+  manual overrides, offline conflicts and refused scans by reason, inside now on re-entry lists; copy as text or CSV.
+  No buyer data. Owner / manager / finance, assigned door staff, admin.
+- ⬜ Door phones stop holding raw per-ticket secrets (derive per-event verify keys); attendee QR available offline
+  in the app.
 
 ### Next (sell more: marketing)
 - ✅ **Paid Purchase pixel actually fires** (CSP allowed pixels only on listing pages, so the Stripe return never
