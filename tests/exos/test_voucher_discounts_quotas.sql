@@ -123,6 +123,8 @@ INSERT INTO public.exos_discount_codes(event_id, code, type, value, usage_limit,
 -- The replay re-grants exos_voucher_discount to anon; the later hardening
 -- (mig 20260929080000) owns that grant, so put it back as prod has it.
 \ir ../../supabase/migrations/20260929080000_exos_rpc_hardening.sql
+-- ...and what came after it (the public views' tax helpers, mig 20261008100000).
+\ir ../../supabase/migrations/20261008100000_exos_public_view_tax_grants.sql
 DO $$
 DECLARE v record;
 BEGIN

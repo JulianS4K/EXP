@@ -90,7 +90,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261001100000_exos_invoices_credit_notes \
          20261001101000_exos_disputes_reconciliation \
          20261005090000_exos_online_events \
-         20261008090000_exos_door_delta_summary; do
+         20261008090000_exos_door_delta_summary \
+         20261008100000_exos_public_view_tax_grants; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -198,7 +199,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261001100000_exos_invoices_credit_notes \
          20261001101000_exos_disputes_reconciliation \
          20261005090000_exos_online_events \
-         20261008090000_exos_door_delta_summary; do
+         20261008090000_exos_door_delta_summary \
+         20261008100000_exos_public_view_tax_grants; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
