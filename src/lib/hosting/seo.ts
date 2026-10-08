@@ -278,6 +278,8 @@ export type PublicReader = (
   cols: string,
   filter: { col: string; val: string } | null,
   limit: number,
+  // Optional: only rows with `gte.col >= gte.val`, sorted ascending by `order`.
+  opts?: { gte?: { col: string; val: string }; order?: string },
 ) => Promise<Row[]>;
 
 const EVENT_COLS =
@@ -311,7 +313,7 @@ export interface PreviewPage {
 // Extra event columns for the full crawler page (store content + online
 // events); read with a fallback so an older database still gets the tags.
 const CONTENT_COLS = ',summary,lineup,faq,min_age,refund_policy,policy_notes,what_to_bring';
-const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_end,sort_order';
+const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
 
 /**
  * Head tags, plus with `opts.content` (server.ts EXOS_AI_DISCOVERY, off until
@@ -432,7 +434,10 @@ export function eventBody(ev: Row, tiers: Row[], s: EventSummary, url: string, n
       const cap = Number(t.capacity ?? 0);
       const soldOut = cap > 0 && Number(t.sold ?? 0) >= cap;
       const ended = typeof t.sales_end === 'string' && parseInstant(t.sales_end) < now.getTime();
-      const state = soldOut ? 'sold out' : ended ? 'sales ended' : 'on sale';
+      const starts = typeof t.sales_start === 'string' ? parseInstant(t.sales_start) : NaN;
+      const notYet = !Number.isNaN(starts) && starts > now.getTime();
+      const state = soldOut ? 'sold out' : ended ? 'sales ended'
+        : notYet ? `on sale ${dateLabel(String(t.sales_start), null) ?? 'soon'}` : 'on sale';
       out.push(`<li>${esc(str(t.name))}: ${esc(money(cents, s.currency))} (${state})</li>`);
     }
     out.push('</ul>');
@@ -464,6 +469,11 @@ export function injectBody(shell: string, body: string | null | undefined): stri
   return shell.slice(0, i + marker.length) + '\n' + body + shell.slice(i + marker.length);
 }
 
+/** Organizer text made inert in markdown: no links, emphasis or escapes, one line. */
+function mdText(v: string | undefined): string {
+  return (v ?? '').replace(/[\\[\]()*_`<>#|!]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 /**
  * /llms.txt (EXOS_AI_DISCOVERY): a plain-text guide for AI assistants, with
  * the upcoming public events (hidden ones left out) and how to query Exos.
@@ -490,11 +500,16 @@ export async function buildLlmsTxt(
   if (opts.mcpUrl) {
     lines.push(`- MCP server (search events, prices, checkout links; read-only, no key needed): ${opts.mcpUrl}`);
   }
+  // Upcoming only, soonest first, filtered and sorted by the database: the
+  // view also holds every past event, and an unordered capped read could drop
+  // the newest ones.
+  const range = { gte: { col: 'starts_at', val: new Date(cutoff).toISOString() }, order: 'starts_at' };
+  const cols = 'id,name,starts_at,occurs_at_local,venue_name,venue_address';
   let events: Row[] = [];
   try {
-    events = await readWithFallback(read, 'id,name,starts_at,occurs_at_local,venue_name,venue_address', ',noindex', null, 500);
+    events = await read('exos_public_events', cols + ',noindex', null, 500, range);
   } catch {
-    events = [];
+    try { events = await read('exos_public_events', cols, null, 500, range); } catch { events = []; }
   }
   const upcoming = events
     .filter((e) => e.noindex !== true && str(e.name))
@@ -505,9 +520,9 @@ export async function buildLlmsTxt(
     lines.push('', '## Upcoming events', '');
     for (const e of upcoming) {
       const addr = e.venue_address && typeof e.venue_address === 'object' ? (e.venue_address as Row) : {};
-      const bits = [dateLabel(str(e.starts_at), str(e.occurs_at_local)), str(e.venue_name), str(addr.city)].filter(Boolean).join(' · ');
-      const name = String(e.name).replace(/[\[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
-      lines.push(`- [${name}](${baseUrl}/bridge/event/${e.id})${bits ? `: ${bits.replace(/[\r\n]+/g, ' ')}` : ''}`);
+      const bits = [dateLabel(str(e.starts_at), str(e.occurs_at_local)), mdText(str(e.venue_name)), mdText(str(addr.city))]
+        .filter(Boolean).join(' · ');
+      lines.push(`- [${mdText(String(e.name))}](${baseUrl}/bridge/event/${encodeURIComponent(String(e.id))})${bits ? `: ${bits}` : ''}`);
     }
   }
   return lines.join('\n') + '\n';

@@ -153,9 +153,11 @@ async function startServer() {
     if (!sbUrl || !sbKey) return (reader = null);
     const { createClient } = await import('@supabase/supabase-js');
     const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
-    reader = async (table, cols, filter, limit) => {
+    reader = async (table, cols, filter, limit, opts) => {
       let q = sb.from(table).select(cols);
       if (filter) q = q.eq(filter.col, filter.val);
+      if (opts?.gte) q = q.gte(opts.gte.col, opts.gte.val);
+      if (opts?.order) q = q.order(opts.order, { ascending: true });
       const { data, error } = await q.limit(limit);
       if (error) throw error;
       return (data ?? []) as unknown as Array<Record<string, unknown>>;

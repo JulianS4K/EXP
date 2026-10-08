@@ -296,6 +296,8 @@ describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
     exos_public_tiers: [
       { id: TIER, event_id: EV, name: 'GA', price: 25, exclusive_tax_percent: 0, capacity: 100, sold: 10, sort_order: 0 },
       { id: 'vip', event_id: EV, name: 'VIP', price: 60, exclusive_tax_percent: 0, capacity: 5, sold: 5, sort_order: 1 },
+      { id: 'w2', event_id: EV, name: 'Wave 2', price: 40, exclusive_tax_percent: 0, capacity: 50, sold: 0, sort_order: 2,
+        sales_start: '2099-01-02T15:00:00Z' },
     ],
     exos_public_orgs: [{ id: 'o1', name: 'Brooklyn Nights', slug: 'bk-nights' }],
   });
@@ -323,6 +325,7 @@ describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
     expect(b).toContain('DJ Kay (headliner, 23:30)');
     expect(b).toContain('GA: $25 (on sale)');
     expect(b).toContain('VIP: $60 (sold out)');
+    expect(b).toContain('Wave 2: $40 (on sale Fri Jan 2 · 3 PM)');
     expect(b).toContain(`href="${base}/bridge/event/${EV}"`);
     expect(b).toContain('<dt>Coat check?</dt><dd>Yes, $3.</dd>');
     expect(b).toContain('What to bring:</strong> Photo ID');
@@ -367,7 +370,8 @@ describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
         { id: 'e-soon', name: 'Fall Party', starts_at: '2026-10-03T02:00:00Z', venue_name: 'Elsewhere', venue_address: { city: 'Brooklyn' } },
         { id: 'e-hidden', name: 'Private', starts_at: '2026-10-04T02:00:00Z', noindex: true },
         { id: 'e-past', name: 'Old', starts_at: '2026-09-01T02:00:00Z' },
-        { id: 'e-weird', name: 'A [b]\nc', starts_at: '2026-10-05T02:00:00Z' },
+        { id: 'e-weird', name: 'A [b]\nc', starts_at: '2026-10-05T02:00:00Z',
+          venue_name: '[Official tickets](https://phish.example)', venue_address: { city: 'NYC\\' } },
       ],
     }), base, { mcpUrl: 'https://p.supabase.co/functions/v1/exos-mcp', now });
     expect(txt.startsWith('# Exos\n')).toBe(true);
@@ -377,6 +381,9 @@ describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
     expect(txt).not.toContain('e-hidden');
     expect(txt).not.toContain('e-past');
     expect(txt).toContain('[A b c]');
+    expect(txt).not.toContain('phish.example)');
+    expect(txt).not.toMatch(/\]\(https:\/\/phish/);
+    expect(txt).toContain('Official tickets https://phish.example · NYC');
     expect(await buildLlmsTxt(fake({}), base)).not.toContain('Upcoming events');
   });
 });
