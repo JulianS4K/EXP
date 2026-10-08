@@ -419,6 +419,44 @@ await run('event report: Disputes block with status, amount, due date and Stripe
   assert(read && read.includes('event_id=eq.' + EV) && read.includes('evidence_due_by'), 'disputes read: ' + read);
 }, { signedIn: true, mock: reportMock });
 
+const DOOR_SUMMARY = {
+  event: { id: EV, name: 'Fall Party', status: 'published', timezone: 'America/New_York' },
+  generated_at: '2026-10-03T05:00:00Z',
+  tickets: { sold: 6, voided: 1, checked_in: 4, no_shows: 2, voided_entered: 1 },
+  entries: { total: 6, first: 5, reentries: 1, exits: 1, forced: 1, offline: 2, by_verification: { verified: 3, manual: 1, name: 1 } },
+  first_entry_at: '2026-10-02T23:10:00Z', last_entry_at: '2026-10-03T00:45:00Z',
+  peak: { start: '2026-10-02T23:15:00Z', entries: 4 },
+  by_hour: [{ hour: '2026-10-02T19:00', entries: 5 }, { hour: '2026-10-02T20:00', entries: 1 }],
+  by_tier: [{ tier: 'GA', sold: 4, checked_in: 3 }, { tier: 'VIP', sold: 2, checked_in: 1 }],
+  by_list: [{ list: 'Main door', entries: 4, exits: 0 }, { list: 'Smoking deck', entries: 2, exits: 1 }],
+  by_staff: [{ staff: 'Sam Scanner', entries: 5, refused: 2 }],
+  overrides: [{ reason: 'Phone died', count: 1 }], conflicts: [{ reason: 'voided', count: 1 }],
+  refused: { total: 2, by_reason: [{ reason: 'used', count: 2 }] }, inside_now: 1,
+};
+
+await run('event report: end-of-night door summary with CSV', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'End-of-night door summary' }) });
+  await section.waitFor({ timeout: 8000 });
+  const text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['4 / 6', '67% showed up', '7:10 PM', 'last in 8:45 PM', 'from 7:15 PM', '1 inside now',
+    '7 PM', 'Sam Scanner', 'Smoking deck', 'Phone died', 'refunded / voided', 'already checked in', 'America/New York']) {
+    assert(text.includes(want), `summary shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_door_summary') && l.includes(EV)), 'summary RPC called');
+  const { text: csv } = await download(page, () => section.getByRole('button', { name: 'CSV' }).click());
+  const lines = firstLines(csv);
+  assert(lines[0] === 'section,item,value,value_2', 'header ' + lines[0]);
+  assert(lines.includes('ticket_type,VIP,1,2') && lines.includes('staff,Sam Scanner,5,2'), 'rows: ' + lines.join(' | '));
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: { exos_event_door_summary: () => DOOR_SUMMARY } }) });
+
+await run('event report: no door summary before the migration', async (page) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  await page.getByRole('heading', { name: 'Disputes' }).waitFor({ timeout: 8000 });
+  assert(await page.getByRole('heading', { name: 'End-of-night door summary' }).count() === 0, 'hidden');
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: {
+  exos_event_door_summary: () => ({ __status: 404, __body: { code: 'PGRST202', message: 'Could not find the function' } }) } }) });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });

@@ -19,8 +19,15 @@ import {
   saveMarks,
   saveRoster,
   wipeDoorRosters,
+  listsSignature,
+  mergeRosterDelta,
+  planRosterRefresh,
+  ROSTER_DELTA_OVERLAP_MS,
+  ROSTER_FULL_EVERY_MS,
   type RosterRow,
+  type RosterSync,
 } from './roster';
+import type { DoorCheckinList } from './lists';
 
 const NOW = Date.UTC(2026, 8, 29, 22, 0, 0);
 const EVENT = 'eeeeeeee-0000-4000-8000-000000000001';
@@ -267,5 +274,56 @@ describe('event header cache (offline cold start)', () => {
     mem.setItem('pending_updates_x', '[]');
     pruneLocalDoorCaches(mem, NOW);
     expect([...mem.m.keys()].sort()).toEqual(['pending_updates_x', `registry_marks_${EVENT}`]);
+  });
+});
+
+describe('incremental refresh (roster delta)', () => {
+  const rowOf = (id: string, status = 'active'): RosterRow => ({
+    id, status, ownerId: 'o', name: id.toUpperCase(), tier: 'GA', barcodeSecret: `s-${id}`, promoterId: '', pendingTransferId: null,
+  });
+  const T0 = 1_800_000_000_000;
+  const sync = (over: Partial<RosterSync> = {}): RosterSync => ({
+    eventId: 'ev1', base: buildRoster([rowOf('a'), rowOf('b')]), cursor: T0, fullAt: T0, lists: '', ...over,
+  });
+
+  it('plans a delta from the cursor minus the overlap', () => {
+    expect(planRosterRefresh(sync(), { now: T0 + 60_000, eventId: 'ev1', deltaSupported: true, lists: '' })).toEqual({
+      kind: 'delta', since: T0 - ROSTER_DELTA_OVERLAP_MS,
+    });
+  });
+
+  it('plans a full pull when it must', () => {
+    const now = T0 + 60_000;
+    expect(planRosterRefresh(null, { now, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: false, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: true, lists: '', force: true }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now: T0 + ROSTER_FULL_EVERY_MS, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: true, lists: 'l1:1' }).kind).toBe('full');
+    // A pull for another event finished after the page moved on.
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev2', deltaSupported: true, lists: '' }).kind).toBe('full');
+    // A delta keeps the full-pull clock: ten minutes after the last FULL pull.
+    expect(
+      planRosterRefresh(sync({ cursor: T0 + 9 * 60_000 }), { now: T0 + ROSTER_FULL_EVERY_MS + 1, eventId: 'ev1', deltaSupported: true, lists: '' }).kind,
+    ).toBe('full');
+    expect(planRosterRefresh(sync({ fullAt: T0 + 1e10 }), { now: T0 + 25 * 3600_000, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
+  });
+
+  it('lists signature tracks re-entry switches, not names or order', () => {
+    const l = (id: string, allowReentry: boolean) => ({ id, allowReentry }) as unknown as DoorCheckinList;
+    expect(listsSignature(null)).toBe('');
+    expect(listsSignature([l('b', false), l('a', true)])).toBe(listsSignature([l('a', true), l('b', false)]));
+    expect(listsSignature([l('a', true)])).not.toBe(listsSignature([l('a', false)]));
+    expect(listsSignature([l('a', true), l('b', false)])).not.toBe(listsSignature([l('a', true)]));
+  });
+
+  it('merges changed rows over the base', () => {
+    const base = sync().base;
+    expect(mergeRosterDelta(base, [])).toBe(base);
+    const next = mergeRosterDelta(base, [rowOf('b', 'used'), rowOf('c')]);
+    expect(Object.keys(next).sort()).toEqual(['a', 'b', 'c']);
+    expect(next.a).toBe(base.a);
+    expect(next.b.used).toBe(true);
+    expect(next.c.barcodeSecret).toBe('s-c');
+    expect(base.b.used).toBe(false);
   });
 });

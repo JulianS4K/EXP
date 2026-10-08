@@ -20,6 +20,7 @@ import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
+import DoorSummaryPanel from '../components/DoorSummaryPanel';
 import WaitlistPanel from '../components/WaitlistPanel';
 import AnnouncementsPanel from '../components/AnnouncementsPanel';
 import RemindersPanel from '../components/RemindersPanel';
@@ -310,6 +311,12 @@ export default function OrganizerEventReport() {
             for the full event lifecycle. */}
         <div className="mb-8">
           <ScanReport eventId={eventId!} totalSold={totalSold} />
+        </div>
+
+        {/* End-of-night door summary: one server read (mig 20261008090000);
+            hidden before it exists or for roles that can't read it. */}
+        <div className="mb-8">
+          <DoorSummaryPanel eventId={eventId!} eventTitle={event.title} />
         </div>
 
         {/* Attendance funnel + attribution (server-side document) + CSV exports. */}

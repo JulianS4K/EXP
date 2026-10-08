@@ -1,7 +1,8 @@
 // Door network reads that aren't ticket operations (those live in lib/tickets).
 
 import { supabase } from '../supabase';
-import { DOOR_REQUEST_TIMEOUT_MS, withDeadline } from './net';
+import { DOOR_REQUEST_TIMEOUT_MS, isMissingRpc, withDeadline } from './net';
+import { parseDoorSummary, type DoorSummary } from './summary';
 import { mapDoorEventRow, type DoorEvent } from './roster';
 import { listCheckinLists } from '../checkinLists';
 
@@ -36,4 +37,15 @@ export async function pingServer(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The end-of-night door summary (exos_event_door_summary, mig 20261008090000).
+ *  null when this database doesn't have it yet, or the caller may not see it. */
+export async function fetchDoorSummary(eventId: string): Promise<DoorSummary | null> {
+  const { data, error } = await supabase.rpc('exos_event_door_summary', { p_event_id: eventId });
+  if (error) {
+    if (isMissingRpc(error) || (error as { code?: string }).code === '42501') return null;
+    throw error;
+  }
+  return parseDoorSummary(data);
 }
