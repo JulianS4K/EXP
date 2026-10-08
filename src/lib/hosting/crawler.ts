@@ -2,6 +2,8 @@
 // server-side preview tags (seo.ts); humans get the plain SPA shell, so they
 // never pay for the extra lookup. Ported from Terminal-2 core/seo.py.
 
+import { isAiAgent } from '../../../supabase/functions/_shared/aiSources.ts';
+
 const CRAWLER_UA_TOKENS = [
   'facebookexternalhit', // Facebook / Messenger
   'facebookcatalog',
@@ -25,8 +27,13 @@ const CRAWLER_UA_TOKENS = [
   'skypeuripreview',
 ];
 
-export function isLinkCrawler(userAgent: string | null | undefined): boolean {
+/**
+ * `ai`: also treat AI crawlers and fetchers (ChatGPT, Claude, Perplexity…)
+ * as crawlers. Off until launch (server.ts EXOS_AI_DISCOVERY), so until then
+ * they keep getting the plain shell.
+ */
+export function isLinkCrawler(userAgent: string | null | undefined, opts: { ai?: boolean } = {}): boolean {
   if (!userAgent) return false;
   const ua = userAgent.toLowerCase();
-  return CRAWLER_UA_TOKENS.some((t) => ua.includes(t));
+  return CRAWLER_UA_TOKENS.some((t) => ua.includes(t)) || (opts.ai === true && isAiAgent(ua));
 }

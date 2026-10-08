@@ -383,9 +383,9 @@ await run('event report: Sources by UTM, promoter and ad platform, with CSV', as
   assert(await page.getByText('Ad click ids aren’t recorded').count() === 0, 'no old-schema note');
   const { text } = await download(page, () => page.getByRole('button', { name: /Sources CSV/ }).click());
   const lines = firstLines(text);
-  assert(lines[0] === 'utm_source,utm_medium,utm_campaign,promoter,ad_platform,orders,tickets,gross,refunded_orders,currency', 'header ' + lines[0]);
-  assert(lines.includes('instagram,paid,fall,,Meta,1,2,40.00,0,USD'), 'Instagram row: ' + lines.join(' | '));
-  assert(lines.includes(',,,dj-kay,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
+  assert(lines[0] === 'utm_source,utm_medium,utm_campaign,promoter,ad_platform,ai_assistant,orders,tickets,gross,refunded_orders,currency', 'header ' + lines[0]);
+  assert(lines.includes('instagram,paid,fall,,Meta,,1,2,40.00,0,USD'), 'Instagram row: ' + lines.join(' | '));
+  assert(lines.includes(',,,dj-kay,,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
 }, { signedIn: true, mock: reportMock });
 
 await run('event report: Money summary from the order money view', async (page, log) => {
@@ -605,6 +605,53 @@ await run('org settings: Legal & invoices saves the seller details', async (page
 }, { signedIn: true, mock: ownerMock({ tables: { exos_org_legal: [
   { org_id: ORG, legal_name: 'BK Nights LLC', legal_address: '1 Main St', tax_id: 'EIN 12-3456789', invoice_footer: null, updated_at: '2026-09-30T12:00:00Z' },
 ] } }) });
+
+// ── Online / hybrid events, what to bring, noindex (mig 20261005090000) ──
+const ONLINE_EVENT = { ...baseTables.exos_public_events[0], format: 'online', venue_name: 'Online', venue_location: 'Online',
+  what_to_bring: 'Headphones and a snack.', noindex: true };
+
+await run('online event page: badge, no map, what to bring, hidden from search', async (page) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Ticket holders get the join link on their ticket.');
+  await expectText(page, 'Headphones and a snack.');
+  assert(await page.getByRole('link', { name: /directions/i }).count() === 0, 'no directions for an online event');
+  assert(await page.locator('meta[name="robots"]').getAttribute('content') === 'noindex, nofollow', 'robots noindex');
+  assert(await page.locator('#vibepass-jsonld').count() === 0, 'no JSON-LD on a hidden event');
+}, { mock: { tables: { exos_public_events: [ONLINE_EVENT] } } });
+
+const onlineTicketMock = (access) => ownerMock({
+  tables: {
+    exos_tickets: [{
+      id: TICKET, event_id: EV, org_id: ORG, tier_id: null, tier_name: 'GA', buyer_id: UID, owner_id: UID, status: 'active',
+      price_paid: 20, order_ref: null, channel_source: 'direct', promoter_id: null, pending_transfer_id: null, transfer_id: null,
+      voided_at: null, voided_by: null, voided_reason: null, released_at: null, check_in_at: null, last_reissue_at: null,
+      created_at: '2026-09-20T12:00:00Z', updated_at: '2026-09-20T12:00:00Z', attendee_name: null,
+      event: { ...EVENT_ROW, format: 'online', what_to_bring: 'Headphones and a snack.', noindex: false },
+    }],
+    exos_ticket_barcode_secrets: [{ ticket_id: TICKET, barcode_secret: 'c2VjcmV0' }],
+    exos_transfers: [], exos_event_saves: [],
+  },
+  rpcs: { exos_my_reschedule_offers: () => [], exos_ticket_access_needs: () => [], exos_event_online_access: () => [access] },
+  fns: { 'exos-wallet/pass': () => ({ status: 503, body: { error: 'wallet not configured' } }) },
+});
+
+await run('ticket shows the join link and what to bring to the holder', async (page, log) => {
+  await page.goto(BASE + '/ticket/' + TICKET);
+  const join = page.getByRole('link', { name: /Join the event/ });
+  await join.waitFor({ timeout: 8000 });
+  assert(await join.getAttribute('href') === 'https://stream.example.com/room', 'join href');
+  assert((await join.getAttribute('rel')).includes('noopener'), 'opens safely');
+  await expectText(page, 'Passcode 4242');
+  await expectText(page, 'Headphones and a snack.');
+  assert(log.some((l) => l.startsWith('rpc exos_event_online_access') && l.includes(EV)), 'asked the access RPC');
+}, { signedIn: true, mock: onlineTicketMock({ state: 'ready', join_url: 'https://stream.example.com/room', join_note: 'Passcode 4242', available_at: null }) });
+
+await run('ticket holds the join link back until the reveal time', async (page) => {
+  await page.goto(BASE + '/ticket/' + TICKET);
+  await expectText(page, 'The join link appears here');
+  assert(await page.getByRole('link', { name: /Join the event/ }).count() === 0, 'no link yet');
+}, { signedIn: true, mock: onlineTicketMock({ state: 'later', join_url: null, join_note: null,
+  available_at: new Date(Date.now() + 2 * 864e5).toISOString() }) });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

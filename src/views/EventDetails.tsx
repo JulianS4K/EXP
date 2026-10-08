@@ -3,6 +3,7 @@ import { EventAccessInfo } from '../components/Accessibility';
 import { EventFaq, EventGallery, EventGoodToKnow, EventLineup, EventVideo } from '../components/StoreContent';
 import { RichText } from '../lib/richText';
 import { ageLabel } from '../lib/storeContent';
+import { formatLabel, isOnline } from '../lib/onlineEvents';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
@@ -146,6 +147,8 @@ export default function EventDetails() {
             description: (data.summary || data.description || '').slice(0, 200),
             imageUrl: data.image || undefined,
             canonicalUrl: publicUrl(`event/${data.id}`),
+            // Organizer's "hide from search engines" (mig 20261005090000).
+            noindex: data.noindex === true,
             event: startIso
               ? {
                   name: data.title,
@@ -161,6 +164,8 @@ export default function EventDetails() {
                   },
                   image: data.image,
                   description: (data.summary || data.description || '').slice(0, 200),
+                  format: data.format,
+                  pageUrl: publicUrl(`event/${data.id}`),
                   offers: {
                     price: data.price,
                     currency: data.currency || 'USD',
@@ -764,6 +769,11 @@ export default function EventDetails() {
                 <span className="disp bg-brand-primary text-black px-3 text-lg tracking-wide inline-block mb-3">
                   {event.category}
                 </span>
+                {formatLabel(event.format) && (
+                  <span className="disp border border-white/60 text-white px-3 text-lg tracking-wide inline-block mb-3 ml-2">
+                    {formatLabel(event.format)}
+                  </span>
+                )}
                 {event.minAge != null && (
                   <span className="disp border border-white/60 text-white px-3 text-lg tracking-wide inline-block mb-3 ml-2">
                     {ageLabel(event.minAge)}
@@ -836,9 +846,16 @@ export default function EventDetails() {
                 <div>
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">location</p>
                    <p className="disp text-xl tracking-tight">{event.location}</p>
+                   {isOnline(event.format) && (
+                     <p className="type text-xs text-white/60 mt-1">
+                       {event.format === 'hybrid' ? 'Also online. ' : ''}Ticket holders get the join link on their ticket.
+                     </p>
+                   )}
                 </div>
               </div>
-              <VenueMap eventId={event.id} location={event.location} address={event.address} />
+              {event.format !== 'online' && (
+                <VenueMap eventId={event.id} location={event.location} address={event.address} />
+              )}
               <EventAccessInfo accessibility={event.accessibility} />
 
               {/* Performers block — only renders when the organizer
@@ -899,7 +916,8 @@ export default function EventDetails() {
             <EventGallery gallery={event.gallery} title={event.title} />
             <EventLineup lineup={event.lineup} />
             <EventFaq faq={event.faq} />
-            <EventGoodToKnow minAge={event.minAge} refundPolicy={event.refundPolicy} policyNotes={event.policyNotes} />
+            <EventGoodToKnow minAge={event.minAge} refundPolicy={event.refundPolicy} policyNotes={event.policyNotes}
+              whatToBring={event.whatToBring} />
 
             <div className="mb-14 bg-[#111] border border-white/10 p-7 flex items-center justify-between group">
                <div className="flex items-center gap-5">

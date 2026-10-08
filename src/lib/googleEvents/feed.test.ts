@@ -162,6 +162,15 @@ describe('Google events feed', () => {
     expect(feedBlocker(ev({ starts_at: '2026-10-01T10:00:00Z', ends_at: '2026-10-01T11:00:00Z' }), [tier()], NOW)).toBe('already over');
   });
 
+  it('leaves out hidden and online-only events, marks hybrid ones (mig 20261005090000)', () => {
+    expect(feedBlocker(ev({ noindex: true }), [tier()], NOW)).toMatch(/hidden/);
+    expect(feedBlocker(ev({ format: 'online' }), [tier()], NOW)).toMatch(/online-only/);
+    expect(feedBlocker(ev({ format: 'hybrid' }), [tier()], NOW)).toBeNull();
+    const { feed } = build([ev({ format: 'hybrid' })], [tier()]);
+    expect(feed.events[0].event.eventAttendanceMode).toMatch(/Mixed/);
+    expect(build([ev()], [tier()]).feed.events[0].event.eventAttendanceMode).toMatch(/Offline/);
+  });
+
   it('never carries buyer or internal data', () => {
     const json = JSON.stringify(build([ev()], [tier()]).feed);
     expect(json).not.toMatch(/barcode|secret|email/i);

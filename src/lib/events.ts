@@ -12,6 +12,7 @@ import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
 import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
+import { parseEventFormat } from './onlineEvents';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
@@ -118,6 +119,14 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
           minAge: parseMinAge(row.min_age),
           refundPolicy: parseRefundPolicy(row.refund_policy),
           policyNotes: row.policy_notes ?? undefined,
+        }
+      : {}),
+    // Online / hybrid, what to bring, noindex (mig 20261005090000); likewise.
+    ...('what_to_bring' in row
+      ? {
+          format: parseEventFormat(row.format),
+          whatToBring: row.what_to_bring ?? undefined,
+          noindex: row.noindex === true,
         }
       : {}),
   };
@@ -311,6 +320,11 @@ export interface EventInput {
   minAge?: number | null;
   refundPolicy?: string | null;
   policyNotes?: string | null;
+  // Online / hybrid events (mig 20261005090000). The join link is not a
+  // column here: lib/onlineEventsApi saves it through an RPC.
+  format?: import('./onlineEvents').EventFormat;
+  whatToBring?: string | null;
+  noindex?: boolean;
   tiers?: TierInput[];
 }
 
@@ -328,6 +342,7 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
   ['summary', 'summary'], ['descriptionMd', 'description_md'], ['lineup', 'lineup'], ['faq', 'faq'],
   ['gallery', 'gallery'], ['videoUrl', 'video_url'], ['minAge', 'min_age'], ['refundPolicy', 'refund_policy'],
   ['policyNotes', 'policy_notes'],
+  ['format', 'format'], ['whatToBring', 'what_to_bring'], ['noindex', 'noindex'],
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {

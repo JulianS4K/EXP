@@ -44,6 +44,9 @@ const KEY_PER_MINUTE = 120;
 const EVENT_COLS =
   "id, slug, name, summary, description, starts_at, doors_at, timezone, currency, venue_name, venue_address, " +
   "primary_performer_name, performer_names, genres, category, image_url, total_tickets, tickets_sold";
+// Online / hybrid + noindex (mig 20261005090000): searches leave out events
+// the organizer hid from search; without the columns, the old select.
+const ONLINE_COLS = ", format, noindex";
 const TIER_COLS =
   "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule, exclusive_tax_percent, accessible";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -103,23 +106,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
 function supabaseData(sb: SupabaseClient): ExosData {
   return {
     async searchEvents(q: EventSearch): Promise<PublicEvent[]> {
-      let query = sb.from("exos_public_events").select(EVENT_COLS)
-        .gte("starts_at", q.from).order("starts_at", { ascending: true }).limit(q.limit);
-      if (q.to) query = query.lte("starts_at", q.to);
-      const words = clean(q.query);
-      if (words) {
-        const p = `"*${words}*"`;
-        query = query.or(`name.ilike.${p},venue_name.ilike.${p},primary_performer_name.ilike.${p},category.ilike.${p}`);
-      }
-      const place = clean(q.city);
-      if (place) query = query.ilike("venue_address->>city", `%${place}%`);
-      const { data, error } = await query;
+      const run = (withOnline: boolean) => {
+        let query = sb.from("exos_public_events").select(EVENT_COLS + (withOnline ? ONLINE_COLS : ""))
+          .gte("starts_at", q.from).order("starts_at", { ascending: true }).limit(q.limit);
+        if (withOnline) query = query.eq("noindex", false);
+        if (q.to) query = query.lte("starts_at", q.to);
+        const words = clean(q.query);
+        if (words) {
+          const p = `"*${words}*"`;
+          query = query.or(`name.ilike.${p},venue_name.ilike.${p},primary_performer_name.ilike.${p},category.ilike.${p}`);
+        }
+        const place = clean(q.city);
+        if (place) query = query.ilike("venue_address->>city", `%${place}%`);
+        return query;
+      };
+      let { data, error } = await run(true);
+      if (error?.code === "42703") ({ data, error } = await run(false)); // undefined_column
       if (error) throw new Error(`search events: ${error.message}`);
       return (data ?? []) as unknown as PublicEvent[];
     },
     async getEvent(ref: string): Promise<PublicEvent | null> {
-      const query = sb.from("exos_public_events").select(EVENT_COLS);
-      const { data, error } = await (UUID_RE.test(ref) ? query.eq("id", ref) : query.eq("slug", ref)).maybeSingle();
+      // By id or slug: a hidden event still opens for someone who has its link.
+      const run = (cols: string) => {
+        const query = sb.from("exos_public_events").select(cols);
+        return (UUID_RE.test(ref) ? query.eq("id", ref) : query.eq("slug", ref)).maybeSingle();
+      };
+      let { data, error } = await run(EVENT_COLS + ", format");
+      if (error?.code === "42703") ({ data, error } = await run(EVENT_COLS));
       if (error) throw new Error(`get event: ${error.message}`);
       return (data as unknown as PublicEvent | null) ?? null;
     },

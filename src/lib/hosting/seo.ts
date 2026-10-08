@@ -11,6 +11,10 @@
 // the injected `PublicReader`, and any miss returns null so a crawler never
 // sees less than the static card.
 
+import {
+  attendanceModeUrl, parseAttendanceFormat, schemaLocation, type AttendanceFormat,
+} from '../../../supabase/functions/_shared/attendance.ts';
+
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
 
@@ -139,6 +143,8 @@ export interface EventSummary {
   fromCents: number | null;
   currency: string;
   orgName?: string;
+  // In person / online / hybrid (mig 20261005090000); in person when absent.
+  format: AttendanceFormat;
 }
 
 type Row = Record<string, unknown>;
@@ -165,6 +171,7 @@ export function eventSummary(event: Row | null | undefined, tiers: TierRow[], or
     fromCents: cents,
     currency,
     orgName: str(org?.name),
+    format: parseAttendanceFormat(event.format),
   };
 }
 
@@ -212,18 +219,20 @@ export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: s
     url: canonicalUrl,
     image: [image],
     eventStatus: 'https://schema.org/EventScheduled',
-    eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+    eventAttendanceMode: attendanceModeUrl(s.format),
   };
   if (s.startsAt) ld.startDate = s.startsAt;
-  if (s.venue) {
-    const loc: Record<string, unknown> = { '@type': 'Place', name: s.venue };
+  let place: Record<string, unknown> | null = null;
+  if (s.venue && s.format !== 'online') {
+    place = { '@type': 'Place', name: s.venue };
     const addr: Record<string, string> = {};
     if (s.street) addr.streetAddress = s.street;
     if (s.city) addr.addressLocality = s.city;
     if (s.region) addr.addressRegion = s.region;
-    if (Object.keys(addr).length) loc.address = { ...addr, '@type': 'PostalAddress' };
-    ld.location = loc;
+    if (Object.keys(addr).length) place.address = { ...addr, '@type': 'PostalAddress' };
   }
+  const location = schemaLocation(s.format, place, canonicalUrl);
+  if (location) ld.location = location;
   if (s.orgName) ld.organizer = { '@type': 'Organization', name: s.orgName };
   if (s.fromCents !== null) {
     ld.offers = {
@@ -269,20 +278,63 @@ export type PublicReader = (
   cols: string,
   filter: { col: string; val: string } | null,
   limit: number,
+  // Optional: only rows with `gte.col >= gte.val`, sorted ascending by `order`.
+  opts?: { gte?: { col: string; val: string }; order?: string },
 ) => Promise<Row[]>;
 
 const EVENT_COLS =
   'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url';
+// Added by mig 20261005090000; read with a fallback until prod has it.
+const ONLINE_COLS = ',format,noindex';
+
+/** Read with the online-event columns, or without them on a database that lacks them. */
+async function readWithFallback(
+  read: PublicReader, cols: string, extra: string, filter: { col: string; val: string } | null, limit: number,
+): Promise<Row[]> {
+  try {
+    return await read('exos_public_events', cols + extra, filter, limit);
+  } catch {
+    return read('exos_public_events', cols, filter, limit);
+  }
+}
 
 /** Resolve a preview target against the public views and return the tag block, or null. */
 export async function buildPreview(read: PublicReader, target: PreviewTarget, baseUrl: string): Promise<string | null> {
+  return (await buildPreviewPage(read, target, baseUrl))?.tags ?? null;
+}
+
+export interface PreviewPage {
+  /** Head tags for the SSR_META block. */
+  tags: string;
+  /** Plain-HTML event page for the body (opts.content only), or null. */
+  body: string | null;
+}
+
+// Extra event columns for the full crawler page (store content + online
+// events); read with a fallback so an older database still gets the tags.
+const CONTENT_COLS = ',summary,lineup,faq,min_age,refund_policy,policy_notes,what_to_bring';
+const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
+
+/**
+ * Head tags, plus with `opts.content` (server.ts EXOS_AI_DISCOVERY, off until
+ * launch) a plain-HTML copy of the event page for crawlers and AI fetchers,
+ * and FAQPage JSON-LD. Hidden (noindex) events never get the content.
+ */
+export async function buildPreviewPage(
+  read: PublicReader, target: PreviewTarget, baseUrl: string, opts: { content?: boolean } = {},
+): Promise<PreviewPage | null> {
+  return previewParts(read, target, baseUrl, opts.content === true);
+}
+
+async function previewParts(read: PublicReader, target: PreviewTarget, baseUrl: string, content: boolean): Promise<PreviewPage | null> {
   let [kind, key] = target;
   const defaultImage = `${baseUrl}/bridge/icon-512.png`;
 
   if (kind === 'org') {
     const orgs = await read('exos_public_orgs', 'id,name,slug,theme,description,marketing', { col: 'slug', val: key }, 1);
     if (!orgs.length) return null;
-    return orgTags(orgs[0], `${baseUrl}/bridge/o/${orgs[0].slug}`, defaultImage);
+    const t = orgTags(orgs[0], `${baseUrl}/bridge/o/${orgs[0].slug}`, defaultImage);
+    return t ? { tags: t, body: null } : null;
   }
   if (kind === 'checkout_tier') {
     const tiers = await read('exos_public_tiers', 'event_id', { col: 'id', val: key }, 1);
@@ -290,16 +342,190 @@ export async function buildPreview(read: PublicReader, target: PreviewTarget, ba
     kind = 'event';
     key = String(tiers[0].event_id);
   }
-  const events = await read('exos_public_events', EVENT_COLS, { col: kind === 'event_slug' ? 'slug' : 'id', val: key }, 1);
+  const filter = { col: kind === 'event_slug' ? 'slug' : 'id', val: key };
+  let events: Row[] = [];
+  if (content) {
+    try { events = await read('exos_public_events', EVENT_COLS + ONLINE_COLS + CONTENT_COLS, filter, 1); } catch { /* older schema */ }
+  }
+  if (!events.length) events = await readWithFallback(read, EVENT_COLS, ONLINE_COLS, filter, 1);
   if (!events.length) return null;
   const ev = events[0];
-  const tiers = await read('exos_public_tiers', 'price,price_schedule,exclusive_tax_percent', { col: 'event_id', val: String(ev.id) }, 50);
+  let tiers: Row[] = [];
+  if (content) {
+    try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, { col: 'event_id', val: String(ev.id) }, 50); } catch { tiers = []; }
+  }
+  if (!tiers.length) tiers = await read('exos_public_tiers', 'price,price_schedule,exclusive_tax_percent', { col: 'event_id', val: String(ev.id) }, 50);
   const orgs = ev.org_id ? await read('exos_public_orgs', 'name', { col: 'id', val: String(ev.org_id) }, 1) : [];
   const s = eventSummary(ev, tiers as TierRow[], orgs[0] ?? null);
   if (!s) return null;
   // Checkout and promoter links preview the event but point search engines at
-  // the event page, and promoter kits stay out of the index.
-  return eventTags(s, `${baseUrl}/bridge/event/${ev.id}`, defaultImage, target[0] === 'promoter');
+  // the event page, and promoter kits stay out of the index, as do events the
+  // organizer hid from search (mig 20261005090000).
+  const url = `${baseUrl}/bridge/event/${ev.id}`;
+  const hidden = target[0] === 'promoter' || ev.noindex === true;
+  let tags = eventTags(s, url, defaultImage, hidden);
+  if (!content || ev.noindex === true) return { tags, body: null };
+  const faq = faqJsonLd(ev.faq);
+  if (faq && !hidden) tags += `\n    ${faq}`;
+  return { tags, body: eventBody(ev, tiers, s, url) };
+}
+
+// ── Full crawler page (EXOS_AI_DISCOVERY) ───────────────────────────────
+
+const REFUND_TEXT: Record<string, string> = {
+  none: 'All sales are final. No refunds.',
+  until_7d: 'Refunds available up to 7 days before the event.',
+  until_24h: 'Refunds available up to 24 hours before the event.',
+  until_start: 'Refunds available until the event starts.',
+};
+
+function list<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v.filter((x) => x && typeof x === 'object') as T[]) : [];
+}
+
+/** FAQPage JSON-LD from the organizer's FAQ, or null. */
+export function faqJsonLd(faq: unknown): string | null {
+  const items = list<{ q?: unknown; a?: unknown }>(faq)
+    .filter((f) => str(f.q) && str(f.a))
+    .slice(0, 20)
+    .map((f) => ({ '@type': 'Question', name: str(f.q), acceptedAnswer: { '@type': 'Answer', text: str(f.a) } }));
+  if (!items.length) return null;
+  const raw = JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: items }).replace(/</g, '\\u003c');
+  return `<script type="application/ld+json">${raw}</script>`;
+}
+
+/**
+ * The event page as plain HTML, for crawlers and AI fetchers that don't run
+ * JavaScript: what a person sees, in the order they see it. Public fields
+ * only (the same views the page reads); everything is escaped.
+ */
+export function eventBody(ev: Row, tiers: Row[], s: EventSummary, url: string, now: Date = new Date()): string {
+  const out: string[] = [];
+  const p = (label: string, value: string | null | undefined) => { if (value) out.push(`<p><strong>${esc(label)}:</strong> ${esc(value)}</p>`); };
+  out.push(`<h1>${esc(s.name)}</h1>`);
+  if (str(ev.summary)) out.push(`<p>${esc(str(ev.summary))}</p>`);
+  p('When', s.date);
+  const where = s.format === 'online'
+    ? 'Online (ticket holders get the join link on their ticket)'
+    : [s.venue, s.street, s.city, s.region].filter(Boolean).join(', ') + (s.format === 'hybrid' ? ' · also online' : '');
+  p('Where', where || null);
+  if (s.orgName) p('Presented by', s.orgName);
+  const age = Number(ev.min_age);
+  if (Number.isFinite(age) && ev.min_age !== null && ev.min_age !== undefined) p('Ages', age > 0 ? `${age}+` : 'All ages');
+  const about = str(ev.description)?.slice(0, 4000);
+  if (about) out.push(`<h2>About</h2><p>${esc(about)}</p>`);
+
+  const lineup = list<{ name?: unknown; role?: unknown; set_at?: unknown }>(ev.lineup).filter((a) => str(a.name));
+  if (lineup.length) {
+    out.push('<h2>Lineup</h2><ul>');
+    for (const a of lineup.slice(0, 20)) {
+      const extra = [str(a.role), str(a.set_at)].filter(Boolean).join(', ');
+      out.push(`<li>${esc(str(a.name))}${extra ? ` (${esc(extra)})` : ''}</li>`);
+    }
+    out.push('</ul>');
+  }
+
+  const rows = [...tiers].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+  const priced = rows.filter((t) => str(t.name));
+  if (priced.length) {
+    out.push('<h2>Tickets</h2><p>Prices are all-in: the price shown is the price paid.</p><ul>');
+    for (const t of priced.slice(0, 20)) {
+      const cents = fromPriceCents([t as TierRow], now) ?? 0;
+      const cap = Number(t.capacity ?? 0);
+      const soldOut = cap > 0 && Number(t.sold ?? 0) >= cap;
+      const ended = typeof t.sales_end === 'string' && parseInstant(t.sales_end) < now.getTime();
+      const starts = typeof t.sales_start === 'string' ? parseInstant(t.sales_start) : NaN;
+      const notYet = !Number.isNaN(starts) && starts > now.getTime();
+      const state = soldOut ? 'sold out' : ended ? 'sales ended'
+        : notYet ? `on sale ${dateLabel(String(t.sales_start), null) ?? 'soon'}` : 'on sale';
+      out.push(`<li>${esc(str(t.name))}: ${esc(money(cents, s.currency))} (${state})</li>`);
+    }
+    out.push('</ul>');
+  }
+  out.push(`<p><a href="${esc(url)}">Get tickets on Exos</a></p>`);
+
+  const faq = list<{ q?: unknown; a?: unknown }>(ev.faq).filter((f) => str(f.q) && str(f.a));
+  if (faq.length) {
+    out.push('<h2>FAQ</h2><dl>');
+    for (const f of faq.slice(0, 20)) out.push(`<dt>${esc(str(f.q))}</dt><dd>${esc(str(f.a))}</dd>`);
+    out.push('</dl>');
+  }
+  const refund = REFUND_TEXT[String(ev.refund_policy ?? '')];
+  if (refund || str(ev.what_to_bring) || str(ev.policy_notes)) {
+    out.push('<h2>Good to know</h2>');
+    p('What to bring', str(ev.what_to_bring));
+    if (refund) out.push(`<p>${esc(refund)}</p>`);
+    if (str(ev.policy_notes)) out.push(`<p>${esc(str(ev.policy_notes))}</p>`);
+  }
+  return `<main id="ssr-content">\n${out.join('\n')}\n</main>`;
+}
+
+/** Put the crawler page inside #root (React replaces it on mount for anyone running JS). */
+export function injectBody(shell: string, body: string | null | undefined): string {
+  if (!body) return shell;
+  const marker = '<div id="root">';
+  const i = shell.indexOf(marker);
+  if (i === -1) return shell;
+  return shell.slice(0, i + marker.length) + '\n' + body + shell.slice(i + marker.length);
+}
+
+/** Organizer text made inert in markdown: no links, emphasis or escapes, one line. */
+function mdText(v: string | undefined): string {
+  return (v ?? '').replace(/[\\[\]()*_`<>#|!]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/**
+ * /llms.txt (EXOS_AI_DISCOVERY): a plain-text guide for AI assistants, with
+ * the upcoming public events (hidden ones left out) and how to query Exos.
+ */
+export async function buildLlmsTxt(
+  read: PublicReader, baseUrl: string, opts: { mcpUrl?: string | null; now?: Date } = {},
+): Promise<string> {
+  const now = opts.now ?? new Date();
+  const cutoff = now.getTime() - 6 * 3_600_000;
+  const lines = [
+    '# Exos',
+    '',
+    '> Exos is a ticketing platform for live events: concerts, parties, comedy and more. Prices on Exos are all-in:',
+    '> the price shown is the price paid, with no fees added at checkout.',
+    '',
+    'Ticket purchases always happen on the event page; an assistant should link the person there and never claim a',
+    'ticket was bought for them.',
+    '',
+    '## How to find events',
+    '',
+    `- Event pages: ${baseUrl}/bridge/event/<event id>`,
+    `- Sitemap of upcoming events: ${baseUrl}/bridge/sitemap.xml`,
+  ];
+  if (opts.mcpUrl) {
+    lines.push(`- MCP server (search events, prices, checkout links; read-only, no key needed): ${opts.mcpUrl}`);
+  }
+  // Upcoming only, soonest first, filtered and sorted by the database: the
+  // view also holds every past event, and an unordered capped read could drop
+  // the newest ones.
+  const range = { gte: { col: 'starts_at', val: new Date(cutoff).toISOString() }, order: 'starts_at' };
+  const cols = 'id,name,starts_at,occurs_at_local,venue_name,venue_address';
+  let events: Row[] = [];
+  try {
+    events = await read('exos_public_events', cols + ',noindex', null, 500, range);
+  } catch {
+    try { events = await read('exos_public_events', cols, null, 500, range); } catch { events = []; }
+  }
+  const upcoming = events
+    .filter((e) => e.noindex !== true && str(e.name))
+    .filter((e) => { const t = typeof e.starts_at === 'string' ? parseInstant(e.starts_at) : NaN; return Number.isNaN(t) || t >= cutoff; })
+    .sort((a, b) => String(a.starts_at ?? '').localeCompare(String(b.starts_at ?? '')))
+    .slice(0, 200);
+  if (upcoming.length) {
+    lines.push('', '## Upcoming events', '');
+    for (const e of upcoming) {
+      const addr = e.venue_address && typeof e.venue_address === 'object' ? (e.venue_address as Row) : {};
+      const bits = [dateLabel(str(e.starts_at), str(e.occurs_at_local)), mdText(str(e.venue_name)), mdText(str(addr.city))]
+        .filter(Boolean).join(' · ');
+      lines.push(`- [${mdText(String(e.name))}](${baseUrl}/bridge/event/${encodeURIComponent(String(e.id))})${bits ? `: ${bits}` : ''}`);
+    }
+  }
+  return lines.join('\n') + '\n';
 }
 
 /**
@@ -310,7 +536,8 @@ export async function buildSitemap(read: PublicReader, baseUrl: string, now: Dat
   const cutoff = now.getTime() - 86_400_000;
   const ts = (v: unknown) => (typeof v === 'string' && v ? parseInstant(v) : NaN);
   const urls: string[] = [];
-  for (const ev of await read('exos_public_events', 'id,starts_at,ends_at', null, 5000)) {
+  for (const ev of await readWithFallback(read, 'id,starts_at,ends_at', ',noindex', null, 5000)) {
+    if (ev.noindex === true) continue;
     const end = ts(ev.ends_at);
     const when = Number.isNaN(end) ? ts(ev.starts_at) : end;
     if (!Number.isNaN(when) && when < cutoff) continue;

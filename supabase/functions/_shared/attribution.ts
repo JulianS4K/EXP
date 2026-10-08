@@ -9,6 +9,8 @@
 // are length-capped and stripped to a safe character set before they reach
 // dashboards and CSV exports.
 
+import { type AiAssistant, sanitizeAiAssistant } from "./aiSources.ts";
+
 export interface Attribution {
   promoter?: string;
   utm_source?: string;
@@ -19,6 +21,8 @@ export interface Attribution {
   cart_origin?: "facebook" | "instagram" | "meta_shops";
   /** A fan's referral code (?ref=, mig 20260924234500). */
   ref?: string;
+  /** The AI assistant the buyer came from (referrer on landing; _shared/aiSources.ts). */
+  ai_ref?: AiAssistant;
 }
 
 const PROMOTER_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -57,6 +61,8 @@ export function readAttribution(get: (key: string) => unknown): Attribution {
   if (typeof origin === "string" && CART_ORIGINS.has(origin)) out.cart_origin = origin as Attribution["cart_origin"];
   const ref = get("ref");
   if (typeof ref === "string" && REF_RE.test(ref)) out.ref = ref;
+  const ai = sanitizeAiAssistant(get("ai_ref"));
+  if (ai) out.ai_ref = ai;
   return out;
 }
 

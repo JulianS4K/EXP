@@ -8,6 +8,7 @@
 // First touch wins: a later untagged visit to the same event doesn't erase it.
 
 import { readAttribution, type Attribution, isEmptyAttribution } from '../../supabase/functions/_shared/attribution.ts';
+import { aiFromReferrer } from '../../supabase/functions/_shared/aiSources.ts';
 
 export type { Attribution };
 export { readAttribution, isEmptyAttribution };
@@ -20,9 +21,16 @@ export function attributionFromSearch(search: string): Attribution {
 }
 
 // Remember this visit's attribution for the event (first touch wins) and
-// return whatever applies now.
-export function captureAttribution(eventId: string, search: string): Attribution {
+// return whatever applies now. A visit referred by an AI assistant (ChatGPT,
+// Perplexity, Claude…) also records which one; only its name is kept.
+export function captureAttribution(
+  eventId: string,
+  search: string,
+  referrer: string = typeof document !== 'undefined' ? document.referrer : '',
+): Attribution {
   const fresh = attributionFromSearch(search);
+  const ai = aiFromReferrer(referrer);
+  if (ai && !fresh.ai_ref) fresh.ai_ref = ai;
   let stored: Attribution = {};
   try {
     const raw = sessionStorage.getItem(KEY(eventId));
@@ -37,12 +45,14 @@ export function captureAttribution(eventId: string, search: string): Attribution
   return fresh;
 }
 
-// Set attribution params on a URL, replacing any it already has.
+// Set attribution params on a URL, replacing any it already has. The AI
+// referrer stays with this visit: a link shared on to a friend shouldn't
+// count the friend's purchase as coming from an assistant.
 export function withAttribution(url: string, attr: Attribution): string {
   let u: URL;
   try { u = new URL(url); } catch { return url; }
   for (const [k, v] of Object.entries(attr)) {
-    if (v) u.searchParams.set(k, v);
+    if (v && k !== 'ai_ref') u.searchParams.set(k, v);
   }
   return u.toString();
 }
