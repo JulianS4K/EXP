@@ -31,7 +31,9 @@
 5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
 7. Ship a new `/bridge` bundle to Terminal-2 (#25, #26, and #28 once merged).
-8. Review / merge EXP #28 (online and hybrid events).
+8. Review / merge EXP #28 (online and hybrid events + AI discovery, which stays off until launch).
+9. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, redeploy `exos-checkout`, decide the training-crawler
+   policy (allow all today).
 
 ## Next to build (2026-10-06, pick order)
 
@@ -41,7 +43,11 @@
    `noindex`.
 3. **Group buy v1:** host pays, friends get claim links plus a pay-back link.
 4. **Money:** minimal double-entry journal; sales-tax report; order rows for free claims and comps.
-5. **Reachable by crawlers and AI:** `llms.txt`, prerendered event pages, FAQ structured data.
+5. ✅ **Reachable by crawlers and AI** (built 2026-10-08, **off until launch**: `EXOS_AI_DISCOVERY=on` on `exos-web`,
+   `docs/hosting.md` "AI discovery"): AI crawlers / fetchers treated as link crawlers, plain-HTML event pages for
+   crawlers, FAQ JSON-LD, `/llms.txt`. The Sources report's "AI assistant" grouping is on now (needs an
+   `exos-checkout` redeploy to keep `ai_ref`). Still open: training-crawler policy in robots.txt (operator), OAuth
+   for organizer MCP tools, agent checkout after Stripe.
 6. Rebuild-or-retire check for Terminal-2's `static/bridge` (CI check that it matches EXP main).
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)

@@ -383,9 +383,9 @@ await run('event report: Sources by UTM, promoter and ad platform, with CSV', as
   assert(await page.getByText('Ad click ids aren’t recorded').count() === 0, 'no old-schema note');
   const { text } = await download(page, () => page.getByRole('button', { name: /Sources CSV/ }).click());
   const lines = firstLines(text);
-  assert(lines[0] === 'utm_source,utm_medium,utm_campaign,promoter,ad_platform,orders,tickets,gross,refunded_orders,currency', 'header ' + lines[0]);
-  assert(lines.includes('instagram,paid,fall,,Meta,1,2,40.00,0,USD'), 'Instagram row: ' + lines.join(' | '));
-  assert(lines.includes(',,,dj-kay,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
+  assert(lines[0] === 'utm_source,utm_medium,utm_campaign,promoter,ad_platform,ai_assistant,orders,tickets,gross,refunded_orders,currency', 'header ' + lines[0]);
+  assert(lines.includes('instagram,paid,fall,,Meta,,1,2,40.00,0,USD'), 'Instagram row: ' + lines.join(' | '));
+  assert(lines.includes(',,,dj-kay,,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
 }, { signedIn: true, mock: reportMock });
 
 await run('event report: Money summary from the order money view', async (page, log) => {

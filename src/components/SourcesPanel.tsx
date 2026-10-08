@@ -65,6 +65,7 @@ const DIMENSIONS: { key: SourceDimension; label: string }[] = [
   { key: 'campaign', label: 'Campaign' },
   { key: 'promoter', label: 'Promoter' },
   { key: 'platform', label: 'Ad platform' },
+  { key: 'assistant', label: 'AI assistant' },
 ];
 
 export default function SourcesPanel({ event, canView }: { event: Event; canView: boolean }) {

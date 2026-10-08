@@ -32,6 +32,7 @@ browser ──► vibepass-storefront-test (Terminal-2, Python)
 | `/bridge/sitemap.xml` | Upcoming published events + organizer pages (10 min cache); 404 without Supabase env |
 | `/sitemap.xml` | 301 → `/bridge/sitemap.xml` |
 | `/robots.txt` | For direct visits to this host. Through the Render link, Terminal-2 serves its own |
+| `/llms.txt`, `/bridge/llms.txt` | Only with `EXOS_AI_DISCOVERY=on` (see below); a 404 until then |
 | `/healthz` | Liveness for Render |
 
 ## Cutover (operator steps)
@@ -61,6 +62,33 @@ and deploying are Render writes.
    should serve the new build, with the signed-in session intact.
 6. **Retire the copy.** Once it's stable, delete Terminal-2's `static/bridge/`
    in a follow-up PR.
+
+## AI discovery (off until launch)
+
+`EXOS_AI_DISCOVERY=on` on `exos-web` makes Exos readable by AI assistants and answer engines. **Leave it unset
+until Exos is live** (operator decision 2026-10-08); with it unset, nothing below happens and AI fetchers keep
+getting the plain app shell. Map of every AI source: the "Exos AI Reach Map" artifact.
+
+With it on:
+- **AI crawlers and fetchers count as link crawlers** (`supabase/functions/_shared/aiSources.ts`
+  `AI_AGENT_UA_TOKENS`: ChatGPT-User, OAI-SearchBot, GPTBot, Claude-User, Claude-SearchBot, ClaudeBot,
+  PerplexityBot, Perplexity-User, MistralAI-User, DuckAssistBot, Amazonbot, CCBot…), so they get the event tags
+  and JSON-LD that Google and Meta get today.
+- **Every crawler gets the event page as plain HTML** inside `#root` (`seo.ts` `eventBody`): summary, date, venue
+  or "Online", organizer, ages, description, lineup, ticket types with all-in prices and sold-out / sales-ended
+  state, the event link, FAQ, what to bring, refund policy and notes. React replaces it on mount for anyone
+  running JavaScript. Hidden (`noindex`) events never get it.
+- **FAQPage JSON-LD** from the organizer's FAQ (not on hidden events or promoter pages).
+- **`/llms.txt`**: what Exos is, that prices are all-in and purchases happen on the event page, the sitemap, the
+  MCP endpoint (from `VITE_SUPABASE_URL`), and up to 200 upcoming public events. Cached 10 minutes.
+
+Through the Render link this needs `EXOS_ORIGIN` set (Terminal-2's own `static/bridge/` fallback has none of it).
+Check after turning it on:
+`curl -A 'ChatGPT-User/1.0' https://<host>/bridge/event/<id> | grep ssr-content` and `curl https://<host>/llms.txt`.
+
+Not behind the switch: the Sources report's "AI assistant" grouping (organizers only). The SPA records which
+assistant referred a visit (`ai_ref`, the name only) and checkout keeps it once `exos-checkout` is redeployed with
+the shared attribution file.
 
 ## Error reporting (optional)
 

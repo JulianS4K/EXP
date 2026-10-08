@@ -6,7 +6,7 @@ import crypto from "crypto";
 import fs from "fs";
 import { securityHeaders } from "./src/lib/hosting/headers";
 import { isLinkCrawler } from "./src/lib/hosting/crawler";
-import { buildPreview, buildSitemap, inject, previewTarget, type PublicReader } from "./src/lib/hosting/seo";
+import { buildLlmsTxt, buildPreviewPage, buildSitemap, inject, injectBody, previewTarget, type PublicReader } from "./src/lib/hosting/seo";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,6 +39,10 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const HOST = process.env.HOST || "0.0.0.0";
   const isProd = process.env.NODE_ENV === "production";
+  // AI discovery (docs/hosting.md "AI discovery"): AI crawlers and fetchers
+  // treated as link crawlers, full event pages for crawlers, FAQ JSON-LD and
+  // /llms.txt. Off until launch: set EXOS_AI_DISCOVERY=on to turn it on.
+  const aiDiscovery = process.env.EXOS_AI_DISCOVERY === "on";
   const corsAllowlist = parseAllowlist();
 
   // If the SPA and API are on the same origin (default for `npm start`),
@@ -201,6 +205,29 @@ async function startServer() {
   });
   app.get('/sitemap.xml', (_req, res) => res.redirect(301, '/bridge/sitemap.xml'));
 
+  // -- llms.txt (AI discovery only; a plain 404 until launch) --------------
+  if (aiDiscovery) {
+    let llmsCache: { generatedAt: number; base: string; text: string } | null = null;
+    const sendLlms = async (req: Request, res: Response) => {
+      try {
+        const base = publicBase(req);
+        if (!llmsCache || llmsCache.base !== base || Date.now() - llmsCache.generatedAt >= SITEMAP_TTL_MS) {
+          const read = await getReader();
+          if (!read) return res.status(404).type('text/plain').send('not found');
+          const sb = (process.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
+          const mcpUrl = /^https:\/\//.test(sb) ? `${sb}/functions/v1/exos-mcp` : null;
+          llmsCache = { generatedAt: Date.now(), base, text: await buildLlmsTxt(read, base, { mcpUrl }) };
+        }
+        return res.type('text/plain; charset=utf-8').send(llmsCache.text);
+      } catch (err) {
+        console.error(JSON.stringify({ lvl: 'error', msg: 'llms.txt failed', error: String(err) }));
+        return res.status(503).type('text/plain').send('unavailable');
+      }
+    };
+    app.get('/llms.txt', sendLlms);
+    app.get('/bridge/llms.txt', sendLlms);
+  }
+
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -252,14 +279,14 @@ async function startServer() {
       // Link-unfurl bots don't run JS: give them the event / org preview
       // server-side. Humans get the plain shell. A failed preview must never
       // break the page.
-      if (isLinkCrawler(req.get("user-agent"))) {
+      if (isLinkCrawler(req.get("user-agent"), { ai: aiDiscovery })) {
         try {
           const page = req.path.replace(/^\/bridge\//, "");
           const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?") + 1) : "";
           const target = previewTarget(page, query);
           const read = target ? await getReader() : null;
-          const tags = target && read ? await buildPreview(read, target, publicBase(req)) : null;
-          if (tags) return res.type("html").send(inject(getShell(), tags));
+          const preview = target && read ? await buildPreviewPage(read, target, publicBase(req), { content: aiDiscovery }) : null;
+          if (preview) return res.type("html").send(injectBody(inject(getShell(), preview.tags), preview.body));
         } catch (err) {
           console.error(JSON.stringify({ lvl: "error", msg: "link preview failed", path: req.path, error: String(err) }));
         }

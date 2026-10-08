@@ -1,7 +1,11 @@
 // Ported from Terminal-2 tests/test_exos_link_preview.py (same cases, same expectations).
 import { describe, it, expect } from 'vitest';
 import {
+  buildLlmsTxt,
   buildPreview,
+  buildPreviewPage,
+  faqJsonLd,
+  injectBody,
   buildSitemap,
   dateLabel,
   effectivePrice,
@@ -276,6 +280,104 @@ describe('online events + noindex (mig 20261005090000)', () => {
     };
     expect(await buildPreview(old, ['event', EV], base)).toContain('OfflineEventAttendanceMode');
     expect(await buildSitemap(old, base)).toContain(`/bridge/event/${EV}`);
+  });
+});
+
+describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
+  const base = 'https://x.example';
+  const UA_GPT = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot';
+  const full = () => fake({
+    exos_public_events: [{
+      id: EV, org_id: 'o1', name: 'Fall Party', starts_at: '2026-10-03T02:00:00Z', venue_name: 'Elsewhere', currency: 'USD',
+      venue_address: { city: 'Brooklyn' }, description: 'Four rooms <b>of</b> house.', summary: 'House till late.',
+      lineup: [{ name: 'DJ Kay', role: 'headliner', set_at: '23:30' }], faq: [{ q: 'Coat check?', a: 'Yes, $3.' }],
+      min_age: 21, refund_policy: 'until_7d', what_to_bring: 'Photo ID', policy_notes: 'No re-entry.', format: 'hybrid', noindex: false,
+    }],
+    exos_public_tiers: [
+      { id: TIER, event_id: EV, name: 'GA', price: 25, exclusive_tax_percent: 0, capacity: 100, sold: 10, sort_order: 0 },
+      { id: 'vip', event_id: EV, name: 'VIP', price: 60, exclusive_tax_percent: 0, capacity: 5, sold: 5, sort_order: 1 },
+    ],
+    exos_public_orgs: [{ id: 'o1', name: 'Brooklyn Nights', slug: 'bk-nights' }],
+  });
+
+  it('leaves AI fetchers out of the crawler list unless asked', () => {
+    expect(isLinkCrawler(UA_GPT)).toBe(false);
+    expect(isLinkCrawler(UA_GPT, { ai: true })).toBe(true);
+    expect(isLinkCrawler('Mozilla/5.0 (compatible; Googlebot/2.1)', { ai: false })).toBe(true);
+  });
+
+  it('adds no body without content mode', async () => {
+    const page = await buildPreviewPage(full(), ['event', EV], base);
+    expect(page?.body).toBeNull();
+    expect(page?.tags).not.toContain('FAQPage');
+  });
+
+  it('renders the event page as escaped HTML with tickets, FAQ and policies', async () => {
+    const page = (await buildPreviewPage(full(), ['event', EV], base, { content: true }))!;
+    const b = page.body!;
+    expect(b).toContain('<h1>Fall Party</h1>');
+    expect(b).toContain('House till late.');
+    expect(b).toContain('Four rooms &lt;b&gt;of&lt;/b&gt; house.');
+    expect(b).toContain('Elsewhere, Brooklyn · also online');
+    expect(b).toContain('Ages:</strong> 21+');
+    expect(b).toContain('DJ Kay (headliner, 23:30)');
+    expect(b).toContain('GA: $25 (on sale)');
+    expect(b).toContain('VIP: $60 (sold out)');
+    expect(b).toContain(`href="${base}/bridge/event/${EV}"`);
+    expect(b).toContain('<dt>Coat check?</dt><dd>Yes, $3.</dd>');
+    expect(b).toContain('What to bring:</strong> Photo ID');
+    expect(b).toContain('Refunds available up to 7 days before the event.');
+    expect(page.tags).toContain('"@type":"FAQPage"');
+  });
+
+  it('keeps hidden events bare', async () => {
+    const hidden = fake({ exos_public_events: [{ id: EV, name: 'Private', noindex: true, faq: [{ q: 'q', a: 'a' }] }] });
+    const page = (await buildPreviewPage(hidden, ['event', EV], base, { content: true }))!;
+    expect(page.body).toBeNull();
+    expect(page.tags).not.toContain('FAQPage');
+  });
+
+  it('falls back to the plain preview on an older schema', async () => {
+    const old: PublicReader = async (table, cols, filter, limit) => {
+      if (/summary|noindex|capacity/.test(cols)) throw new Error('column does not exist');
+      return fake({ exos_public_events: [{ id: EV, name: 'Old DB' }], exos_public_tiers: [{ event_id: EV, price: 10 }] })(table, cols, filter, limit);
+    };
+    const page = (await buildPreviewPage(old, ['event', EV], base, { content: true }))!;
+    expect(page.tags).toContain('Old DB');
+    expect(page.body).toContain('<h1>Old DB</h1>');
+  });
+
+  it('FAQ JSON-LD skips incomplete entries and escapes <', () => {
+    expect(faqJsonLd([{ q: 'only a question' }])).toBeNull();
+    expect(faqJsonLd(null)).toBeNull();
+    expect(faqJsonLd([{ q: '</script>', a: 'x' }])).not.toContain('</script>"');
+  });
+
+  it('puts the body inside #root', () => {
+    expect(injectBody('<body><div id="root"><div id="boot"></div></div></body>', '<main>x</main>'))
+      .toBe('<body><div id="root">\n<main>x</main><div id="boot"></div></div></body>');
+    expect(injectBody('<body></body>', '<main>x</main>')).toBe('<body></body>');
+    expect(injectBody('<div id="root"></div>', null)).toBe('<div id="root"></div>');
+  });
+
+  it('builds llms.txt with upcoming public events and the MCP endpoint', async () => {
+    const now = new Date(Date.UTC(2026, 9, 1));
+    const txt = await buildLlmsTxt(fake({
+      exos_public_events: [
+        { id: 'e-soon', name: 'Fall Party', starts_at: '2026-10-03T02:00:00Z', venue_name: 'Elsewhere', venue_address: { city: 'Brooklyn' } },
+        { id: 'e-hidden', name: 'Private', starts_at: '2026-10-04T02:00:00Z', noindex: true },
+        { id: 'e-past', name: 'Old', starts_at: '2026-09-01T02:00:00Z' },
+        { id: 'e-weird', name: 'A [b]\nc', starts_at: '2026-10-05T02:00:00Z' },
+      ],
+    }), base, { mcpUrl: 'https://p.supabase.co/functions/v1/exos-mcp', now });
+    expect(txt.startsWith('# Exos\n')).toBe(true);
+    expect(txt).toContain('all-in');
+    expect(txt).toContain('MCP server (search events, prices, checkout links; read-only, no key needed): https://p.supabase.co/functions/v1/exos-mcp');
+    expect(txt).toContain(`- [Fall Party](${base}/bridge/event/e-soon): Sat Oct 3 · 2 AM · Elsewhere · Brooklyn`);
+    expect(txt).not.toContain('e-hidden');
+    expect(txt).not.toContain('e-past');
+    expect(txt).toContain('[A b c]');
+    expect(await buildLlmsTxt(fake({}), base)).not.toContain('Upcoming events');
   });
 });
 

@@ -3,6 +3,7 @@ import {
   DIRECT_LABEL,
   SOURCES_CSV_HEADER,
   adPlatformOf,
+  aiAssistantOf,
   sourceKeyOf,
   sourcesCsvRows,
   summarizeSources,
@@ -45,7 +46,7 @@ describe('sourceKeyOf', () => {
       promoter_id: 'dj-kay',
       attribution: { utm_source: ' Instagram ', utm_medium: 'Paid_Social', utm_campaign: 'Launch', promoter: 'other' },
       ad_ids: { fbclid: 'x' },
-    }))).toEqual({ source: 'instagram', medium: 'paid_social', campaign: 'launch', promoter: 'dj-kay', platform: 'Meta' });
+    }))).toEqual({ source: 'instagram', medium: 'paid_social', campaign: 'launch', promoter: 'dj-kay', platform: 'Meta', assistant: null });
     expect(sourceKeyOf(row({ attribution: { promoter: 'p1' } })).promoter).toBe('p1');
   });
 });
@@ -104,7 +105,34 @@ describe('summarizeSources', () => {
     const s = summarizeSources(sessions);
     const rows = sourcesCsvRows(s);
     expect(rows.every((r) => r.length === SOURCES_CSV_HEADER.length)).toBe(true);
-    expect(rows[1]).toEqual(['instagram', 'paid_social', 'launch', '', 'Meta', 2, 3, '75.00', 1, 'USD']);
-    expect(rows.at(-1)).toEqual([DIRECT_LABEL, '', '', '', '', 2, 2, '20.00', 0, 'USD']);
+    expect(rows[1]).toEqual(['instagram', 'paid_social', 'launch', '', 'Meta', '', 2, 3, '75.00', 1, 'USD']);
+    expect(rows.at(-1)).toEqual([DIRECT_LABEL, '', '', '', '', '', 2, 2, '20.00', 0, 'USD']);
   });
 });
+
+describe('AI assistants as a source', () => {
+  it('reads the referrer name first, then a utm_source an assistant uses', () => {
+    expect(aiAssistantOf({ ai_ref: 'Perplexity', utm_source: 'chatgpt.com' })).toBe('Perplexity');
+    expect(aiAssistantOf({ utm_source: 'chatgpt.com' })).toBe('ChatGPT');
+    expect(aiAssistantOf({ utm_source: 'ai_assistant' })).toBe('Exos MCP');
+    expect(aiAssistantOf({ ai_ref: 'Evil<script>' })).toBeNull();
+    expect(aiAssistantOf({ utm_source: 'instagram' })).toBeNull();
+    expect(aiAssistantOf(null)).toBeNull();
+  });
+  it('groups by assistant and labels the rest', () => {
+    const s = summarizeSources([
+      row({ attribution: { ai_ref: 'ChatGPT' }, amount_cents: 3000 }),
+      row({ attribution: { utm_source: 'chatgpt.com', utm_medium: 'referral' }, amount_cents: 2000 }),
+      row({ attribution: { ai_ref: 'Claude' }, amount_cents: 1000 }),
+      row({}),
+    ], 'assistant');
+    expect(s.rows.map((r) => [r.label, r.orders])).toEqual([
+      ['via ChatGPT', 2], ['via Claude', 1], ['Not from an AI assistant', 1],
+    ]);
+    expect(s.attributedOrders).toBe(3);
+    const all = summarizeSources([row({ attribution: { ai_ref: 'Claude' } })]);
+    expect(all.rows[0].label).toBe('via Claude');
+    expect(sourcesCsvRows(all)[0][5]).toBe('Claude');
+  });
+});
+
