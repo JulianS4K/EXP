@@ -127,6 +127,8 @@ export function buildRoster(rows: RosterRow[]): DoorRoster {
 
 /** Where incremental refreshes stand for one event, kept in memory only. */
 export interface RosterSync {
+  /** The event the base belongs to (a pull can finish after the page moved on). */
+  eventId: string;
   /** The server roster as last pulled (no local marks or queued scans). */
   base: DoorRoster;
   /** Server time (ms) read just before the last pull started. */
@@ -154,9 +156,9 @@ export type RosterPlan = { kind: 'full' } | { kind: 'delta'; since: number };
  *  re-entry lists changed. Pure. */
 export function planRosterRefresh(
   sync: RosterSync | null,
-  opts: { now: number; deltaSupported: boolean; lists: string; force?: boolean },
+  opts: { eventId: string; now: number; deltaSupported: boolean; lists: string; force?: boolean },
 ): RosterPlan {
-  if (opts.force || !opts.deltaSupported || !sync) return { kind: 'full' };
+  if (opts.force || !opts.deltaSupported || !sync || sync.eventId !== opts.eventId) return { kind: 'full' };
   if (opts.now - sync.fullAt >= ROSTER_FULL_EVERY_MS) return { kind: 'full' };
   if (opts.now - sync.cursor >= ROSTER_DELTA_MAX_AGE_MS) return { kind: 'full' };
   if (sync.lists !== opts.lists) return { kind: 'full' };

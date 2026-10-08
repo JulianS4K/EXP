@@ -28,6 +28,12 @@ export default function DoorSummaryPanel({ eventId, eventTitle }: { eventId: str
   const [copied, setCopied] = useState(false);
   const [tick, setTick] = useState(0);
 
+  // Another event: never show the last one's numbers while this one loads.
+  useEffect(() => {
+    setSummary(null);
+    setState('loading');
+  }, [eventId]);
+
   useEffect(() => {
     let alive = true;
     setState((s) => (s === 'ready' ? s : 'loading'));
@@ -95,6 +101,9 @@ export default function DoorSummaryPanel({ eventId, eventTitle }: { eventId: str
             Times in {tz.replace(/_/g, ' ')}
             {s.generatedAt ? ` · as of ${timeIn(s.generatedAt, tz)}` : ''}
           </p>
+          {state === 'error' && (
+            <p role="status" className="text-xs text-red-600 mt-1">Refresh failed; showing the last numbers.</p>
+          )}
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => setTick((t) => t + 1)} aria-label="Refresh the door summary"

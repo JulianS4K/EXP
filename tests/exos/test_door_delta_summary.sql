@@ -282,9 +282,24 @@ BEGIN
   ASSERT s->'conflicts' = '[{"reason":"voided","count":1}]'::jsonb, 'S4: conflicts';
   ASSERT s->'refused' = '{"total":3,"by_reason":[{"reason":"used","count":2},{"reason":"invalid-barcode","count":1}]}'::jsonb,
          'S4: refused ' || (s->'refused')::text;
-  ASSERT (s->>'inside_now')::int = 1, 'S4: inside now (re-entry list) ' || coalesce(s->>'inside_now', 'null');
+  ASSERT (s->>'inside_now')::int = 5, 'S4: inside now = everyone who came in ' || coalesce(s->>'inside_now', 'null');
   ASSERT position('d2hold' in s::text) = 0 AND position('Holly' in s::text) = 0, 'S4: no buyer data';
 END $$;
+
+-- S4a. Stepping out on a re-entry list takes them out of "inside now".
+SET LOCAL session_replication_role = replica;
+INSERT INTO public.exos_event_checkins(event_id,ticket_id,org_id,scanned_by,source,verification,scanned_at,list_id,direction,gate)
+VALUES ('d2000000-0000-0000-0000-0000000000e3', pg_temp.tk('e0001'), 'd2000000-0000-0000-0000-000000000001',
+        'd2000000-0000-0000-0000-0000000000a3', 'camera', 'verified', '2026-10-03 01:00+00',
+        'd2000000-0000-0000-0000-00000000aa32', 'exit', 'Smoking deck');
+SET LOCAL session_replication_role = origin;
+DO $$
+BEGIN
+  PERFORM pg_temp.act('d2000000-0000-0000-0000-0000000000a1');
+  ASSERT (pg_temp.sum()->>'inside_now')::int = 4, 'S4a: one stepped out';
+  ASSERT (pg_temp.sum()->'tickets'->>'checked_in')::int = 4, 'S4a: still checked in';
+END $$;
+DELETE FROM public.exos_event_checkins WHERE ticket_id = pg_temp.tk('e0001') AND direction = 'exit';
 
 -- S4b. No re-entry list: inside_now is null; an empty night is all zeros.
 DO $$

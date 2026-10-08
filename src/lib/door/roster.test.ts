@@ -283,27 +283,29 @@ describe('incremental refresh (roster delta)', () => {
   });
   const T0 = 1_800_000_000_000;
   const sync = (over: Partial<RosterSync> = {}): RosterSync => ({
-    base: buildRoster([rowOf('a'), rowOf('b')]), cursor: T0, fullAt: T0, lists: '', ...over,
+    eventId: 'ev1', base: buildRoster([rowOf('a'), rowOf('b')]), cursor: T0, fullAt: T0, lists: '', ...over,
   });
 
   it('plans a delta from the cursor minus the overlap', () => {
-    expect(planRosterRefresh(sync(), { now: T0 + 60_000, deltaSupported: true, lists: '' })).toEqual({
+    expect(planRosterRefresh(sync(), { now: T0 + 60_000, eventId: 'ev1', deltaSupported: true, lists: '' })).toEqual({
       kind: 'delta', since: T0 - ROSTER_DELTA_OVERLAP_MS,
     });
   });
 
   it('plans a full pull when it must', () => {
     const now = T0 + 60_000;
-    expect(planRosterRefresh(null, { now, deltaSupported: true, lists: '' }).kind).toBe('full');
-    expect(planRosterRefresh(sync(), { now, deltaSupported: false, lists: '' }).kind).toBe('full');
-    expect(planRosterRefresh(sync(), { now, deltaSupported: true, lists: '', force: true }).kind).toBe('full');
-    expect(planRosterRefresh(sync(), { now: T0 + ROSTER_FULL_EVERY_MS, deltaSupported: true, lists: '' }).kind).toBe('full');
-    expect(planRosterRefresh(sync(), { now, deltaSupported: true, lists: 'l1:1' }).kind).toBe('full');
+    expect(planRosterRefresh(null, { now, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: false, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: true, lists: '', force: true }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now: T0 + ROSTER_FULL_EVERY_MS, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev1', deltaSupported: true, lists: 'l1:1' }).kind).toBe('full');
+    // A pull for another event finished after the page moved on.
+    expect(planRosterRefresh(sync(), { now, eventId: 'ev2', deltaSupported: true, lists: '' }).kind).toBe('full');
     // A delta keeps the full-pull clock: ten minutes after the last FULL pull.
     expect(
-      planRosterRefresh(sync({ cursor: T0 + 9 * 60_000 }), { now: T0 + ROSTER_FULL_EVERY_MS + 1, deltaSupported: true, lists: '' }).kind,
+      planRosterRefresh(sync({ cursor: T0 + 9 * 60_000 }), { now: T0 + ROSTER_FULL_EVERY_MS + 1, eventId: 'ev1', deltaSupported: true, lists: '' }).kind,
     ).toBe('full');
-    expect(planRosterRefresh(sync({ fullAt: T0 + 1e10 }), { now: T0 + 25 * 3600_000, deltaSupported: true, lists: '' }).kind).toBe('full');
+    expect(planRosterRefresh(sync({ fullAt: T0 + 1e10 }), { now: T0 + 25 * 3600_000, eventId: 'ev1', deltaSupported: true, lists: '' }).kind).toBe('full');
   });
 
   it('lists signature tracks re-entry switches, not names or order', () => {

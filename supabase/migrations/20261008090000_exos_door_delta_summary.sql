@@ -33,7 +33,8 @@
 --    zone, by ticket type, by list / gate, by staff member (entries and
 --    refused scans), manual overrides by reason, offline conflicts by
 --    reason, refused scans by reason, and "inside now" when the event has a
---    re-entry list. No buyer names or emails; staff appear by display name
+--    re-entry list (everyone who came in, minus those whose latest scan on
+--    a re-entry list was an exit). No buyer names or emails; staff appear by display name
 --    or masked email. Owner / manager / finance of the org, door staff
 --    assigned to the event, or a platform admin.
 --
@@ -201,12 +202,14 @@ BEGIN
       LEFT JOIN public.exos_profiles p ON p.id = u.uid
   ),
   inside AS (
-    -- Last scan per ticket on re-entry lists; "inside" = it was an entry.
-    SELECT count(*) AS n FROM (
-      SELECT DISTINCT ON (c.ticket_id) c.direction
-        FROM ci c JOIN public.exos_checkin_lists l ON l.id = c.list_id AND l.allow_reentry
-       ORDER BY c.ticket_id, c.at DESC, c.scanned_at DESC) x
-     WHERE x.direction = 'entry'
+    -- Venue-wide: every ticket that came in, minus those whose latest scan
+    -- on a re-entry list was an exit (stepped out and not back yet).
+    SELECT (SELECT count(*) FROM first_ent)
+         - (SELECT count(*) FROM (
+              SELECT DISTINCT ON (c.ticket_id) c.direction
+                FROM ci c JOIN public.exos_checkin_lists l ON l.id = c.list_id AND l.allow_reentry
+               ORDER BY c.ticket_id, c.at DESC, c.scanned_at DESC) x
+             WHERE x.direction = 'exit') AS n
   )
   SELECT jsonb_build_object(
     'event', jsonb_build_object(

@@ -251,6 +251,8 @@ export default function OrganizerCheckIn() {
   // its cursor. false once the delta RPC turns out to be missing here.
   const rosterSyncRef = useRef<RosterSync | null>(null);
   const deltaOkRef = useRef(true);
+  const eventIdRef = useRef(eventId);
+  eventIdRef.current = eventId;
   useEffect(() => {
     rosterSyncRef.current = null;
   }, [eventId]);
@@ -707,6 +709,7 @@ export default function OrganizerCheckIn() {
       const lists = listsSignature(event?.checkinLists);
       const prev = rosterSyncRef.current;
       const plan = planRosterRefresh(prev, {
+        eventId,
         now: startedAt,
         deltaSupported: deltaOkRef.current && cursor !== null,
         lists,
@@ -729,9 +732,13 @@ export default function OrganizerCheckIn() {
         // per-ticket barcode_secret (staff RLS) so the offline HMAC check works.
         roster = buildRoster(await listEventTicketsForRegistry(eventId));
       }
+      // The page moved to another event while this ran: drop the result.
+      if (eventIdRef.current !== eventId) return null;
       const count = Object.keys(roster).length;
       rosterSyncRef.current =
-        cursor === null ? null : { base: roster, cursor, fullAt: full ? startedAt : (prev?.fullAt ?? startedAt), lists };
+        cursor === null
+          ? null
+          : { eventId, base: roster, cursor, fullAt: full ? startedAt : (prev?.fullAt ?? startedAt), lists };
       // What this device changed while the download ran stays on top of it.
       marksRef.current = marksSince(marksRef.current, startedAt);
       saveMarks(safeLocalStorage(), eventId, marksRef.current, Date.now());
