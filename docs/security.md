@@ -41,8 +41,8 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 
 | Function | Verdict | Why |
 |---|---|---|
-| `exos_addon_exclusive_tax_percent` | Revoked | Tax rate for any add-on id (drafts, hidden). Only definer view `exos_public_addons` needs it, and that view runs as its owner |
-| `exos_tier_exclusive_tax_percent` | Revoked | Same, for any tier; used by `exos_public_tiers` (definer view) and definer functions |
+| `exos_addon_exclusive_tax_percent` | OK (anon + authenticated, mig 20261008100000) | Tax rate for any add-on id (drafts, hidden). Revoked by 20260929080000 and put back: Postgres checks EXECUTE on a function in a view against the reader even when the view runs as its owner, so `exos_public_addons` failed for every visitor. A tax rate, not buyer or sales data |
+| `exos_tier_exclusive_tax_percent` | OK (anon + authenticated, mig 20261008100000) | Same, for any tier; `exos_public_tiers` needs it for every reader (the event page showed no tickets from 2026-09-29 until the grant was restored on 2026-10-08). **Any function a public view calls must be executable by anon and authenticated** |
 | `exos_tier_is_table` | Revoked | Internal; answered for any tier id |
 | `exos_tier_party_size` | Revoked | Internal; only definer functions (and `exos_assert_quota`, called by definer functions) use it |
 | `exos_event_is_published` | OK | Boolean only; backs the anon tier-read policy `exos_tiers_public_read`, so anon must keep it |

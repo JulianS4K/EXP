@@ -69,7 +69,6 @@ DO $$
 DECLARE f text; n int;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
-    'public.exos_addon_exclusive_tax_percent(uuid)', 'public.exos_tier_exclusive_tax_percent(uuid)',
     'public.exos_tier_is_table(uuid)', 'public.exos_tier_party_size(uuid)',
     'public.exos_channel_allocated(uuid)', 'public.exos_event_house_available(uuid)',
     'public.exos_redeem_discount_code(uuid,text)'
@@ -95,6 +94,14 @@ DECLARE n int; refused boolean := false;
 BEGIN
   SELECT count(*) INTO n FROM public.exos_public_tiers WHERE event_id = 'a8000000-0000-0000-0000-0000000000e1';
   ASSERT n = 1, 'H2: anon reads the public tier view, got ' || n;
+  -- Every column, as the event page does (select *): a count never evaluates
+  -- exclusive_tax_percent, which is how a revoked helper slipped through
+  -- (mig 20261008100000).
+  SELECT count(*) INTO n FROM (SELECT * FROM public.exos_public_tiers
+                                WHERE event_id = 'a8000000-0000-0000-0000-0000000000e1' OFFSET 0) x
+   WHERE x.exclusive_tax_percent IS NOT NULL;
+  ASSERT n = 1, 'H2: anon reads exclusive_tax_percent on the tier view, got ' || n;
+  PERFORM * FROM (SELECT * FROM public.exos_public_addons OFFSET 0) y WHERE y.exclusive_tax_percent IS NOT NULL;
   BEGIN
     PERFORM public.exos_tier_party_size('a8000000-0000-0000-0000-0000000000d1');
   EXCEPTION WHEN insufficient_privilege THEN refused := true;
@@ -117,6 +124,8 @@ BEGIN
        -- public by design
        'exos_event_is_published', 'exos_public_promoter', 'exos_public_table_tiers',
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
+       -- the public tier / add-on views call these as the reader (mig 20261008100000)
+       'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',
