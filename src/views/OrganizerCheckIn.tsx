@@ -1735,6 +1735,7 @@ export default function OrganizerCheckIn() {
           onSync={() => void downloadDoorExtras()}
           syncing={extrasSyncing}
           incomingCode={guestCode}
+          onIncomingHandled={() => setGuestCode(null)}
         />
       </div>
       ) : (

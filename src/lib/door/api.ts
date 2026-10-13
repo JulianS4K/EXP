@@ -71,3 +71,17 @@ export async function importGuests(listId: string, rows: ImportRow[]): Promise<I
     errors: Array.isArray(d.errors) ? (d.errors as ImportResult['errors']) : [],
   };
 }
+
+/** The event's guest list with this exact name, if any (so a re-import goes
+ *  into the same list instead of a new one). */
+export async function findGuestListId(eventId: string, name: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('exos_guest_lists')
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('name', name)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0]?.id as string | undefined) ?? null;
+}

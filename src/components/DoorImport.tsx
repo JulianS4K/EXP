@@ -15,7 +15,7 @@ import {
   type ColumnMap,
   type ImportField,
 } from '../lib/door/imports';
-import { importGuests, type ImportResult } from '../lib/door/api';
+import { findGuestListId, importGuests, type ImportResult } from '../lib/door/api';
 import { upsertGuestList } from '../lib/guestListsApi';
 
 const FIELDS: Array<{ id: ImportField; label: string }> = [
@@ -69,7 +69,10 @@ export default function DoorImport({ eventId, onImported }: { eventId: string; o
     setBusy(true);
     setError(null);
     try {
-      const listId = await upsertGuestList(eventId, { name: `${source} import`.slice(0, 80), maxPlusOnes: 5 });
+      // Same list for the same platform: a second import adds to it.
+      const listName = `${source} import`.slice(0, 80);
+      const listId = (await findGuestListId(eventId, listName))
+        ?? (await upsertGuestList(eventId, { name: listName, maxPlusOnes: 5 }));
       const r = await importGuests(listId, plan.rows);
       setResult(r);
       onImported?.(r);
@@ -146,7 +149,10 @@ export default function DoorImport({ eventId, onImported }: { eventId: string; o
                 {map.code === undefined ? ' (no code column: check-in by name only)' : ''}.
               </p>
               {plan.noName > 0 && <p>{plan.noName} row(s) have no name and are skipped.</p>}
-              {plan.repeatedCodes > 0 && <p>{plan.repeatedCodes} row(s) repeat a code and are kept once.</p>}
+              {plan.repeatedCodes > 0 && <p>{plan.repeatedCodes} row(s) repeat an earlier row and are kept once.</p>}
+              {plan.sharedCodes > 0 && (
+                <p>{plan.sharedCodes} attendee(s) share a code with someone else (an order number?): imported for check-in by name.</p>
+              )}
               {plan.overLimit > 0 && <p>{plan.overLimit} row(s) are past the 5,000 limit: import them in a second file.</p>}
               {plan.rows.slice(0, 3).map((r, i) => (
                 <p key={i} className="font-mono text-[11px] text-slate-500 truncate">

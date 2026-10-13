@@ -92,6 +92,17 @@ BEGIN
   -- A code is unique per event, not per list.
   r := pg_temp.imp('small', jsonb_build_array(jsonb_build_object('name', 'Ada again', 'code', '123456789001')));
   ASSERT r->>'duplicates' = '1' AND r->>'inserted' = '0', 'I2: same code on another list of the event';
+  -- Without a code, name + email is checked across the event too (a second
+  -- import into another list adds nobody), and a malformed email (stored as
+  -- NULL) still matches its first import.
+  r := pg_temp.imp('small', jsonb_build_array(
+    jsonb_build_object('name', 'bo diddley', 'email', 'bo@x.com'),
+    jsonb_build_object('name', 'Bad Email', 'email', 'not-an-email', 'code', 'eb-77')));
+  ASSERT r->>'duplicates' = '2' AND r->>'inserted' = '0', 'I2: event-wide name + email ' || r::text;
+  r := pg_temp.imp('list', jsonb_build_array(jsonb_build_object('name', 'Dee Dee', 'email', 'nope')));
+  ASSERT r->>'inserted' = '1', 'I2: first Dee Dee';
+  r := pg_temp.imp('list', jsonb_build_array(jsonb_build_object('name', 'Dee Dee', 'email', 'nope')));
+  ASSERT r->>'duplicates' = '1' AND r->>'inserted' = '0', 'I2: a bad email re-import is a duplicate ' || r::text;
 END $$;
 
 -- I3. Who may import.

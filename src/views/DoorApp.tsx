@@ -63,6 +63,9 @@ export default function DoorApp() {
   const canManage = activeRole === 'owner' || activeRole === 'manager';
 
   useEffect(() => {
+    // Another organization: never show the last one's events meanwhile.
+    setEvents(null);
+    setOpenImport(null);
     if (!orgId) return undefined;
     let alive = true;
     setLoadError(false);
@@ -80,6 +83,7 @@ export default function DoorApp() {
       alive = false;
     };
   }, [orgId, tick]);
+  // A refresh after creating an event keeps the list on screen.
 
   const create = async () => {
     if (!orgId || !form.name.trim() || !form.date) return;

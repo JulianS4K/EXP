@@ -127,8 +127,11 @@ export interface ImportPlan {
   rows: ImportRow[];
   /** Data rows with no name (skipped before upload). */
   noName: number;
-  /** Rows sharing a code with an earlier row in the file (kept once). */
+  /** Rows repeating an earlier row (same code, same name): kept once. */
   repeatedCodes: number;
+  /** Different people sharing one code (e.g. an order number): kept,
+   *  without the code, for check-in by name. */
+  sharedCodes: number;
   /** Rows past MAX_IMPORT_ROWS. */
   overLimit: number;
 }
@@ -136,8 +139,9 @@ export interface ImportPlan {
 /** Turn parsed CSV rows (header first) into import rows. */
 export function planImport(table: string[][], map: ColumnMap, source: string): ImportPlan {
   const out: ImportRow[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   let noName = 0;
+  let sharedCodes = 0;
   let repeatedCodes = 0;
   let overLimit = 0;
   const cell = (r: string[], f: ImportField) => {
@@ -150,13 +154,20 @@ export function planImport(table: string[][], map: ColumnMap, source: string): I
       noName++;
       continue;
     }
-    const code = normalizeDoorCode(cell(r, 'code')) ?? undefined;
+    let code = normalizeDoorCode(cell(r, 'code')) ?? undefined;
     if (code) {
-      if (seen.has(code)) {
-        repeatedCodes++;
-        continue;
-      }
-      seen.add(code);
+      const first = seen.get(code);
+      if (first !== undefined) {
+        // The same row twice: skip it. A different person sharing the code
+        // (an order number used as the code, several tickets per order):
+        // keep them, checked in by name.
+        if (first === name.toLowerCase()) {
+          repeatedCodes++;
+          continue;
+        }
+        sharedCodes++;
+        code = undefined;
+      } else seen.set(code, name.toLowerCase());
     }
     if (out.length >= MAX_IMPORT_ROWS) {
       overLimit++;
@@ -174,7 +185,7 @@ export function planImport(table: string[][], map: ColumnMap, source: string): I
     if (note) row.note = note.slice(0, 200);
     out.push(row);
   }
-  return { rows: out, noName, repeatedCodes, overLimit };
+  return { rows: out, noName, repeatedCodes, sharedCodes, overLimit };
 }
 
 /** Candidate codes in what the camera read: the whole text, and for a link
@@ -221,7 +232,7 @@ export function matchImported<T>(scanned: string, index: Map<string, T>): T | nu
   return null;
 }
 
-/** Exos's own codes (signed T- / wallet W- / a bare ticket uuid): never
- *  looked up among imported codes. */
-export const isExosCode = (scanned: string): boolean =>
-  /^(T-|W-)/.test(scanned.trim()) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(scanned.trim());
+/** Exos's own signed codes (rotating T- / wallet W-): never looked up among
+ *  imported codes. A bare uuid is not on this list: another platform may use
+ *  uuids as ticket ids, so it is matched against the imported codes first. */
+export const isExosCode = (scanned: string): boolean => /^(T-|W-)/.test(scanned.trim());

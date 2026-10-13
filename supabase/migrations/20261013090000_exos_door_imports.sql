@@ -25,7 +25,7 @@
 -- 2. exos_import_guests(list, rows) adds up to 5000 rows at once (owner /
 --    manager of the list's org). Each row: {name, email?, phone?, code?,
 --    ticket?, plus_ones?, note?, source?}. Rows whose code is already in the
---    event, or (without a code) whose name + email is already on the list,
+--    event, or (without a code) whose name + email is already in the event,
 --    are skipped, so importing the same export twice adds nothing. Bad rows
 --    are skipped and reported (first 20). Same per-row rules as adding a
 --    guest by hand (_exos_guest_insert: list cap, plus-ones limit, event not
@@ -141,6 +141,8 @@ BEGIN
     i := i + 1;
     v_name  := nullif(btrim(coalesce(r->>'name', '')), '');
     v_email := nullif(lower(btrim(coalesce(r->>'email', ''))), '');
+    -- What _exos_guest_insert would store (a malformed email is dropped).
+    v_email := CASE WHEN v_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' AND length(v_email) <= 254 THEN v_email END;
     v_code  := public._exos_door_code(r->>'code');
     IF jsonb_typeof(r) <> 'object' OR v_name IS NULL
        OR (nullif(btrim(coalesce(r->>'code', '')), '') IS NOT NULL AND v_code IS NULL) THEN
@@ -158,7 +160,7 @@ BEGIN
         CONTINUE;
       END IF;
     ELSIF EXISTS (SELECT 1 FROM public.exos_guest_list_entries
-                   WHERE list_id = l.id AND lower(guest_name) = lower(left(v_name, 80))
+                   WHERE event_id = l.event_id AND lower(guest_name) = lower(left(v_name, 80))
                      AND email IS NOT DISTINCT FROM v_email) THEN
       v_dupes := v_dupes + 1;
       CONTINUE;
@@ -166,7 +168,7 @@ BEGIN
     BEGIN
       v_id := public._exos_guest_insert(
         l.id, v_name,
-        CASE WHEN v_email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' AND length(v_email) <= 254 THEN v_email END,
+        v_email,
         CASE WHEN btrim(coalesce(r->>'phone', '')) ~ '^[0-9+() .-]{3,32}$' THEN btrim(r->>'phone') END,
         CASE WHEN coalesce(r->>'plus_ones', '') ~ '^\d{1,2}$' THEN (r->>'plus_ones')::int ELSE 0 END,
         left(nullif(btrim(coalesce(r->>'note', '')), ''), 200),

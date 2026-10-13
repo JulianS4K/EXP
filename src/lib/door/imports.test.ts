@@ -57,7 +57,7 @@ describe('planImport', () => {
     ['Ada', 'Lovelace', 'ada@x.com', 'GA', '1234 5678'],
     ['', '', 'ghost@x.com', 'GA', '999'],
     ['Bo', '', '', 'VIP', ''],
-    ['Ada', 'L', 'ada@x.com', 'GA', '12345678'],
+    ['Ada', 'Lovelace', 'ada@x.com', 'GA', '12345678'],
   ];
   it('builds rows, joins first + last, drops no-name rows and repeated codes', () => {
     const p = planImport(table, detectColumns(table[0]), 'Eventbrite');
@@ -65,7 +65,13 @@ describe('planImport', () => {
       { name: 'Ada Lovelace', email: 'ada@x.com', ticket: 'GA', code: '12345678', source: 'Eventbrite' },
       { name: 'Bo', ticket: 'VIP', source: 'Eventbrite' },
     ]);
-    expect([p.noName, p.repeatedCodes, p.overLimit]).toEqual([1, 1, 0]);
+    expect([p.noName, p.repeatedCodes, p.sharedCodes, p.overLimit]).toEqual([1, 1, 0, 0]);
+  });
+  it('people sharing an order number are all kept, by name', () => {
+    const t = [['Name', 'Order #'], ['Ada', '1001'], ['Bo', '1001'], ['Cy', '1002'], ['Cy', '1002']];
+    const p = planImport(t, detectColumns(t[0]), 'Other');
+    expect(p.rows.map((r) => [r.name, r.code ?? null])).toEqual([['Ada', '1001'], ['Bo', null], ['Cy', '1002']]);
+    expect([p.sharedCodes, p.repeatedCodes]).toEqual([1, 1]);
   });
   it('stops at the row limit', () => {
     const big = [['Name'], ...Array.from({ length: MAX_IMPORT_ROWS + 3 }, (_, i) => [`G${i}`])];
@@ -93,7 +99,10 @@ describe('scanning imported codes', () => {
   it("Exos's own codes are never looked up", () => {
     expect(isExosCode('T-abc:def:1:sig')).toBe(true);
     expect(isExosCode('W-xyz')).toBe(true);
-    expect(isExosCode('0f9e8d7c-6b5a-4c3d-9e2f-1a2b3c4d5e6f')).toBe(true);
     expect(isExosCode('12345678')).toBe(false);
+    // Another platform may use uuids as ticket ids: matched, not refused.
+    expect(isExosCode('0f9e8d7c-6b5a-4c3d-9e2f-1a2b3c4d5e6f')).toBe(false);
+    const u = codeIndex([{ id: 'u', code: '0f9e8d7c-6b5a-4c3d-9e2f-1a2b3c4d5e6f' }]);
+    expect(matchImported('0F9E8D7C-6B5A-4C3D-9E2F-1A2B3C4D5E6F', u)?.id).toBe('u');
   });
 });

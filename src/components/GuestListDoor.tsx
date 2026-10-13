@@ -46,6 +46,7 @@ export default function GuestListDoor({
   onSync,
   syncing,
   incomingCode,
+  onIncomingHandled,
 }: {
   eventId: string;
   isOffline: boolean;
@@ -57,6 +58,7 @@ export default function GuestListDoor({
   syncing: boolean;
   /** A code read by the ticket scanner that belongs to an imported guest. */
   incomingCode?: { text: string; at: number } | null;
+  onIncomingHandled?: () => void;
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
@@ -219,23 +221,35 @@ export default function GuestListDoor({
   checkInByCodeRef.current = checkInByCode;
 
   // The camera for imported barcodes (same library as the ticket scanner).
+  // stop() throws unless the camera is already scanning, so a close during
+  // start-up waits for start() to finish and stops it then.
   useEffect(() => {
     if (!cameraOn) return undefined;
     let stopped = false;
-    let qr: { stop: () => Promise<void>; clear: () => void } | null = null;
+    let inst: { start: (...a: any[]) => Promise<unknown>; stop: () => Promise<void>; clear: () => void; isScanning: boolean } | null = null;
+    const shut = async () => {
+      if (!inst) return;
+      try {
+        if (inst.isScanning) await inst.stop();
+        inst.clear();
+      } catch {
+        /* already stopped */
+      }
+    };
     void (async () => {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
         if (stopped) return;
-        const inst = new Html5Qrcode('guest-reader');
-        qr = inst;
-        await inst.start(
+        inst = new Html5Qrcode('guest-reader') as unknown as typeof inst;
+        await inst!.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: (vw: number, vh: number) => { const m = Math.floor(Math.min(vw, vh) * 0.7); return { width: m, height: m }; } },
           (decoded: string) => checkInByCodeRef.current(decoded),
           () => {},
         );
+        if (stopped) await shut();
       } catch (err) {
+        if (stopped) return;
         console.error('guest camera failed', err);
         toast({ kind: 'error', message: 'Could not open the camera. Allow camera access, or type the code.' });
         setCameraOn(false);
@@ -243,7 +257,7 @@ export default function GuestListDoor({
     })();
     return () => {
       stopped = true;
-      if (qr) void qr.stop().then(() => qr?.clear()).catch(() => {});
+      void shut();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOn]);
@@ -251,10 +265,12 @@ export default function GuestListDoor({
   const hasCodes = byCode.size > 0;
 
   useEffect(() => {
-    if (incomingCode) {
-      lastReadRef.current = null;
-      checkInByCodeRef.current(incomingCode.text);
-    }
+    if (!incomingCode) return;
+    lastReadRef.current = null;
+    checkInByCodeRef.current(incomingCode.text);
+    // Handled once: switching tabs later must not replay it.
+    onIncomingHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingCode?.at]);
 
   if (!extras) {
