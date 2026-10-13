@@ -14,7 +14,8 @@
   the Eventbrite one in parts, its disconnect / unlink functions pasted by the operator).
   `20261014090000_exos_auto_channel_split` (auto split: 10% reserve → 1 pack at T-48h; free tiers stay on
   Exos) is not applied. `20261014100000_exos_s4k_feed` (S4K network feed; deploy `exos-s4k-feed` with
-  `--no-verify-jwt` first, the migration schedules its 1-minute cron) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
+  `--no-verify-jwt` first, the migration schedules its 1-minute cron) is not applied. `20261014110000_exos_eventbrite_inventory`
+  (shared count with Eventbrite; redeploy `exos-eventbrite-sync` after) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
   `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
 - **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
   onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
@@ -68,9 +69,13 @@
    (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`), one GA line per ticket type at free − 1 pack;
    S4K buys back with `POST /exos/events/{id}/orders` (idempotent; a sale Exos can't fill is rejected with a 409
    and logged, the marketplace penalty is S4K's); signed coalesced webhook as the secondary signal; org opt-in +
-   per-event route, one route at a time. Open: S4K's poll interval (sets the buffer), fees, id mapping.
-8. **Eventbrite writes** (operator choice 2026-10-13: dry-run, then per-org switch): create the event and ticket
-   types on the promoter's Eventbrite and keep `quantity_total` in step with the shared count.
+   per-event route, one route at a time. No S4K fee for now (operator 2026-10-13: growth spend). Open: S4K's poll interval (sets the buffer), id mapping.
+8. ✅ **Eventbrite inventory** (built 2026-10-13, mig `20261014110000`, not applied; `docs/marketplace/eventbrite/README.md`
+   "Inventory"): an owner / manager maps each EXISTING Eventbrite ticket class to an Exos ticket type (Exos never
+   creates ticket classes or events there); Eventbrite sales take Exos seats (refunds give them back, a sale with
+   no seat left is counted as oversold); each class's capacity is set to Eventbrite sold + (free on Exos - one
+   pack). The one write is Update a Ticket Class with `capacity` only, dry run unless the org's switch AND
+   `EXOS_EVENTBRITE_WRITES=on`. Next: first live test on the test org; inventory-tier classes not supported.
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

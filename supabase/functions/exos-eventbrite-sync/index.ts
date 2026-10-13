@@ -3,10 +3,13 @@
 // docs/marketplace/eventbrite.md; docs/organizer-guide.md "Tickets sold
 // somewhere else").
 //
-// Eventbrite is only READ (CLAUDE.md: upstream ticketing APIs are
-// read-only): every request goes through _shared/eventbrite/client.ts ebGet,
-// which sends GET only. No check-ins are written back, no webhooks are
-// registered, nothing is bought or held.
+// Eventbrite is READ (CLAUDE.md: upstream ticketing APIs are read-only):
+// every read goes through _shared/eventbrite/client.ts ebGet, which sends GET
+// only. The one exception is the inventory sync's capacity update on an
+// organizer's existing, mapped ticket class (_shared/eventbrite/writer.ts,
+// dry run unless the org's switch and EXOS_EVENTBRITE_WRITES=on). No
+// check-ins are written back, no webhooks are registered, nothing is
+// created, bought or held.
 //
 // Routes (under /functions/v1/exos-eventbrite-sync), JSON in and out:
 //   POST /connect    {org, token}   owner / manager. Checks the private token
@@ -25,6 +28,19 @@
 //        (exos_eventbrite_sync_claim), within a time budget. Scheduled every 2
 //        minutes by the migration.
 //
+// Inventory (mig 20261014110000; one shared count across Exos and Eventbrite):
+//   GET  /ticket-classes?event=<id> owner / manager. The linked Eventbrite
+//        event's ticket classes and the Exos ticket types, for mapping.
+//   POST /map  {event, ticket_class_id, ticket_class_name, tier|null}
+//        owner / manager. Maps an EXISTING Eventbrite ticket class to an Exos
+//        ticket type (null: unmap). Exos never creates ticket classes.
+//   POST /writes {org, on}           owner. The org's switch for sending.
+//   After each sync of a link with mappings: read the ticket classes, count
+//   Eventbrite sales against Exos (exos_eventbrite_inventory_apply), then set
+//   each class's capacity to its target with _shared/eventbrite/writer.ts,
+//   the one write Exos makes there. Dry run (plan recorded only) unless the
+//   org's switch AND EXOS_EVENTBRITE_WRITES=on.
+//
 // The user routes take the Supabase JWT in Authorization and verify it here;
 // the RPCs they call are service role only and re-check the user's role.
 // Deploy with --no-verify-jwt (the CORS preflight carries no JWT; /cron is
@@ -34,16 +50,18 @@
 // sent only to www.eventbriteapi.com in the Authorization header.
 //
 // Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
-//      CRON_SECRET, EXOS_REDIRECT_ORIGINS (CORS allowlist for the SPA).
+//      CRON_SECRET, EXOS_REDIRECT_ORIGINS (CORS allowlist for the SPA),
+//      EXOS_EVENTBRITE_WRITES ("on" lets orgs that switched it on send capacity).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
-  type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listUpcomingEvents,
-  readEvent, type SyncOutcome, syncLink, whoAmI,
+  type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listTicketClasses,
+  listUpcomingEvents, readEvent, type SyncOutcome, syncLink, whoAmI,
 } from "../_shared/eventbrite/client.ts";
+import { planCapacity, planRecord, sendCapacity, writesLive } from "../_shared/eventbrite/writer.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Wall-clock budget for one cron run (the platform limit is higher). */
@@ -140,6 +158,45 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(r.data, 200, cors);
     }
 
+    if (route === "ticket-classes" && req.method === "GET") {
+      const event = url.searchParams.get("event") ?? "";
+      if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
+      const org = await eventOrg(sb, event);
+      if (!org) return json({ error: "event not found" }, 404, cors);
+      const tok = await sb.rpc("exos_eventbrite_token", { p_org_id: org, p_user_id: user });
+      if (tok.error) return rpcError(tok.error, cors);
+      if (typeof tok.data !== "string") return json({ error: "Connect Eventbrite first.", reason: "not_connected" }, 409, cors);
+      const { data: lk } = await sb.from("exos_eventbrite_links").select("eb_event_id").eq("event_id", event).maybeSingle();
+      const ebEvent = (lk as { eb_event_id?: string } | null)?.eb_event_id;
+      if (!ebEvent) return json({ error: "Link an Eventbrite event first.", reason: "not_linked" }, 409, cors);
+      const r = await listTicketClasses(fetch, tok.data, ebEvent);
+      if (!r.ok) return json({ error: ebErrorMessage(r), reason: "eventbrite" }, 502, cors);
+      return json({ ticket_classes: r.body }, 200, cors);
+    }
+
+    if (route === "map" && req.method === "POST") {
+      const event = String(body?.event ?? "");
+      const cls = String(body?.ticket_class_id ?? "");
+      const tier = body?.tier == null ? null : String(body.tier);
+      if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
+      if (!isEbId(cls)) return json({ error: "Pick an Eventbrite ticket class.", reason: "bad_class" }, 400, cors);
+      if (tier !== null && !UUID.test(tier)) return json({ error: "Pick an Exos ticket type.", reason: "bad_tier" }, 400, cors);
+      const name = typeof body?.ticket_class_name === "string" ? body.ticket_class_name.slice(0, 200) : null;
+      const r = await sb.rpc("exos_eventbrite_map_ticket", {
+        p_event_id: event, p_user_id: user, p_eb_ticket_class_id: cls, p_eb_ticket_class_name: name, p_tier_id: tier,
+      });
+      if (r.error) return rpcError(r.error, cors);
+      return json(r.data, 200, cors);
+    }
+
+    if (route === "writes" && req.method === "POST") {
+      const org = String(body?.org ?? "");
+      if (!UUID.test(org)) return json({ error: "missing or bad org" }, 400, cors);
+      const r = await sb.rpc("exos_eventbrite_set_writes", { p_org_id: org, p_user_id: user, p_on: body?.on === true });
+      if (r.error) return rpcError(r.error, cors);
+      return json({ writes_enabled: r.data === true, live: writesLive(r.data === true, Deno.env.get("EXOS_EVENTBRITE_WRITES")) }, 200, cors);
+    }
+
     if (route === "sync" && req.method === "POST") {
       const event = String(body?.event ?? "");
       if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
@@ -156,7 +213,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
 // ---- Sync ------------------------------------------------------------------
 
-type ManualSync = SyncOutcome | { skipped: "recent" | "not_linked" } | { forbidden: true } | null;
+type ManualSync = (SyncOutcome & { inventory?: InventoryOutcome }) | { skipped: "recent" | "not_linked" } | { forbidden: true } | null;
 
 /** "Sync now" (or the first sync after linking) for one event. */
 async function syncOne(sb: SupabaseClient, event: string, user: string, pages: number): Promise<ManualSync> {
@@ -171,7 +228,9 @@ async function syncOne(sb: SupabaseClient, event: string, user: string, pages: n
     const linked = await sb.from("exos_eventbrite_links").select("event_id").eq("event_id", event).maybeSingle();
     return { skipped: linked.data ? "recent" : "not_linked" };
   }
-  return await syncLink(fetch, link, applier(sb, link), { maxPages: pages, deadline: Date.now() + 40_000 });
+  const out = await syncLink(fetch, link, applier(sb, link), { maxPages: pages, deadline: Date.now() + 40_000 });
+  const inventory = await syncInventory(sb, link);
+  return inventory ? { ...out, inventory } : out;
 }
 
 async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
@@ -182,7 +241,7 @@ async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
     return { ok: false };
   }
   const links = (c.data as ClaimedLink[] | null) ?? [];
-  const results: Array<{ event: string; state: string; rows: number }> = [];
+  const results: Array<Record<string, unknown>> = [];
   for (const link of links) {
     if (Date.now() >= deadline) {
       // Out of time: free the rest for the next run.
@@ -192,7 +251,8 @@ async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
       continue;
     }
     const out = await syncLink(fetch, link, applier(sb, link), { maxPages: CRON_PAGES, deadline });
-    results.push({ event: link.event_id, state: out.state, rows: out.rows });
+    const inventory = Date.now() < deadline ? await syncInventory(sb, link) : null;
+    results.push({ event: link.event_id, state: out.state, rows: out.rows, ...(inventory ? { inventory } : {}) });
   }
   return { ok: true, claimed: links.length, results };
 }
@@ -211,6 +271,57 @@ function applier(sb: SupabaseClient, link: ClaimedLink) {
     }
     return r.data as { ok: boolean; reason?: string; added?: number; voided?: number; restored?: number };
   };
+}
+
+// ---- Inventory ---------------------------------------------------------------
+
+type InventoryRow = {
+  eb_ticket_class_id: string; tier_id: string; eb_capacity: number | null; eb_sold: number | null;
+  target_capacity: number | null; oversold: number | null; writes_enabled: boolean; skip_reason: string | null;
+};
+type InventoryOutcome = { classes: number; sent: number; planned: number; failed: number; skipped: number; oversold: number };
+
+/** One inventory pass for a link: read classes, count sales, set capacities. Null: no mappings. */
+async function syncInventory(sb: SupabaseClient, link: ClaimedLink): Promise<InventoryOutcome | null> {
+  const { count } = await sb.from("exos_eventbrite_ticket_links").select("tier_id", { count: "exact", head: true })
+    .eq("event_id", link.event_id).eq("eb_event_id", link.eb_event_id).eq("active", true);
+  if (!count) return null;
+  const read = await listTicketClasses(fetch, link.token, link.eb_event_id);
+  if (!read.ok || !read.body) {
+    console.error("exos-eventbrite-sync: ticket classes not read", link.event_id, read.error ?? read.status);
+    return { classes: 0, sent: 0, planned: 0, failed: 1, skipped: 0, oversold: 0 };
+  }
+  const applied = await sb.rpc("exos_eventbrite_inventory_apply", { p_event_id: link.event_id, p_classes: read.body });
+  if (applied.error) {
+    console.error("exos-eventbrite-sync: inventory apply failed", redactError(applied.error));
+    return { classes: read.body.length, sent: 0, planned: 0, failed: 1, skipped: 0, oversold: 0 };
+  }
+  const out: InventoryOutcome = { classes: read.body.length, sent: 0, planned: 0, failed: 0, skipped: 0, oversold: 0 };
+  const flag = Deno.env.get("EXOS_EVENTBRITE_WRITES");
+  for (const row of (applied.data ?? []) as InventoryRow[]) {
+    out.oversold += row.oversold ?? 0;
+    if (row.skip_reason) {
+      out.skipped++;
+      continue;
+    }
+    const plan = planCapacity(link.eb_event_id, row.eb_ticket_class_id, row.eb_capacity, row.target_capacity);
+    if (!plan) continue;
+    const live = writesLive(row.writes_enabled, flag);
+    let error: string | null = null;
+    if (live) {
+      const r = await sendCapacity(fetch, link.token, plan);
+      if (!r.ok) error = `Eventbrite ${r.error ?? r.status}`;
+    }
+    const ack = await sb.rpc("exos_eventbrite_inventory_ack", {
+      p_event_id: link.event_id, p_eb_ticket_class_id: row.eb_ticket_class_id, p_plan: planRecord(plan, live),
+      p_sent: live, p_capacity: plan.to, p_error: error,
+    });
+    if (ack.error) console.error("exos-eventbrite-sync: inventory ack failed", redactError(ack.error));
+    if (!live) out.planned++;
+    else if (error) out.failed++;
+    else out.sent++;
+  }
+  return out;
 }
 
 // ---- Helpers ---------------------------------------------------------------

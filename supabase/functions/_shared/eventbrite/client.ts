@@ -222,6 +222,54 @@ export async function listUpcomingEvents(fetchImpl: Fetch, token: string): Promi
   return { ok: true, status: 200, body: out };
 }
 
+// ---- Ticket classes (for the inventory sync, mig 20261014110000) -----------
+
+/** The fields exos_eventbrite_inventory_apply reads. */
+export interface EbTicketClass {
+  id: string;
+  name: string | null;
+  capacity: number | null;
+  quantity_sold: number | null;
+  inventory_tier_id: string | null;
+  free: boolean;
+  hidden: boolean;
+}
+
+function toTicketClass(t: Record<string, unknown> | null | undefined): EbTicketClass | null {
+  if (!t || !isEbId(t.id)) return null;
+  const num = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
+  const tier = t.inventory_tier_id;
+  return {
+    id: t.id as string,
+    name: typeof t.name === "string" ? t.name.slice(0, 200) : null,
+    capacity: num(t.capacity ?? t.quantity_total),
+    quantity_sold: num(t.quantity_sold),
+    inventory_tier_id: typeof tier === "string" && tier !== "" ? tier : typeof tier === "number" ? String(tier) : null,
+    free: t.free === true,
+    hidden: t.hidden === true,
+  };
+}
+
+/** An Eventbrite event's ticket classes (GET /events/{id}/ticket_classes/), at most 10 pages. */
+export async function listTicketClasses(fetchImpl: Fetch, token: string, ebEventId: string): Promise<EbResult<EbTicketClass[]>> {
+  if (!isEbId(ebEventId)) return { ok: false, status: 0, body: null, error: "bad event id" };
+  const out: EbTicketClass[] = [];
+  let continuation: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const r = await ebGet<{ ticket_classes?: Array<Record<string, unknown>>; pagination?: EbPagination }>(
+      fetchImpl, token, `/events/${ebEventId}/ticket_classes/`, { continuation },
+    );
+    if (!r.ok) return { ...r, body: null };
+    for (const t of r.body?.ticket_classes ?? []) {
+      const c = toTicketClass(t);
+      if (c) out.push(c);
+    }
+    if (!r.body?.pagination?.has_more_items || !r.body.pagination.continuation) break;
+    continuation = r.body.pagination.continuation;
+  }
+  return { ok: true, status: 200, body: out };
+}
+
 // ---- One sync run for one link ---------------------------------------------
 
 export interface ClaimedLink {

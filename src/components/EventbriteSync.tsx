@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Link2, Loader2, RefreshCw, Unlink } from 'lucide-react';
+import EventbriteInventory from './EventbriteInventory';
 import {
   connectEventbrite, disconnectEventbrite, fetchEventbriteStatus, linkEventbrite, listEventbriteEvents,
   syncEventbrite, syncSummaryText, unlinkEventbrite, type EventbriteEventChoice, type EventbriteStatus,
@@ -76,7 +77,7 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
         <h3 id={`eb-${eventId}`} className="text-sm font-bold text-slate-800">Live sync from Eventbrite</h3>
         <p className="text-xs text-slate-500 mt-1">
           New Eventbrite buyers reach the door within a couple of minutes, and refunded or cancelled tickets stop
-          working. Exos only reads from Eventbrite; nothing is changed there.
+          working. Exos reads your attendees; it changes nothing on Eventbrite unless you share a ticket's count below.
         </p>
       </div>
 
@@ -180,6 +181,7 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
               guest?). Exos keeps retrying.
             </p>
           )}
+          {status.canManage && <EventbriteInventory eventId={eventId} orgId={orgId} />}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy !== null}
               onClick={() => void run('sync', async () => {
