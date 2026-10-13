@@ -68,6 +68,9 @@ export interface Organization {
   // Max non-voided free comp tickets the org may issue (mig 20260911132000).
   // null/undefined = unlimited. Set via exos_set_org_comp_budget (owner).
   compBudget?: number | null;
+  // In the S4K network (mig 20261014100000): S4K may list this org's events on
+  // the marketplaces. Set via exos_set_s4k_network (owner).
+  s4kNetwork?: boolean;
   // Phase 2 white-label. Filled in by Sprint 2.
   theme?: {
     logoUrl?: string;
@@ -320,6 +323,10 @@ export interface Event {
     marketplaceBlocklist?: string[];
   };
   distributionNetworks?: string[];
+  // Who lists the event on the marketplaces (mig 20261014100000): Exos
+  // directly, or S4K from the feed. Read-only here; set via
+  // exos_set_distribution_route.
+  distributionRoute?: 'direct' | 's4k';
   // Self-serve RSVP release policy (mig 20260911131000). Holder-side release
   // is allowed by default; the cutoff closes it N hours before start (0 = up to
   // the start time). Staff releases ignore both.

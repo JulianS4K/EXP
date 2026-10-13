@@ -78,6 +78,7 @@ import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoSta
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
 import ChannelSplitPanel from '../components/ChannelSplitPanel';
+import S4kRoutePanel from '../components/S4kRoutePanel';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
@@ -1713,6 +1714,13 @@ export default function EditEvent() {
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
+             <S4kRoutePanel
+               eventId={eventId}
+               route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
+               onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
+             />
+           )}
+           {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (
              // Remounted (re-read) after any grid save: a hand edit switches the event to manual.
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
              <ChannelSplitPanel
@@ -1723,7 +1731,7 @@ export default function EditEvent() {
              />
              </div>
            )}
-           {eventId && !eventData.exclusivity?.primaryMarketOnly && (
+           {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}:${r.unit_price ?? ''}`).join('|')}>
              <MarketplaceGrid
                eventId={eventId}

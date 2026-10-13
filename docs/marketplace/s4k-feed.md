@@ -1,8 +1,16 @@
-# Exos → S4K inventory feed (design, 2026-10-13)
+# Exos → S4K inventory feed (built 2026-10-13, not live)
 
-Status: **design only.** Nothing here is built or deployed. It replaces the
-"Exos pushes to Automatiq" idea in [`automatiq.md`](automatiq.md) with a pull
-model, so Exos never writes to a third party (Hard Rule #2 stays intact).
+Status: **built, not applied or deployed.** Migration `20261014100000_exos_s4k_feed.sql`
+(harness `tests/exos/test_s4k_feed.sql`), edge function `exos-s4k-feed`, shapes in
+`_shared/s4kFeed/feed.ts` (tests `src/lib/s4kFeed/feed.test.ts`), and the organizer
+switches (Organization settings → S4K network; event → Marketplaces → Who lists it).
+It replaces the "Exos pushes to Automatiq" idea in [`automatiq.md`](automatiq.md)
+with a pull model, so Exos never writes to a third party (Hard Rule #2 stays intact).
+
+Operator decisions (2026-10-13): the contract is the Ticket Desk's two Paciolan
+calls with the names changed; S4K calls the feed, and a signed webhook is the
+secondary signal; an order Exos can't fill is **rejected** (nothing taken), and
+any marketplace penalty from that is **S4K's** until the system is further along.
 
 ## The flow
 
@@ -80,6 +88,19 @@ with its current shared count.
   passed) comes back once with `"status": "withdrawn"` and `available: 0` on
   the next `updatedSince` call, so the consumer delists it. The desk has no
   equivalent: it simply stops listing expired events.
+- `generatedAt` runs 15 seconds behind the clock on purpose: pass it back as
+  the next `updatedSince` and a change that committed while you were reading
+  still comes back (sometimes twice, never zero times).
+- `updatedAt` comes from a per-event content hash (`exos_feed_events`), refreshed
+  every minute by the cron and on every call 1 and every order, so a re-check
+  that finds nothing new moves nothing (the desk's "only store a changed pull").
+- An event is on the feed when its org joined the S4K network
+  (`exos_orgs.s4k_network`, owner only), the event's route is `s4k`
+  (`exos_events.distribution_route`, owner or manager), it is published, and
+  doors (else start) are in the future. An `s4k` event gets no direct
+  marketplace allocation, by hand or from the auto split, and an event with
+  direct listings can't switch to `s4k` until they are set to 0: one route at
+  a time, or a seat could sell twice.
 
 ## Call 2: tickets for one event
 
@@ -153,11 +174,20 @@ seats on the storefront**. Exos copies that, through an API instead of a
 browser:
 
 ```
-POST /exos/events/{eventId}/orders        (feed token + Idempotency-Key)
+POST /exos/events/{eventId}/orders        (feed token; Idempotency-Key = externalRef)
 { "ticketId": "1f4b…", "quantity": 2, "externalRef": "AQ-order-88123",
-  "marketplace": "stubhub", "unitNet": 30.00 }
-→ 201 { "orderId": "…", "tickets": [{ "claimUrl": "https://…/bridge/claim/…", "seat": "GA-0153" }, …] }
-→ 409 { "error": "not enough left", "available": 1 }        (the oversell, surfaced immediately)
+  "marketplace": "stubhub", "unitPrice": 30.00, "buyerEmail": "optional" }
+→ 201 { "orderId": "…", "status": "fulfilled", "replayed": false,
+        "tickets": [{ "seat": "GA-0153", "claimUrl": "https://…/bridge/claim/…?k=…", "status": "active" }, …] }
+→ 200 the same body with "replayed": true   (same externalRef again)
+→ 409 { "error": "not enough left", "reason": "sold_out", "available": 1, "price": 30 }
+      reasons: sold_out · price_changed · over_max_per_order · no_delivery_email
+→ 404 reason not_on_feed / ticket_not_on_feed
+
+GET  /exos/orders/{orderId}               status + claim links again
+POST /exos/orders/{orderId}/cancel        the marketplace cancelled: tickets voided, seats back
+                                          (409 once doors opened or a ticket was scanned)
+GET  /exos/status                         { generatedAt, activeEvents } for a monitor
 ```
 
 - This is a write **into Exos**, by S4K, on Exos's own API. Exos still never
@@ -169,14 +199,56 @@ POST /exos/events/{eventId}/orders        (feed token + Idempotency-Key)
   the same way it uploads Paciolan transfers.
 - `Idempotency-Key` (or `externalRef`) makes a retried POST return the first
   order, not a second one.
-- `unitNet` is checked against `netToOrganizer`, so a stale price can't sell
-  below the organizer's floor.
-- A 409 is the oversell. S4K then handles it the way it handles a Paciolan
-  seat that sold out from under it. Whether that means cancel or substitute is
-  the open oversell-policy question.
-- Refunds and cancellations: `POST /exos/orders/{orderId}/cancel` before
-  doors returns the seats to the shared count. After doors, refunds follow
-  the organizer's policy.
+- `unitPrice` is what S4K pays Exos per ticket. Below the ticket's current
+  price the order is rejected (`price_changed`), so a stale feed can't sell
+  under the organizer's price. Exos's fee comes out of it as on every
+  marketplace order (`organizer_net`), which is what `netToOrganizer` shows.
+- All or nothing: an order for more than is left takes nothing. The buffer is
+  not a reserve: S4K can still buy the last pack the feed no longer shows.
+- **A 409 is the oversell, and it is S4K's.** Exos never accepts an order it
+  can't fill, so no Exos buyer and no organizer is hurt; S4K cancels the
+  marketplace sale and pays any marketplace penalty, the way it handles a
+  Paciolan seat that sold out from under it. Every rejection is logged
+  (`exos_feed_rejections`: marketplace, quantity, what was left) for that
+  accounting and for tuning the buffer.
+- With no `buyerEmail`, the claim links are mailed to the token's delivery
+  inbox (`exos_feed_consumers.delivery_email`), and returned in the response
+  either way.
+- Cancel before doors returns the seats to the shared count. After doors, or
+  once a ticket was scanned, it's refused; refunds then follow the
+  organizer's policy.
+
+## Webhook (secondary)
+
+Polling is the contract; the webhook only says "something moved, poll now".
+Each minute the cron refreshes the feed state and, for a token with a
+`webhook_url`, POSTs one coalesced body of every event that moved since the
+last delivered one:
+
+```json
+{ "type": "inventory.changed", "generatedAt": "2026-10-13T14:00:00Z",
+  "events": [{ "eventId": "6c1e…", "status": "active", "available": 12, "updatedAt": "2026-10-13T13:58:40Z" }] }
+```
+
+Signed like Exos's other webhooks: `X-Exos-Timestamp`, `X-Exos-Signature:
+sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>`, `X-Exos-Delivery`
+(dedupe on it). Deliveries page on `(updatedAt, eventId)` and stay 15 seconds
+behind the clock, so a batch never skips a change that was still committing.
+A non-2xx keeps the cursor and backs off (1, 2, 4 … 30
+minutes); the next success carries everything since. The URL must be https
+and resolve to public addresses.
+
+## Turning it on (operator)
+
+1. Apply `20261014100000_exos_s4k_feed.sql` (prod apply needs OK).
+2. Deploy `exos-s4k-feed` with `--no-verify-jwt`. Secrets: `CRON_SECRET`,
+   `EXOS_APP_BASE_URL` (plus the platform's `SUPABASE_*`).
+3. Mint S4K's token, run once with the service role:
+   `select * from exos_feed_create_consumer('S4K', '<fulfilment inbox>', '<webhook https url>');`
+   It returns the `exf_…` token (shown once; only its hash is kept) and the
+   webhook secret. Hand both to S4K over a private channel.
+4. The migration schedules `exos-s4k-feed-1min` when pg_cron is present.
+5. Base URL for S4K: `https://<project>.supabase.co/functions/v1/exos-s4k-feed/exos`.
 
 ## Mappings
 
@@ -186,7 +258,7 @@ side: `PUT /exos/events/{eventId}/mapping {"internalId": "AQ-10442"}` (feed
 token). After that, call 1 echoes it and either id resolves. Phase 1 can skip
 this: S4K stores the Exos `eventId` and needs no pairing.
 
-## What gets built (when S4K says go)
+## What the first plan said would be built (done, kept for the record)
 
 1. Migration `…_exos_s4k_feed.sql`:
    - `exos_feed_tokens` (hash, prefix, consumer name, revoked_at, last_used_at);
@@ -208,15 +280,10 @@ this: S4K stores the Exos `eventId` and needs no pairing.
 Phase 2, only if asked: `/feed/full`, `/feed/changes` and `/feed/status`
 with per-token baselines, copied from the desk's `feed_seen` design.
 
-## Open questions for S4K
+## Still open
 
-1. Is this two-call shape what the S4K consumer already reads? If so, should
-   the paths be literally `/paciolan/…`-style so it can reuse the same parser
-   (`/exos/events` here)?
-2. Who calls the order POST: the Automatiq integration, or S4K's own
-   fulfilment service? Do they want a webhook on sale-back instead of
-   polling?
-3. What poll interval will they use? It sets the buffer.
-4. Fees and consignment: S4K's margin on top of `netToOrganizer`, and who
-   eats an oversell.
-5. Broadcast or auto split as the default for S4K-network events.
+1. S4K's poll interval: it sets the buffer. Re-run `scripts/channel-sim/broadcast.py`
+   with S4K's interval added to each marketplace's lag before going live.
+2. Fees and consignment: S4K's margin on top of `netToOrganizer`.
+3. Mapping S4K's internal ids (`internalId` is null until a pairing call exists).
+4. Phase 2 if S4K wants it: `/feed/full` + `/feed/changes` with per-token baselines.

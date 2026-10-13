@@ -13,7 +13,8 @@
   with `--no-verify-jwt` first, the migration schedules its cron). **Both applied 2026-10-13** (operator OK;
   the Eventbrite one in parts, its disconnect / unlink functions pasted by the operator).
   `20261014090000_exos_auto_channel_split` (auto split: 10% reserve → 1 pack at T-48h; free tiers stay on
-  Exos) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
+  Exos) is not applied. `20261014100000_exos_s4k_feed` (S4K network feed; deploy `exos-s4k-feed` with
+  `--no-verify-jwt` first, the migration schedules its 1-minute cron) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
   `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
 - **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
   onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
@@ -62,11 +63,12 @@
    `exos-checkout` redeploy to keep `ai_ref`). Still open: training-crawler policy in robots.txt (operator), OAuth
    for organizer MCP tools, agent checkout after Stripe.
 6. Rebuild-or-retire check for Terminal-2's `static/bridge` (CI check that it matches EXP main).
-7. **S4K network feed** (design 2026-10-13, `docs/marketplace/s4k-feed.md`): Exos serves the same read-only,
-   token-gated two-call feed as S4K's Ticket Desk (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`),
-   one GA line per ticket type at the broadcast count (unsold − holds − 1 pack). S4K pulls it and lists through
-   Automatiq. Sales come back as S4K buying from Exos (`POST /exos/events/{id}/orders`, idempotent, 409 =
-   oversell). Supersedes the push-to-Automatiq design. Waiting on S4K's answers (open questions in the doc).
+7. ✅ **S4K network feed** (built 2026-10-13, mig `20261014100000` + `exos-s4k-feed`, not applied / deployed;
+   `docs/marketplace/s4k-feed.md`): the Ticket Desk's two Paciolan calls with Exos names
+   (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`), one GA line per ticket type at free − 1 pack;
+   S4K buys back with `POST /exos/events/{id}/orders` (idempotent; a sale Exos can't fill is rejected with a 409
+   and logged, the marketplace penalty is S4K's); signed coalesced webhook as the secondary signal; org opt-in +
+   per-event route, one route at a time. Open: S4K's poll interval (sets the buffer), fees, id mapping.
 8. **Eventbrite writes** (operator choice 2026-10-13: dry-run, then per-org switch): create the event and ticket
    types on the promoter's Eventbrite and keep `quantity_total` in step with the shared count.
 
