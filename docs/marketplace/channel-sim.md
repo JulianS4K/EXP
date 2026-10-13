@@ -111,6 +111,37 @@ Frequency (even, 5% reserve): served %
 | 100–500 | even, all marketplaces | 5% (≥ 1 pack) | adaptive |
 | 500+ | pools of 1 pack, or even + taper (10% → 1 pack at T-48h) | rest on Exos / taper | refill on each sale (pools) or adaptive |
 
+## Broadcast: every unsold ticket on every marketplace at once (`broadcast.py`)
+
+GA tickets are interchangeable, so the alternative to splitting is listing the whole unsold count
+everywhere and taking it down everywhere as it sells, as broker point-of-sale tools do. The only risk is
+the sync lag: a marketplace still shows tickets another one has just sold. Lags used: StubHub, SeatGeek,
+GoTickets ~3 min, TickPick 5 min, Vivid Seats 10 min (polling only), **Gametime 6 h** (CSV upload).
+An **oversell** = an order accepted on a marketplace that Exos can't fill.
+
+Cell: served % · oversold orders per event · oversold tickets per 1,000 sold.
+
+| Policy | 50 ×0.7 | 50 ×1.0 | 50 ×1.5 | 200 ×0.7 | 200 ×1.0 | 200 ×1.5 | 800 ×0.7 | 800 ×1.0 | 800 ×1.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| broadcast, no buffer | 100% · 0.00 · 0.0 | 98% · 0.08 · 5.4 | 100% · 0.03 · 1.3 | 100% · 0.00 · 0.0 | 100% · 0.10 · 1.4 | 100% · 0.11 · 1.3 | 100% · 0.00 · 0.0 | 100% · 0.21 · 1.0 | 100% · 0.62 · 1.9 |
+| broadcast, buffer 1 pack | 100% · 0.00 · 0.0 | 86% · 0.00 · 0.0 | 92% · 0.00 · 0.0 | 100% · 0.00 · 0.0 | 97% · 0.01 · 0.1 | 99% · 0.00 · 0.0 | 100% · 0.00 · 0.0 | 99% · 0.03 · 0.2 | 100% · 0.01 · 0.0 |
+| broadcast, buffer 2 packs | 91% · 0.00 · 0.0 | 72% · 0.00 · 0.0 | 78% · 0.00 · 0.0 | 100% · 0.00 · 0.0 | 93% · 0.00 · 0.0 | 98% · 0.00 · 0.0 | 100% · 0.00 · 0.0 | 99% · 0.00 · 0.0 | 100% · 0.00 · 0.0 |
+| broadcast + Gametime 20% share, buffer 1 pack | 92% · 0.00 · 0.0 | 77% · 0.00 · 0.0 | 87% · 0.00 · 0.0 | 99% · 0.00 · 0.0 | 89% · 0.00 · 0.0 | 96% · 0.00 · 0.0 | 99% · 0.00 · 0.0 | 91% · 0.00 · 0.0 | 96% · 0.00 · 0.0 |
+| broadcast + Gametime 20% share, buffer 2 packs | 80% · 0.00 · 0.0 | 65% · 0.00 · 0.0 | 74% · 0.00 · 0.0 | 99% · 0.00 · 0.0 | 86% · 0.00 · 0.0 | 95% · 0.00 · 0.0 | 99% · 0.00 · 0.0 | 90% · 0.00 · 0.0 | 96% · 0.00 · 0.0 |
+| auto split (10% → 1 pack at 48 h) | 86% · 0 · 0 | 73% · 0 · 0 | 83% · 0 · 0 | 100% · 0 · 0 | 93% · 0 · 0 | 97% · 0 · 0 | 100% · 0 · 0 | 98% · 0 · 0 | 100% · 0 · 0 |
+
+- **Broadcast with a one-pack buffer** (the last 8 tickets never listed, so Exos sells them) sells as
+  much as or more than the split everywhere: 86–92% at 50 tickets (split: 73–83%), 97–100% at
+  200–800, with about one oversold order per 30 events in the worst cell (800 tickets, demand =
+  capacity, mostly from Gametime's 6-hour lag).
+- With no buffer it sells the most but oversells 1–5 tickets per 1,000.
+- Giving Gametime a fixed share instead of broadcasting there loses more (fragmentation) than its
+  lag costs.
+- So the better default for GA is **broadcast with a one-pack buffer**, not a split. It changes the
+  rule Exos is built on (a seat in one place at a time): marketplace sales would claim from one shared
+  count, and an order arriving after the last ticket went needs the oversell path (cancel / replace /
+  refund on that marketplace). Reserved seating keeps the split.
+
 ## What Exos does by default (mig `20261014090000`)
 
 The operator picked the tapering reserve (2026-10-13). Every new event's ticket types are split
