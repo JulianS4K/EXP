@@ -76,7 +76,8 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
-import { ChannelLinks, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
+import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
+import ChannelSplitPanel from '../components/ChannelSplitPanel';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
@@ -1711,6 +1712,14 @@ export default function EditEvent() {
              ].filter((st): st is NonNullable<typeof st> => !!st);
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
+           {eventId && !eventData.exclusivity?.primaryMarketOnly && (
+             <ChannelSplitPanel
+               eventId={eventId}
+               tierNames={Object.fromEntries((eventData.ticketTiers || []).filter((t) => t.id).map((t) => [t.id, t.name]))}
+               labels={CHANNEL_LABEL}
+               onChanged={() => { void loadMarketRows(eventId); }}
+             />
+           )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}:${r.unit_price ?? ''}`).join('|')}>
              <MarketplaceGrid

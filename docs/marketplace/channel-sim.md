@@ -111,6 +111,24 @@ Frequency (even, 5% reserve): served %
 | 100–500 | even, all marketplaces | 5% (≥ 1 pack) | adaptive |
 | 500+ | pools of 1 pack, or even + taper (10% → 1 pack at T-48h) | rest on Exos / taper | refill on each sale (pools) or adaptive |
 
+## What Exos does by default (mig `20261014090000`)
+
+The operator picked the tapering reserve (2026-10-13). Every new event's ticket types are split
+automatically (**Auto** in the event editor's Marketplaces section; existing events stay as they were):
+
+- Exos keeps **10% (at least one pack)**, and **one pack from 48 hours before the show**.
+  A pack = the max per order (8 when the event has none).
+- The rest is shared **evenly** across the ticked marketplaces.
+- Rebalanced **daily**, every **6 hours** in the last week, **hourly** in the last 48 hours
+  (`exos_run_channel_splits`, hourly cron).
+- **Free ticket types stay on Exos**: the resale marketplaces don't get them by default (Eventbrite may
+  sell them once it is a channel). The organizer can still list one by hand.
+- Editing the grid by hand switches the event to **Manual**.
+- In Auto, the pools' scarcity and stagnant rules (mig `20260928040000`) are off: the split already
+  protects the reserve. The **3-hour day-of cutoff still applies** (every pool to 0 three hours before
+  doors). The CRM puts ~10% of event-day resale sales in those 3 hours, so that cutoff is worth a second
+  look.
+
 ## Limits
 
 - The CRM is resale (broker) data. Primary sales may run earlier; the shape of the last 72 hours is
