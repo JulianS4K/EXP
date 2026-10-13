@@ -17,7 +17,7 @@ import { setChannelAllocation, setChannelPrice, setMarketSplit, type AllocationC
 import { allocationCellStatus, parseMarketplacePrice, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { MARKET_SPLITS, MARKET_SPLIT_LABEL, formatSeatRanges, netEqualListPrice, parseSeatRanges, type MarketSplit } from '../lib/marketplace';
 
-const LABEL: Record<string, string> = {
+export const LABEL: Record<string, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', gametime: 'Gametime', gotickets: 'GoTickets', vivid: 'Vivid Seats', tickpick: 'TickPick', evo: 'Ticket Evolution', automatiq: 'Automatiq',
 };
 

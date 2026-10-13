@@ -10,7 +10,10 @@
   `20261001101000_exos_disputes_reconciliation`, `20261005090000_exos_online_events` (EXP #28, merged) and
   `20261008090000_exos_door_delta_summary` (roster delta + door summary) and `20261013090000_exos_door_imports`
   (Exos Door) and `20261013100000_exos_eventbrite_sync` (Eventbrite attendee sync; deploy `exos-eventbrite-sync`
-  with `--no-verify-jwt` first, the migration schedules its cron). `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
+  with `--no-verify-jwt` first, the migration schedules its cron). **Both applied 2026-10-13** (operator OK;
+  the Eventbrite one in parts, its disconnect / unlink functions pasted by the operator).
+  `20261014090000_exos_auto_channel_split` (auto split: 10% reserve → 1 pack at T-48h; free tiers stay on
+  Exos) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
   `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
 - **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
   onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
