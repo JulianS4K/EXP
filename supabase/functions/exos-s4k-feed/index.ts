@@ -179,10 +179,10 @@ async function runCron(sb: SupabaseClient) {
   const { data: due, error: dErr } = await sb.rpc("exos_feed_webhook_due", { p_limit: 500 });
   if (dErr) throw new Error(`webhook due: ${dErr.message}`);
   let sent = 0, failed = 0;
-  for (const w of (due ?? []) as Array<{ consumer_id: string; url: string; secret: string; cursor_to: string; events: WebhookEvent[] }>) {
-    const err = await sendWebhook(w.url, w.secret, w.consumer_id, w.cursor_to, w.events);
+  for (const w of (due ?? []) as Array<{ consumer_id: string; url: string; secret: string; cursor_to: string; cursor_id: string; events: WebhookEvent[] }>) {
+    const err = await sendWebhook(w.url, w.secret, w.consumer_id, `${w.cursor_to}/${w.cursor_id}`, w.events);
     const { error: aErr } = await sb.rpc("exos_feed_webhook_ack", {
-      p_consumer_id: w.consumer_id, p_cursor_to: w.cursor_to, p_ok: err === null, p_error: err,
+      p_consumer_id: w.consumer_id, p_cursor_to: w.cursor_to, p_cursor_id: w.cursor_id, p_ok: err === null, p_error: err,
     });
     if (aErr) console.error("exos-s4k-feed: webhook ack failed", aErr.message);
     if (err === null) sent++;
@@ -192,7 +192,7 @@ async function runCron(sb: SupabaseClient) {
 }
 
 /** null on a 2xx, else a short reason (no URL, no secret). */
-async function sendWebhook(target: string, secret: string, consumerId: string, cursorTo: string, events: WebhookEvent[]): Promise<string | null> {
+async function sendWebhook(target: string, secret: string, consumerId: string, batch: string, events: WebhookEvent[]): Promise<string | null> {
   const blocked = await urlIsBlocked(target);
   if (blocked) return `blocked: ${blocked}`;
   const body = JSON.stringify(webhookBody(events, new Date()));
@@ -208,7 +208,7 @@ async function sendWebhook(target: string, secret: string, consumerId: string, c
         "User-Agent": "Exos-Feed/1",
         "X-Exos-Timestamp": String(ts),
         "X-Exos-Signature": `sha256=${sig}`,
-        "X-Exos-Delivery": `${consumerId}:${cursorTo}`,
+        "X-Exos-Delivery": `${consumerId}:${batch}`,
       },
       body,
     });

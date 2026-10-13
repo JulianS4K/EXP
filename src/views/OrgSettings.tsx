@@ -618,7 +618,7 @@ export default function OrgSettings() {
 
             {/* S4K network (owner): S4K may list this org's events on the
                 marketplaces from the Exos feed (docs/marketplace/s4k-feed.md). */}
-            <S4kNetworkCard orgId={org.id} initial={org.s4kNetwork === true} canEdit={canEdit} />
+            <S4kNetworkCard orgId={org.id} initial={org.s4kNetwork === true} canEdit={activeRole === 'owner'} />
 
             {/* Meta info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-xs text-slate-500 space-y-2">

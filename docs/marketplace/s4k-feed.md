@@ -88,6 +88,9 @@ with its current shared count.
   passed) comes back once with `"status": "withdrawn"` and `available: 0` on
   the next `updatedSince` call, so the consumer delists it. The desk has no
   equivalent: it simply stops listing expired events.
+- `generatedAt` runs 15 seconds behind the clock on purpose: pass it back as
+  the next `updatedSince` and a change that committed while you were reading
+  still comes back (sometimes twice, never zero times).
 - `updatedAt` comes from a per-event content hash (`exos_feed_events`), refreshed
   every minute by the cron and on every call 1 and every order, so a re-check
   that finds nothing new moves nothing (the desk's "only store a changed pull").
@@ -229,7 +232,9 @@ last delivered one:
 
 Signed like Exos's other webhooks: `X-Exos-Timestamp`, `X-Exos-Signature:
 sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>`, `X-Exos-Delivery`
-(dedupe on it). A non-2xx keeps the cursor and backs off (1, 2, 4 … 30
+(dedupe on it). Deliveries page on `(updatedAt, eventId)` and stay 15 seconds
+behind the clock, so a batch never skips a change that was still committing.
+A non-2xx keeps the cursor and backs off (1, 2, 4 … 30
 minutes); the next success carries everything since. The URL must be https
 and resolve to public addresses.
 

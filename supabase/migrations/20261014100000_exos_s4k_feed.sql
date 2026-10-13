@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS public.exos_feed_consumers (
   webhook_url         text CHECK (webhook_url IS NULL OR webhook_url ~ '^https://'),
   webhook_secret      text NOT NULL DEFAULT encode(extensions.gen_random_bytes(24), 'hex'),
   webhook_cursor      timestamptz,
+  webhook_cursor_id   uuid,
   webhook_failures    integer NOT NULL DEFAULT 0,
   webhook_next_at     timestamptz,
   webhook_last_ok_at  timestamptz,
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS public.exos_feed_consumers (
   revoked_at          timestamptz,
   created_at          timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.exos_feed_consumers ADD COLUMN IF NOT EXISTS webhook_cursor_id uuid;
 ALTER TABLE public.exos_feed_consumers ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_feed_consumers FROM PUBLIC, anon, authenticated;
 
@@ -100,7 +102,7 @@ CREATE TABLE IF NOT EXISTS public.exos_feed_events (
   content_hash    text NOT NULL,
   updated_at      timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS exos_feed_events_updated_idx ON public.exos_feed_events (updated_at);
+CREATE INDEX IF NOT EXISTS exos_feed_events_updated_idx ON public.exos_feed_events (updated_at, event_id);
 ALTER TABLE public.exos_feed_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_feed_events FROM PUBLIC, anon, authenticated;
 
@@ -219,7 +221,9 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_feed_lines(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Record the feed state: updated_at moves only when an event's content
--- changes; an event that drops off is marked withdrawn once. NULL = every
+-- changes; an event that drops off is marked withdrawn once. Stamped with
+-- the wall clock (not the transaction start), and readers stay 15 s behind
+-- it, so a change committing while someone reads is never skipped. NULL = every
 -- event (skipped when another refresh holds the lock); an id = that event.
 CREATE OR REPLACE FUNCTION public.exos_feed_refresh(p_event_id uuid DEFAULT NULL)
 RETURNS integer
@@ -252,14 +256,14 @@ BEGIN
         INTO v_avail, v_cap, v_hash
         FROM public._exos_feed_lines(r.id) l;
       INSERT INTO public.exos_feed_events AS f (event_id, org_id, status, available, total_capacity, content_hash, updated_at)
-      VALUES (r.id, r.org_id, 'active', v_avail, v_cap, v_hash, now())
+      VALUES (r.id, r.org_id, 'active', v_avail, v_cap, v_hash, clock_timestamp())
       ON CONFLICT (event_id) DO UPDATE
         SET status = 'active', available = EXCLUDED.available, total_capacity = EXCLUDED.total_capacity,
-            content_hash = EXCLUDED.content_hash, updated_at = now()
+            content_hash = EXCLUDED.content_hash, updated_at = clock_timestamp()
         WHERE f.content_hash IS DISTINCT FROM EXCLUDED.content_hash OR f.status <> 'active';
     ELSE
       UPDATE public.exos_feed_events
-         SET status = 'withdrawn', available = 0, content_hash = 'withdrawn', updated_at = now()
+         SET status = 'withdrawn', available = 0, content_hash = 'withdrawn', updated_at = clock_timestamp()
        WHERE event_id = r.id AND status = 'active';
     END IF;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
@@ -279,7 +283,9 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_now    timestamptz := now();
+  -- Pass generatedAt back as updatedSince: it is 15 s behind the clock, so a
+  -- change committing during this call shows up next time (perhaps twice).
+  v_now    timestamptz := now() - interval '15 seconds';
   v_limit  int := least(greatest(coalesce(p_limit, 200), 1), 1000);
   v_offset int := greatest(coalesce(p_offset, 0), 0);
   v_total  int;
@@ -379,7 +385,8 @@ BEGIN
   END IF;
   v_email := coalesce(v_email, c.delivery_email);
 
-  -- Idempotent on externalRef.
+  -- Idempotent on externalRef: retries in flight wait here for the first one.
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_feed_order:' || v_ref, 0));
   SELECT * INTO o FROM public.exos_marketplace_orders WHERE channel = 's4k' AND external_order_id = v_ref;
   IF o.id IS NOT NULL THEN
     IF (o.raw ->> 'consumer_id') IS DISTINCT FROM v_cons::text THEN
@@ -402,23 +409,28 @@ BEGIN
   END;
 
   IF v_why IS NULL THEN
-    INSERT INTO public.exos_marketplace_orders (
-      channel, external_order_id, event_id, org_id, tier_id, quantity, buyer_email,
-      proceeds, list_unit_price, currency, sale_status, sold_at, raw)
-    VALUES ('s4k', v_ref, e.id, e.org_id, p_tier_id, p_quantity, v_email,
-            round(p_unit_price * p_quantity, 2), p_unit_price, l.currency, 'confirmed', now(),
-            jsonb_build_object('consumer_id', v_cons, 'marketplace', v_mkt))
-    RETURNING * INTO o;
-    SELECT * INTO f FROM public.exos_fulfil_marketplace_order(o.id, p_app_base);
-    IF f.status = 'fulfilled' THEN
+    -- A subtransaction: when the order can't be filled, everything it did
+    -- (the order row, the organizer's "action needed" alert and mail, the
+    -- counters) is rolled back, so a rejection leaves no trace but its log row.
+    BEGIN
+      INSERT INTO public.exos_marketplace_orders (
+        channel, external_order_id, event_id, org_id, tier_id, quantity, buyer_email,
+        proceeds, list_unit_price, currency, sale_status, sold_at, raw)
+      VALUES ('s4k', v_ref, e.id, e.org_id, p_tier_id, p_quantity, v_email,
+              round(p_unit_price * p_quantity, 2), p_unit_price, l.currency, 'confirmed', now(),
+              jsonb_build_object('consumer_id', v_cons, 'marketplace', v_mkt))
+      RETURNING * INTO o;
+      SELECT * INTO f FROM public.exos_fulfil_marketplace_order(o.id, p_app_base);
+      IF f.status IS DISTINCT FROM 'fulfilled' THEN
+        v_why := CASE WHEN f.reason LIKE 'oversold%' THEN 'sold_out' ELSE 'not_fillable: ' || coalesce(f.reason, f.status) END;
+        RAISE EXCEPTION 'exos_feed_place_order: rejected' USING ERRCODE = 'P0S4K';
+      END IF;
       PERFORM public.exos_feed_refresh(p_event_id);
       RETURN jsonb_build_object('result', 'created', 'order_id', o.id, 'status', 'fulfilled',
                                 'transfer_ids', to_jsonb(f.transfer_ids));
-    END IF;
-    -- Not filled (sold out, or anything the fulfil path parks): nothing was
-    -- minted. Drop the order so the ref can be retried, and reject.
-    DELETE FROM public.exos_marketplace_orders WHERE id = o.id AND cardinality(ticket_ids) = 0;
-    v_why := CASE WHEN f.reason LIKE 'oversold%' THEN 'sold_out' ELSE 'not_fillable: ' || coalesce(f.reason, f.status) END;
+    EXCEPTION WHEN SQLSTATE 'P0S4K' THEN
+      NULL;   -- v_why is set; the rejection is logged below
+    END;
     SELECT x.free_now INTO v_avail FROM public._exos_feed_lines(p_event_id) x WHERE x.tier_id = p_tier_id;
   END IF;
 
@@ -523,25 +535,33 @@ GRANT EXECUTE ON FUNCTION public.exos_feed_cancel_order(text, uuid) TO service_r
 -- listing the events whose feed state moved since its cursor. The edge
 -- function claims, sends, then acks; a failed send keeps the cursor, so the
 -- next run re-sends (retry with backoff, capped at 30 minutes).
+DROP FUNCTION IF EXISTS public.exos_feed_webhook_due(integer);
 CREATE OR REPLACE FUNCTION public.exos_feed_webhook_due(p_limit integer DEFAULT 500)
-RETURNS TABLE (consumer_id uuid, url text, secret text, cursor_to timestamptz, events jsonb)
+RETURNS TABLE (consumer_id uuid, url text, secret text, cursor_to timestamptz, cursor_id uuid, events jsonb)
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE c record; v_to timestamptz; v_ev jsonb;
+DECLARE c record; v_ev jsonb; v_to timestamptz; v_id uuid;
 BEGIN
   FOR c IN SELECT * FROM public.exos_feed_consumers
             WHERE revoked_at IS NULL AND webhook_url IS NOT NULL
               AND (webhook_next_at IS NULL OR webhook_next_at <= now())
   LOOP
-    SELECT max(updated_at), jsonb_agg(jsonb_build_object('event_id', event_id, 'status', status,
-                                                        'available', available, 'updated_at', updated_at) ORDER BY updated_at)
-      INTO v_to, v_ev
-      FROM (SELECT * FROM public.exos_feed_events f
-             WHERE c.webhook_cursor IS NULL OR f.updated_at > c.webhook_cursor
-             ORDER BY f.updated_at LIMIT least(greatest(coalesce(p_limit, 500), 1), 1000)) s;
-    IF v_to IS NOT NULL THEN
-      consumer_id := c.id; url := c.webhook_url; secret := c.webhook_secret; cursor_to := v_to; events := v_ev;
+    -- Keyset on (updated_at, event_id), 15 s behind the clock (see refresh).
+    SELECT jsonb_agg(jsonb_build_object('event_id', d.event_id, 'status', d.status, 'available', d.available,
+                                        'updated_at', d.updated_at) ORDER BY d.updated_at, d.event_id),
+           (array_agg(d.updated_at ORDER BY d.updated_at DESC, d.event_id DESC))[1],
+           (array_agg(d.event_id ORDER BY d.updated_at DESC, d.event_id DESC))[1]
+      INTO v_ev, v_to, v_id
+      FROM (SELECT f.updated_at, f.event_id, f.status, f.available FROM public.exos_feed_events f
+             WHERE f.updated_at <= clock_timestamp() - interval '15 seconds'
+               AND (c.webhook_cursor IS NULL
+                    OR (f.updated_at, f.event_id) > (c.webhook_cursor, coalesce(c.webhook_cursor_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+             ORDER BY f.updated_at, f.event_id
+             LIMIT least(greatest(coalesce(p_limit, 500), 1), 1000)) d;
+    IF v_id IS NOT NULL THEN
+      consumer_id := c.id; url := c.webhook_url; secret := c.webhook_secret;
+      cursor_to := v_to; cursor_id := v_id; events := v_ev;
       RETURN NEXT;
     END IF;
   END LOOP;
@@ -549,7 +569,8 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_feed_webhook_due(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_feed_webhook_due(integer) TO service_role;
 
-CREATE OR REPLACE FUNCTION public.exos_feed_webhook_ack(p_consumer_id uuid, p_cursor_to timestamptz,
+DROP FUNCTION IF EXISTS public.exos_feed_webhook_ack(uuid, timestamptz, boolean, text);
+CREATE OR REPLACE FUNCTION public.exos_feed_webhook_ack(p_consumer_id uuid, p_cursor_to timestamptz, p_cursor_id uuid,
                                                         p_ok boolean, p_error text DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
@@ -557,10 +578,15 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF p_ok THEN
-    UPDATE public.exos_feed_consumers
-       SET webhook_cursor = greatest(coalesce(webhook_cursor, p_cursor_to), p_cursor_to),
+    -- The cursor only moves forward (a late ack of an older batch can't rewind it).
+    UPDATE public.exos_feed_consumers c
+       SET webhook_cursor    = CASE WHEN adv THEN p_cursor_to ELSE c.webhook_cursor END,
+           webhook_cursor_id = CASE WHEN adv THEN p_cursor_id ELSE c.webhook_cursor_id END,
            webhook_failures = 0, webhook_next_at = NULL, webhook_last_ok_at = now(), webhook_last_error = NULL
-     WHERE id = p_consumer_id;
+      FROM (SELECT x.webhook_cursor IS NULL
+                   OR (p_cursor_to, p_cursor_id) > (x.webhook_cursor, coalesce(x.webhook_cursor_id, '00000000-0000-0000-0000-000000000000'::uuid)) AS adv
+              FROM public.exos_feed_consumers x WHERE x.id = p_consumer_id) a
+     WHERE c.id = p_consumer_id;
   ELSE
     UPDATE public.exos_feed_consumers
        SET webhook_failures = webhook_failures + 1,
@@ -569,8 +595,8 @@ BEGIN
      WHERE id = p_consumer_id;
   END IF;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_feed_webhook_ack(uuid, timestamptz, boolean, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_feed_webhook_ack(uuid, timestamptz, boolean, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_feed_webhook_ack(uuid, timestamptz, uuid, boolean, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_feed_webhook_ack(uuid, timestamptz, uuid, boolean, text) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- Operator: mint a consumer token (returned once; only its hash is stored).
@@ -624,7 +650,14 @@ AS $$
 BEGIN
   IF auth.uid() IS NOT NULL AND current_setting('exos.s4k_switch', true) IS DISTINCT FROM '1' THEN
     -- Separate IFs: PL/pgSQL resolves every NEW field in an expression.
-    IF TG_TABLE_NAME = 'exos_orgs' THEN
+    IF TG_OP = 'INSERT' THEN
+      -- A new row starts off the network; the RPCs switch it on.
+      IF TG_TABLE_NAME = 'exos_orgs' THEN
+        NEW.s4k_network := false;
+      ELSE
+        NEW.distribution_route := 'direct';
+      END IF;
+    ELSIF TG_TABLE_NAME = 'exos_orgs' THEN
       IF NEW.s4k_network IS DISTINCT FROM OLD.s4k_network THEN
         RAISE EXCEPTION 'use exos_set_s4k_network' USING ERRCODE = '42501';
       END IF;
@@ -636,10 +669,10 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_tg_s4k_switch_guard() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS exos_orgs_s4k_guard ON public.exos_orgs;
-CREATE TRIGGER exos_orgs_s4k_guard BEFORE UPDATE OF s4k_network ON public.exos_orgs
+CREATE TRIGGER exos_orgs_s4k_guard BEFORE INSERT OR UPDATE OF s4k_network ON public.exos_orgs
   FOR EACH ROW EXECUTE FUNCTION public.exos_tg_s4k_switch_guard();
 DROP TRIGGER IF EXISTS exos_events_s4k_guard ON public.exos_events;
-CREATE TRIGGER exos_events_s4k_guard BEFORE UPDATE OF distribution_route ON public.exos_events
+CREATE TRIGGER exos_events_s4k_guard BEFORE INSERT OR UPDATE OF distribution_route ON public.exos_events
   FOR EACH ROW EXECUTE FUNCTION public.exos_tg_s4k_switch_guard();
 
 -- An event goes to S4K only from an opted-in org and with nothing listed
@@ -651,6 +684,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE e public.exos_events%ROWTYPE; v_on boolean;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
   SELECT * INTO e FROM public.exos_events WHERE id = p_event_id FOR UPDATE;
   IF e.id IS NULL OR NOT public.exos_has_org_role(e.org_id, ARRAY['owner','manager']) THEN
     RAISE EXCEPTION 'not allowed' USING ERRCODE = '42501';
@@ -700,6 +734,12 @@ SELECT pg_temp.exos_patch('public.exos_fulfil_marketplace_order(uuid, text)',
   'WHEN ''evo'' THEN ''Ticket Evolution'' ELSE initcap(o.channel) END',
   'WHEN ''evo'' THEN ''Ticket Evolution'' WHEN ''s4k'' THEN ''S4K'' ELSE initcap(o.channel) END');
 
+-- The organizer-facing label (alerts, payouts).
+SELECT pg_temp.exos_patch('public.exos_channel_label(text)',
+  'WHEN ''s4k'' THEN ''S4K''',
+  'WHEN ''automatiq'' THEN ''Automatiq'' ELSE',
+  'WHEN ''automatiq'' THEN ''Automatiq'' WHEN ''s4k'' THEN ''S4K'' ELSE');
+
 -- One route at a time: an S4K event gets no direct marketplace allocation,
 -- by hand or from the auto split.
 SELECT pg_temp.exos_patch('public.exos_set_channel_allocation(uuid, text, uuid, integer)',
@@ -709,6 +749,26 @@ SELECT pg_temp.exos_patch('public.exos_set_channel_allocation(uuid, text, uuid, 
   E'    RAISE EXCEPTION ''exos_set_channel_allocation: this event is on the S4K network (S4K lists it): switch it to direct first'';\n' ||
   E'  END IF;\n' ||
   E'  IF v_ev.status = ''cancelled'' AND p_qty > 0 THEN');
+-- Route changes and allocations for one event take the same advisory lock
+-- first, so a switch to s4k and a new direct allocation can't both pass their
+-- checks (neither may lock the event row: see exos_apply_channel_split).
+SELECT pg_temp.exos_patch('public.exos_set_channel_allocation(uuid, text, uuid, integer)',
+  'exos_route:',
+  E'  SELECT * INTO v_ev FROM public.exos_events WHERE id = p_event_id;',
+  E'  PERFORM pg_advisory_xact_lock(hashtextextended(''exos_route:'' || p_event_id::text, 0));\n' ||
+  E'  SELECT * INTO v_ev FROM public.exos_events WHERE id = p_event_id;');
+SELECT pg_temp.exos_patch('public.exos_apply_channel_split(uuid)',
+  'exos_route:',
+  E'  SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;\n  IF e.id IS NULL THEN\n    RETURN jsonb_build_object(''applied'', false, ''reason'', ''not-found'');',
+  E'  PERFORM pg_advisory_xact_lock(hashtextextended(''exos_route:'' || p_event_id::text, 0));\n' ||
+  E'  SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;\n  IF e.id IS NULL THEN\n    RETURN jsonb_build_object(''applied'', false, ''reason'', ''not-found'');');
+SELECT pg_temp.exos_patch('public.exos_apply_channel_split(uuid)',
+  'S4K lists it (apply)',
+  E'  IF e.channel_split_mode <> ''auto'' THEN',
+  E'  IF e.distribution_route = ''s4k'' THEN   -- S4K lists it (apply)\n' ||
+  E'    RETURN jsonb_build_object(''applied'', false, ''reason'', ''s4k'');\n' ||
+  E'  END IF;\n' ||
+  E'  IF e.channel_split_mode <> ''auto'' THEN');
 SELECT pg_temp.exos_patch('public._exos_channel_split_plan(uuid)',
   'S4K lists it',
   E'  IF e.id IS NULL THEN\n    RETURN;\n  END IF;',

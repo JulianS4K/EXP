@@ -19,6 +19,8 @@
 --   F10 webhook: due rows coalesce changes since the cursor; ack advances it,
 --       a failure backs off and keeps it
 --   F11 grants
+--   F12 a signed-in insert can't start an event on the S4K route
+--   (F7 also: a rejection sends the organizer no alert or mail)
 -- Self-contained (a6 prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -209,6 +211,10 @@ BEGIN
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 20, 'F7: sold out exactly';
 
   ASSERT (SELECT count(*) FROM public.exos_feed_rejections WHERE consumer_id = (SELECT id FROM tok WHERE name = 's4k')) = 5, 'F7: five logged';
+  -- A rejection leaves no trace for the organizer: no alert, no "action needed" mail.
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE template = 'marketplace-attention'), 'F7: no attention mail';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_marketplace_attention_alerts), 'F7: no attention alert';
+  ASSERT (SELECT tickets_sold FROM public.exos_events WHERE id = pg_temp.ev()) = 6, 'F7: house counter: the two filled orders only';
   ASSERT EXISTS (SELECT 1 FROM public.exos_feed_rejections WHERE reason = 'sold_out' AND marketplace = 'vivid' AND available = 3 AND quantity = 4), 'F7: the sold-out row';
   RAISE NOTICE 'F7 ok';
 END $$;
@@ -252,23 +258,50 @@ END $$;
 
 -- F10. Webhook.
 DO $$
-DECLARE w record; v_to timestamptz; n int;
+DECLARE w record; n int;
 BEGIN
-  SELECT count(*) INTO n FROM public.exos_feed_webhook_due();
+  -- Readers stay 15 s behind the clock: a fresh change isn't due yet.
+  UPDATE public.exos_feed_events SET updated_at = clock_timestamp() WHERE event_id = pg_temp.ev();
+  ASSERT (SELECT count(*) FROM public.exos_feed_webhook_due()) = 0, 'F10: fresh change waits 15 s';
+  -- Two events moved at the same instant; batches of one still deliver both (keyset).
+  UPDATE public.exos_feed_events SET updated_at = now() - interval '1 minute' WHERE event_id = pg_temp.ev();
+  INSERT INTO public.exos_feed_events(event_id, org_id, status, available, total_capacity, content_hash, updated_at)
+  VALUES ('a6000000-0000-0000-0000-0000000000e2', 'a6000000-0000-0000-0000-000000000001', 'withdrawn', 0, 0, 'x', now() - interval '1 minute');
+  SELECT count(*) INTO n FROM public.exos_feed_webhook_due(1);
   ASSERT n = 1, 'F10: one consumer with a URL is due';
-  SELECT * INTO w FROM public.exos_feed_webhook_due();
+  SELECT * INTO w FROM public.exos_feed_webhook_due(1);
   ASSERT w.url = 'https://hooks.s4k.example/exos' AND w.secret = (SELECT secret FROM tok WHERE name = 's4k')
      AND jsonb_array_length(w.events) = 1, 'F10: payload ' || row_to_json(w)::text;
-  PERFORM public.exos_feed_webhook_ack(w.consumer_id, w.cursor_to, false, 'HTTP 500');
+  PERFORM public.exos_feed_webhook_ack(w.consumer_id, w.cursor_to, w.cursor_id, false, 'HTTP 500');
   ASSERT (SELECT webhook_cursor IS NULL AND webhook_failures = 1 AND webhook_next_at > now()
             FROM public.exos_feed_consumers WHERE id = w.consumer_id), 'F10: failure backs off, cursor kept';
   ASSERT (SELECT count(*) FROM public.exos_feed_webhook_due()) = 0, 'F10: not due while backing off';
   UPDATE public.exos_feed_consumers SET webhook_next_at = now() - interval '1 second' WHERE id = w.consumer_id;
-  SELECT cursor_to INTO v_to FROM public.exos_feed_webhook_due();
-  PERFORM public.exos_feed_webhook_ack(w.consumer_id, v_to, true);
-  ASSERT (SELECT webhook_cursor = v_to AND webhook_failures = 0 FROM public.exos_feed_consumers WHERE id = w.consumer_id), 'F10: ack advances';
+  SELECT * INTO w FROM public.exos_feed_webhook_due(1);
+  PERFORM public.exos_feed_webhook_ack(w.consumer_id, w.cursor_to, w.cursor_id, true);
+  ASSERT (SELECT webhook_cursor = w.cursor_to AND webhook_cursor_id = w.cursor_id AND webhook_failures = 0
+            FROM public.exos_feed_consumers WHERE id = w.consumer_id), 'F10: ack advances';
+  SELECT * INTO w FROM public.exos_feed_webhook_due(1);
+  ASSERT w.events -> 0 ->> 'event_id' IS DISTINCT FROM (SELECT webhook_cursor_id::text FROM public.exos_feed_consumers WHERE id = w.consumer_id)
+     AND jsonb_array_length(w.events) = 1, 'F10: the same-instant second event comes next';
+  PERFORM public.exos_feed_webhook_ack(w.consumer_id, w.cursor_to, w.cursor_id, true);
   ASSERT (SELECT count(*) FROM public.exos_feed_webhook_due()) = 0, 'F10: nothing new, nothing due';
+  -- A late ack of an older batch doesn't rewind the cursor.
+  PERFORM public.exos_feed_webhook_ack(w.consumer_id, now() - interval '1 day', w.cursor_id, true);
+  ASSERT (SELECT webhook_cursor = w.cursor_to FROM public.exos_feed_consumers WHERE id = w.consumer_id), 'F10: no rewind';
+  DELETE FROM public.exos_feed_events WHERE event_id = 'a6000000-0000-0000-0000-0000000000e2';
   RAISE NOTICE 'F10 ok';
+END $$;
+
+-- F12. A signed-in insert starts off the network.
+DO $$
+BEGIN
+  PERFORM pg_temp.act('a6000000-0000-0000-0000-0000000000a0');
+  INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_route)
+  VALUES ('a6000000-0000-0000-0000-0000000000e4','a6000000-0000-0000-0000-000000000001','Sneaky','draft',now() + interval '9 days','Hall',0,0,'s4k');
+  ASSERT (SELECT distribution_route FROM public.exos_events WHERE id = 'a6000000-0000-0000-0000-0000000000e4') = 'direct', 'F12: forced direct';
+  PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'F12 ok';
 END $$;
 
 -- F11. Grants.
@@ -280,7 +313,7 @@ BEGIN
                            'public.exos_feed_place_order(text,uuid,uuid,integer,text,text,numeric,text,text)',
                            'public.exos_feed_cancel_order(text,uuid)', 'public.exos_feed_order_tickets(text,uuid)', 'public.exos_feed_order_status(text,uuid)',
                            'public.exos_feed_refresh(uuid)', 'public.exos_feed_create_consumer(text,text,text)',
-                           'public.exos_feed_webhook_due(integer)', 'public.exos_feed_webhook_ack(uuid,timestamptz,boolean,text)'] LOOP
+                           'public.exos_feed_webhook_due(integer)', 'public.exos_feed_webhook_ack(uuid,timestamptz,uuid,boolean,text)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'F11: ' || f;
   END LOOP;
   ASSERT has_function_privilege('authenticated', 'public.exos_set_s4k_network(uuid,boolean)', 'EXECUTE'), 'F11: switch';
