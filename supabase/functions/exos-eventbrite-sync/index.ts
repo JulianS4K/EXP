@@ -171,7 +171,7 @@ async function syncOne(sb: SupabaseClient, event: string, user: string, pages: n
     const linked = await sb.from("exos_eventbrite_links").select("event_id").eq("event_id", event).maybeSingle();
     return { skipped: linked.data ? "recent" : "not_linked" };
   }
-  return await syncLink(fetch, link, applier(sb, link.event_id), { maxPages: pages, deadline: Date.now() + 40_000 });
+  return await syncLink(fetch, link, applier(sb, link), { maxPages: pages, deadline: Date.now() + 40_000 });
 }
 
 async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
@@ -187,31 +187,29 @@ async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
     if (Date.now() >= deadline) {
       // Out of time: free the rest for the next run.
       await sb.rpc("exos_eventbrite_apply", {
-        p_event_id: link.event_id, p_rows: [], p_state: "pause", p_continuation: link.continuation,
+        p_event_id: link.event_id, p_lease: link.lease_id, p_rows: [], p_state: "pause", p_continuation: link.continuation,
       });
       continue;
     }
-    const out = await syncLink(fetch, link, applier(sb, link.event_id), { maxPages: CRON_PAGES, deadline });
+    const out = await syncLink(fetch, link, applier(sb, link), { maxPages: CRON_PAGES, deadline });
     results.push({ event: link.event_id, state: out.state, rows: out.rows });
   }
   return { ok: true, claimed: links.length, results };
 }
 
-function applier(sb: SupabaseClient, event: string) {
+/** exos_eventbrite_apply for one claimed link. A failed call returns null;
+ *  syncLink then records the error with the page's own continuation. */
+function applier(sb: SupabaseClient, link: ClaimedLink) {
   return async (rows: ApplyRow[], state: ApplyState, continuation: string | null, error: string | null) => {
     const r = await sb.rpc("exos_eventbrite_apply", {
-      p_event_id: event, p_rows: rows, p_state: state, p_continuation: continuation, p_error: error,
+      p_event_id: link.event_id, p_lease: link.lease_id, p_rows: rows, p_state: state,
+      p_continuation: continuation, p_error: error,
     });
     if (r.error) {
       console.error("exos-eventbrite-sync: apply failed", redactError(r.error));
-      // Free the link and keep the cursor; the next run retries.
-      await sb.rpc("exos_eventbrite_apply", {
-        p_event_id: event, p_rows: [], p_state: "error", p_continuation: continuation,
-        p_error: "Exos couldn't save the attendees; retrying.",
-      });
       return null;
     }
-    return r.data as { ok: boolean; added?: number; voided?: number; restored?: number };
+    return r.data as { ok: boolean; reason?: string; added?: number; voided?: number; restored?: number };
   };
 }
 

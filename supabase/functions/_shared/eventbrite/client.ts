@@ -230,11 +230,13 @@ export interface ClaimedLink {
   token: string;
   sync_cursor: string | null;
   continuation: string | null;
+  /** The claim's lease id; every apply presents it (a stale run writes nothing). */
+  lease_id: string;
 }
 
 export type ApplyState = "more" | "pause" | "done" | "error";
 export type ApplyFn = (rows: ApplyRow[], state: ApplyState, continuation: string | null,
-  error: string | null) => Promise<{ ok: boolean; added?: number; voided?: number; restored?: number } | null>;
+  error: string | null) => Promise<{ ok: boolean; reason?: string; added?: number; voided?: number; restored?: number } | null>;
 
 export interface SyncOutcome {
   state: "done" | "more" | "error";
@@ -284,7 +286,14 @@ export async function syncLink(
     const res = await apply(rows, more ? (stop ? "pause" : "more") : "done", next, null);
     if (!res?.ok) {
       out.state = "error";
-      out.error = "could not save the attendees";
+      if (res?.reason === "lease-lost") {
+        // Relinked, reconnected or taken over by another run: stop, write nothing.
+        out.error = "The link changed during the sync.";
+        return out;
+      }
+      out.error = "Exos couldn't save the attendees; retrying.";
+      // Keep the continuation this page was fetched WITH, so it is read again.
+      await apply([], "error", continuation ?? null, out.error);
       return out;
     }
     out.added += res.added ?? 0;

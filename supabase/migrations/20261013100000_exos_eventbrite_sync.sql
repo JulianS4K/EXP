@@ -39,7 +39,7 @@
 --    follow Eventbrite, and a refunded, cancelled or deleted ticket is
 --    VOIDED (voided_at): the door refuses it, by scan or by name. A ticket
 --    that comes back (an undone refund) is un-voided. A voided attendee
---    never imported is not added.
+--    never imported is not added. Voiding leaves the house capacity alone.
 --
 -- Eventbrite is only read. Nothing is written to it: no check-ins, no
 -- webhooks, no orders (CLAUDE.md, upstream APIs are read-only). Keyed on the
@@ -47,7 +47,8 @@
 -- with the same barcode is adopted, not duplicated.
 --
 -- The claim takes a 2-minute lease per link, so the cron and a "Sync now" tap
--- never run the same link at once. A pass that needs more pages than one run
+-- never run the same link at once; each run's writes carry its lease id, so a
+-- run overtaken by a relink or reconnect writes nothing. A pass that needs more pages than one run
 -- allows keeps Eventbrite's continuation token and resumes next run.
 --
 -- Order: deploy exos-eventbrite-sync, then apply (section 9 schedules its
@@ -126,6 +127,9 @@ CREATE TABLE IF NOT EXISTS public.exos_eventbrite_links (
   pass_started_at timestamptz,          -- the running pass's start: the next cursor once it completes
   continuation    text CHECK (continuation IS NULL OR length(continuation) <= 2048),
   lease_until     timestamptz,
+  lease_id        uuid,                 -- the claiming run's id; a stale run's writes are refused
+  pass_errors     integer NOT NULL DEFAULT 0,  -- rows that failed in the running pass
+  row_errors      integer NOT NULL DEFAULT 0,  -- rows that failed in the last finished pass
   last_synced_at  timestamptz,
   last_ok_at      timestamptz,
   last_error      text CHECK (last_error IS NULL OR length(last_error) <= 200),
@@ -196,7 +200,8 @@ BEGIN
          connected_by = EXCLUDED.connected_by, connected_at = EXCLUDED.connected_at;
   -- Another account may see other events: start every link's next pass over.
   UPDATE public.exos_eventbrite_links
-     SET sync_cursor = NULL, continuation = NULL, pass_started_at = NULL, last_error = NULL
+     SET sync_cursor = NULL, continuation = NULL, pass_started_at = NULL, last_error = NULL,
+         pass_errors = 0, lease_id = NULL, lease_until = NULL
    WHERE org_id = p_org_id;
   RETURN jsonb_build_object('connected', true,
                             'account_name', left(nullif(btrim(coalesce(p_account_name, '')), ''), 120));
@@ -301,6 +306,10 @@ BEGIN
          sync_cursor     = CASE WHEN l.eb_event_id = EXCLUDED.eb_event_id THEN l.sync_cursor END,
          pass_started_at = CASE WHEN l.eb_event_id = EXCLUDED.eb_event_id THEN l.pass_started_at END,
          continuation    = CASE WHEN l.eb_event_id = EXCLUDED.eb_event_id THEN l.continuation END,
+         pass_errors     = CASE WHEN l.eb_event_id = EXCLUDED.eb_event_id THEN l.pass_errors ELSE 0 END,
+         -- A run still going for the old link loses its lease: its writes are refused.
+         -- and the link's first sync runs now ("Sync now" spacing starts over).
+         lease_id = NULL, lease_until = NULL, last_synced_at = NULL,
          last_error = NULL;
   RETURN jsonb_build_object('linked', true, 'list_id', v_list, 'relinked', v_prev IS NOT NULL AND v_prev <> p_eb_event_id);
 END $$;
@@ -325,7 +334,8 @@ REVOKE ALL ON FUNCTION public.exos_eventbrite_unlink(uuid, uuid) FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public.exos_eventbrite_unlink(uuid, uuid) TO service_role;
 
 -- ---------------------------------------------------------------------------
--- 5. Claim links to sync, with a 2-minute lease and the token.
+-- 5. Claim links to sync, with a 2-minute lease (lease_id: this run's id,
+--    which every exos_eventbrite_apply must present) and the token.
 --    p_event_id NULL: the cron; the links that are due, oldest first.
 --    p_event_id set:  "Sync now" by p_user_id (door roles, scanner scope);
 --                     at most every 20 seconds.
@@ -333,7 +343,7 @@ GRANT EXECUTE ON FUNCTION public.exos_eventbrite_unlink(uuid, uuid) TO service_r
 CREATE OR REPLACE FUNCTION public.exos_eventbrite_sync_claim(
   p_event_id uuid DEFAULT NULL, p_user_id uuid DEFAULT NULL, p_limit integer DEFAULT 10
 ) RETURNS TABLE(event_id uuid, eb_event_id text, token text, sync_cursor timestamptz,
-                continuation text, pass_started_at timestamptz)
+                continuation text, pass_started_at timestamptz, lease_id uuid)
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
@@ -377,11 +387,12 @@ BEGIN
   )
   UPDATE public.exos_eventbrite_links l
      SET lease_until = now() + interval '2 minutes',
+         lease_id = gen_random_uuid(),
          last_synced_at = now(),
          pass_started_at = coalesce(l.pass_started_at, now())
     FROM due, public.exos_eventbrite_accounts a, vault.decrypted_secrets d
    WHERE l.event_id = due.event_id AND a.org_id = l.org_id AND d.id = a.secret_id
-  RETURNING l.event_id, l.eb_event_id, d.decrypted_secret, l.sync_cursor, l.continuation, l.pass_started_at;
+  RETURNING l.event_id, l.eb_event_id, d.decrypted_secret, l.sync_cursor, l.continuation, l.pass_started_at, l.lease_id;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_eventbrite_sync_claim(uuid, uuid, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_eventbrite_sync_claim(uuid, uuid, integer) TO service_role;
@@ -396,9 +407,16 @@ GRANT EXECUTE ON FUNCTION public.exos_eventbrite_sync_claim(uuid, uuid, integer)
 --      next run resumes, the lease is released), 'done' (the pass is
 --      complete: the cursor moves to the pass's start), 'error' (p_error;
 --      the cursor stays, p_continuation NULL restarts the pass).
+--    p_lease: the claim's lease_id. When the link was relinked, reconnected
+--      or claimed by another run since, nothing is written ('lease-lost').
+--    A pass in which some rows failed (e.g. a barcode another guest holds)
+--      completes without moving the cursor, so those rows are read again;
+--      row_errors says how many.
+--    Voiding never changes the house capacity: the heads stay taken (remove
+--      the guest to free them), so nothing else that counts heads drifts.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.exos_eventbrite_apply(
-  p_event_id uuid, p_rows jsonb, p_state text, p_continuation text DEFAULT NULL, p_error text DEFAULT NULL
+  p_event_id uuid, p_lease uuid, p_rows jsonb, p_state text, p_continuation text DEFAULT NULL, p_error text DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -413,7 +431,6 @@ DECLARE
   v_name    text;
   v_email   text;
   v_void    boolean;
-  v_counts  boolean;
   v_id      uuid;
   v_added   int := 0;
   v_updated int := 0;
@@ -421,10 +438,14 @@ DECLARE
   v_restored int := 0;
   v_skipped int := 0;
   v_errors  int := 0;
+  v_invalid int := 0;
 BEGIN
   SELECT * INTO lk FROM public.exos_eventbrite_links WHERE event_id = p_event_id FOR UPDATE;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'not-linked');
+  END IF;
+  IF lk.lease_id IS NULL OR p_lease IS DISTINCT FROM lk.lease_id THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'lease-lost');
   END IF;
   IF p_state IS NULL OR p_state NOT IN ('more', 'pause', 'done', 'error') THEN
     RAISE EXCEPTION 'exos_eventbrite_apply: bad state %', p_state USING ERRCODE = '22023';
@@ -436,7 +457,7 @@ BEGIN
 
   FOR r IN SELECT value FROM jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) LOOP
     IF jsonb_typeof(r) <> 'object' OR coalesce(r->>'ref', '') !~ '^[0-9]{1,24}$' THEN
-      v_errors := v_errors + 1;
+      v_invalid := v_invalid + 1;      -- unusable; reading it again won't help
       CONTINUE;
     END IF;
     v_ref   := 'eb:' || (r->>'ref');
@@ -478,18 +499,9 @@ BEGIN
                voided_at     = CASE WHEN v_void THEN coalesce(voided_at, now()) END,
                void_reason   = CASE WHEN v_void THEN left(coalesce(nullif(btrim(r->>'reason'), ''), 'refunded'), 40) END
          WHERE id = g.id;
-        -- An entry on a list that counts toward the house cap gives its
-        -- heads back on void and takes them again on restore.
-        v_counts := coalesce((SELECT counts_toward_capacity FROM public.exos_guest_lists WHERE id = g.list_id), false);
         IF v_void AND g.voided_at IS NULL THEN
           v_voided := v_voided + 1;
-          IF v_counts THEN
-            PERFORM public._exos_guest_capacity(p_event_id, -(1 + g.plus_ones));
-          END IF;
         ELSIF NOT v_void AND g.voided_at IS NOT NULL THEN
-          IF v_counts THEN
-            PERFORM public._exos_guest_capacity(p_event_id, 1 + g.plus_ones);
-          END IF;
           v_restored := v_restored + 1;
         ELSE
           v_updated := v_updated + 1;
@@ -497,7 +509,7 @@ BEGIN
       END IF;
     EXCEPTION
       WHEN unique_violation OR check_violation OR raise_exception THEN
-        -- e.g. a barcode another entry already holds, or the list is full.
+        -- e.g. a barcode another entry already holds.
         v_errors := v_errors + 1;
     END;
     g := NULL;
@@ -506,19 +518,26 @@ BEGIN
   UPDATE public.exos_eventbrite_links
      SET lease_until     = CASE WHEN p_state = 'more' THEN now() + interval '2 minutes' END,
          continuation    = CASE WHEN p_state IN ('more', 'pause', 'error') THEN left(p_continuation, 2048) END,
-         sync_cursor     = CASE WHEN p_state = 'done' THEN coalesce(pass_started_at, now()) ELSE sync_cursor END,
+         -- Done: the cursor moves to the pass's start, unless rows failed in
+         -- the pass (they are read again) or the pass start is unknown.
+         sync_cursor     = CASE WHEN p_state = 'done' AND pass_errors + v_errors = 0 AND pass_started_at IS NOT NULL
+                                THEN pass_started_at ELSE sync_cursor END,
+         row_errors      = CASE WHEN p_state = 'done' THEN pass_errors + v_errors ELSE row_errors END,
+         pass_errors     = CASE WHEN p_state = 'done' OR (p_state = 'error' AND p_continuation IS NULL) THEN 0
+                                ELSE pass_errors + v_errors END,
          pass_started_at = CASE WHEN p_state = 'done' OR (p_state = 'error' AND p_continuation IS NULL) THEN NULL
                                 ELSE pass_started_at END,
          last_ok_at      = CASE WHEN p_state = 'done' THEN now() ELSE last_ok_at END,
          last_error      = CASE WHEN p_state = 'error' THEN left(coalesce(nullif(btrim(p_error), ''), 'sync failed'), 200)
-                                WHEN p_state = 'done' THEN NULL ELSE last_error END
+                                ELSE NULL END
    WHERE event_id = p_event_id;
 
   RETURN jsonb_build_object('ok', true, 'added', v_added, 'updated', v_updated, 'voided', v_voided,
-                            'restored', v_restored, 'skipped', v_skipped, 'errors', v_errors);
+                            'restored', v_restored, 'skipped', v_skipped, 'errors', v_errors,
+                            'invalid', v_invalid);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_eventbrite_apply(uuid, jsonb, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_eventbrite_apply(uuid, jsonb, text, text, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_eventbrite_apply(uuid, uuid, jsonb, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_eventbrite_apply(uuid, uuid, jsonb, text, text, text) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 7. What the door page shows (door roles, scanner scope). Never the token.
@@ -551,6 +570,7 @@ BEGIN
     'link', CASE WHEN lk.event_id IS NULL THEN NULL ELSE jsonb_build_object(
       'eb_event_id', lk.eb_event_id, 'eb_event_name', lk.eb_event_name,
       'last_synced_at', lk.last_synced_at, 'last_ok_at', lk.last_ok_at, 'last_error', lk.last_error,
+      'row_errors', lk.row_errors,
       'syncing', lk.lease_until IS NOT NULL AND lk.lease_until > now(),
       'attendees', (SELECT count(*) FROM public.exos_guest_list_entries g
                      WHERE g.event_id = p_event_id AND g.external_ref LIKE 'eb:%' AND g.voided_at IS NULL),

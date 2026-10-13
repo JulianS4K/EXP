@@ -15,6 +15,8 @@ export interface EventbriteLink {
   syncing: boolean;
   attendees: number;
   voided: number;
+  /** Attendees the last pass couldn't add (e.g. a barcode another guest has); retried each pass. */
+  rowErrors: number;
 }
 
 export interface EventbriteStatus {
@@ -52,6 +54,7 @@ export function parseEventbriteStatus(raw: any): EventbriteStatus {
         syncing: l.syncing === true,
         attendees: Number(l.attendees) || 0,
         voided: Number(l.voided) || 0,
+        rowErrors: Number(l.row_errors) || 0,
       }
       : null,
   };

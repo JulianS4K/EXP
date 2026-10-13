@@ -12,12 +12,14 @@
 --      kept with the lease; 'pause' frees the link and the next run resumes
 --   E5 apply 'done': cursor moves to the pass start, lease released
 --   E6 void: the door refuses a voided guest and the download says so; a
---      restored ticket checks in; a counting list gives heads back
+--      restored ticket checks in; the house capacity is never touched
 --   E7 status: door staff see it (never the token); outsider refused
 --   E8 apply 'error': error kept, lease released, pass restarts; the cron
 --      waits 10 minutes before retrying
 --   E9 disconnect: Vault secret and links gone, guests stay
 --   E10 grants
+--   E11 (runs before E9) a run overtaken by a relink writes nothing; a pass
+--      with a failed row keeps the cursor; a good page clears the error
 -- Self-contained (BEGIN / ROLLBACK). Org e5…01 owned by …a1; manager …a2,
 -- scanner …a3 (unscoped), scanner …a4 (assigned to e2 only), outsider …a6.
 -- ============================================================================
@@ -55,6 +57,12 @@ CREATE FUNCTION pg_temp.act(p_uid text) RETURNS void LANGUAGE sql AS $$
 $$;
 CREATE FUNCTION pg_temp.u(p text) RETURNS uuid LANGUAGE sql AS $$ SELECT ('e5000000-0000-0000-0000-0000000000' || p)::uuid $$;
 CREATE FUNCTION pg_temp.org() RETURNS uuid LANGUAGE sql AS $$ SELECT 'e5000000-0000-0000-0000-000000000001'::uuid $$;
+-- exos_eventbrite_apply with the link's current lease (what the claiming run holds).
+CREATE FUNCTION pg_temp.ap(p_event uuid, p_rows jsonb, p_state text, p_cont text DEFAULT NULL, p_err text DEFAULT NULL)
+RETURNS jsonb LANGUAGE sql AS $$
+  SELECT public.exos_eventbrite_apply(p_event, (SELECT lease_id FROM public.exos_eventbrite_links WHERE event_id = p_event),
+                                      p_rows, p_state, p_cont, p_err)
+$$;
 CREATE FUNCTION pg_temp.entry(p_ref text) RETURNS public.exos_guest_list_entries LANGUAGE sql AS $$
   SELECT * FROM public.exos_guest_list_entries WHERE event_id = pg_temp.u('e1') AND external_ref = 'eb:' || p_ref
 $$;
@@ -186,14 +194,15 @@ BEGIN
   PERFORM pg_temp.act(NULL);
   UPDATE public.exos_eventbrite_links SET lease_until = now() + interval '2 minutes' WHERE event_id = pg_temp.u('e1');
 
-  r := public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  r := pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9001', 'code', '70010001', 'name', 'Ada Lovelace', 'ticket', 'GA', 'void', false),
     jsonb_build_object('ref', '9002', 'code', '70010002', 'name', 'Bo Diddley', 'email', 'BO@X.COM', 'ticket', 'VIP', 'void', false),
     jsonb_build_object('ref', '9003', 'code', '70010003', 'name', 'Cy Refunded', 'void', true, 'reason', 'refunded'),
     jsonb_build_object('ref', 'abc', 'name', 'Bad ref', 'void', false),
     jsonb_build_object('ref', '9004', 'name', 'No Barcode', 'void', false)),
     'more', 'CONT-1');
-  ASSERT r->>'added' = '2' AND r->>'updated' = '1' AND r->>'skipped' = '1' AND r->>'errors' = '1', 'E4: ' || r::text;
+  ASSERT r->>'added' = '2' AND r->>'updated' = '1' AND r->>'skipped' = '1' AND r->>'errors' = '0'
+         AND r->>'invalid' = '1', 'E4: ' || r::text;
   ASSERT (SELECT count(*) FROM public.exos_guest_list_entries WHERE event_id = pg_temp.u('e1') AND external_code = '70010001') = 1,
          'E4: CSV entry adopted, not duplicated';
   ASSERT (pg_temp.entry('9001')).list_id = v_csv AND (pg_temp.entry('9001')).ticket_label = 'GA', 'E4: adopted entry';
@@ -204,7 +213,7 @@ BEGIN
   ASSERT (SELECT continuation = 'CONT-1' AND lease_until > now() FROM public.exos_eventbrite_links
            WHERE event_id = pg_temp.u('e1')), 'E4: continuation + lease kept';
   -- The run stops with pages left: saved, link freed, claimed again next run.
-  r := public.exos_eventbrite_apply(pg_temp.u('e1'), '[]'::jsonb, 'pause', 'CONT-2');
+  r := pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'pause', 'CONT-2');
   ASSERT (SELECT continuation = 'CONT-2' AND lease_until IS NULL AND pass_started_at IS NOT NULL
             FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1')), 'E4: paused';
   ASSERT (SELECT c.continuation FROM public.exos_eventbrite_sync_claim() c WHERE c.event_id = pg_temp.u('e1')) = 'CONT-2',
@@ -217,12 +226,12 @@ DECLARE r jsonb; v_start timestamptz;
 BEGIN
   UPDATE public.exos_eventbrite_links SET pass_started_at = now() - interval '5 minutes' WHERE event_id = pg_temp.u('e1');
   SELECT pass_started_at INTO v_start FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1');
-  r := public.exos_eventbrite_apply(pg_temp.u('e1'), '[]'::jsonb, 'done');
+  r := pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'done');
   ASSERT r->>'ok' = 'true', 'E5: ' || r::text;
   ASSERT (SELECT sync_cursor = v_start AND pass_started_at IS NULL AND continuation IS NULL
                  AND lease_until IS NULL AND last_ok_at IS NOT NULL AND last_error IS NULL
             FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1')), 'E5: state';
-  r := public.exos_eventbrite_apply(pg_temp.u('e2'), '[]'::jsonb, 'done');
+  r := pg_temp.ap(pg_temp.u('e2'), '[]'::jsonb, 'done');
   ASSERT r->>'reason' = 'not-linked', 'E5: unlinked';
 END $$;
 
@@ -231,7 +240,7 @@ DO $$
 DECLARE r jsonb; v_g uuid; v_sold int;
 BEGIN
   v_g := (pg_temp.entry('9002')).id;
-  r := public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  r := pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9002', 'code', '70010002', 'name', 'Bo Diddley', 'void', true, 'reason', 'refunded')), 'done');
   ASSERT r->>'voided' = '1', 'E6: ' || r::text;
   ASSERT (pg_temp.entry('9002')).voided_at IS NOT NULL AND (pg_temp.entry('9002')).void_reason = 'refunded', 'E6: voided';
@@ -246,37 +255,32 @@ BEGIN
          'E6: download says why';
 
   PERFORM pg_temp.act(NULL);
-  r := public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  r := pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9002', 'code', '70010002', 'name', 'Bo Diddley', 'void', false)), 'done');
   ASSERT r->>'restored' = '1', 'E6: restored ' || r::text;
   PERFORM pg_temp.act('e5000000-0000-0000-0000-0000000000a3');
   r := public.exos_guest_check_in(v_g, 1, pg_temp.u('e1'), gen_random_uuid());
   ASSERT r->>'ok' = 'true' AND r->>'reason' = 'checked-in', 'E6: restored checks in ' || r::text;
 
-  -- A list counting toward the house cap gives the heads back on void.
+  -- Voiding and restoring never touch the house capacity, even on a list
+  -- that counts toward it (remove / delete-list paths count heads as stored).
   PERFORM pg_temp.act(NULL);
   UPDATE public.exos_guest_lists SET counts_toward_capacity = true
    WHERE id = (pg_temp.entry('9004')).list_id;
   UPDATE public.exos_events SET tickets_sold = 10 WHERE id = pg_temp.u('e1');
-  PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  PERFORM pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9004', 'name', 'No Barcode', 'void', true, 'reason', 'cancelled')), 'done');
-  SELECT tickets_sold INTO v_sold FROM public.exos_events WHERE id = pg_temp.u('e1');
-  ASSERT v_sold = 9, 'E6: heads back ' || v_sold;
-  PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
-    jsonb_build_object('ref', '9004', 'name', 'No Barcode', 'void', true)), 'done');
-  SELECT tickets_sold INTO v_sold FROM public.exos_events WHERE id = pg_temp.u('e1');
-  ASSERT v_sold = 9, 'E6: voiding twice gives back once';
-  PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  PERFORM pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9004', 'name', 'No Barcode', 'void', false)), 'done');
   SELECT tickets_sold INTO v_sold FROM public.exos_events WHERE id = pg_temp.u('e1');
-  ASSERT v_sold = 10, 'E6: restore takes them again';
+  ASSERT v_sold = 10, 'E6: capacity unchanged ' || v_sold;
 END $$;
 
 -- E7. Status.
 DO $$
 DECLARE r jsonb;
 BEGIN
-  PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), jsonb_build_array(
+  PERFORM pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
     jsonb_build_object('ref', '9004', 'name', 'No Barcode', 'void', true)), 'done');
   PERFORM pg_temp.act('e5000000-0000-0000-0000-0000000000a3');
   r := public.exos_eventbrite_status(pg_temp.u('e1'));
@@ -308,7 +312,7 @@ BEGIN
   UPDATE public.exos_eventbrite_links
      SET lease_until = now() + interval '1 minute', continuation = 'CONT-9', pass_started_at = now()
    WHERE event_id = pg_temp.u('e1');
-  PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), '[]'::jsonb, 'error', NULL, 'Eventbrite said 401');
+  PERFORM pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'error', NULL, 'Eventbrite said 401');
   ASSERT (SELECT last_error = 'Eventbrite said 401' AND lease_until IS NULL AND continuation IS NULL
                  AND pass_started_at IS NULL AND sync_cursor IS NOT NULL
             FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1')), 'E8: state';
@@ -319,15 +323,54 @@ BEGIN
   ASSERT EXISTS (SELECT 1 FROM public.exos_eventbrite_sync_claim() c WHERE c.event_id = pg_temp.u('e1')), 'E8: retried';
   UPDATE public.exos_eventbrite_links SET lease_until = NULL WHERE event_id = pg_temp.u('e1');
   BEGIN
-    PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), '[]'::jsonb, 'later');
+    PERFORM pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'later');
     RAISE EXCEPTION 'E8: bad state accepted';
   EXCEPTION WHEN invalid_parameter_value THEN NULL;
   END;
   BEGIN
-    PERFORM public.exos_eventbrite_apply(pg_temp.u('e1'), '{}'::jsonb, 'done');
+    PERFORM pg_temp.ap(pg_temp.u('e1'), '{}'::jsonb, 'done');
     RAISE EXCEPTION 'E8: an object accepted as rows';
   EXCEPTION WHEN invalid_parameter_value THEN NULL;
   END;
+END $$;
+
+-- E11. A run overtaken by a relink writes nothing; a failed row keeps the cursor.
+DO $$
+DECLARE r jsonb; v_old uuid; v_cur timestamptz;
+BEGIN
+  UPDATE public.exos_eventbrite_links SET lease_until = NULL, last_synced_at = NULL, last_error = NULL
+   WHERE event_id = pg_temp.u('e1');
+  SELECT c.lease_id INTO v_old FROM public.exos_eventbrite_sync_claim() c WHERE c.event_id = pg_temp.u('e1');
+  ASSERT v_old IS NOT NULL, 'E11: claimed';
+  PERFORM public.exos_eventbrite_link(pg_temp.u('e1'), pg_temp.u('a1'), '113', 'Another one');
+  r := public.exos_eventbrite_apply(pg_temp.u('e1'), v_old, jsonb_build_array(
+    jsonb_build_object('ref', '9100', 'name', 'Stale', 'void', false)), 'more', 'OLD-CONT');
+  ASSERT r->>'reason' = 'lease-lost', 'E11: ' || r::text;
+  ASSERT (pg_temp.entry('9100')).id IS NULL, 'E11: stale row written';
+  ASSERT (SELECT continuation IS NULL AND sync_cursor IS NULL FROM public.exos_eventbrite_links
+           WHERE event_id = pg_temp.u('e1')), 'E11: stale state written';
+  -- The /link sync can claim straight away.
+  ASSERT EXISTS (SELECT 1 FROM public.exos_eventbrite_sync_claim(pg_temp.u('e1'), pg_temp.u('a1'))), 'E11: relink sync claims';
+  -- A pass with a failed row (a barcode another guest holds) doesn't move the cursor.
+  UPDATE public.exos_eventbrite_links SET sync_cursor = now() - interval '1 day' WHERE event_id = pg_temp.u('e1');
+  SELECT sync_cursor INTO v_cur FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1');
+  r := pg_temp.ap(pg_temp.u('e1'), jsonb_build_array(
+    jsonb_build_object('ref', '9200', 'code', '70010001', 'name', 'Clash', 'void', false)), 'more', 'K2');
+  ASSERT r->>'errors' = '1', 'E11: clash ' || r::text;
+  r := pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'done');
+  ASSERT (SELECT sync_cursor = v_cur AND row_errors = 1 AND pass_errors = 0 AND pass_started_at IS NULL
+            FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1')), 'E11: cursor kept';
+  -- A clean pass moves it.
+  UPDATE public.exos_eventbrite_links SET pass_started_at = now() WHERE event_id = pg_temp.u('e1');
+  PERFORM pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'done');
+  ASSERT (SELECT sync_cursor > v_cur AND row_errors = 0 FROM public.exos_eventbrite_links
+           WHERE event_id = pg_temp.u('e1')), 'E11: cursor moved';
+  -- A successful page clears an earlier error.
+  UPDATE public.exos_eventbrite_links SET last_error = 'old' WHERE event_id = pg_temp.u('e1');
+  PERFORM pg_temp.ap(pg_temp.u('e1'), '[]'::jsonb, 'pause', 'K5');
+  ASSERT (SELECT last_error IS NULL FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e1')), 'E11: error cleared';
+  UPDATE public.exos_eventbrite_links SET continuation = NULL, pass_started_at = NULL, lease_until = NULL
+   WHERE event_id = pg_temp.u('e1');
 END $$;
 
 -- E9. Disconnect.
@@ -360,7 +403,7 @@ BEGIN
     'public.exos_eventbrite_connect(uuid,uuid,text,text)', 'public.exos_eventbrite_disconnect(uuid,uuid)',
     'public.exos_eventbrite_token(uuid,uuid)', 'public.exos_eventbrite_link(uuid,uuid,text,text)',
     'public.exos_eventbrite_unlink(uuid,uuid)', 'public.exos_eventbrite_sync_claim(uuid,uuid,integer)',
-    'public.exos_eventbrite_apply(uuid,jsonb,text,text,text)', 'public._exos_eb_role(uuid,uuid,uuid)'] LOOP
+    'public.exos_eventbrite_apply(uuid,uuid,jsonb,text,text,text)', 'public._exos_eb_role(uuid,uuid,uuid)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'E10: authenticated may run ' || f;
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE'), 'E10: anon may run ' || f;
     ASSERT has_function_privilege('service_role', f, 'EXECUTE'), 'E10: service role may not run ' || f;

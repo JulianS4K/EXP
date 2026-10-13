@@ -97,7 +97,7 @@ describe('changedSince', () => {
 });
 
 describe('syncLink', () => {
-  const link = { event_id: 'e1', eb_event_id: '111', token: 'TOKEN1234', sync_cursor: '2026-10-13T20:00:00Z', continuation: null };
+  const link = { event_id: 'e1', eb_event_id: '111', token: 'TOKEN1234', sync_cursor: '2026-10-13T20:00:00Z', continuation: null, lease_id: 'L1' };
   const page = (n: number, more: boolean) => ({
     attendees: [{ id: String(100 + n), profile: { name: `P${n}` }, barcodes: [{ barcode: `C${n}`, status: 'unused' }] }],
     pagination: { has_more_items: more, continuation: more ? `K${n + 1}` : null },
@@ -164,10 +164,27 @@ describe('syncLink', () => {
     expect(r2.applied[0]).toMatchObject({ state: 'error', cont: 'K9' });
   });
 
-  it('a failed save stops the run', async () => {
+  it('a failed save stops the run and keeps the failed page for the next run', async () => {
+    const { fetch } = attendeeServer(5);
+    const calls: Array<[ApplyState, string | null]> = [];
+    let n = 0;
+    const apply = async (_rows: ApplyRow[], state: ApplyState, cont: string | null) => {
+      calls.push([state, cont]);
+      n += 1;
+      return n === 2 ? null : { ok: true }; // page 2 (fetched with K2) fails to save
+    };
+    const out = await syncLink(fetch, link, apply, { maxPages: 5, deadline: Date.now() + 9e4 });
+    expect(out).toMatchObject({ state: 'error', pages: 2 });
+    expect(calls).toEqual([['more', 'K2'], ['more', 'K3'], ['error', 'K2']]);
+  });
+
+  it('a lost lease stops without writing an error', async () => {
     const { fetch } = attendeeServer(3);
-    const out = await syncLink(fetch, link, async () => null, { maxPages: 5, deadline: Date.now() + 9e4 });
-    expect(out).toMatchObject({ state: 'error', pages: 1 });
+    const calls: ApplyState[] = [];
+    const out = await syncLink(fetch, link, async (_r, state) => { calls.push(state); return { ok: false, reason: 'lease-lost' }; },
+      { maxPages: 5, deadline: Date.now() + 9e4 });
+    expect(out.state).toBe('error');
+    expect(calls).toEqual(['more']);
   });
 });
 

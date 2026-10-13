@@ -60,6 +60,11 @@ Not built.
   un-voided. A voided attendee never seen before is not added.
 - **Key:** `external_ref = 'eb:<attendee id>'`; the barcode is the first one
   that isn't refunded.
+- **Safety:** each run's writes carry the claim's lease id, so a run overtaken
+  by a relink or reconnect writes nothing. A page that fails to save is read
+  again. A pass in which a row failed (e.g. a barcode another guest holds)
+  doesn't move the cursor, so it is retried; the panel shows how many.
+  Voiding never changes the house capacity.
 
 ## Endpoints
 

@@ -174,6 +174,12 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
             {link.syncing ? ' · syncing now' : ''}
           </p>
           {link.lastError && <p className="text-rose-500">{link.lastError}</p>}
+          {link.rowErrors > 0 && (
+            <p className="text-amber-700">
+              {link.rowErrors} attendee{link.rowErrors === 1 ? '' : 's'} couldn't be added (a barcode already on another
+              guest?). Exos keeps retrying.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy !== null}
               onClick={() => void run('sync', async () => {
