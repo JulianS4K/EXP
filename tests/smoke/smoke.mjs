@@ -739,7 +739,9 @@ await run('org settings: Legal & invoices saves the seller details', async (page
   const card = settingsCard(page, 'Legal & invoices');
   await card.waitFor({ timeout: 8000 });
   await waitFor(seen(log, 'GET exos_org_legal'), 'legal details read');
-  assert(await card.getByLabel('Tax ID (EIN, VAT or sales-tax number)').inputValue() === 'EIN 12-3456789', 'shows the saved tax id');
+  // The request is logged before its answer reaches the form: wait for the value, not the call.
+  const taxId = card.getByLabel('Tax ID (EIN, VAT or sales-tax number)');
+  await waitFor(async () => (await taxId.inputValue()) === 'EIN 12-3456789', 'shows the saved tax id');
   await card.getByLabel('Legal name').fill('BK Nights Holdings LLC');
   await card.getByLabel('Receipt footer').fill('x'.repeat(501));
   await expectText(page, 'At most 500 characters');
