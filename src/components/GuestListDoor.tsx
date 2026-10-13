@@ -10,7 +10,8 @@
 
 import { AccessNeedBadges } from './Accessibility';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, RefreshCw, Search, Users } from 'lucide-react';
+import { Ban, Camera, CameraOff, CheckCircle2, RefreshCw, ScanLine, Search, Users } from 'lucide-react';
+import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   applyArrival,
   arrivalReasonText,
@@ -20,6 +21,7 @@ import {
   partySize,
   remainingFor,
   searchGuests,
+  voidedText,
   type GuestEntry,
   type PendingArrival,
 } from '../lib/guestLists';
@@ -44,6 +46,8 @@ export default function GuestListDoor({
   onExtrasChange,
   onSync,
   syncing,
+  incomingCode,
+  onIncomingHandled,
 }: {
   eventId: string;
   isOffline: boolean;
@@ -53,6 +57,9 @@ export default function GuestListDoor({
   /** Re-download from the server. */
   onSync: () => void;
   syncing: boolean;
+  /** A code read by the ticket scanner that belongs to an imported guest. */
+  incomingCode?: { text: string; at: number } | null;
+  onIncomingHandled?: () => void;
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
@@ -67,6 +74,14 @@ export default function GuestListDoor({
   const listName = useMemo(() => Object.fromEntries(lists.map((l) => [l.id, l.name])), [lists]);
   const perList = useMemo(() => countsByList(guests, lists.map((l) => l.id)), [guests, lists]);
   const results = useMemo(() => searchGuests(guests, query, 40), [guests, query]);
+  // Exos Door (mig 20261013090000): guests imported from another platform
+  // carry its barcode; scan or type it (a USB / Bluetooth scanner types it
+  // and presses Enter) to check that guest in.
+  const byCode: Map<string, GuestEntry> = useMemo(() => codeIndex<GuestEntry>(guests), [guests]);
+  const [code, setCode] = useState('');
+  const [codeFlash, setCodeFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const lastReadRef = useRef<{ text: string; at: number } | null>(null);
 
   const persistPending = (q: PendingArrival[]) => {
     setPending(q);
@@ -138,7 +153,11 @@ export default function GuestListDoor({
   const checkIn = async (g: GuestEntry, count: number) => {
     const local = applyArrival(g, count);
     if (!local.ok || !local.entry) {
-      setFlash({ id: g.id, text: arrivalReasonText(local.reason ?? 'bad-count', local.remaining), ok: false });
+      setFlash({
+        id: g.id,
+        text: local.reason === 'voided' ? voidedText(g) : arrivalReasonText(local.reason ?? 'bad-count', local.remaining),
+        ok: false,
+      });
       return;
     }
     const after = local.entry;
@@ -164,6 +183,12 @@ export default function GuestListDoor({
         return;
       }
       if (typeof r.arrived === 'number') patchGuest(g.id, (e) => ({ ...e, arrived: r.arrived! }));
+      if (r.reason === 'voided') {
+        // Voided since this device downloaded the lists.
+        patchGuest(g.id, (e) => ({ ...e, voided: true }));
+        setFlash({ id: g.id, text: voidedText(g), ok: false });
+        return;
+      }
       setFlash({ id: g.id, text: arrivalReasonText(r.reason, r.remaining), ok: false });
     } catch (err) {
       if (isServerAnswer(err)) {
@@ -175,6 +200,93 @@ export default function GuestListDoor({
       queueIt();
     }
   };
+
+  const checkInByCode = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return;
+    const last = lastReadRef.current;
+    if (last && last.text === text && Date.now() - last.at < 3_000) return;
+    lastReadRef.current = { text, at: Date.now() };
+    if (isExosCode(text)) {
+      setCodeFlash({ text: 'That is an Exos ticket: scan it in Tickets mode.', ok: false });
+      return;
+    }
+    const g = matchImported<GuestEntry>(text, byCode);
+    if (!g) {
+      setCodeFlash({ text: `Not on the imported lists (${text.slice(0, 24)}). Search the name instead.`, ok: false });
+      return;
+    }
+    setQuery(g.guestName);
+    setCode('');
+    if (g.voided) {
+      setCodeFlash({ text: voidedText(g), ok: false });
+      return;
+    }
+    if (remainingFor(g) === 0) {
+      setCodeFlash({ text: `${g.guestName}: already checked in.`, ok: false });
+      return;
+    }
+    setCodeFlash({
+      text: `${g.guestName}${g.ticketLabel ? ` · ${g.ticketLabel}` : ''}${g.source ? ` · ${g.source} ticket` : ''}`,
+      ok: true,
+    });
+    void checkIn(g, 1);
+  };
+  const checkInByCodeRef = useRef(checkInByCode);
+  checkInByCodeRef.current = checkInByCode;
+
+  // The camera for imported barcodes (same library as the ticket scanner).
+  // stop() throws unless the camera is already scanning, so a close during
+  // start-up waits for start() to finish and stops it then.
+  useEffect(() => {
+    if (!cameraOn) return undefined;
+    let stopped = false;
+    let inst: { start: (...a: any[]) => Promise<unknown>; stop: () => Promise<void>; clear: () => void; isScanning: boolean } | null = null;
+    const shut = async () => {
+      if (!inst) return;
+      try {
+        if (inst.isScanning) await inst.stop();
+        inst.clear();
+      } catch {
+        /* already stopped */
+      }
+    };
+    void (async () => {
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        if (stopped) return;
+        inst = new Html5Qrcode('guest-reader') as unknown as typeof inst;
+        await inst!.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: (vw: number, vh: number) => { const m = Math.floor(Math.min(vw, vh) * 0.7); return { width: m, height: m }; } },
+          (decoded: string) => checkInByCodeRef.current(decoded),
+          () => {},
+        );
+        if (stopped) await shut();
+      } catch (err) {
+        if (stopped) return;
+        console.error('guest camera failed', err);
+        toast({ kind: 'error', message: 'Could not open the camera. Allow camera access, or type the code.' });
+        setCameraOn(false);
+      }
+    })();
+    return () => {
+      stopped = true;
+      void shut();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraOn]);
+
+  const hasCodes = byCode.size > 0;
+
+  useEffect(() => {
+    if (!incomingCode) return;
+    lastReadRef.current = null;
+    checkInByCodeRef.current(incomingCode.text);
+    // Handled once: switching tabs later must not replay it.
+    onIncomingHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingCode?.at]);
 
   if (!extras) {
     return (
@@ -210,10 +322,53 @@ export default function GuestListDoor({
         </div>
       )}
 
+      {hasCodes && (
+        <div className="mb-4 rounded-2xl border border-slate-200 p-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              lastReadRef.current = null;
+              checkInByCode(code);
+            }}
+            className="flex gap-2"
+          >
+            <label htmlFor="guest-code" className="sr-only">Ticket code from another platform</label>
+            <div className="relative flex-1">
+              <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <input
+                id="guest-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Scan or type a ticket code"
+                autoComplete="off"
+                className="w-full bg-slate-50 rounded-xl py-3 pl-9 pr-3 text-slate-900 font-mono text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
+              />
+            </div>
+            <button type="submit" className="px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest">
+              Check in
+            </button>
+            <button
+              type="button"
+              onClick={() => setCameraOn((v) => !v)}
+              aria-label={cameraOn ? 'Close the camera' : 'Scan with the camera'}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-slate-600"
+            >
+              {cameraOn ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+            </button>
+          </form>
+          {cameraOn && <div id="guest-reader" className="mt-3 overflow-hidden rounded-xl bg-black" />}
+          {codeFlash && (
+            <p role="status" className={`mt-2 text-[12px] font-bold ${codeFlash.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+              {codeFlash.text}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="relative mb-4">
         <input
           type="search"
-          autoFocus
+          autoFocus={!hasCodes}
           placeholder="Search a name…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -233,7 +388,7 @@ export default function GuestListDoor({
             const left = remainingFor(g);
             const n = Math.min(counts[g.id] ?? left, left) || 1;
             return (
-              <li key={g.id} className={`px-4 py-3 ${left === 0 ? 'bg-emerald-50/40' : 'bg-white'}`}>
+              <li key={g.id} className={`px-4 py-3 ${g.voided ? 'bg-rose-50/60' : left === 0 ? 'bg-emerald-50/40' : 'bg-white'}`}>
                 <div className="flex items-center gap-3">
                   <span className="min-w-0 flex-1">
                     <span className="block font-bold text-slate-900 truncate">
@@ -241,7 +396,10 @@ export default function GuestListDoor({
                       {g.plusOnes > 0 && <span className="text-slate-500 font-medium"> +{g.plusOnes}</span>}
                     </span>
                     <span className="block text-[11px] text-slate-400 truncate">
-                      {listName[g.listId] ?? 'Guest list'}{g.note ? ` · ${g.note}` : ''}
+                      {listName[g.listId] ?? 'Guest list'}
+                      {g.ticketLabel ? ` · ${g.ticketLabel}` : ''}
+                      {g.source ? ` · ${g.source}` : ''}
+                      {g.note ? ` · ${g.note}` : ''}
                     </span>
                     {(g.accessNeeds?.length ?? 0) > 0 && (
                       <span className="block mt-1"><AccessNeedBadges needs={g.accessNeeds!} /></span>
@@ -250,7 +408,11 @@ export default function GuestListDoor({
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 shrink-0">
                     <Users className="w-3.5 h-3.5" /> {g.arrived}/{partySize(g)}
                   </span>
-                  {left > 0 ? (
+                  {g.voided ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-600 uppercase tracking-widest shrink-0">
+                      <Ban className="w-4 h-4" /> {g.voidReason || 'Refunded'}
+                    </span>
+                  ) : left > 0 ? (
                     <span className="inline-flex items-center gap-2 shrink-0">
                       {left > 1 && (
                         <select

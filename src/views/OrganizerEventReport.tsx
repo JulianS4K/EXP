@@ -21,6 +21,7 @@ import { useToast } from '../context/ToastContext';
 import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
 import DoorSummaryPanel from '../components/DoorSummaryPanel';
+import DoorImport from '../components/DoorImport';
 import WaitlistPanel from '../components/WaitlistPanel';
 import AnnouncementsPanel from '../components/AnnouncementsPanel';
 import RemindersPanel from '../components/RemindersPanel';
@@ -447,6 +448,12 @@ export default function OrganizerEventReport() {
         {/* Nightlife: table labels for sold tables, and guest lists. */}
         <TableAssignmentsPanel event={event} canManage={canAct} />
         <GuestListPanel event={event} canManage={canAct} />
+        {/* Exos Door: attendees sold on another platform (mig 20261013090000). */}
+        {canAct && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
+            <DoorImport eventId={event.id} />
+          </div>
+        )}
         </>)}
 
         {tab === 'marketing' && (<>

@@ -6,11 +6,13 @@ import {
   dropFromQueue,
   enqueueArrival,
   listCounts,
+  mapGuestEntry,
   normalizeForSearch,
   overlayPending,
   remainingFor,
   searchGuests,
   validateGuestInput,
+  voidedText,
   type GuestEntry,
 } from './guestLists';
 
@@ -74,5 +76,22 @@ describe('guest list model', () => {
     const over = overlayPending(entries, q);
     expect(over.find((e) => e.id === '2')!.arrived).toBe(2); // clamped at party size
     expect(dropFromQueue(q, ['r1']).map((p) => p.ref)).toEqual(['r2']);
+  });
+});
+
+describe('voided guests (Eventbrite sync)', () => {
+  const v = mapGuestEntry({
+    id: 'v1', list_id: 'L1', guest_name: 'Cy', plus_ones: 0, arrived: 0,
+    source: 'Eventbrite', voided: true, void_reason: 'refunded',
+  });
+  it('maps the flag and refuses the arrival', () => {
+    expect(v.voided).toBe(true);
+    expect(applyArrival(v, 1)).toEqual({ ok: false, reason: 'voided', remaining: 0 });
+    expect(voidedText(v)).toBe('Cy: not valid. The ticket was refunded on Eventbrite.');
+    expect(mapGuestEntry({ id: 'x', list_id: 'L1', guest_name: 'X' }).voided).toBe(false);
+  });
+  it('a voided guest who never came is not expected; one who came still counts', () => {
+    const came = { ...v, id: 'v2', arrived: 1 };
+    expect(countsByList([v, came, g('3', 'Dee')]).L1).toEqual({ entries: 2, heads: 2, arrived: 1 });
   });
 });

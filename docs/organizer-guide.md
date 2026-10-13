@@ -242,6 +242,34 @@ list. It works for every active ticket of the event, claimed or not.
 - The scan report counts check-ins by name, and lists each one with verification `name` and the
   note.
 
+### Tickets sold somewhere else (Exos Door)
+
+The door works for events you sell on Eventbrite, Posh, DICE, Shotgun, RA or anywhere else, for free.
+Open **Exos Door** at `/door` (it installs as its own app on your phone's home screen).
+- **New door for an event sold elsewhere** creates a door-only event: a draft that never goes on sale on
+  Exos.
+- **Import attendees:** export the attendee list from the other platform as CSV and choose the file.
+  - Exos guesses the platform and which column holds the name, email, ticket type and barcode. Change any
+    of them before you import.
+  - Importing the same file again adds nobody twice.
+  - You can also import from the event report, under **Tables & guest lists**.
+- **At the door:** the **Guest list** tab has a code box. Scan the barcode on the attendee's ticket with
+  the camera, or with a USB / Bluetooth barcode scanner (it types the code and presses Enter), or type it.
+  - If the code is on an imported list, the guest is checked in.
+  - In the **Tickets** tab, a code from another platform is handed to the guest list automatically.
+- **It works offline** like the rest of the door: download the lists first.
+- **Live sync from Eventbrite** (instead of re-importing): in `/door`, open **Eventbrite sync** on the event.
+  - An owner or manager pastes the Eventbrite **private token** once (Eventbrite: Account settings →
+    Developer links → API keys) and picks the Eventbrite event.
+  - New buyers reach the door within a couple of minutes on the event day (every 30 minutes before that).
+    **Sync now** pulls the latest right away; any door staff can tap it.
+  - A ticket refunded or cancelled on Eventbrite stops working: the door says "not valid" for the scan and
+    the name.
+  - Exos only reads from Eventbrite. Check-ins are not sent back to it, and nothing there changes.
+  - Posh, DICE and the others: import their CSV (they have no API we can use yet).
+- **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
+  gets in once, as with the other platform's own app.
+
 ### Check-in lists and re-entry
 
 **Re-entry is off unless you turn it on.** By default every ticket gets in once, at any door, and a

@@ -8,7 +8,9 @@
   `20260930100000_exos_marketing_conversions`, `20260930101000_exos_audience_export`,
   `20260930102000_exos_oauth_google`, `20261001100000_exos_invoices_credit_notes`,
   `20261001101000_exos_disputes_reconciliation`, `20261005090000_exos_online_events` (EXP #28, merged) and
-  `20261008090000_exos_door_delta_summary` (roster delta + door summary).
+  `20261008090000_exos_door_delta_summary` (roster delta + door summary) and `20261013090000_exos_door_imports`
+  (Exos Door) and `20261013100000_exos_eventbrite_sync` (Eventbrite attendee sync; deploy `exos-eventbrite-sync`
+  with `--no-verify-jwt` first, the migration schedules its cron). `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
   `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
 - **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
   onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
@@ -37,8 +39,14 @@
 8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, redeploy `exos-checkout`, decide the training-crawler
    policy (allow all today).
 
-## Next to build (2026-10-06, pick order)
+## Next to build (2026-10-13, pick order)
 
+0. **Apps suite** (operator direction 2026-10-13, `docs/strategy.md` "Apps"): one suite of single-purpose apps,
+   each free, with Exos earning only per ticket sold. ✅ **Door** (`/door`, mig `20261013090000`, not applied):
+   door-only events, import an Eventbrite / Posh / DICE / Shotgun / RA / spreadsheet attendee CSV, scan their
+   barcodes or check in by name (offline too), own install manifest; the door download is now scanner-scoped.
+   Next: landing pages for Events, Promote and Money; a public "free door app" page for organizers on other
+   platforms.
 1. **Door:** ✅ end-of-night door summary and roster delta RPC (built 2026-10-08, mig `20261008090000`, not
    applied); still open: per-day door keys (stop shipping raw per-ticket secrets to door phones).
 2. **Online events follow-ups:** wallet passes drop the geofence for online events; public calendar feeds honor

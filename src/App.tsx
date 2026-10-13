@@ -52,6 +52,7 @@ const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
+const DoorApp = lazy(() => import('./views/DoorApp'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
@@ -162,6 +163,7 @@ export default function App() {
                     <Route path="/dashboard" element={<OrganizerDashboard />} />
                     <Route path="/create-event" element={<CreateEvent />} />
                     <Route path="/checkin/:eventId" element={<OrganizerCheckIn />} />
+                    <Route path="/door" element={<DoorApp />} />
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />

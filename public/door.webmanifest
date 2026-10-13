@@ -1,0 +1,57 @@
+{
+  "name": "Exos Door",
+  "short_name": "Door",
+  "id": "/bridge/door",
+  "start_url": "/bridge/door",
+  "scope": "/bridge/",
+  "lang": "en",
+  "dir": "ltr",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "orientation": "portrait-primary",
+  "background_color": "#0A0A0A",
+  "theme_color": "#0A0A0A",
+  "categories": [
+    "entertainment",
+    "events",
+    "tickets"
+  ],
+  "description": "Free door app for any event: scan tickets sold anywhere, check in by name, works offline.",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/bridge/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/bridge/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/bridge/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/bridge/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/bridge/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

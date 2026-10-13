@@ -17,6 +17,38 @@ It gets there in two steps:
 2. **Expand into everything else that happens around a ticket:** the door, the bar, resale, and
    the other places tickets get sold.
 
+## Apps: one suite, each free to start (operator direction 2026-10-13)
+
+**Exos is packaged as a suite of single-purpose apps under one account, not one big dashboard.**
+The model is a suite like ArtCraft: focused apps, each useful on day one, each free, with no
+lock-in. An organizer can adopt one app for an event ticketed somewhere else and move over one
+piece at a time.
+
+Rules for every app:
+- **Free to use.** Exos makes money only on tickets it sells (the per-ticket fee). No app has a
+  subscription, a seat charge or a paywall.
+- **Works with other platforms' data.** Each app is useful before the organizer sells a single
+  ticket on Exos. For example, the door imports an Eventbrite or Posh attendee CSV.
+- **Its own address and home-screen icon** (`/door`, …, each with its own install manifest). All
+  apps share one sign-in, the same organizations and the same roles.
+- **One job per app**, with a landing page that says that job in one line. Cross-links between apps
+  are a footer, not a menu.
+
+| App | Job | Status |
+|---|---|---|
+| **Door** (`/door`) | Check in any event: Exos tickets, imported tickets from other platforms, guest lists; offline, many phones | **Built** (mig `20261013090000`): import CSV, scan their barcodes, door-only events |
+| **Events** | Create an event page and sell tickets (the only app that charges, per ticket sold) | Exists as the organizer dashboard; needs its own landing page |
+| **Promote** | Promoter links, guest lists, kits, leaderboard | Exists (`/p/:token`, `/orgs/:id/promoters`); needs its own landing page |
+| **Box Office** | Walk-ups and comps at the door | Comps exist; card sales need Stripe Terminal (Phase 3) |
+| **Money** | Payouts, receipts, settlement, the end-of-night summary | Exists inside the event report; needs its own landing page |
+
+**Order:** Door first. It's the strongest piece we have, every event needs a door, and it brings
+in organizers who sell elsewhere today. Next, give Events and Promote their own landing pages,
+then Money. Box Office waits for Stripe Terminal.
+
+**What we watch:** the number of organizers who use a free app on an event not sold on Exos, and
+how many of them sell their next event on Exos.
+
 ## Competitive position
 
 The full, sourced comparison and the build order that follows from it are in `docs/competition.md`.
