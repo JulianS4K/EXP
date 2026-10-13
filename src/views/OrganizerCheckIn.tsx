@@ -44,6 +44,7 @@ import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
+import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   getDoorExtras,
   loadCachedDoorExtras,
@@ -328,10 +329,22 @@ export default function OrganizerCheckIn() {
   const lastReadRef = useRef<RecentRead | null>(null);
   // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
   const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
+  // Exos Door (mig 20261013090000): a code from another platform read in
+  // Tickets mode is handed to the guest-list door, which checks it in.
+  const [guestCode, setGuestCode] = useState<{ text: string; at: number } | null>(null);
+  const modeTouchedRef = useRef(false);
   // Offline door download: table labels by ticket + every guest-list entry.
   const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
   const [extrasSyncing, setExtrasSyncing] = useState(false);
   const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+  // A door-only event (no Exos tickets, guests imported from another
+  // platform) opens on the guest-list door.
+  useEffect(() => {
+    if (modeTouchedRef.current || mode === 'guests' || !doorExtras || !event) return;
+    if ((event.totalTickets ?? 0) === 0 && (event.ticketsSold ?? 0) === 0 && doorExtras.guests.some((g) => g.code)) {
+      setMode('guests');
+    }
+  }, [doorExtras, event, mode]);
 
   const noteServerOk = () => setServerDown(false);
   const noteServerFailure = () => setServerDown(true);
@@ -1202,6 +1215,18 @@ export default function OrganizerCheckIn() {
     if (e) e.preventDefault();
     const raw = (manualValue || searchId).trim();
     if (!raw || !eventId || inFlightRef.current) return;
+    // Imported from another platform (Exos Door): not an Exos code, but on a
+    // guest list. Check it in there.
+    if (!isExosCode(raw) && doorExtras && matchImported(raw, codeIndex(doorExtras.guests))) {
+      if (scanning) {
+        void stopScanner();
+        setScanning(false);
+      }
+      setSearchId('');
+      setMode('guests');
+      setGuestCode({ text: raw, at: Date.now() });
+      return;
+    }
     const src = source;
     const code = parseDoorCode(raw, src);
     const now = serverNow();
@@ -1691,6 +1716,7 @@ export default function OrganizerCheckIn() {
                 void stopScanner();
                 setScanning(false);
               }
+              modeTouchedRef.current = true;
               setMode(m);
             }}
             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
@@ -1708,6 +1734,7 @@ export default function OrganizerCheckIn() {
           onExtrasChange={updateDoorExtras}
           onSync={() => void downloadDoorExtras()}
           syncing={extrasSyncing}
+          incomingCode={guestCode}
         />
       </div>
       ) : (

@@ -3,6 +3,7 @@
 import { supabase } from '../supabase';
 import { DOOR_REQUEST_TIMEOUT_MS, isMissingRpc, withDeadline } from './net';
 import { parseDoorSummary, type DoorSummary } from './summary';
+import type { ImportRow } from './imports';
 import { mapDoorEventRow, type DoorEvent } from './roster';
 import { listCheckinLists } from '../checkinLists';
 
@@ -48,4 +49,25 @@ export async function fetchDoorSummary(eventId: string): Promise<DoorSummary | n
     throw error;
   }
   return parseDoorSummary(data);
+}
+
+export interface ImportResult {
+  inserted: number;
+  duplicates: number;
+  invalid: number;
+  errors: { row: number; reason: string }[];
+}
+
+/** Add an attendee export to a guest list (exos_import_guests, mig
+ *  20261013090000; owners / managers). Rows over the limit are refused. */
+export async function importGuests(listId: string, rows: ImportRow[]): Promise<ImportResult> {
+  const { data, error } = await supabase.rpc('exos_import_guests', { p_list_id: listId, p_rows: rows });
+  if (error) throw error;
+  const d = (data ?? {}) as Record<string, unknown>;
+  return {
+    inserted: Number(d.inserted) || 0,
+    duplicates: Number(d.duplicates) || 0,
+    invalid: Number(d.invalid) || 0,
+    errors: Array.isArray(d.errors) ? (d.errors as ImportResult['errors']) : [],
+  };
 }

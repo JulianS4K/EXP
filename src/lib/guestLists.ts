@@ -20,6 +20,11 @@ export interface GuestEntry {
   phone?: string | null;
   /** Access needs (mig 20260926090000); empty when none or not deployed. */
   accessNeeds?: AccessNeed[];
+  /** Imported from another platform (mig 20261013090000): its barcode /
+   *  ticket number, ticket type and the platform's name. */
+  code?: string | null;
+  ticketLabel?: string | null;
+  source?: string | null;
 }
 
 export interface GuestListMeta {
@@ -44,6 +49,9 @@ export function mapGuestEntry(r: any): GuestEntry {
     email: r.email ?? null,
     phone: r.phone ?? null,
     accessNeeds: normalizeNeeds(r.access_needs),
+    code: r.code ?? r.external_code ?? null,
+    ticketLabel: r.ticket ?? r.ticket_label ?? null,
+    source: r.source ?? null,
   };
 }
 

@@ -10,7 +10,8 @@
 
 import { AccessNeedBadges } from './Accessibility';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, RefreshCw, Search, Users } from 'lucide-react';
+import { Camera, CameraOff, CheckCircle2, RefreshCw, ScanLine, Search, Users } from 'lucide-react';
+import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   applyArrival,
   arrivalReasonText,
@@ -44,6 +45,7 @@ export default function GuestListDoor({
   onExtrasChange,
   onSync,
   syncing,
+  incomingCode,
 }: {
   eventId: string;
   isOffline: boolean;
@@ -53,6 +55,8 @@ export default function GuestListDoor({
   /** Re-download from the server. */
   onSync: () => void;
   syncing: boolean;
+  /** A code read by the ticket scanner that belongs to an imported guest. */
+  incomingCode?: { text: string; at: number } | null;
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
@@ -67,6 +71,14 @@ export default function GuestListDoor({
   const listName = useMemo(() => Object.fromEntries(lists.map((l) => [l.id, l.name])), [lists]);
   const perList = useMemo(() => countsByList(guests, lists.map((l) => l.id)), [guests, lists]);
   const results = useMemo(() => searchGuests(guests, query, 40), [guests, query]);
+  // Exos Door (mig 20261013090000): guests imported from another platform
+  // carry its barcode; scan or type it (a USB / Bluetooth scanner types it
+  // and presses Enter) to check that guest in.
+  const byCode: Map<string, GuestEntry> = useMemo(() => codeIndex<GuestEntry>(guests), [guests]);
+  const [code, setCode] = useState('');
+  const [codeFlash, setCodeFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const lastReadRef = useRef<{ text: string; at: number } | null>(null);
 
   const persistPending = (q: PendingArrival[]) => {
     setPending(q);
@@ -176,6 +188,75 @@ export default function GuestListDoor({
     }
   };
 
+  const checkInByCode = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return;
+    const last = lastReadRef.current;
+    if (last && last.text === text && Date.now() - last.at < 3_000) return;
+    lastReadRef.current = { text, at: Date.now() };
+    if (isExosCode(text)) {
+      setCodeFlash({ text: 'That is an Exos ticket: scan it in Tickets mode.', ok: false });
+      return;
+    }
+    const g = matchImported<GuestEntry>(text, byCode);
+    if (!g) {
+      setCodeFlash({ text: `Not on the imported lists (${text.slice(0, 24)}). Search the name instead.`, ok: false });
+      return;
+    }
+    setQuery(g.guestName);
+    setCode('');
+    if (remainingFor(g) === 0) {
+      setCodeFlash({ text: `${g.guestName}: already checked in.`, ok: false });
+      return;
+    }
+    setCodeFlash({
+      text: `${g.guestName}${g.ticketLabel ? ` · ${g.ticketLabel}` : ''}${g.source ? ` · ${g.source} ticket` : ''}`,
+      ok: true,
+    });
+    void checkIn(g, 1);
+  };
+  const checkInByCodeRef = useRef(checkInByCode);
+  checkInByCodeRef.current = checkInByCode;
+
+  // The camera for imported barcodes (same library as the ticket scanner).
+  useEffect(() => {
+    if (!cameraOn) return undefined;
+    let stopped = false;
+    let qr: { stop: () => Promise<void>; clear: () => void } | null = null;
+    void (async () => {
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        if (stopped) return;
+        const inst = new Html5Qrcode('guest-reader');
+        qr = inst;
+        await inst.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: (vw: number, vh: number) => { const m = Math.floor(Math.min(vw, vh) * 0.7); return { width: m, height: m }; } },
+          (decoded: string) => checkInByCodeRef.current(decoded),
+          () => {},
+        );
+      } catch (err) {
+        console.error('guest camera failed', err);
+        toast({ kind: 'error', message: 'Could not open the camera. Allow camera access, or type the code.' });
+        setCameraOn(false);
+      }
+    })();
+    return () => {
+      stopped = true;
+      if (qr) void qr.stop().then(() => qr?.clear()).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraOn]);
+
+  const hasCodes = byCode.size > 0;
+
+  useEffect(() => {
+    if (incomingCode) {
+      lastReadRef.current = null;
+      checkInByCodeRef.current(incomingCode.text);
+    }
+  }, [incomingCode?.at]);
+
   if (!extras) {
     return (
       <div className="py-10 text-center">
@@ -210,10 +291,53 @@ export default function GuestListDoor({
         </div>
       )}
 
+      {hasCodes && (
+        <div className="mb-4 rounded-2xl border border-slate-200 p-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              lastReadRef.current = null;
+              checkInByCode(code);
+            }}
+            className="flex gap-2"
+          >
+            <label htmlFor="guest-code" className="sr-only">Ticket code from another platform</label>
+            <div className="relative flex-1">
+              <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <input
+                id="guest-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Scan or type a ticket code"
+                autoComplete="off"
+                className="w-full bg-slate-50 rounded-xl py-3 pl-9 pr-3 text-slate-900 font-mono text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
+              />
+            </div>
+            <button type="submit" className="px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest">
+              Check in
+            </button>
+            <button
+              type="button"
+              onClick={() => setCameraOn((v) => !v)}
+              aria-label={cameraOn ? 'Close the camera' : 'Scan with the camera'}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-slate-600"
+            >
+              {cameraOn ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+            </button>
+          </form>
+          {cameraOn && <div id="guest-reader" className="mt-3 overflow-hidden rounded-xl bg-black" />}
+          {codeFlash && (
+            <p role="status" className={`mt-2 text-[12px] font-bold ${codeFlash.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+              {codeFlash.text}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="relative mb-4">
         <input
           type="search"
-          autoFocus
+          autoFocus={!hasCodes}
           placeholder="Search a name…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -241,7 +365,10 @@ export default function GuestListDoor({
                       {g.plusOnes > 0 && <span className="text-slate-500 font-medium"> +{g.plusOnes}</span>}
                     </span>
                     <span className="block text-[11px] text-slate-400 truncate">
-                      {listName[g.listId] ?? 'Guest list'}{g.note ? ` · ${g.note}` : ''}
+                      {listName[g.listId] ?? 'Guest list'}
+                      {g.ticketLabel ? ` · ${g.ticketLabel}` : ''}
+                      {g.source ? ` · ${g.source}` : ''}
+                      {g.note ? ` · ${g.note}` : ''}
                     </span>
                     {(g.accessNeeds?.length ?? 0) > 0 && (
                       <span className="block mt-1"><AccessNeedBadges needs={g.accessNeeds!} /></span>

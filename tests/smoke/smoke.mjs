@@ -27,7 +27,7 @@ async function run(name, fn, opts = {}) {
   }, SESSION);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|401/.test(m.text())) errors.push('console: ' + m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|401|WebSocket connection to 'wss:\/\/mock\.supabase\.test/.test(m.text())) errors.push('console: ' + m.text()); });
   try {
     await fn(page, log);
     results.push({ name, ok: errors.length === 0, errors });
@@ -456,6 +456,62 @@ await run('event report: no door summary before the migration', async (page) => 
   assert(await page.getByRole('heading', { name: 'End-of-night door summary' }).count() === 0, 'hidden');
 }, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: {
   exos_event_door_summary: () => ({ __status: 404, __body: { code: 'PGRST202', message: 'Could not find the function' } }) } }) });
+
+// --- Exos Door (mig 20261013090000) ------------------------------------------
+await run('door app: the pitch and sign-in when signed out', async (page) => {
+  await page.goto(BASE + '/door');
+  await expectText(page, 'The free door app for any event.');
+  await page.getByRole('button', { name: 'Sign in or create an account' }).waitFor({ timeout: 8000 });
+  const manifest = await page.locator('link[rel="manifest"]').getAttribute('href');
+  assert(manifest && manifest.endsWith('door.webmanifest'), 'own install manifest: ' + manifest);
+});
+
+const EB_CSV = 'Order #,First Name,Last Name,Email,Ticket Type,Barcode #\n1001,Ada,Lovelace,ada@x.com,GA,1234 5678\n1002,Bo,Diddley,bo@x.com,VIP,87654321\n1003,,,ghost@x.com,GA,555\n';
+await run('door app: import an Eventbrite attendee CSV into an event', async (page, log) => {
+  await page.goto(BASE + '/door');
+  await expectText(page, 'Your doors');
+  await page.getByRole('button', { name: /Import attendees/ }).first().click();
+  await page.locator('input[type="file"]').setInputFiles({ name: 'eventbrite-report.csv', mimeType: 'text/csv', buffer: Buffer.from(EB_CSV) });
+  await expectText(page, '2 attendees to import');
+  await expectText(page, '1 row(s) have no name');
+  assert(await page.locator('select').first().inputValue() === 'Eventbrite', 'platform guessed from the file');
+  await page.getByRole('button', { name: /Import 2 attendees/ }).click();
+  await expectText(page, 'Imported 2.');
+  const call = log.find((l) => l.startsWith('rpc exos_import_guests'));
+  assert(call && call.includes('"p_list_id":"gl-1"') && call.includes('"code":"12345678"') && call.includes('"name":"Ada Lovelace"')
+    && call.includes('"source":"Eventbrite"') && !call.includes('ghost@x.com'), 'import payload: ' + call);
+  assert(log.some((l) => l.startsWith('rpc exos_upsert_guest_list') && l.includes('Eventbrite import')), 'list created');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_upsert_guest_list: () => 'gl-1',
+  exos_import_guests: (b) => ({ inserted: b.p_rows.length, duplicates: 0, invalid: 0, errors: [] }),
+} }) });
+
+const DOOR_GUESTS = {
+  tables: [], ticket_access: {},
+  lists: [{ id: 'gl1', name: 'Eventbrite import', cap: null, status: 'open', promoter: null }],
+  guests: [{ id: 'g1', list_id: 'gl1', guest_name: 'Ada Lovelace', plus_ones: 0, arrived: 0, arrived_at: null, note: null,
+    code: '12345678', ticket: 'GA', source: 'Eventbrite' }],
+};
+await run('door: a code from another platform checks the imported guest in', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByText(/^Guest list/).first().click();
+  const box = page.getByPlaceholder('Scan or type a ticket code');
+  await box.waitFor({ timeout: 8000 });
+  await box.fill('1234 5678');
+  await box.press('Enter');
+  await expectText(page, 'Ada Lovelace · GA · Eventbrite ticket');
+  await expectText(page, '1 in');
+  const call = log.find((l) => l.startsWith('rpc exos_guest_check_in'));
+  assert(call && call.includes('"p_entry_id":"g1"') && call.includes('"p_count":1'), 'guest check-in: ' + call);
+  await box.fill('nope-999');
+  await box.press('Enter');
+  await expectText(page, 'Not on the imported lists');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => DOOR_GUESTS,
+  exos_guest_check_in: () => ({ ok: true, reason: 'checked-in', arrived: 1, party: 1 }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [],
+  exos_server_time: () => new Date().toISOString(),
+} }) });
 
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
