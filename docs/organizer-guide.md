@@ -258,6 +258,15 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
   - If the code is on an imported list, the guest is checked in.
   - In the **Tickets** tab, a code from another platform is handed to the guest list automatically.
 - **It works offline** like the rest of the door: download the lists first.
+- **Live sync from Eventbrite** (instead of re-importing): in `/door`, open **Eventbrite sync** on the event.
+  - An owner or manager pastes the Eventbrite **private token** once (Eventbrite: Account settings →
+    Developer links → API keys) and picks the Eventbrite event.
+  - New buyers reach the door within a couple of minutes on the event day (every 30 minutes before that).
+    **Sync now** pulls the latest right away; any door staff can tap it.
+  - A ticket refunded or cancelled on Eventbrite stops working: the door says "not valid" for the scan and
+    the name.
+  - Exos only reads from Eventbrite. Check-ins are not sent back to it, and nothing there changes.
+  - Posh, DICE and the others: import their CSV (they have no API we can use yet).
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
 

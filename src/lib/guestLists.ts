@@ -25,6 +25,10 @@ export interface GuestEntry {
   code?: string | null;
   ticketLabel?: string | null;
   source?: string | null;
+  /** Refunded / cancelled on that platform (mig 20261013100000, the
+   *  Eventbrite sync): the door refuses it. */
+  voided?: boolean;
+  voidReason?: string | null;
 }
 
 export interface GuestListMeta {
@@ -52,6 +56,8 @@ export function mapGuestEntry(r: any): GuestEntry {
     code: r.code ?? r.external_code ?? null,
     ticketLabel: r.ticket ?? r.ticket_label ?? null,
     source: r.source ?? null,
+    voided: r.voided === true,
+    voidReason: r.void_reason ?? null,
   };
 }
 
@@ -85,11 +91,13 @@ export function listCounts(entries: GuestEntry[]): ListCounts {
   return { entries: entries.length, heads, arrived };
 }
 
-/** Counts per list id (lists with no entries included when given). */
+/** Counts per list id (lists with no entries included when given). A
+ *  voided guest who never came in is not expected: left out. */
 export function countsByList(entries: GuestEntry[], listIds: string[] = []): Record<string, ListCounts> {
   const out: Record<string, ListCounts> = {};
   for (const id of listIds) out[id] = { entries: 0, heads: 0, arrived: 0 };
   for (const e of entries) {
+    if (e.voided && e.arrived === 0) continue;
     const c = (out[e.listId] ??= { entries: 0, heads: 0, arrived: 0 });
     c.entries += 1;
     c.heads += partySize(e);
@@ -157,7 +165,7 @@ export function searchGuests(entries: GuestEntry[], query: string, limit = 50): 
   return scored.slice(0, limit).map((s) => s.e);
 }
 
-export type ArrivalRefusal = 'over' | 'used' | 'bad-count';
+export type ArrivalRefusal = 'over' | 'used' | 'bad-count' | 'voided';
 
 export interface ArrivalResult {
   ok: boolean;
@@ -171,6 +179,7 @@ export interface ArrivalResult {
 /** Local (offline-first) arrival: same rule the server applies. */
 export function applyArrival(e: GuestEntry, count: number, nowIso = new Date().toISOString()): ArrivalResult {
   const left = remainingFor(e);
+  if (e.voided) return { ok: false, reason: 'voided', remaining: 0 };
   if (!Number.isInteger(count) || count < 1) return { ok: false, reason: 'bad-count', remaining: left };
   if (left === 0) return { ok: false, reason: 'used', remaining: 0 };
   if (count > left) return { ok: false, reason: 'over', remaining: left };
@@ -206,6 +215,11 @@ export function overlayPending(entries: GuestEntry[], queue: PendingArrival[]): 
   );
 }
 
+/** What the door says about a voided guest. */
+export function voidedText(e: Pick<GuestEntry, 'guestName' | 'source' | 'voidReason'>): string {
+  return `${e.guestName}: not valid. The ticket was ${e.voidReason || 'refunded'} on ${e.source || 'the platform that sold it'}.`;
+}
+
 export function arrivalReasonText(reason: string, remaining?: number): string {
   switch (reason) {
     case 'over':
@@ -222,6 +236,8 @@ export function arrivalReasonText(reason: string, remaining?: number): string {
       return 'Guest not found. Sync and try again.';
     case 'not-assigned':
       return "You're not assigned to scan this event.";
+    case 'voided':
+      return 'Not valid: this ticket was refunded or cancelled.';
     default:
       return 'Could not check this guest in.';
   }

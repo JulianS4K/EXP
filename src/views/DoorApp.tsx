@@ -1,6 +1,7 @@
 // Exos Door (/door): the first app of the Exos suite (docs/strategy.md
 // "Apps"). A free door for any event: tickets sold on Exos, or on Eventbrite,
-// Posh, DICE, Shotgun or RA (import their attendee CSV, mig 20261013090000).
+// Posh, DICE, Shotgun or RA (import their attendee CSV, mig 20261013090000;
+// or keep an Eventbrite event in sync, mig 20261013100000).
 // Scan barcodes or check in by name, on as many phones as you like, offline
 // too. No fees: Exos charges only on tickets it sells.
 //
@@ -10,12 +11,13 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarPlus, DoorOpen, FileUp, Loader2, ScanLine, WifiOff } from 'lucide-react';
+import { CalendarPlus, DoorOpen, FileUp, Loader2, RefreshCw, ScanLine, WifiOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { createEvent, listOrgEvents } from '../lib/events';
 import type { Event } from '../types';
 import DoorImport from '../components/DoorImport';
+import EventbriteSync from '../components/EventbriteSync';
 
 const DOOR_ROLES = new Set(['owner', 'manager', 'scanner']);
 
@@ -53,7 +55,8 @@ export default function DoorApp() {
   const { orgs, activeOrg, activeRole, setActiveOrg, loading: orgsLoading } = useOrganization();
   const [events, setEvents] = useState<Event[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [openImport, setOpenImport] = useState<string | null>(null);
+  // The panel open under one event: the CSV import or the Eventbrite sync.
+  const [open, setOpen] = useState<{ id: string; kind: 'import' | 'eventbrite' } | null>(null);
   const [form, setForm] = useState({ name: '', date: '', venue: '' });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -65,7 +68,7 @@ export default function DoorApp() {
   useEffect(() => {
     // Another organization: never show the last one's events meanwhile.
     setEvents(null);
-    setOpenImport(null);
+    setOpen(null);
     if (!orgId) return undefined;
     let alive = true;
     setLoadError(false);
@@ -102,7 +105,7 @@ export default function DoorApp() {
         totalTickets: 0,
       });
       setForm({ name: '', date: '', venue: '' });
-      setOpenImport(eventId);
+      setOpen({ id: eventId, kind: 'import' });
       setTick((t) => t + 1);
     } catch (err) {
       console.error('door event create failed', err);
@@ -190,9 +193,17 @@ export default function DoorApp() {
                         </span>
                       </span>
                       {canManage && (
-                        <button type="button" onClick={() => setOpenImport(openImport === e.id ? null : e.id)}
+                        <button type="button" aria-expanded={open?.id === e.id && open.kind === 'import'}
+                          onClick={() => setOpen(open?.id === e.id && open.kind === 'import' ? null : { id: e.id, kind: 'import' })}
                           className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700">
-                          <FileUp className="w-3.5 h-3.5" /> Import attendees
+                          <FileUp className="w-3.5 h-3.5" /> Import CSV
+                        </button>
+                      )}
+                      {activeRole && DOOR_ROLES.has(activeRole) && (
+                        <button type="button" aria-expanded={open?.id === e.id && open.kind === 'eventbrite'}
+                          onClick={() => setOpen(open?.id === e.id && open.kind === 'eventbrite' ? null : { id: e.id, kind: 'eventbrite' })}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700">
+                          <RefreshCw className="w-3.5 h-3.5" /> Eventbrite sync
                         </button>
                       )}
                       <Link to={`/checkin/${e.id}`}
@@ -200,9 +211,14 @@ export default function DoorApp() {
                         <ScanLine className="w-3.5 h-3.5" /> Open door
                       </Link>
                     </div>
-                    {openImport === e.id && canManage && (
+                    {open?.id === e.id && open.kind === 'import' && canManage && (
                       <div className="border-t border-slate-100 pt-3">
                         <DoorImport eventId={e.id} />
+                      </div>
+                    )}
+                    {open?.id === e.id && open.kind === 'eventbrite' && orgId && (
+                      <div className="border-t border-slate-100 pt-3">
+                        <EventbriteSync eventId={e.id} orgId={orgId} />
                       </div>
                     )}
                   </li>
@@ -216,7 +232,8 @@ export default function DoorApp() {
                   <CalendarPlus className="w-4 h-4" /> New door for an event sold elsewhere
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Creates a door-only event: it never goes on sale on Exos. Import the attendees next.
+                  Creates a door-only event: it never goes on sale on Exos. Import the attendees next, or link it to
+                  the Eventbrite event to keep them in sync.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <label className="text-xs text-slate-600 sm:col-span-3">

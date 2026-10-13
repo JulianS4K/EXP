@@ -470,7 +470,7 @@ const EB_CSV = 'Order #,First Name,Last Name,Email,Ticket Type,Barcode #\n1001,A
 await run('door app: import an Eventbrite attendee CSV into an event', async (page, log) => {
   await page.goto(BASE + '/door');
   await expectText(page, 'Your doors');
-  await page.getByRole('button', { name: /Import attendees/ }).first().click();
+  await page.getByRole('button', { name: /Import CSV/ }).first().click();
   await page.locator('input[type="file"]').setInputFiles({ name: 'eventbrite-report.csv', mimeType: 'text/csv', buffer: Buffer.from(EB_CSV) });
   await expectText(page, '2 attendees to import');
   await expectText(page, '1 row(s) have no name');
@@ -509,6 +509,62 @@ await run('door: a code from another platform checks the imported guest in', asy
 }, { signedIn: true, mock: ownerMock({ rpcs: {
   exos_event_door_extras: () => DOOR_GUESTS,
   exos_guest_check_in: () => ({ ok: true, reason: 'checked-in', arrived: 1, party: 1 }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [],
+  exos_server_time: () => new Date().toISOString(),
+} }) });
+
+let ebState = { can_manage: true, connected: false, account_name: null, link: null };
+await run('door app: connect Eventbrite and link an event (read-only sync)', async (page, log) => {
+  ebState = { can_manage: true, connected: false, account_name: null, link: null };
+  await page.goto(BASE + '/door');
+  await expectText(page, 'Your doors');
+  await page.getByRole('button', { name: /Eventbrite sync/ }).first().click();
+  await expectText(page, 'Live sync from Eventbrite');
+  await page.getByLabel('Eventbrite private token').fill('ABCDEFGH12345678');
+  await page.getByRole('button', { name: /Connect Eventbrite/ }).click();
+  await expectText(page, 'Connected to Blue Room.');
+  const connect = log.find((l) => l.startsWith('fn exos-eventbrite-sync/connect'));
+  assert(connect && connect.includes('"token":"ABCDEFGH12345678"'), 'connect call: ' + connect);
+  assert(!log.some((l) => l.startsWith('rpc') && l.includes('ABCDEFGH')), 'token never sent to an RPC');
+  await page.getByRole('button', { name: /Show my Eventbrite events/ }).click();
+  await page.getByLabel('Eventbrite event').selectOption('222');
+  await page.getByRole('button', { name: /Link and sync/ }).click();
+  await expectText(page, 'Linked. 2 new, 1 refunded or cancelled. Up to date.');
+  const link = log.find((l) => l.startsWith('fn exos-eventbrite-sync/link'));
+  assert(link && link.includes('"eb_event":"222"'), 'link call: ' + link);
+  await expectText(page, 'Linked to Fall Party (EB)');
+  await expectText(page, '2 attendees at the door · 1 refunded or cancelled');
+}, { signedIn: true, mock: ownerMock({
+  rpcs: { exos_eventbrite_status: () => ebState },
+  fns: {
+    'exos-eventbrite-sync/connect': () => {
+      ebState = { ...ebState, connected: true, account_name: 'Blue Room' };
+      return { body: { connected: true, account_name: 'Blue Room' } };
+    },
+    'exos-eventbrite-sync/events': () => ({ body: { events: [
+      { id: '111', name: 'Other night', start: '2026-10-20T00:00:00Z', status: 'live' },
+      { id: '222', name: 'Fall Party (EB)', start: '2026-10-25T00:00:00Z', status: 'live' }] } }),
+    'exos-eventbrite-sync/link': () => {
+      ebState = { ...ebState, link: { eb_event_id: '222', eb_event_name: 'Fall Party (EB)', last_synced_at: new Date().toISOString(),
+        last_ok_at: new Date().toISOString(), last_error: null, syncing: false, attendees: 2, voided: 1 } };
+      return { body: { linked: true, sync: { state: 'done', rows: 3, added: 2, voided: 1, restored: 0 } } };
+    },
+  },
+}) });
+
+await run('door: a ticket refunded on Eventbrite is refused at the door', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByText(/^Guest list/).first().click();
+  const box = page.getByPlaceholder('Scan or type a ticket code');
+  await box.waitFor({ timeout: 8000 });
+  await box.fill('87654321');
+  await box.press('Enter');
+  await expectText(page, 'Bo Diddley: not valid. The ticket was refunded on Eventbrite.');
+  assert(!log.some((l) => l.startsWith('rpc exos_guest_check_in')), 'no check-in sent for a voided ticket');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ ...DOOR_GUESTS, guests: [...DOOR_GUESTS.guests,
+    { id: 'g2', list_id: 'gl1', guest_name: 'Bo Diddley', plus_ones: 0, arrived: 0, arrived_at: null, note: null,
+      code: '87654321', ticket: 'VIP', source: 'Eventbrite', voided: true, void_reason: 'refunded' }] }),
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });

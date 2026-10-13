@@ -10,7 +10,7 @@
 
 import { AccessNeedBadges } from './Accessibility';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, CameraOff, CheckCircle2, RefreshCw, ScanLine, Search, Users } from 'lucide-react';
+import { Ban, Camera, CameraOff, CheckCircle2, RefreshCw, ScanLine, Search, Users } from 'lucide-react';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   applyArrival,
@@ -21,6 +21,7 @@ import {
   partySize,
   remainingFor,
   searchGuests,
+  voidedText,
   type GuestEntry,
   type PendingArrival,
 } from '../lib/guestLists';
@@ -152,7 +153,11 @@ export default function GuestListDoor({
   const checkIn = async (g: GuestEntry, count: number) => {
     const local = applyArrival(g, count);
     if (!local.ok || !local.entry) {
-      setFlash({ id: g.id, text: arrivalReasonText(local.reason ?? 'bad-count', local.remaining), ok: false });
+      setFlash({
+        id: g.id,
+        text: local.reason === 'voided' ? voidedText(g) : arrivalReasonText(local.reason ?? 'bad-count', local.remaining),
+        ok: false,
+      });
       return;
     }
     const after = local.entry;
@@ -178,6 +183,12 @@ export default function GuestListDoor({
         return;
       }
       if (typeof r.arrived === 'number') patchGuest(g.id, (e) => ({ ...e, arrived: r.arrived! }));
+      if (r.reason === 'voided') {
+        // Voided since this device downloaded the lists.
+        patchGuest(g.id, (e) => ({ ...e, voided: true }));
+        setFlash({ id: g.id, text: voidedText(g), ok: false });
+        return;
+      }
       setFlash({ id: g.id, text: arrivalReasonText(r.reason, r.remaining), ok: false });
     } catch (err) {
       if (isServerAnswer(err)) {
@@ -207,6 +218,10 @@ export default function GuestListDoor({
     }
     setQuery(g.guestName);
     setCode('');
+    if (g.voided) {
+      setCodeFlash({ text: voidedText(g), ok: false });
+      return;
+    }
     if (remainingFor(g) === 0) {
       setCodeFlash({ text: `${g.guestName}: already checked in.`, ok: false });
       return;
@@ -373,7 +388,7 @@ export default function GuestListDoor({
             const left = remainingFor(g);
             const n = Math.min(counts[g.id] ?? left, left) || 1;
             return (
-              <li key={g.id} className={`px-4 py-3 ${left === 0 ? 'bg-emerald-50/40' : 'bg-white'}`}>
+              <li key={g.id} className={`px-4 py-3 ${g.voided ? 'bg-rose-50/60' : left === 0 ? 'bg-emerald-50/40' : 'bg-white'}`}>
                 <div className="flex items-center gap-3">
                   <span className="min-w-0 flex-1">
                     <span className="block font-bold text-slate-900 truncate">
@@ -393,7 +408,11 @@ export default function GuestListDoor({
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 shrink-0">
                     <Users className="w-3.5 h-3.5" /> {g.arrived}/{partySize(g)}
                   </span>
-                  {left > 0 ? (
+                  {g.voided ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-600 uppercase tracking-widest shrink-0">
+                      <Ban className="w-4 h-4" /> {g.voidReason || 'Refunded'}
+                    </span>
+                  ) : left > 0 ? (
                     <span className="inline-flex items-center gap-2 shrink-0">
                       {left > 1 && (
                         <select
