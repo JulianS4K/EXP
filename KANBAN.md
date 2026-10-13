@@ -62,6 +62,13 @@
    `exos-checkout` redeploy to keep `ai_ref`). Still open: training-crawler policy in robots.txt (operator), OAuth
    for organizer MCP tools, agent checkout after Stripe.
 6. Rebuild-or-retire check for Terminal-2's `static/bridge` (CI check that it matches EXP main).
+7. **S4K network feed** (design 2026-10-13, `docs/marketplace/s4k-feed.md`): Exos serves the same read-only,
+   token-gated two-call feed as S4K's Ticket Desk (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`),
+   one GA line per ticket type at the broadcast count (unsold − holds − 1 pack). S4K pulls it and lists through
+   Automatiq. Sales come back as S4K buying from Exos (`POST /exos/events/{id}/orders`, idempotent, 409 =
+   oversell). Supersedes the push-to-Automatiq design. Waiting on S4K's answers (open questions in the doc).
+8. **Eventbrite writes** (operator choice 2026-10-13: dry-run, then per-org switch): create the event and ticket
+   types on the promoter's Eventbrite and keep `quantity_total` in step with the shared count.
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 
