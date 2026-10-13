@@ -145,6 +145,8 @@ BEGIN
   PERFORM pg_temp.act('a5000000-0000-0000-0000-0000000000a0');
   PERFORM public.exos_set_channel_allocation(pg_temp.ev(), 'stubhub', 'a5000000-0000-0000-0000-0000000000d1', 50);
   ASSERT (SELECT channel_split_mode FROM public.exos_events WHERE id = pg_temp.ev()) = 'manual', 'S7: hand edit -> manual';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings
+                      WHERE event_id = pg_temp.ev() AND tier_id IS NOT NULL AND pool_size IS NOT NULL), 'S7: split pool sizes reset';
   PERFORM pg_temp.act(NULL);
   r := public.exos_apply_channel_split(pg_temp.ev());
   ASSERT r->>'reason' = 'manual', 'S7: manual skipped ' || r::text;
@@ -205,6 +207,8 @@ BEGIN
   ASSERT r->>'reason' = 'not-on-sale', 'S9: draft ' || r::text;
   r := public.exos_apply_channel_split('a5000000-0000-0000-0000-0000000000e3');
   ASSERT r->>'reason' = 'primary-market-only', 'S9: primary ' || r::text;
+  -- Skipped events are stamped, so they don't sit at the front of every run.
+  ASSERT (SELECT channel_split_at IS NOT NULL FROM public.exos_events WHERE id = 'a5000000-0000-0000-0000-0000000000e3'), 'S9: skip stamped';
   UPDATE public.exos_events SET total_tickets = 50 WHERE id = pg_temp.ev();
   r := public.exos_apply_channel_split(pg_temp.ev());
   ASSERT r->>'reason' = 'house-cap', 'S9: tight cap ' || r::text;
@@ -225,6 +229,7 @@ BEGIN
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE'), 'S10: anon may run ' || f;
   END LOOP;
   ASSERT has_function_privilege('authenticated', 'public.exos_set_channel_split(uuid,text,integer,integer)', 'EXECUTE'), 'S10: set';
+  ASSERT NOT has_function_privilege('authenticated', 'public.exos_run_channel_splits_each(integer)', 'EXECUTE'), 'S10: procedure';
   ASSERT has_function_privilege('authenticated', 'public.exos_channel_split_preview(uuid)', 'EXECUTE'), 'S10: preview';
   ASSERT NOT has_function_privilege('anon', 'public.exos_set_channel_split(uuid,text,integer,integer)', 'EXECUTE'), 'S10: anon set';
 END $$;

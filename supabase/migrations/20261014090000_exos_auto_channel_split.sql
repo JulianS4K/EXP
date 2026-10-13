@@ -10,6 +10,8 @@
 --           W: FUNCTION exos_set_channel_allocation (patched in place: a hand
 --              edit switches the event to manual), exos_channel_pool_plan
 --              (patched in place: auto events use the split's share)
+--           C: PROCEDURE exos_run_channel_splits_each (the cron's entry: one
+--              commit per event)
 --           C: cron.schedule (exos-channel-split-hourly, when pg_cron present)
 --           R: exos_distribution_listings, exos_ticket_tiers,
 --              exos_effective_available, exos_sync_channel_hold (20260928010000)
@@ -140,7 +142,7 @@ BEGIN
                  THEN (e.purchase_limits ->> 'maxPerOrder')::int ELSE 8 END;
   v_taper := e.starts_at IS NOT NULL AND e.starts_at <= now() + make_interval(hours => e.channel_taper_hours);
   -- The ticked marketplaces, in a fixed order (the remainder goes first come).
-  v_chs := ARRAY(SELECT c FROM unnest(ARRAY['stubhub','seatgeek','gametime','vivid','tickpick','gotickets','evo']) WITH ORDINALITY u(c, o)
+  v_chs := ARRAY(SELECT c FROM unnest(ARRAY['stubhub','seatgeek','gametime','vivid','gotickets','evo']) WITH ORDINALITY u(c, o)
                   WHERE c = ANY (coalesce(e.distribution_networks, '{}'::text[])) ORDER BY o);
   v_n := coalesce(array_length(v_chs, 1), 0);
   IF v_n = 0 THEN
@@ -196,7 +198,10 @@ DECLARE
   v_target int;
   v_free   int;
 BEGIN
-  SELECT * INTO e FROM public.exos_events WHERE id = p_event_id FOR UPDATE;
+  -- No lock on the event row here: a marketplace sale locks its allocation
+  -- row, then the event (exos_fulfil_marketplace_order); taking them in the
+  -- other order could deadlock. The event is stamped at the end.
+  SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;
   IF e.id IS NULL THEN
     RETURN jsonb_build_object('applied', false, 'reason', 'not-found');
   END IF;
@@ -207,17 +212,19 @@ BEGIN
     RETURN jsonb_build_object('applied', false, 'reason', 'not-on-sale');
   END IF;
   IF coalesce(e.exclusivity ->> 'primaryMarketOnly', 'false') = 'true' THEN
+    UPDATE public.exos_events SET channel_split_at = now() WHERE id = p_event_id;   -- not due again until its next slot
     RETURN jsonb_build_object('applied', false, 'reason', 'primary-market-only');
   END IF;
   -- Same rule as the grid: the house cap must not be tighter than the tiers.
   SELECT COALESCE(SUM(capacity), 0), bool_or(capacity = 0) INTO v_sum, v_uncap
     FROM public.exos_ticket_tiers WHERE event_id = p_event_id;
   IF e.total_tickets > 0 AND (v_uncap OR e.total_tickets < v_sum) THEN
+    UPDATE public.exos_events SET channel_split_at = now() WHERE id = p_event_id;
     RETURN jsonb_build_object('applied', false, 'reason', 'house-cap');
   END IF;
-  -- Stamped first: from here the pools follow the split's shares
-  -- (exos_channel_pool_plan), also while the syncs below run.
-  UPDATE public.exos_events SET channel_split_at = now() WHERE id = p_event_id;
+  -- From here the pools follow the split's shares (exos_channel_pool_plan),
+  -- also while the syncs below run, before the event is stamped.
+  PERFORM set_config('exos.channel_split_event', p_event_id::text, true);
 
   FOR p IN
     SELECT pl.*, coalesce(al.requested_qty, 0) AS held
@@ -268,6 +275,8 @@ BEGIN
     END;
   END LOOP;
 
+  UPDATE public.exos_events SET channel_split_at = now() WHERE id = p_event_id;
+  PERFORM set_config('exos.channel_split_event', '', true);
   RETURN jsonb_build_object('applied', true, 'changed', v_rows);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_apply_channel_split(uuid) FROM PUBLIC, anon, authenticated;
@@ -305,6 +314,7 @@ BEGIN
      WHERE e.channel_split_mode = 'auto' AND e.status = 'published'
        AND (e.starts_at IS NULL OR e.starts_at > now())
        AND cardinality(coalesce(e.distribution_networks, '{}'::text[])) > 0
+       AND coalesce(e.exclusivity ->> 'primaryMarketOnly', 'false') <> 'true'
        AND public._exos_channel_split_due(e.starts_at, e.channel_split_at)
      ORDER BY e.channel_split_at NULLS FIRST
      LIMIT LEAST(GREATEST(coalesce(p_limit, 200), 1), 1000)
@@ -320,6 +330,38 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_run_channel_splits(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_run_channel_splits(integer) TO service_role;
+
+-- The cron's entry point: the same run, committing after each event so one
+-- event's locks (allocation rows, tiers) are never held while the next is
+-- split. (The function above is the same loop in one transaction, for tests
+-- and manual runs.)
+-- No SET clause: a procedure with one can't COMMIT. Every name is qualified.
+CREATE OR REPLACE PROCEDURE public.exos_run_channel_splits_each(p_limit integer DEFAULT 200)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_ids uuid[];
+  v_id  uuid;
+BEGIN
+  v_ids := ARRAY(
+    SELECT e.id FROM public.exos_events e
+     WHERE e.channel_split_mode = 'auto' AND e.status = 'published'
+       AND (e.starts_at IS NULL OR e.starts_at > now())
+       AND cardinality(coalesce(e.distribution_networks, '{}'::text[])) > 0
+       AND coalesce(e.exclusivity ->> 'primaryMarketOnly', 'false') <> 'true'
+       AND public._exos_channel_split_due(e.starts_at, e.channel_split_at)
+     ORDER BY e.channel_split_at NULLS FIRST
+     LIMIT LEAST(GREATEST(coalesce(p_limit, 200), 1), 1000));
+  FOREACH v_id IN ARRAY v_ids LOOP
+    BEGIN
+      PERFORM public.exos_apply_channel_split(v_id);
+    EXCEPTION WHEN others THEN
+      RAISE WARNING 'exos_run_channel_splits_each(%): %', v_id, SQLERRM;
+    END;
+    COMMIT;
+  END LOOP;
+END $$;
+REVOKE ALL ON PROCEDURE public.exos_run_channel_splits_each(integer) FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. What the event editor shows, and the switch (owner / manager).
@@ -374,6 +416,10 @@ BEGIN
   IF p_taper_hours IS NOT NULL AND p_taper_hours NOT BETWEEN 0 AND 720 THEN
     RAISE EXCEPTION 'exos_set_channel_split: taper must be 0-720 hours' USING ERRCODE = '22023';
   END IF;
+  IF p_mode = 'manual' AND e.channel_split_mode = 'auto' THEN
+    -- The split's pool sizes go: manual pools are 2 x max per order again.
+    UPDATE public.exos_distribution_listings SET pool_size = NULL WHERE event_id = p_event_id AND tier_id IS NOT NULL;
+  END IF;
   UPDATE public.exos_events
      SET channel_split_mode  = p_mode,
          channel_reserve_pct = coalesce(p_reserve_pct, channel_reserve_pct),
@@ -401,6 +447,10 @@ SELECT pg_temp.exos_patch_n('public.exos_set_channel_allocation(uuid, text, uuid
   -- A person setting the grid takes over from the auto split (mig 20261014090000).
   IF auth.uid() IS NOT NULL THEN
     UPDATE public.exos_events SET channel_split_mode = 'manual' WHERE id = p_event_id AND channel_split_mode <> 'manual';
+    IF FOUND THEN
+      -- The split's pool sizes go: manual pools are 2 x max per order again.
+      UPDATE public.exos_distribution_listings SET pool_size = NULL WHERE event_id = p_event_id AND tier_id IS NOT NULL;
+    END IF;
   END IF;$n$, 1);
 
 -- ---------------------------------------------------------------------------
@@ -411,7 +461,8 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_pool_plan(uuid)',
   $m$'auto'::text$m$,
   $o$  -- 2. Selling or stagnant.$o$,
   $n$  -- Auto split (mig 20261014090000): once it has run, its share is the target.
-  IF e.channel_split_mode = 'auto' AND e.channel_split_at IS NOT NULL THEN
+  IF e.channel_split_mode = 'auto'
+     AND (e.channel_split_at IS NOT NULL OR current_setting('exos.channel_split_event', true) = e.id::text) THEN
     RETURN QUERY SELECT v_base, 'auto'::text, 0;
     RETURN;
   END IF;
@@ -429,7 +480,7 @@ BEGIN
       PERFORM cron.unschedule('exos-channel-split-hourly');
     END IF;
     PERFORM cron.schedule('exos-channel-split-hourly', '37 * * * *',
-                          $cron$SELECT public.exos_run_channel_splits();$cron$);
+                          $cron$CALL public.exos_run_channel_splits_each();$cron$);
   END IF;
 END $$;
 

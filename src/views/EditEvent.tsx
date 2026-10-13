@@ -1713,12 +1713,15 @@ export default function EditEvent() {
              return lines.map((st) => <p key={st.text} role="status" className={`type text-xs ${color[st.tone]}`}>{st.text}</p>);
            })()}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
+             // Remounted (re-read) after any grid save: a hand edit switches the event to manual.
+             <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}`).join('|')}>
              <ChannelSplitPanel
                eventId={eventId}
                tierNames={Object.fromEntries((eventData.ticketTiers || []).filter((t) => t.id).map((t) => [t.id, t.name]))}
                labels={CHANNEL_LABEL}
                onChanged={() => { void loadMarketRows(eventId); }}
              />
+             </div>
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && (
              <div key={marketRows.map((r) => `${r.channel}:${r.tier_id}:${r.status}:${r.requested_qty}:${r.sell_cap}:${r.unit_price ?? ''}`).join('|')}>
