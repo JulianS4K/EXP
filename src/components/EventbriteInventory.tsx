@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import {
-  fetchInventoryStatus, listEbTicketClasses, mapEbTicketClass, mappingLine, setEbWrites,
+  fetchInventoryStatus, listEbTicketClasses, mapEbTicketClass, mappingLine, setEbWrites, unshareable,
   type EbInventoryStatus, type EbMapping, type EbTicketClassChoice,
 } from '../lib/door/eventbrite';
 
@@ -100,14 +100,14 @@ export default function EventbriteInventory({ eventId, orgId }: { eventId: strin
         <ul className="space-y-2">
           {classes.map((c) => {
             const m = byClass.get(c.id);
-            const tiered = c.inventory_tier_id !== null;
+            const why = unshareable(c);
             return (
               <li key={c.id} className="flex flex-wrap items-center gap-2">
                 <span className="min-w-[10rem] text-slate-800">
                   {c.name ?? `Ticket ${c.id}`}{c.free ? ' (free)' : ''}{c.hidden ? ' (hidden)' : ''}
                 </span>
-                {tiered ? (
-                  <span className="text-slate-400">In an Eventbrite inventory tier: not supported yet</span>
+                {why ? (
+                  <span className="text-slate-400">{why}</span>
                 ) : (
                   <select aria-label={`Exos ticket type for ${c.name ?? c.id}`} disabled={busy !== null}
                     value={m?.tierId ?? ''}
@@ -120,7 +120,7 @@ export default function EventbriteInventory({ eventId, orgId }: { eventId: strin
                     }}
                     className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-xs">
                     <option value="">Not shared</option>
-                    {status.tiers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {status.tiers.filter((t) => t.capacity > 0 || t.id === m?.tierId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 )}
               </li>

@@ -233,6 +233,17 @@ export interface EbTicketClass {
   inventory_tier_id: string | null;
   free: boolean;
   hidden: boolean;
+  donation: boolean;
+  /** admission, add_on or donation (admission when Eventbrite doesn't say). */
+  category: string;
+}
+
+/** Why a class can't share a count with Exos, or null. */
+export function unshareableReason(c: EbTicketClass): string | null {
+  if (c.inventory_tier_id) return "It is in an Eventbrite inventory tier (not supported yet).";
+  if (c.donation || c.category === "donation") return "Donation tickets can't share a count.";
+  if (c.category === "add_on") return "Add-ons don't count toward the event, so they can't share a count.";
+  return null;
 }
 
 function toTicketClass(t: Record<string, unknown> | null | undefined): EbTicketClass | null {
@@ -247,6 +258,8 @@ function toTicketClass(t: Record<string, unknown> | null | undefined): EbTicketC
     inventory_tier_id: typeof tier === "string" && tier !== "" ? tier : typeof tier === "number" ? String(tier) : null,
     free: t.free === true,
     hidden: t.hidden === true,
+    donation: t.donation === true,
+    category: typeof t.category === "string" && /^[a-z_]{1,20}$/.test(t.category) ? t.category : "admission",
   };
 }
 

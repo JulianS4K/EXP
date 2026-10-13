@@ -2,9 +2,11 @@
 -- Eventbrite inventory: one shared count across Exos and Eventbrite
 -- ============================================================================
 -- Touches:  C: TABLE exos_eventbrite_ticket_links (service role only)
---           W: exos_eventbrite_accounts (+ writes_enabled)
+--           W: exos_eventbrite_accounts (+ writes_enabled), exos_eventbrite_links
+--              (+ inventory_at)
 --           C: FUNCTION exos_eventbrite_map_ticket, exos_eventbrite_set_writes,
---              exos_eventbrite_inventory_apply, exos_eventbrite_inventory_ack
+--              exos_eventbrite_inventory_apply, exos_eventbrite_inventory_ack,
+--              exos_eventbrite_inventory_due
 --              (service role); exos_eventbrite_inventory_status (authenticated,
 --              role-checked)
 --           W: exos_ticket_tiers.sold, exos_events.tickets_sold (Eventbrite
@@ -27,11 +29,21 @@
 --      (capacity only), or, unless BOTH the org's writes_enabled switch AND the
 --      operator's EXOS_EVENTBRITE_WRITES=on are set, only records the plan
 --      (dry run).
--- Classes that live in an Eventbrite inventory tier are skipped: the tier,
--- not the class, holds their quantity (not supported yet).
+-- Not shared (refused at map, skipped at apply): Eventbrite classes in an
+-- inventory tier (the tier holds their quantity), donation and add-on
+-- classes; Exos ticket types with no capacity set, or in a shared capacity
+-- group (a quota counts minted tickets, not these seats). A target of 0
+-- can't be sent (Eventbrite refuses 0 for a normal class), so it is shown
+-- as an error instead: hide or end the ticket on Eventbrite.
+-- Inventory runs every 2 minutes for links with mappings
+-- (exos_eventbrite_inventory_due), apart from the attendee cadence, and a
+-- read older than the last one applied is ignored (no stale "refunds").
+-- Locks: the event's mapping rows (class order), then the ticket type, then
+-- the event: checkout's order (tier, then event).
 -- Prod apply needs operator OK.
 
 ALTER TABLE public.exos_eventbrite_accounts ADD COLUMN IF NOT EXISTS writes_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE public.exos_eventbrite_links ADD COLUMN IF NOT EXISTS inventory_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS public.exos_eventbrite_ticket_links (
   event_id            uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
@@ -90,8 +102,11 @@ BEGIN
   IF p_eb_ticket_class_id IS NULL OR p_eb_ticket_class_id !~ '^[0-9]{1,24}$' THEN
     RAISE EXCEPTION 'exos_eventbrite_map_ticket: bad ticket class' USING ERRCODE = '22023';
   END IF;
+  -- Every mapping row of the event, in class order: the same order as apply.
+  PERFORM 1 FROM public.exos_eventbrite_ticket_links
+   WHERE event_id = p_event_id ORDER BY eb_event_id, eb_ticket_class_id FOR UPDATE;
   SELECT * INTO r FROM public.exos_eventbrite_ticket_links
-   WHERE event_id = p_event_id AND eb_event_id = lk.eb_event_id AND eb_ticket_class_id = p_eb_ticket_class_id FOR UPDATE;
+   WHERE event_id = p_event_id AND eb_event_id = lk.eb_event_id AND eb_ticket_class_id = p_eb_ticket_class_id;
 
   IF p_tier_id IS NULL THEN
     UPDATE public.exos_eventbrite_ticket_links SET active = false
@@ -105,6 +120,12 @@ BEGIN
   END IF;
   IF public.exos_tier_is_table(p_tier_id) THEN
     RAISE EXCEPTION 'exos_eventbrite_map_ticket: table ticket types can''t be shared with Eventbrite' USING ERRCODE = '22023';
+  END IF;
+  IF coalesce((SELECT capacity FROM public.exos_ticket_tiers WHERE id = p_tier_id), 0) <= 0 THEN
+    RAISE EXCEPTION 'exos_eventbrite_map_ticket: set a capacity on this ticket type first' USING ERRCODE = '22023';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.exos_quota_tiers q WHERE q.tier_id = p_tier_id) THEN
+    RAISE EXCEPTION 'exos_eventbrite_map_ticket: ticket types in a shared capacity group can''t be shared with Eventbrite yet' USING ERRCODE = '22023';
   END IF;
   -- Sales already counted belong to the ticket type they were taken from.
   IF r.eb_ticket_class_id IS NOT NULL AND r.tier_id <> p_tier_id AND r.counted_sold > 0 THEN
@@ -147,9 +168,11 @@ GRANT EXECUTE ON FUNCTION public.exos_eventbrite_set_writes(uuid, uuid, boolean)
 -- ---------------------------------------------------------------------------
 -- Apply what Eventbrite reports for an event's ticket classes, and say what
 -- capacity each mapped class should have. p_classes: the ticket classes as
--- read, [{id, name, capacity, quantity_sold, inventory_tier_id}, ...].
--- Returns one row per active mapping.
-CREATE OR REPLACE FUNCTION public.exos_eventbrite_inventory_apply(p_event_id uuid, p_classes jsonb)
+-- read, [{id, name, capacity, quantity_sold, inventory_tier_id, donation,
+-- category}, ...]; p_read_at: when the read started (an older read than the
+-- last one applied is ignored). Returns one row per active mapping.
+DROP FUNCTION IF EXISTS public.exos_eventbrite_inventory_apply(uuid, jsonb);
+CREATE OR REPLACE FUNCTION public.exos_eventbrite_inventory_apply(p_event_id uuid, p_classes jsonb, p_read_at timestamptz DEFAULT NULL)
 RETURNS TABLE (eb_ticket_class_id text, tier_id uuid, eb_capacity integer, eb_sold integer,
                target_capacity integer, oversold integer, writes_enabled boolean, skip_reason text)
 LANGUAGE plpgsql SECURITY DEFINER
@@ -157,46 +180,56 @@ SET search_path = public, pg_temp
 AS $$
 #variable_conflict use_column
 DECLARE
-  lk      public.exos_eventbrite_links%ROWTYPE;
-  e       public.exos_events%ROWTYPE;
-  m       record;
-  c       jsonb;
-  v_sold  int;
-  v_cap   int;
-  v_delta int;
-  v_avail int;
-  v_house int;
-  v_take  int;
-  v_back  int;
-  v_over  int;
-  v_pack  int;
-  v_live  boolean;
-  v_on    boolean;
-  v_why   text;
+  lk       public.exos_eventbrite_links%ROWTYPE;
+  e        public.exos_events%ROWTYPE;
+  t        public.exos_eventbrite_ticket_links%ROWTYPE;
+  c        jsonb;
+  v_read   timestamptz := coalesce(p_read_at, clock_timestamp());
+  v_sold   int;
+  v_cap    int;
+  v_delta  int;
+  v_avail  int;
+  v_house  int;
+  v_take   int;
+  v_back   int;
+  v_over   int;
+  v_pack   int;
+  v_live   boolean;
+  v_on     boolean;
+  v_why    text;
+  v_share  int;
+  v_promised int := 0;   -- headroom already given to earlier classes (one house / one quota)
+  v_target int;
 BEGIN
   SELECT * INTO lk FROM public.exos_eventbrite_links WHERE event_id = p_event_id;
   IF lk.event_id IS NULL THEN RETURN; END IF;
   SELECT coalesce(a.writes_enabled, false) INTO v_on FROM public.exos_eventbrite_accounts a WHERE a.org_id = lk.org_id;
+  -- All of the event's mapping rows, in class order (map_ticket takes the same).
+  PERFORM 1 FROM public.exos_eventbrite_ticket_links x
+    WHERE x.event_id = p_event_id ORDER BY x.eb_event_id, x.eb_ticket_class_id FOR UPDATE;
 
-  FOR m IN
-    SELECT t.eb_ticket_class_id AS cls, t.tier_id AS tier FROM public.exos_eventbrite_ticket_links t
-     WHERE t.event_id = p_event_id AND t.eb_event_id = lk.eb_event_id AND t.active
-     ORDER BY t.eb_ticket_class_id
+  FOR t IN
+    SELECT * FROM public.exos_eventbrite_ticket_links x
+     WHERE x.event_id = p_event_id AND x.eb_event_id = lk.eb_event_id AND x.active
+     ORDER BY x.eb_ticket_class_id
   LOOP
-    -- The mapping row first (two syncs at once count a sale once), then the
-    -- event and the ticket type: the same order as every other mint.
-    PERFORM 1 FROM public.exos_eventbrite_ticket_links t
-      WHERE t.event_id = p_event_id AND t.eb_event_id = lk.eb_event_id AND t.eb_ticket_class_id = m.cls FOR UPDATE;
-    SELECT x.value INTO c FROM jsonb_array_elements(coalesce(p_classes, '[]'::jsonb)) AS x(value) WHERE x.value ->> 'id' = m.cls LIMIT 1;
+    SELECT y.value INTO c FROM jsonb_array_elements(coalesce(p_classes, '[]'::jsonb)) AS y(value)
+     WHERE y.value ->> 'id' = t.eb_ticket_class_id LIMIT 1;
     v_why := CASE
+      WHEN t.last_read_at IS NOT NULL AND v_read <= t.last_read_at THEN 'stale'
       WHEN c IS NULL THEN 'ticket class not found on Eventbrite'
       WHEN nullif(c ->> 'inventory_tier_id', '') IS NOT NULL THEN 'this class is in an Eventbrite inventory tier: not supported yet'
+      WHEN c ->> 'donation' = 'true' OR c ->> 'category' IN ('donation', 'add_on') THEN 'donation and add-on tickets can''t be shared'
       WHEN (c ->> 'quantity_sold') !~ '^[0-9]{1,9}$' THEN 'Eventbrite gave no quantity sold'
+      WHEN coalesce((SELECT capacity FROM public.exos_ticket_tiers WHERE id = t.tier_id), 0) <= 0 THEN 'set a capacity on the Exos ticket type'
+      WHEN EXISTS (SELECT 1 FROM public.exos_quota_tiers q WHERE q.tier_id = t.tier_id) THEN 'ticket types in a shared capacity group can''t be shared yet'
     END;
     IF v_why IS NOT NULL THEN
-      UPDATE public.exos_eventbrite_ticket_links t SET last_error = v_why, last_read_at = now()
-       WHERE t.event_id = p_event_id AND t.eb_event_id = lk.eb_event_id AND t.eb_ticket_class_id = m.cls;
-      eb_ticket_class_id := m.cls; tier_id := m.tier; eb_capacity := NULL; eb_sold := NULL;
+      IF v_why <> 'stale' THEN
+        UPDATE public.exos_eventbrite_ticket_links x SET last_error = v_why, last_read_at = v_read
+         WHERE x.event_id = t.event_id AND x.eb_event_id = t.eb_event_id AND x.eb_ticket_class_id = t.eb_ticket_class_id;
+      END IF;
+      eb_ticket_class_id := t.eb_ticket_class_id; tier_id := t.tier_id; eb_capacity := NULL; eb_sold := NULL;
       target_capacity := NULL; oversold := NULL; writes_enabled := v_on; skip_reason := v_why;
       RETURN NEXT;
       CONTINUE;
@@ -204,17 +237,17 @@ BEGIN
     v_sold := (c ->> 'quantity_sold')::int;
     v_cap  := CASE WHEN (c ->> 'capacity') ~ '^[0-9]{1,9}$' THEN (c ->> 'capacity')::int END;
 
+    -- Checkout's order: the ticket type, then the event.
+    PERFORM 1 FROM public.exos_ticket_tiers WHERE id = t.tier_id FOR UPDATE;
     SELECT * INTO e FROM public.exos_events WHERE id = p_event_id FOR UPDATE;
-    PERFORM 1 FROM public.exos_ticket_tiers WHERE id = m.tier FOR UPDATE;
-    SELECT t.counted_sold - v_sold, t.oversold INTO v_delta, v_over FROM public.exos_eventbrite_ticket_links t
-     WHERE t.event_id = p_event_id AND t.eb_event_id = lk.eb_event_id AND t.eb_ticket_class_id = m.cls;
-    v_delta := -v_delta;   -- new Eventbrite sales (negative: refunds)
+    v_delta := v_sold - t.counted_sold;   -- new Eventbrite sales (negative: refunds)
+    v_over  := t.oversold;
 
     IF v_delta > 0 THEN
-      v_avail := public.exos_effective_available(m.tier);
+      v_avail := public.exos_effective_available(t.tier_id);
       v_house := CASE WHEN coalesce(e.total_tickets, 0) > 0 THEN greatest(e.total_tickets - e.tickets_sold, 0) END;
       v_take  := least(v_delta, greatest(coalesce(v_avail, v_delta), 0), coalesce(v_house, v_delta));
-      UPDATE public.exos_ticket_tiers SET sold = sold + v_take WHERE id = m.tier;
+      UPDATE public.exos_ticket_tiers SET sold = sold + v_take WHERE id = t.tier_id;
       UPDATE public.exos_events SET tickets_sold = tickets_sold + v_take WHERE id = p_event_id;
       v_over := v_over + (v_delta - v_take);
     ELSIF v_delta < 0 THEN
@@ -222,34 +255,72 @@ BEGIN
       v_back := least(-v_delta, v_over);
       v_over := v_over - v_back;
       v_back := -v_delta - v_back;
-      UPDATE public.exos_ticket_tiers SET sold = greatest(0, sold - v_back) WHERE id = m.tier;
+      UPDATE public.exos_ticket_tiers SET sold = greatest(0, sold - v_back) WHERE id = t.tier_id;
       UPDATE public.exos_events SET tickets_sold = greatest(0, tickets_sold - v_back) WHERE id = p_event_id;
     END IF;
 
-    -- What Eventbrite may sell from here: the shared count, one pack held back.
+    -- What Eventbrite may sell from here: the shared count, one pack held
+    -- back, and the house remainder split across the event's classes.
     SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;
     v_pack := CASE WHEN (e.purchase_limits ->> 'maxPerOrder') ~ '^[0-9]{1,4}$' AND (e.purchase_limits ->> 'maxPerOrder')::int > 0
                    THEN (e.purchase_limits ->> 'maxPerOrder')::int ELSE 8 END;
     v_live := e.status = 'published' AND coalesce(e.ends_at, e.starts_at, now() + interval '1 day') > now();
-    v_avail := greatest(coalesce(public.exos_effective_available(m.tier), 0), 0);
+    v_avail := greatest(coalesce(public.exos_effective_available(t.tier_id), 0), 0);
     IF coalesce(e.total_tickets, 0) > 0 THEN
-      v_avail := least(v_avail, greatest(e.total_tickets - e.tickets_sold, 0));
+      v_avail := least(v_avail, greatest(e.total_tickets - e.tickets_sold - v_promised, 0));
     END IF;
+    v_share := CASE WHEN v_live THEN greatest(v_avail - v_pack, 0) ELSE 0 END;
+    v_promised := v_promised + v_share;
+    v_target := v_sold + v_share;
 
-    UPDATE public.exos_eventbrite_ticket_links t
+    UPDATE public.exos_eventbrite_ticket_links x
        SET counted_sold = v_sold, oversold = v_over, eb_sold = v_sold, eb_capacity = v_cap,
-           target_capacity = v_sold + CASE WHEN v_live THEN greatest(v_avail - v_pack, 0) ELSE 0 END,
-           last_read_at = now(), last_error = NULL
-     WHERE t.event_id = p_event_id AND t.eb_event_id = lk.eb_event_id AND t.eb_ticket_class_id = m.cls
-    RETURNING t.target_capacity INTO target_capacity;
+           target_capacity = v_target, last_read_at = v_read,
+           -- Eventbrite refuses capacity 0 on a normal ticket class.
+           last_error = CASE WHEN v_target < 1 THEN 'nothing to sell on Eventbrite yet, and Exos can''t set it to 0: hide or end this ticket on Eventbrite' END
+     WHERE x.event_id = t.event_id AND x.eb_event_id = t.eb_event_id AND x.eb_ticket_class_id = t.eb_ticket_class_id;
 
-    eb_ticket_class_id := m.cls; tier_id := m.tier; eb_capacity := v_cap; eb_sold := v_sold;
-    oversold := v_over; writes_enabled := v_on; skip_reason := NULL;
+    eb_ticket_class_id := t.eb_ticket_class_id; tier_id := t.tier_id; eb_capacity := v_cap; eb_sold := v_sold;
+    target_capacity := v_target; oversold := v_over; writes_enabled := v_on;
+    skip_reason := CASE WHEN v_target < 1 THEN 'target 0' END;
     RETURN NEXT;
   END LOOP;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_eventbrite_inventory_apply(uuid, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_eventbrite_inventory_apply(uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_eventbrite_inventory_apply(uuid, jsonb, timestamptz) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_eventbrite_inventory_apply(uuid, jsonb, timestamptz) TO service_role;
+
+-- Links due an inventory pass (the cron, every 2 minutes, apart from the
+-- attendee cadence): an active mapping, the event published (or cancelled,
+-- until Eventbrite has been set to what it sold), not over by 2 days. Claimed
+-- by stamping inventory_at; returns the token.
+CREATE OR REPLACE FUNCTION public.exos_eventbrite_inventory_due(p_limit integer DEFAULT 20)
+RETURNS TABLE (event_id uuid, eb_event_id text, token text)
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH due AS (
+    SELECT l.event_id
+      FROM public.exos_eventbrite_links l
+      JOIN public.exos_events e ON e.id = l.event_id
+     WHERE (l.inventory_at IS NULL OR l.inventory_at < now() - interval '100 seconds')
+       AND coalesce(e.ends_at, e.starts_at, now()) > now() - interval '2 days'
+       AND EXISTS (SELECT 1 FROM public.exos_eventbrite_ticket_links t
+                    WHERE t.event_id = l.event_id AND t.eb_event_id = l.eb_event_id AND t.active
+                      AND (e.status = 'published'
+                           OR (e.status = 'cancelled' AND t.eb_capacity IS DISTINCT FROM t.eb_sold)))
+     ORDER BY l.inventory_at NULLS FIRST
+     LIMIT least(greatest(coalesce(p_limit, 20), 1), 100)
+     FOR UPDATE OF l SKIP LOCKED
+  )
+  UPDATE public.exos_eventbrite_links l SET inventory_at = now()
+    FROM due, public.exos_eventbrite_accounts a, vault.decrypted_secrets d
+   WHERE l.event_id = due.event_id AND a.org_id = l.org_id AND d.id = a.secret_id
+  RETURNING l.event_id, l.eb_event_id, d.decrypted_secret;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_eventbrite_inventory_due(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_eventbrite_inventory_due(integer) TO service_role;
 
 -- Record what was sent (p_sent) or only planned (dry run), and any error.
 CREATE OR REPLACE FUNCTION public.exos_eventbrite_inventory_ack(

@@ -35,8 +35,9 @@
 //        owner / manager. Maps an EXISTING Eventbrite ticket class to an Exos
 //        ticket type (null: unmap). Exos never creates ticket classes.
 //   POST /writes {org, on}           owner. The org's switch for sending.
-//   After each sync of a link with mappings: read the ticket classes, count
-//   Eventbrite sales against Exos (exos_eventbrite_inventory_apply), then set
+//   Every 2 minutes for each link with mappings (exos_eventbrite_inventory_due,
+//   apart from the attendee cadence) and after Sync now: read the ticket
+//   classes, count Eventbrite sales against Exos (exos_eventbrite_inventory_apply), then set
 //   each class's capacity to its target with _shared/eventbrite/writer.ts,
 //   the one write Exos makes there. Dry run (plan recorded only) unless the
 //   org's switch AND EXOS_EVENTBRITE_WRITES=on.
@@ -59,7 +60,7 @@ import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
   type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listTicketClasses,
-  listUpcomingEvents, readEvent, type SyncOutcome, syncLink, whoAmI,
+  listUpcomingEvents, readEvent, type SyncOutcome, syncLink, unshareableReason, whoAmI,
 } from "../_shared/eventbrite/client.ts";
 import { planCapacity, planRecord, sendCapacity, writesLive } from "../_shared/eventbrite/writer.ts";
 
@@ -181,7 +182,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
       if (!isEbId(cls)) return json({ error: "Pick an Eventbrite ticket class.", reason: "bad_class" }, 400, cors);
       if (tier !== null && !UUID.test(tier)) return json({ error: "Pick an Exos ticket type.", reason: "bad_tier" }, 400, cors);
-      const name = typeof body?.ticket_class_name === "string" ? body.ticket_class_name.slice(0, 200) : null;
+      let name = typeof body?.ticket_class_name === "string" ? body.ticket_class_name.slice(0, 200) : null;
+      if (tier !== null) {
+        // Only an existing, shareable class of the linked Eventbrite event.
+        const org = await eventOrg(sb, event);
+        if (!org) return json({ error: "event not found" }, 404, cors);
+        const tok = await sb.rpc("exos_eventbrite_token", { p_org_id: org, p_user_id: user });
+        if (tok.error) return rpcError(tok.error, cors);
+        if (typeof tok.data !== "string") return json({ error: "Connect Eventbrite first.", reason: "not_connected" }, 409, cors);
+        const { data: lk } = await sb.from("exos_eventbrite_links").select("eb_event_id").eq("event_id", event).maybeSingle();
+        const ebEvent = (lk as { eb_event_id?: string } | null)?.eb_event_id;
+        if (!ebEvent) return json({ error: "Link an Eventbrite event first.", reason: "not_linked" }, 409, cors);
+        const list = await listTicketClasses(fetch, tok.data, ebEvent);
+        if (!list.ok || !list.body) return json({ error: ebErrorMessage(list), reason: "eventbrite" }, 502, cors);
+        const found = list.body.find((c) => c.id === cls);
+        if (!found) return json({ error: "That ticket isn't on the linked Eventbrite event.", reason: "bad_class" }, 400, cors);
+        const why = unshareableReason(found);
+        if (why) return json({ error: why, reason: "unshareable" }, 400, cors);
+        name = found.name ?? name;
+      }
       const r = await sb.rpc("exos_eventbrite_map_ticket", {
         p_event_id: event, p_user_id: user, p_eb_ticket_class_id: cls, p_eb_ticket_class_name: name, p_tier_id: tier,
       });
@@ -251,10 +270,21 @@ async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
       continue;
     }
     const out = await syncLink(fetch, link, applier(sb, link), { maxPages: CRON_PAGES, deadline });
-    const inventory = Date.now() < deadline ? await syncInventory(sb, link) : null;
-    results.push({ event: link.event_id, state: out.state, rows: out.rows, ...(inventory ? { inventory } : {}) });
+    results.push({ event: link.event_id, state: out.state, rows: out.rows });
   }
-  return { ok: true, claimed: links.length, results };
+  // Inventory every 2 minutes for every link with a mapping, apart from the
+  // attendee cadence (which is 29 minutes until 2 days out).
+  const inventory: Array<Record<string, unknown>> = [];
+  if (Date.now() < deadline) {
+    const due = await sb.rpc("exos_eventbrite_inventory_due", { p_limit: 20 });
+    if (due.error) console.error("exos-eventbrite-sync: inventory due failed", redactError(due.error));
+    for (const l of (due.data ?? []) as InventoryLink[]) {
+      if (Date.now() >= deadline) break;
+      const r = await syncInventory(sb, l);
+      if (r) inventory.push({ event: l.event_id, ...r });
+    }
+  }
+  return { ok: true, claimed: links.length, results, inventory };
 }
 
 /** exos_eventbrite_apply for one claimed link. A failed call returns null;
@@ -279,19 +309,21 @@ type InventoryRow = {
   eb_ticket_class_id: string; tier_id: string; eb_capacity: number | null; eb_sold: number | null;
   target_capacity: number | null; oversold: number | null; writes_enabled: boolean; skip_reason: string | null;
 };
+type InventoryLink = { event_id: string; eb_event_id: string; token: string };
 type InventoryOutcome = { classes: number; sent: number; planned: number; failed: number; skipped: number; oversold: number };
 
 /** One inventory pass for a link: read classes, count sales, set capacities. Null: no mappings. */
-async function syncInventory(sb: SupabaseClient, link: ClaimedLink): Promise<InventoryOutcome | null> {
+async function syncInventory(sb: SupabaseClient, link: InventoryLink): Promise<InventoryOutcome | null> {
   const { count } = await sb.from("exos_eventbrite_ticket_links").select("tier_id", { count: "exact", head: true })
     .eq("event_id", link.event_id).eq("eb_event_id", link.eb_event_id).eq("active", true);
   if (!count) return null;
+  const readAt = new Date().toISOString();   // a later read wins; an older one is ignored
   const read = await listTicketClasses(fetch, link.token, link.eb_event_id);
   if (!read.ok || !read.body) {
     console.error("exos-eventbrite-sync: ticket classes not read", link.event_id, read.error ?? read.status);
     return { classes: 0, sent: 0, planned: 0, failed: 1, skipped: 0, oversold: 0 };
   }
-  const applied = await sb.rpc("exos_eventbrite_inventory_apply", { p_event_id: link.event_id, p_classes: read.body });
+  const applied = await sb.rpc("exos_eventbrite_inventory_apply", { p_event_id: link.event_id, p_classes: read.body, p_read_at: readAt });
   if (applied.error) {
     console.error("exos-eventbrite-sync: inventory apply failed", redactError(applied.error));
     return { classes: read.body.length, sent: 0, planned: 0, failed: 1, skipped: 0, oversold: 0 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EB_API, listTicketClasses, type Fetch } from '../../supabase/functions/_shared/eventbrite/client.ts';
+import { EB_API, listTicketClasses, unshareableReason, type EbTicketClass, type Fetch } from '../../supabase/functions/_shared/eventbrite/client.ts';
 import {
   assertCapacityOnly, planCapacity, planRecord, sendCapacity, writesLive, type CapacityPlan,
 } from '../../supabase/functions/_shared/eventbrite/writer.ts';
@@ -33,12 +33,19 @@ describe('ticket classes (read)', () => {
     const r = await listTicketClasses(fetch, 'TOKEN123', '555');
     expect(r.ok).toBe(true);
     expect(r.body).toEqual([
-      { id: '101', name: 'GA', capacity: 50, quantity_sold: 10, inventory_tier_id: null, free: false, hidden: false },
-      { id: '102', name: 'Tiered', capacity: 30, quantity_sold: 2, inventory_tier_id: '9', free: false, hidden: true },
+      { id: '101', name: 'GA', capacity: 50, quantity_sold: 10, inventory_tier_id: null, free: false, hidden: false, donation: false, category: 'admission' },
+      { id: '102', name: 'Tiered', capacity: 30, quantity_sold: 2, inventory_tier_id: '9', free: false, hidden: true, donation: false, category: 'admission' },
     ]);
     expect(calls.map((c) => c.init?.method)).toEqual(['GET', 'GET']);
     expect(calls[0].url).toBe(`${EB_API}/events/555/ticket_classes/`);
     expect(new URL(calls[1].url).searchParams.get('continuation')).toBe('c2');
+  });
+  it('says which classes can\'t share a count', () => {
+    const c: EbTicketClass = { id: '1', name: 'x', capacity: 5, quantity_sold: 0, inventory_tier_id: null, free: false, hidden: false, donation: false, category: 'admission' };
+    expect(unshareableReason(c)).toBeNull();
+    expect(unshareableReason({ ...c, inventory_tier_id: '9' })).toMatch(/inventory tier/);
+    expect(unshareableReason({ ...c, donation: true })).toMatch(/Donation/);
+    expect(unshareableReason({ ...c, category: 'add_on' })).toMatch(/Add-ons/);
   });
   it('refuses a bad event id without calling', async () => {
     const { fetch, calls } = fake(200, {});
@@ -51,6 +58,8 @@ describe('the one write: a ticket class capacity', () => {
   it('plans only a change', () => {
     expect(planCapacity('555', '101', 50, 50)).toBeNull();
     expect(planCapacity('555', '101', 50, -1)).toBeNull();
+    // Eventbrite refuses 0 on a normal class (and reads it as unlimited on a donation): never sent.
+    expect(planCapacity('555', '101', 50, 0)).toBeNull();
     expect(planCapacity('555', '101', 50, null)).toBeNull();
     expect(planCapacity('55x', '101', 50, 60)).toBeNull();
     expect(planCapacity('555', '101', 50, 96)).toEqual({

@@ -143,7 +143,7 @@ export const syncEventbrite = (eventId: string) =>
 
 // ---- Inventory: one shared count (mig 20261014110000) ----------------------
 
-export { mappingLine, parseInventoryStatus } from './eventbriteInventoryModel';
+export { mappingLine, parseInventoryStatus, unshareable } from './eventbriteInventoryModel';
 export type { EbInventoryStatus, EbMapping, EbTicketClassChoice } from './eventbriteInventoryModel';
 
 /** null when the migration isn't deployed. */

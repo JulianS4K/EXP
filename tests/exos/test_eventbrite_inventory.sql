@@ -15,6 +15,13 @@
 --   I8 writes switch: owner only; status shows mappings to owner / manager
 --   I9 ack: a dry run records the plan only; a sent one records capacity
 --   I10 grants
+--   I11 refused at map: a ticket type with no capacity, or in a shared
+--       capacity group (a quota counts minted tickets, not these seats)
+--   I12 a target of 0 is never planned: shown as an error instead
+--   I13 two classes on two ticket types split the house remainder
+--   I14 a read older than the last one applied is ignored (no false refund)
+--   I15 the 2-minute inventory schedule: due once, again after 100 s; a
+--       cancelled event stays due until Eventbrite is set to what it sold
 -- Self-contained (e6 prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -203,12 +210,87 @@ BEGIN
   RAISE NOTICE 'I9 ok';
 END $$;
 
+-- I11. Refused at map.
+DO $$
+DECLARE ok boolean;
+BEGIN
+  INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,sort_order) VALUES
+    ('e6000000-0000-0000-0000-0000000000d3','e6000000-0000-0000-0000-0000000000e1','Uncapped',25,0,0,3),
+    ('e6000000-0000-0000-0000-0000000000d4','e6000000-0000-0000-0000-0000000000e1','In a quota',25,50,0,4);
+  INSERT INTO public.exos_quotas(id,event_id,name,size) VALUES
+    ('e6000000-0000-0000-0000-0000000000f1','e6000000-0000-0000-0000-0000000000e1','Floor',60);
+  INSERT INTO public.exos_quota_tiers(quota_id,tier_id) VALUES
+    ('e6000000-0000-0000-0000-0000000000f1','e6000000-0000-0000-0000-0000000000d4');
+  BEGIN
+    PERFORM public.exos_eventbrite_map_ticket(pg_temp.u('e1'), pg_temp.u('a1'), '9004', 'x', pg_temp.u('d3')); ok := true;
+  EXCEPTION WHEN invalid_parameter_value THEN ok := false; END;
+  ASSERT NOT ok, 'I11: uncapped refused';
+  BEGIN
+    PERFORM public.exos_eventbrite_map_ticket(pg_temp.u('e1'), pg_temp.u('a1'), '9005', 'x', pg_temp.u('d4')); ok := true;
+  EXCEPTION WHEN invalid_parameter_value THEN ok := false; END;
+  ASSERT NOT ok, 'I11: quota tier refused';
+  RAISE NOTICE 'I11 ok';
+END $$;
+
+-- I12. Target 0: nothing left and nothing sold on Eventbrite.
+DO $$
+DECLARE r record;
+BEGIN
+  UPDATE public.exos_ticket_tiers SET sold = 18 WHERE id = pg_temp.u('d2');   -- RSVP: 2 free, pack 4
+  SELECT * INTO r FROM public.exos_eventbrite_inventory_apply(pg_temp.u('e1'), pg_temp.cls(20, 50, 0)) x WHERE x.eb_ticket_class_id = '9002';
+  ASSERT r.target_capacity = 0 AND r.skip_reason = 'target 0' AND (pg_temp.row('9002')).last_error LIKE '%can''t set it to 0%', 'I12: ' || row_to_json(r)::text;
+  UPDATE public.exos_ticket_tiers SET sold = 0 WHERE id = pg_temp.u('d2');
+  RAISE NOTICE 'I12 ok';
+END $$;
+
+-- I13. A house cap is split across the classes, not offered to each.
+DO $$
+BEGIN
+  UPDATE public.exos_events SET total_tickets = 100, tickets_sold = 50 WHERE id = pg_temp.u('e1');   -- 50 left in the house
+  UPDATE public.exos_ticket_tiers SET sold = 50 WHERE id = pg_temp.u('d1');                          -- GA: 50 free
+  PERFORM public.exos_eventbrite_inventory_apply(pg_temp.u('e1'), pg_temp.cls(20, 50, 0));
+  -- GA (class 9001) first: min(50 free, 50 house) - 4 = 46; RSVP: 20 free but only 50 - 46 = 4 house left, - 4 = 0.
+  ASSERT (pg_temp.row('9001')).target_capacity = 20 + 46, 'I13: GA ' || row_to_json(pg_temp.row('9001'))::text;
+  ASSERT (pg_temp.row('9002')).target_capacity = 0, 'I13: RSVP gets what is left of the house ' || row_to_json(pg_temp.row('9002'))::text;
+  UPDATE public.exos_events SET total_tickets = 0 WHERE id = pg_temp.u('e1');
+  RAISE NOTICE 'I13 ok';
+END $$;
+
+-- I14. A stale read is ignored.
+DO $$
+DECLARE r record; v_sold int;
+BEGIN
+  PERFORM public.exos_eventbrite_inventory_apply(pg_temp.u('e1'), pg_temp.cls(22));
+  v_sold := pg_temp.sold('d1');
+  SELECT * INTO r FROM public.exos_eventbrite_inventory_apply(pg_temp.u('e1'), pg_temp.cls(20), now() - interval '1 hour') x WHERE x.eb_ticket_class_id = '9001';
+  ASSERT r.skip_reason = 'stale' AND pg_temp.sold('d1') = v_sold AND (pg_temp.row('9001')).counted_sold = 22, 'I14: older read ignored';
+  RAISE NOTICE 'I14 ok';
+END $$;
+
+-- I15. The inventory schedule.
+DO $$
+DECLARE n int;
+BEGIN
+  UPDATE public.exos_eventbrite_links SET inventory_at = NULL WHERE event_id = pg_temp.u('e1');
+  SELECT count(*) INTO n FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1') AND d.token = 'TOKENINV00001';
+  ASSERT n = 1, 'I15: due with its token';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1')), 'I15: not again within 100 s';
+  UPDATE public.exos_eventbrite_links SET inventory_at = now() - interval '5 minutes' WHERE event_id = pg_temp.u('e1');
+  UPDATE public.exos_events SET status = 'cancelled' WHERE id = pg_temp.u('e1');
+  UPDATE public.exos_eventbrite_ticket_links SET eb_capacity = eb_sold WHERE event_id = pg_temp.u('e1');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1')), 'I15: cancelled and closed on Eventbrite: done';
+  UPDATE public.exos_eventbrite_ticket_links SET eb_capacity = eb_sold + 10 WHERE event_id = pg_temp.u('e1') AND eb_ticket_class_id = '9001';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1')), 'I15: cancelled, still selling: due';
+  UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('e1');
+  RAISE NOTICE 'I15 ok';
+END $$;
+
 -- I10. Grants.
 DO $$
 DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY['public.exos_eventbrite_map_ticket(uuid,uuid,text,text,uuid)', 'public.exos_eventbrite_set_writes(uuid,uuid,boolean)',
-                           'public.exos_eventbrite_inventory_apply(uuid,jsonb)', 'public.exos_eventbrite_inventory_ack(uuid,text,jsonb,boolean,integer,text)'] LOOP
+                           'public.exos_eventbrite_inventory_apply(uuid,jsonb,timestamptz)', 'public.exos_eventbrite_inventory_ack(uuid,text,jsonb,boolean,integer,text)', 'public.exos_eventbrite_inventory_due(integer)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'I10: ' || f;
   END LOOP;
   ASSERT has_function_privilege('authenticated', 'public.exos_eventbrite_inventory_status(uuid)', 'EXECUTE'), 'I10: status';

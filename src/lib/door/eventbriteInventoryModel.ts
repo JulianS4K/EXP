@@ -9,6 +9,16 @@ export interface EbTicketClassChoice {
   inventory_tier_id: string | null;
   free: boolean;
   hidden: boolean;
+  donation?: boolean;
+  category?: string;
+}
+
+/** Why a class can't share a count (mirrors the server's check), or null. */
+export function unshareable(c: EbTicketClassChoice): string | null {
+  if (c.inventory_tier_id) return 'In an Eventbrite inventory tier: not supported yet';
+  if (c.donation || c.category === 'donation') return 'Donation ticket: can\'t share a count';
+  if (c.category === 'add_on') return 'Add-on: doesn\'t count toward the event';
+  return null;
 }
 
 export interface EbMapping {

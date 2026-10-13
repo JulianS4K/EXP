@@ -92,20 +92,35 @@ not built). The event-level capacity tier is left alone.
 How it works:
 1. **Map.** In `/door` (the event's Eventbrite card), an owner or manager picks
    which Exos ticket type each existing Eventbrite ticket class sells from
-   (`POST /map`; one class per ticket type). Free ticket types can be shared:
-   Eventbrite may sell them, resale marketplaces don't.
-2. **Count.** After each attendee sync (every 2 minutes near the event), the
-   function reads `GET /events/{id}/ticket_classes/` and
+   (`POST /map`; one class per ticket type). The function re-reads the class
+   from Eventbrite first. Free ticket types can be shared: Eventbrite may sell
+   them, resale marketplaces don't. **Not shareable** (refused at map, skipped
+   if it changes later): Eventbrite classes in an inventory tier, donation and
+   add-on classes; Exos ticket types with no capacity set, or in a shared
+   capacity group (a quota counts minted tickets, not these seats).
+2. **Count.** Every 2 minutes for each link with a mapping
+   (`exos_eventbrite_inventory_due`, apart from the attendee cadence) and on
+   Sync now, the function reads `GET /events/{id}/ticket_classes/` and
    `exos_eventbrite_inventory_apply` takes each class's new Eventbrite sales
    from the Exos ticket type (refunds give seats back). A sale Exos had no seat
    left for is counted as **oversold** and shown in red; a later refund clears
-   oversold first. An unmapped class keeps its count, so mapping it again
-   doesn't count its sales twice.
+   oversold first. A read older than the last one applied is ignored, so two
+   overlapping passes can't turn into a false refund. An unmapped class keeps
+   its count, so mapping it again doesn't count its sales twice. Locks: all the
+   event's mapping rows (class order), then the ticket type, then the event
+   (checkout's order).
 3. **Set.** The target capacity is `quantity_sold + max(0, free on Exos - one
-   pack)` (one pack = max per order, else 8: room for the 2-minute lag), or
-   `quantity_sold` once the event is cancelled or over. When it differs from
-   Eventbrite's, the writer plans `{"ticket_class": {"capacity": N}}` and sends
-   it only when sending is live.
+   pack)` (one pack = max per order, else 8), or `quantity_sold` once the event
+   is cancelled or over (a cancelled event stays on the 2-minute schedule until
+   Eventbrite is set). With a house cap, its remainder is split across the
+   classes rather than offered to each. When the target differs from
+   Eventbrite's capacity, the writer plans `{"ticket_class": {"capacity": N}}`
+   and sends it only when sending is live. **A target of 0 is never sent**
+   (Eventbrite refuses 0 on a normal class and reads it as unlimited on a
+   donation): the panel says to hide or end that ticket on Eventbrite instead.
+
+Known limits: Eventbrite's `quantity_sold` doesn't include carts in progress,
+so at the very end a cart can complete into oversold (shown, not hidden).
 
 Not checked against a live account yet: whether Eventbrite accepts a partial
 update with only `capacity` (the spec lists the Update fields as required).

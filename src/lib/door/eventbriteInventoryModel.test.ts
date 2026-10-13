@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mappingLine, parseInventoryStatus, type EbMapping } from './eventbriteInventoryModel';
+import { mappingLine, parseInventoryStatus, unshareable, type EbMapping } from './eventbriteInventoryModel';
 
 const base: EbMapping = {
   ebTicketClassId: '101', ebTicketClassName: 'GA', tierId: 't1', ebSold: 10, ebCapacity: 50, targetCapacity: 96,
@@ -33,5 +33,15 @@ describe('mappingLine', () => {
   it('shows the error, or waits for the first read', () => {
     expect(mappingLine({ ...base, lastError: 'ticket class not found on Eventbrite' }, true)).toBe('ticket class not found on Eventbrite');
     expect(mappingLine({ ...base, lastReadAt: null }, true)).toBe('Counts after the next sync.');
+  });
+});
+
+describe('unshareable', () => {
+  const c = { id: '1', name: 'GA', capacity: 5, quantity_sold: 0, inventory_tier_id: null, free: false, hidden: false };
+  it('flags tiered, donation and add-on classes', () => {
+    expect(unshareable(c)).toBeNull();
+    expect(unshareable({ ...c, inventory_tier_id: '9' })).toMatch(/inventory tier/);
+    expect(unshareable({ ...c, donation: true })).toMatch(/Donation/);
+    expect(unshareable({ ...c, category: 'add_on' })).toMatch(/Add-on/);
   });
 });

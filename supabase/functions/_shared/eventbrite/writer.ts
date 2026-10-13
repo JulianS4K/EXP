@@ -35,7 +35,9 @@ export interface CapacityPlan {
 /** The request that sets a class's capacity, or null when nothing changes. */
 export function planCapacity(ebEventId: string, classId: string, from: number | null, to: number | null): CapacityPlan | null {
   if (!isEbId(ebEventId) || !isEbId(classId)) return null;
-  if (to == null || !Number.isInteger(to) || to < 0 || to > MAX_CAPACITY) return null;
+  // Eventbrite refuses 0 for a normal class (and reads it as unlimited for a
+  // donation class), so 0 is never sent.
+  if (to == null || !Number.isInteger(to) || to < 1 || to > MAX_CAPACITY) return null;
   if (from === to) return null;
   return {
     method: "POST",
@@ -58,7 +60,7 @@ export function assertCapacityOnly(plan: CapacityPlan): void {
   const inner = Object.keys(plan.body?.ticket_class ?? {});
   if (plan.method !== "POST" || !WRITE_PATH.test(plan.path) || keys.length !== 1 || keys[0] !== "ticket_class"
       || inner.length !== 1 || inner[0] !== "capacity"
-      || !Number.isInteger(plan.body.ticket_class.capacity) || plan.body.ticket_class.capacity < 0
+      || !Number.isInteger(plan.body.ticket_class.capacity) || plan.body.ticket_class.capacity < 1
       || plan.body.ticket_class.capacity > MAX_CAPACITY) {
     throw new Error("eventbrite writer: only a ticket class capacity update may be sent");
   }
