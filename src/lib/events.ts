@@ -98,6 +98,7 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     discountCodes: discounts ? discounts.map(mapDiscount) : undefined,
     exclusivity: row.exclusivity ?? undefined,
     distributionNetworks: row.distribution_networks ?? undefined,
+    distributionRoute: row.distribution_route === 's4k' ? 's4k' : 'direct',
     purchaseLimits: row.purchase_limits ?? undefined,
     allowHolderRelease: row.allow_holder_release ?? undefined,
     releaseCutoffHours: row.release_cutoff_hours ?? undefined,

@@ -53,6 +53,7 @@ function mapOrg(row: any, secrets?: any): Organization {
     country: row.country ?? undefined,
     currency: row.currency ?? undefined,
     compBudget: row.comp_budget ?? null,
+    s4kNetwork: row.s4k_network === true,
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
     // payments/distribution live in exos_org_secrets (owner/finance RLS); absent

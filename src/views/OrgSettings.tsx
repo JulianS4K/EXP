@@ -18,6 +18,7 @@ import { publicUrl } from '../lib/utils';
 import { buildEmbedSnippet } from '../lib/embed';
 import { useToast } from '../context/ToastContext';
 import { getOrgCompUsage, setOrgCompBudget } from '../lib/comps';
+import { setS4kNetwork } from '../lib/marketplace/s4kNetwork';
 import { getOrganization, updateOrganization } from '../lib/orgs';
 import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
@@ -615,6 +616,10 @@ export default function OrgSettings() {
                 batch / box-office paths. Enforced server-side per batch. */}
             <CompBudgetCard orgId={org.id} initial={org.compBudget ?? null} canEdit={canEdit} />
 
+            {/* S4K network (owner): S4K may list this org's events on the
+                marketplaces from the Exos feed (docs/marketplace/s4k-feed.md). */}
+            <S4kNetworkCard orgId={org.id} initial={org.s4kNetwork === true} canEdit={canEdit} />
+
             {/* Meta info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-xs text-slate-500 space-y-2">
               <div>
@@ -638,6 +643,50 @@ export default function OrgSettings() {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function S4kNetworkCard({ orgId, initial, canEdit }: { orgId: string; initial: boolean; canEdit: boolean }) {
+  const { toast } = useToast();
+  const [on, setOn] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  const flip = async () => {
+    setSaving(true);
+    try {
+      const next = await setS4kNetwork(orgId, !on);
+      setOn(next);
+      toast({ kind: 'success', message: next ? 'Joined the S4K network. Pick S4K per event under Marketplaces.' : 'Left the S4K network. Your events are back to listing directly.' });
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Not saved.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <h2 className={`${SECTION} mb-3`}>S4K network</h2>
+      <p className="text-xs text-slate-400 mb-4">
+        S4K lists the events you send it on StubHub, SeatGeek, Vivid Seats, Gametime, GoTickets and Ticket Evolution, from
+        its own seller accounts, so you need none. Every channel sells from one shared count. A marketplace sale becomes an
+        Exos order only when seats are left: if not, it's refused and S4K handles the marketplace side. Then choose S4K per
+        event under Marketplaces.
+      </p>
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-slate-700">{on ? 'In the network' : 'Not in the network'}</span>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={flip}
+            disabled={saving}
+            className="px-3 py-1.5 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-tm-blue hover:text-tm-blue transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : on ? 'Leave' : 'Join'}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
