@@ -1,5 +1,10 @@
 # Automatiq as the distribution route (design, 2026-09-29)
 
+> **Superseded 2026-10-13 by [`s4k-feed.md`](s4k-feed.md).** S4K will pull Exos
+> inventory the way it already pulls its Ticket Desk (a read-only, token-gated
+> two-call feed) and list it through Automatiq itself, so Exos never writes to
+> Automatiq. The route and double-listing ideas below still apply.
+
 Status: **design only.** No Automatiq API docs are in this repo or in
 Terminal-2 (Terminal-2 only sees Automatiq indirectly, through the S4K CRM's
 failed-order alerts). The scaffold in `exos-distribute` (pass 2,
