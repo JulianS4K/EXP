@@ -8,7 +8,8 @@ export const RESALE_MIN_CAPACITY = 250;
 /** The event's max capacity: the overall cap when set (never above what the
  *  capped ticket types add up to, unless one has no cap), else the capped
  *  ticket types' sum. A ticket type with no cap (0) adds nothing without an
- *  overall cap. */
+ *  overall cap. Pass each tier's admissions (a table tier's capacity ×
+ *  party size, see admissionsForTier), as the server counts people. */
 export function eventMaxCapacity(totalTickets: number | null | undefined, tierCapacities: number[]): number {
   const total = Math.max(0, Math.trunc(Number(totalTickets) || 0));
   const caps = tierCapacities.map((c) => Math.max(0, Math.trunc(Number(c) || 0)));

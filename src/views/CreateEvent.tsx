@@ -1690,7 +1690,7 @@ export default function CreateEvent() {
            
            {(() => {
              // Resale unlocks at a max capacity of 250 (mig 20261014140000).
-             const cap = eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => Number(t.capacity) || 0));
+             const cap = eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table)));
              return resaleUnlocked(cap) ? null : (
                <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
              );
@@ -1701,7 +1701,7 @@ export default function CreateEvent() {
                    <input
                      type="checkbox"
                      disabled={!(formData.distributionNetworks).includes(network.id)
-                       && !resaleUnlocked(eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => Number(t.capacity) || 0)))}
+                       && !resaleUnlocked(eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table))))}
                      className="w-4 h-4 accent-brand-primary disabled:opacity-40"
                      // Bound to formData.distributionNetworks so the user's
                      // choice is actually persisted. Previously this was a

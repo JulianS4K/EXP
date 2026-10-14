@@ -1681,7 +1681,7 @@ export default function EditEvent() {
 
            {(() => {
              // Resale unlocks at a max capacity of 250 (mig 20261014140000).
-             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0));
+             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])));
              return resaleUnlocked(cap) ? null : (
                <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
              );
@@ -1699,7 +1699,7 @@ export default function EditEvent() {
                      type="checkbox"
                      disabled={!(eventData.distributionNetworks || []).includes(network.id)
                        && (eventData.distributionRoute === 's4k'   // S4K lists it: no direct marketplaces
-                         || !resaleUnlocked(eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0))))}
+                         || !resaleUnlocked(eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))))}
                      className="w-4 h-4 accent-brand-primary disabled:opacity-40"
                      // Bound to distributionNetworks (saved by handleSubmit), like
                      // CreateEvent. Was defaultChecked={true}, which saved nothing.
@@ -1735,7 +1735,7 @@ export default function EditEvent() {
                eventId={eventId}
                route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
                onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
-               maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0))}
+               maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))}
              />
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (

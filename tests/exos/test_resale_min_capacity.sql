@@ -2,7 +2,7 @@
 -- Resale unlocks at a max capacity of 250 (mig 20261014140000):
 --   R1 max capacity: overall cap (never above the capped types' sum unless a
 --      type has no cap), else the capped types' sum; an uncapped type adds
---      nothing without an overall cap
+--      nothing without an overall cap; a table counts as its party size
 --   R2 under 250: no allocation, no distribution request (with the reason)
 --   R3 under 250: a ticked marketplace makes no event row; 250+ does
 --   R4 a ticket type growing past 250 unlocks it (event row made); lowering
@@ -76,6 +76,15 @@ BEGIN
      AND NOT public.exos_resale_unlocked(pg_temp.u('e5')), 'R1: unlocked';
   ASSERT public.exos_resale_min_capacity() = 250, 'R1: default 250';
 END $$;
+
+-- R1. A table counts as its party size: 100 GA + 100 tables of 2 = 300.
+UPDATE public.exos_ticket_tiers SET kind = 'table', party_size = 2 WHERE id = pg_temp.u('d2');
+DO $$
+BEGIN
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 300, 'R1: table party size';
+  ASSERT public.exos_resale_unlocked(pg_temp.u('e1')), 'R1: tables unlock';
+END $$;
+UPDATE public.exos_ticket_tiers SET kind = 'standard', party_size = NULL WHERE id = pg_temp.u('d2');
 
 -- R2 / R3. Publish both with StubHub ticked.
 DO $$

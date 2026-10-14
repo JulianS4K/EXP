@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { admissionsForTier, BLANK_TABLE_DRAFT } from '../tables';
 import { eventMaxCapacity, RESALE_MIN_CAPACITY, resaleLockedText, resaleUnlocked } from './resaleGate';
 
 describe('resale gate (mig 20261014140000)', () => {
@@ -10,6 +11,10 @@ describe('resale gate (mig 20261014140000)', () => {
     expect(eventMaxCapacity(0, [100, 0])).toBe(100);
     expect(eventMaxCapacity(undefined, [])).toBe(0);
     expect(eventMaxCapacity(180, [200, 200])).toBe(180);
+  });
+  it('a table counts as its party size', () => {
+    const table = { ...BLANK_TABLE_DRAFT, isTable: true, partySize: '2' };
+    expect(eventMaxCapacity(0, [admissionsForTier(100, null), admissionsForTier(100, table)])).toBe(300);
   });
   it('the line is 250', () => {
     expect(RESALE_MIN_CAPACITY).toBe(250);

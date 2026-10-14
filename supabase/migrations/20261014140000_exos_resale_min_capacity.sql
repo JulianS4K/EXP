@@ -20,6 +20,7 @@
 --                  than its capped ticket types add up to (unless a ticket
 --                  type has no cap, then the overall cap);
 --                  with no overall cap, the sum of the capped ticket types.
+--   A table counts as its party size (capacity is tables; the cap is people).
 --   A ticket type with no cap and no overall cap adds nothing, so an
 --   unlimited free RSVP can't unlock resale.
 --   250 is the default; the operator can change it with a row in
@@ -87,8 +88,10 @@ AS $$
   SELECT CASE
            WHEN coalesce(e.total_tickets, 0) > 0 AND coalesce(bool_or(t.capacity = 0), false) THEN e.total_tickets
            WHEN coalesce(e.total_tickets, 0) > 0
-             THEN least(e.total_tickets, coalesce(sum(t.capacity) FILTER (WHERE t.capacity > 0), 0))::int
-           ELSE coalesce(sum(t.capacity) FILTER (WHERE t.capacity > 0), 0)::int
+             THEN least(e.total_tickets, coalesce(sum(t.capacity * CASE WHEN t.kind = 'table' THEN greatest(coalesce(t.party_size, 1), 1) ELSE 1 END)
+                            FILTER (WHERE t.capacity > 0), 0))::int
+           ELSE coalesce(sum(t.capacity * CASE WHEN t.kind = 'table' THEN greatest(coalesce(t.party_size, 1), 1) ELSE 1 END)
+                            FILTER (WHERE t.capacity > 0), 0)::int
          END
     FROM public.exos_events e
     LEFT JOIN public.exos_ticket_tiers t ON t.event_id = e.id
@@ -198,7 +201,7 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_tg_tier_resale_resync() FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE TRIGGER exos_tiers_resale_resync
-  AFTER INSERT OR DELETE OR UPDATE OF capacity ON public.exos_ticket_tiers
+  AFTER INSERT OR DELETE OR UPDATE OF capacity, kind, party_size ON public.exos_ticket_tiers
   FOR EACH ROW EXECUTE FUNCTION public.exos_tg_tier_resale_resync();
 
 -- ---------------------------------------------------------------------------

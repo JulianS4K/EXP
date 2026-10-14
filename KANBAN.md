@@ -131,7 +131,7 @@ Easiest first. ✅ = done in this pass.
 17. ✅ Event report Attendees lists ticket ids, not names.
 
 **Tier 3, logic**
-18. The 250-capacity resale rule counts a table as one seat, not its party size (client and server).
+18. ✅ The 250-capacity resale rule counts a table as one seat, not its party size (client and server).
 19. ✅ Stripe Connect has no status: show "finish setup" / "charges on" / "payouts on" and a readable error.
 20. ✅ Order total (tickets + add-ons) before Stripe.
 21. Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
