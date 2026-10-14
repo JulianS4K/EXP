@@ -90,6 +90,10 @@
    it exactly (no buffer); an S4K order takes seats from it only, a cancel returns them to it; leaving the route
    releases its unsold seats. Replaces the shared count minus a buffer. Open: an auto split for the S4K pool
    (like `20261014090000`'s 10% → 1 pack), and whether unsold S4K seats should come back to Exos before doors.
+11. ✅ **Resale unlocks at 250 capacity** (operator rule 2026-10-14, mig `20261014140000`, not applied;
+   `docs/marketplace/README.md`): StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats, TEvo and the S4K route
+   only for events with a max capacity of 250+; enforced in every resale entry point, shown in the event editors.
+   The number is an operator setting (`exos_platform_settings.resale_min_capacity`).
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

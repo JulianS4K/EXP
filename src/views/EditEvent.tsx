@@ -74,6 +74,7 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
@@ -1678,12 +1679,21 @@ export default function EditEvent() {
              per marketplace later, so nothing is listed or sold there today.
            </p>
 
+           {(() => {
+             // Resale unlocks at a max capacity of 250 (mig 20261014140000).
+             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0));
+             return resaleUnlocked(cap) ? null : (
+               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
+             );
+           })()}
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (
                 <label key={network.id} className="flex items-center space-x-3 p-4 bg-black/40 cursor-pointer hover:bg-black/60 transition-colors border border-white/10 has-[:checked]:border-brand-primary has-[:checked]:bg-brand-primary/10">
                    <input
                      type="checkbox"
-                     className="w-4 h-4 accent-brand-primary"
+                     disabled={!(eventData.distributionNetworks || []).includes(network.id)
+                       && !resaleUnlocked(eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0)))}
+                     className="w-4 h-4 accent-brand-primary disabled:opacity-40"
                      // Bound to distributionNetworks (saved by handleSubmit), like
                      // CreateEvent. Was defaultChecked={true}, which saved nothing.
                      checked={(eventData.distributionNetworks || []).includes(network.id)}
@@ -1718,6 +1728,7 @@ export default function EditEvent() {
                eventId={eventId}
                route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
                onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
+               maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => Number(t.capacity) || 0))}
              />
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (

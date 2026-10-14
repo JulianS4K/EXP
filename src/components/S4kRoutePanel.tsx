@@ -7,17 +7,21 @@ import { Loader2 } from 'lucide-react';
 import { useOrganization } from '../context/OrganizationContext';
 import { setDistributionRoute, type DistributionRoute } from '../lib/marketplace/s4kNetwork';
 import S4kSplitPanel from './S4kSplitPanel';
+import { resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 
-export default function S4kRoutePanel({ eventId, route, onChanged }: {
+export default function S4kRoutePanel({ eventId, route, onChanged, maxCapacity }: {
   eventId: string;
   route: DistributionRoute;
   onChanged: (route: DistributionRoute) => void;
+  /** The event's max capacity (lib/marketplace/resaleGate): S4K needs 250+. */
+  maxCapacity?: number;
 }) {
   const { activeOrg } = useOrganization();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Not in the network and not already on it: nothing to choose.
   if (!activeOrg?.s4kNetwork && route !== 's4k') return null;
+  const locked = maxCapacity !== undefined && !resaleUnlocked(maxCapacity);
 
   const change = async (next: DistributionRoute) => {
     setBusy(true);
@@ -37,7 +41,7 @@ export default function S4kRoutePanel({ eventId, route, onChanged }: {
         <span className="type text-[11px] text-white/60 uppercase tracking-widest">Who lists it</span>
         <div role="radiogroup" aria-label="Who lists it" className="flex gap-2">
           {(['s4k', 'direct'] as const).map((r) => (
-            <button key={r} type="button" role="radio" aria-checked={route === r} disabled={busy}
+            <button key={r} type="button" role="radio" aria-checked={route === r} disabled={busy || (r === 's4k' && locked && route !== 's4k')}
               onClick={() => route !== r && void change(r)}
               className={`px-3 py-1 text-[10px] uppercase tracking-widest border ${route === r ? 'border-brand-primary text-brand-primary' : 'border-white/20 text-white/50'} disabled:opacity-50`}>
               {r === 's4k' ? 'S4K network' : 'Exos, per marketplace'}
@@ -51,6 +55,7 @@ export default function S4kRoutePanel({ eventId, route, onChanged }: {
           ? 'S4K lists the seats you give it below on the marketplaces, and buys from Exos when a marketplace sells. Exos and Eventbrite sell the rest. Free tickets stay off resale.'
           : 'You choose each marketplace\'s seats in the grid below. To hand the event to S4K, set every marketplace to 0 first.'}
       </p>
+      {locked && maxCapacity !== undefined && <p role="status" className="type text-xs text-amber-400">{resaleLockedText(maxCapacity)}</p>}
       {error && <p role="alert" className="type text-xs text-rose-400">{error}</p>}
       {route === 's4k' && <S4kSplitPanel eventId={eventId} />}
     </div>
