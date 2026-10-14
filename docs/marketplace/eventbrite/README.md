@@ -152,6 +152,12 @@ How it works:
    (Eventbrite refuses 0 on a normal class and reads it as unlimited on a
    donation): the panel says to hide or end that ticket on Eventbrite instead.
 
+Simulated (`scripts/channel-sim/eventbrite_dual.py`, report `eventbrite-dual-report.txt`): with sending
+live, a 2-minute sync and a 1-pack buffer, steady demand never oversold; an on-sale rush oversold about 1
+order per 800-seat sell-out (2.7 tickets per 1,000). A late cron is the risk in a rush (10 minutes: about 11
+orders per 800-seat sell-out). Sending off (count only) oversells about 20% of a sell-out. A velocity buffer
+(at least one pack, or twice what Exos sold in the last window) cut the rush to 0.24 and the late cron to 0.
+
 Known limits: Eventbrite's `quantity_sold` doesn't include carts in progress,
 so at the very end a cart can complete into oversold (shown, not hidden).
 
