@@ -49,6 +49,15 @@ const startMs = (e: Event): number => {
   return d?.toMillis ? d.toMillis() : 0;
 };
 
+/** The start in the event's own zone (doors run on venue time). */
+const startLabel = (e: Event): string => {
+  try {
+    return new Date(startMs(e)).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: e.timezone || undefined });
+  } catch {
+    return new Date(startMs(e)).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+};
+
 export default function DoorApp() {
   useDoorManifest();
   const { user, openAuthModal } = useAuth();
@@ -188,7 +197,7 @@ export default function DoorApp() {
                       <span className="flex-1 min-w-0">
                         <span className="block font-bold truncate">{e.title}</span>
                         <span className="block text-xs text-slate-500">
-                          {startMs(e) ? new Date(startMs(e)).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'No date'}
+                          {startMs(e) ? startLabel(e) : 'No date'}
                           {e.status === 'draft' ? ' · door only' : ''}
                         </span>
                       </span>

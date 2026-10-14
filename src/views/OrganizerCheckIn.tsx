@@ -147,6 +147,15 @@ function eventTime(ms: number, timeZone?: string): string {
   }
 }
 
+/** A date and time in the event's zone (falls back to the device's). */
+function eventDateTime(ms: number, timeZone?: string): string {
+  try {
+    return new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', timeZone });
+  } catch {
+    return new Date(ms).toLocaleString();
+  }
+}
+
 // Door copy for server refusals that aren't barcode problems.
 const REFUSAL_TEXT: Record<string, string> = {
   'needs-manager': 'Needs a manager. Typing a ticket in (no live code) is an override only an owner or manager can make.',
@@ -1611,7 +1620,7 @@ export default function OrganizerCheckIn() {
           <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           {rosterSavedAt != null && rosterCount > 0 ? (
             <span>
-              {isOffline ? 'Offline' : "Server not answering"}, using list saved at {clockTime(rosterSavedAt)} ({rosterCount} ticket{rosterCount === 1 ? '' : 's'}). Check-ins upload when the connection is back.
+              {isOffline ? 'Offline' : "Server not answering"}, using list saved at {eventTime(rosterSavedAt, event?.timezone)} ({rosterCount} ticket{rosterCount === 1 ? '' : 's'}). Check-ins upload when the connection is back.
             </span>
           ) : (
             <span>
@@ -2083,9 +2092,9 @@ export default function OrganizerCheckIn() {
                 Checked in at: <br />
                 <strong>
                   {usedInfo?.at
-                    ? new Date(usedInfo.at).toLocaleString()
+                    ? eventDateTime(new Date(usedInfo.at).getTime(), event?.timezone)
                     : foundTicket?.checkInDate && foundTicket.checkInDate.toMillis() > 0
-                    ? foundTicket.checkInDate.toDate().toLocaleString()
+                    ? eventDateTime(foundTicket.checkInDate.toMillis(), event?.timezone)
                     : 'Earlier (time shows once online)'}
                 </strong>
                 {usedInfo?.device ? <><br />on <strong>{usedInfo.device}</strong></> : null}
@@ -2203,7 +2212,7 @@ export default function OrganizerCheckIn() {
                     <li key={`${c.ticketId}-${c.at}-${i}`} className="text-xs text-slate-700">
                       <span className="font-bold">{c.name || `…${c.ticketId.slice(-6)}`}</span>{' '}
                       <span className="text-slate-500">
-                        · {conflictText(c)} · admitted {clockTime(c.scannedAt)}
+                        · {conflictText(c)} · admitted {eventTime(c.scannedAt, event?.timezone)}
                       </span>
                     </li>
                   ))}
@@ -2269,7 +2278,7 @@ export default function OrganizerCheckIn() {
                             Undo
                           </button>
                         ) : null}
-                        <span className="text-[10px] font-mono text-slate-300 shrink-0">{scan.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[10px] font-mono text-slate-300 shrink-0">{eventTime(scan.time.getTime(), event?.timezone)}</span>
                       </div>
                       {undoKey === scan.key ? (
                         <form

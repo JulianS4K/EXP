@@ -134,8 +134,8 @@ Easiest first. ✅ = done in this pass.
 18. ✅ The 250-capacity resale rule counts a table as one seat, not its party size (client and server).
 19. ✅ Stripe Connect has no status: show "finish setup" / "charges on" / "payouts on" and a readable error.
 20. ✅ Order total (tickets + add-ons) before Stripe.
-21. Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
-22. Door times in the event's time zone, not the browser's.
+21. ✅ Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
+22. ✅ Door times in the event's time zone, not the browser's.
 23. Promoter `/l/…` link previews show the org, not the promoter; no-image fallback card size.
 24. Ads / catalog / audience panels: say when they're live only once the operator deploys them.
 
