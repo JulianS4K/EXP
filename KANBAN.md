@@ -142,11 +142,11 @@ Easiest first. ✅ = done in this pass.
 **Tier 4, bigger**
 25. ✅ Guests can't use a promo / presale code or join a waitlist without signing in. (kept by design: codes and waitlists need an account so guessing and list-stuffing stay throttled; now one emailed code, and the waitlist form opens by itself after)
 26. ✅ Offline at the door: the ticket page never loads after a reload (keep the last copy on the device).
-27. Phone: door scanner below the fold, three offline banners at once, org settings tabs scroll sideways.
-28. Discoverability: Eventbrite mapping only in /door, scheduled pricing on the report, vouchers / add-ons only after create.
-29. Buyer refund request (not built).
-30. Wallet passes (credentials, operator).
-31. Payments live (Stripe, operator).
+27. ✅ Phone: door scanner below the fold, three offline banners at once, org settings tabs scroll sideways.
+28. ✅ Discoverability: Eventbrite mapping only in /door, scheduled pricing on the report, vouchers / add-ons only after create.
+29. Buyer refund request (not built; next build item: request → organizer approves → exos-refund).
+30. Wallet passes (operator: Apple / Google pass credentials into the secret store; code is built).
+31. Payments live (operator: Stripe live keys + webhook, docs/payments-go-live.md; agent checkout follows).
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

@@ -1563,6 +1563,10 @@ export default function CreateEvent() {
             <p className="type text-xs text-white/50 mt-2 leading-relaxed">
               After you publish, open Edit event → Vouchers to make codes that unlock a hidden ticket type, pin a price, or let someone buy when sold out.
             </p>
+            <p className="type text-xs text-white/50 mt-2 leading-relaxed">
+              Also after you create: add-ons and merch (Edit event), and price steps by date such as early bird
+              (the event report → Settings → Scheduled pricing).
+            </p>
           </div>
         {/* Rarely-needed settings stay folded so the form reads as name →
             when/where → tickets → publish. */}

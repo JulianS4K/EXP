@@ -294,7 +294,7 @@ export default function OrgSettings() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-6 border-b border-slate-200 mb-8">
+        <div className="flex flex-wrap gap-x-4 md:gap-x-6 border-b border-slate-200 mb-8 whitespace-nowrap">
           <button className="pb-3 text-sm font-bold text-slate-900 border-b-2 border-tm-blue -mb-px">General</button>
           <button
             onClick={() => navigate(`/orgs/${org.id}/members`)}
@@ -316,7 +316,6 @@ export default function OrgSettings() {
               Payouts
             </button>
           )}
-          <span className="pb-3 text-sm font-bold text-slate-300 cursor-default">Billing</span>
         </div>
 
         {!canEdit && (

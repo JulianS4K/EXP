@@ -1562,22 +1562,22 @@ export default function OrganizerCheckIn() {
 
   return (
     <div className="bg-[#f2f4f7] min-h-screen">
-    <div className="max-w-7xl mx-auto px-4 py-10">
+    <div className="max-w-7xl mx-auto px-4 py-4 md:py-10">
       <style>{`
         @keyframes checkinScanline { 0% { top: 8%; } 100% { top: 92%; } }
         .checkin-scanline { animation: checkinScanline 2s ease-in-out infinite alternate; }
       `}</style>
 
-      <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-6 transition-colors">
+      <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-3 md:mb-6 transition-colors">
         <ArrowLeft className="w-3.5 h-3.5" />
         Back to dashboard
       </button>
 
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 md:gap-4 mb-4 md:mb-8">
         <div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Door Check-In</p>
           <span className="inline-flex items-baseline gap-3 flex-wrap">
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900">{event.title}</h1>
+            <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-slate-900">{event.title}</h1>
             <span className="marker text-brand-secondary text-lg rotate-[-3deg] leading-none whitespace-nowrap">at the door ✦</span>
           </span>
         </div>
@@ -1665,7 +1665,7 @@ export default function OrganizerCheckIn() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* SCANNER STAGE */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4 md:space-y-6">
       {checkinLists && checkinLists.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">

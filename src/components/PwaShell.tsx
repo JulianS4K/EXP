@@ -30,11 +30,11 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-export default function PwaShell() {
+export default function PwaShell({ offlineBanner = true }: { offlineBanner?: boolean }) {
   return (
     <>
       <SwUpdateBanner />
-      <OfflineBanner />
+      {offlineBanner && <OfflineBanner />}
       <InstallPrompt />
     </>
   );
