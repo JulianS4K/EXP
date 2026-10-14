@@ -2,6 +2,7 @@ import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
+import { loadPasses, savePasses } from '../lib/passCache';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
@@ -37,6 +38,8 @@ export default function TicketDetail() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
+  // Shown from the copy saved on this device (no signal): when it was saved.
+  const [savedCopyAt, setSavedCopyAt] = useState<number | null>(null);
   const [barcode, setBarcode] = useState('');
   // Signing failed (no secret / no Web Crypto). No unsigned fallback: the
   // door refuses those, so the pass says so instead.
@@ -78,6 +81,17 @@ export default function TicketDetail() {
   useEffect(() => {
     async function fetchData() {
       if (!id || !user) return;
+      // The copy on this device, for a door with no signal.
+      const useSavedCopy = (): boolean => {
+        const saved = loadPasses(user.uid, id);
+        if (!saved || !saved.tickets.length) return false;
+        setEvent(saved.event);
+        setTickets(saved.tickets);
+        const i = saved.tickets.findIndex((t) => t.id === id);
+        setCurrentIndex(i !== -1 ? i : 0);
+        setSavedCopyAt(saved.savedAt);
+        return true;
+      };
       try {
         const ticketData = await getTicket(id);
         if (ticketData) {
@@ -100,6 +114,8 @@ export default function TicketDetail() {
           };
           const sorted = [...allTickets].sort((a, b) => sortRank(a) - sortRank(b));
           setTickets(sorted);
+          setSavedCopyAt(null);
+          savePasses(user.uid, id, ticketData.event ?? null, sorted);
 
           // Default the carousel to the URL-matched ticket if it's
           // scannable; otherwise jump to the first scannable ticket
@@ -123,6 +139,9 @@ export default function TicketDetail() {
         }
       } catch (err) {
         console.error(err);
+        if (!useSavedCopy() && typeof navigator !== 'undefined' && navigator.onLine === false) {
+          toast({ kind: 'error', message: 'No connection, and this ticket has not been opened on this phone before.' });
+        }
       } finally {
         setLoading(false);
       }
@@ -262,6 +281,12 @@ export default function TicketDetail() {
           <ArrowLeft className="w-4 h-4 text-brand-primary" />
           back to tickets
         </button>
+
+        {savedCopyAt !== null && (
+          <p role="status" className="type text-[11px] text-amber-300 border border-amber-300/30 bg-amber-300/5 px-3 py-2 mb-6">
+            No connection: showing the copy saved on this phone ({new Date(savedCopyAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}). The code still works at the door.
+          </p>
+        )}
 
         <div className="relative">
           <AnimatePresence mode="wait">

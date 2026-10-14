@@ -7,7 +7,7 @@
 // email; on success it shows the queue position, and the organizer releases
 // spots later (exos_notify_waitlist), which emails the joiner.
 
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Bell, Check } from 'lucide-react';
 import { joinWaitlist } from '../lib/waitlist';
 import { useToast } from '../context/ToastContext';
@@ -26,7 +26,7 @@ interface Props {
 
 export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName, accentStyle }: Props) {
   const { toast } = useToast();
-  const { user, signIn } = useAuth();
+  const { user, openAuth } = useAuth();
   const t = useT();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(defaultEmail || '');
@@ -34,6 +34,14 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [position, setPosition] = useState<number | null>(null);
+  // Signed out: sign in with an emailed code, then the form opens by itself.
+  const [wantsToJoin, setWantsToJoin] = useState(false);
+  useEffect(() => {
+    if (user && wantsToJoin) {
+      setWantsToJoin(false);
+      setOpen(true);
+    }
+  }, [user, wantsToJoin]);
 
   const submit = async () => {
     const trimmed = (user?.email ?? email).trim().toLowerCase();
@@ -81,7 +89,11 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
     return (
       <button
         type="button"
-        onClick={() => (user ? setOpen(true) : signIn())}
+        onClick={() => {
+          if (user) return setOpen(true);
+          setWantsToJoin(true);
+          openAuth('code');
+        }}
         className="w-full flex items-center justify-center space-x-3 border-2 border-white/20 hover:border-brand-primary hover:text-brand-primary text-white/70 py-4 font-black uppercase italic tracking-tighter text-sm transition-all"
       >
         <Bell className="w-5 h-5" />
