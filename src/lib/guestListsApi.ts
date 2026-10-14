@@ -200,6 +200,8 @@ export interface GuestCheckInResult {
   arrived?: number;
   party?: number;
   remaining?: number;
+  /** 'checked-in-elsewhere': where / at / method (mig 20261014120000). */
+  elsewhere?: unknown;
 }
 
 export async function guestCheckIn(

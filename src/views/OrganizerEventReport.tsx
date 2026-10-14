@@ -41,6 +41,7 @@ import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
 import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
+import AttendeeLookup from '../components/AttendeeLookup';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -331,6 +332,10 @@ export default function OrganizerEventReport() {
         </>)}
 
         {tab === 'attendees' && (<>
+        {/* One lookup across Exos tickets, Eventbrite and guest lists, in
+            Eventbrite's status words (mig 20261014120000). */}
+        <AttendeeLookup eventId={eventId!} canView={canAct} />
+
         {/* Access needs guests shared (mig 20260926090000). */}
         <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
 

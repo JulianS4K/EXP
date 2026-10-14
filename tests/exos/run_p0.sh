@@ -96,7 +96,9 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261013100000_exos_eventbrite_sync \
          20261014090000_exos_auto_channel_split \
          20261014100000_exos_s4k_feed \
-         20261014110000_exos_eventbrite_inventory; do
+         20261014110000_exos_eventbrite_inventory \
+         20261014120000_exos_eventbrite_checkins \
+         20261014130000_exos_s4k_pools; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
@@ -210,7 +212,9 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261013100000_exos_eventbrite_sync \
          20261014090000_exos_auto_channel_split \
          20261014100000_exos_s4k_feed \
-         20261014110000_exos_eventbrite_inventory; do
+         20261014110000_exos_eventbrite_inventory \
+         20261014120000_exos_eventbrite_checkins \
+         20261014130000_exos_s4k_pools; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -234,3 +238,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrit
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_auto_channel_split.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_s4k_feed.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_inventory.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_checkins.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_s4k_pools.sql"

@@ -1,10 +1,12 @@
 // Who lists this event on the marketplaces (mig 20261014100000): Exos
-// directly (the grid below) or S4K from the Exos feed.
+// directly (the grid below) or S4K from the Exos feed, with the split
+// between S4K's pool and Exos + Eventbrite's (mig 20261014130000).
 
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useOrganization } from '../context/OrganizationContext';
 import { setDistributionRoute, type DistributionRoute } from '../lib/marketplace/s4kNetwork';
+import S4kSplitPanel from './S4kSplitPanel';
 
 export default function S4kRoutePanel({ eventId, route, onChanged }: {
   eventId: string;
@@ -46,10 +48,11 @@ export default function S4kRoutePanel({ eventId, route, onChanged }: {
       </div>
       <p className="type text-xs text-white/60">
         {route === 's4k'
-          ? 'S4K lists every paid, public ticket type on the marketplaces from one shared count (minus one order\'s worth held back), and buys from Exos when a marketplace sells. Free tickets stay on Exos.'
+          ? 'S4K lists the seats you give it below on the marketplaces, and buys from Exos when a marketplace sells. Exos and Eventbrite sell the rest. Free tickets stay off resale.'
           : 'You choose each marketplace\'s seats in the grid below. To hand the event to S4K, set every marketplace to 0 first.'}
       </p>
       {error && <p role="alert" className="type text-xs text-rose-400">{error}</p>}
+      {route === 's4k' && <S4kSplitPanel eventId={eventId} />}
     </div>
   );
 }

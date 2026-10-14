@@ -171,7 +171,9 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
           </p>
           <p>
             {link.attendees} attendee{link.attendees === 1 ? '' : 's'} at the door
-            {link.voided > 0 ? ` · ${link.voided} refunded or cancelled` : ''} · last synced {ago(link.lastOkAt)}
+            {link.voided > 0 ? ` · ${link.voided} refunded or cancelled` : ''}
+            {link.checkedInOnEventbrite > 0 ? ` · ${link.checkedInOnEventbrite} checked in on Eventbrite's app` : ''}
+            {' '}· last synced {ago(link.lastOkAt)}
             {link.syncing ? ' · syncing now' : ''}
           </p>
           {link.lastError && <p className="text-rose-500">{link.lastError}</p>}

@@ -56,7 +56,7 @@ GET /exos/events?updatedSince=2026-10-13T00:00:00Z&limit=200&offset=0
 Returns every event that is published, not cancelled, has doors at or after
 now, belongs to an org that opted into the S4K network, and has
 `channel_split_mode` set to anything other than primary-only. Each event comes
-with its current shared count.
+with S4K's pool count (see "The count").
 
 ```json
 {
@@ -80,9 +80,9 @@ with its current shared count.
 ```
 
 - `updatedAt` moves whenever anything in call 2 would change (a sale on any
-  channel, a refund, a price or cap change, the buffer stepping down at T-48h).
+  by S4K, a refund, a price or split change).
   `updatedSince` compares against it, as on the desk.
-- `availability.available` is the **broadcast** count (see "The count"), not
+- `availability.available` is what S4K's pool holds (see "The count"), not
   the raw unsold count.
 - An event that drops out (cancelled, unpublished, the org opts out, doors
   passed) comes back once with `"status": "withdrawn"` and `available: 0` on
@@ -142,30 +142,41 @@ default, `channel-sim.md`).
   seat numbers are assigned at sale time, as today.
 - Unknown `eventId`, or an event this token can't see: `404 {"error": …}`.
 
-## The count
+## The count: two pools (mig `20261014130000`)
 
-The feed publishes **one shared count per ticket type**. Exos checkout,
-Eventbrite and S4K all sell from it at once (the broadcast model in
-`channel-sim.md`):
+Inventory is split into **two pools**, and the organizer picks the split per
+ticket type (event editor → Distribution → "Two pools"):
 
 ```
-quantity = max(0, capacity − sold − active_holds − buffer)
-buffer   = one pack (max per order, else 8)
+pool 1, Exos + Eventbrite = capacity − S4K's split
+pool 2, S4K               = S4K's split (its total, sold included)
+feed quantity             = what S4K's pool holds now (split − S4K sold)
 ```
 
-- Exos checkout itself sells down to 0. The buffer only absorbs the lag of
-  the slower channels: S4K's poll interval, then Automatiq's push to each
-  marketplace.
-- The simulation (`scripts/channel-sim/broadcast.py`) found a 1-pack buffer
-  with lags of 3 to 10 minutes gives about one oversold order per 30
-  sold-out events. With S4K polling every 5 minutes, add its interval to each
-  marketplace's lag. Re-run the sim with those lags before going live. If the
-  oversell rate is too high, the fix is a 2-pack buffer near sell-out, not a
-  split.
-- When the auto split (mig `20261014090000`) is on, its reserve still
-  applies: `quantity` is capped at `capacity − sold − reserve` for the S4K
-  feed. Broadcast and auto split are alternatives per event (open question
-  below).
+- S4K's pool is an allocation row (`exos_distribution_listings`, channel
+  `s4k`). Every Exos sale path and the Eventbrite capacity sync read
+  `exos_effective_available`, which leaves allocated seats out, so neither
+  can sell S4K's seats, and Exos selling out its pool doesn't touch S4K's.
+- No buffer: nothing but S4K sells from its pool, so the count is exact. The
+  lag between S4K's marketplaces is S4K's to manage; an order bigger than
+  the pool is rejected (`sold_out`), never filled from pool 1.
+- The pool holds its whole split at once: none of the direct marketplaces'
+  top-up, stagnant-shrink or day-of cutoff rules apply.
+- Lowering the split gives S4K's unsold seats back to pool 1 at once.
+  Raising it takes only seats free in pool 1 right now (refused with how many
+  are). It can't go below what S4K already sold.
+- A ticket type with no split isn't on the feed. Not splittable: free
+  ticket types (resale marketplaces don't sell them), table types, types with
+  no capacity, and events whose overall cap is below the types' sum.
+- Leaving the S4K route (or the owner leaving the network) releases every
+  unsold S4K seat to pool 1; S4K's sold count is kept for when it comes back.
+- `exos_s4k_pool_status(event)` shows both pools per ticket type;
+  `exos_set_s4k_split(event, [{tier_id, seats}])` sets them (owner /
+  manager, all or none).
+
+The earlier design (one shared count minus a 1-pack buffer, from the
+broadcast simulation in `channel-sim.md`) is replaced: with disjoint pools
+there is no Exos-side race to buffer against.
 
 ## Sales back: S4K buys from Exos
 
@@ -203,18 +214,19 @@ GET  /exos/status                         { generatedAt, activeEvents } for a mo
   price the order is rejected (`price_changed`), so a stale feed can't sell
   under the organizer's price. Exos's fee comes out of it as on every
   marketplace order (`organizer_net`), which is what `netToOrganizer` shows.
-- All or nothing: an order for more than is left takes nothing. The buffer is
-  not a reserve: S4K can still buy the last pack the feed no longer shows.
+- All or nothing: an order for more than S4K's pool holds takes nothing. The
+  order locks the pool row first, so two S4K orders can't both take its last
+  seats, and it is never filled from pool 1.
 - **A 409 is the oversell, and it is S4K's.** Exos never accepts an order it
   can't fill, so no Exos buyer and no organizer is hurt; S4K cancels the
   marketplace sale and pays any marketplace penalty, the way it handles a
   Paciolan seat that sold out from under it. Every rejection is logged
   (`exos_feed_rejections`: marketplace, quantity, what was left) for that
-  accounting and for tuning the buffer.
+  accounting and for sizing the split.
 - With no `buyerEmail`, the claim links are mailed to the token's delivery
   inbox (`exos_feed_consumers.delivery_email`), and returned in the response
   either way.
-- Cancel before doors returns the seats to the shared count. After doors, or
+- Cancel before doors returns the seats to S4K's pool (still its share). After doors, or
   once a ticket was scanned, it's refused; refunds then follow the
   organizer's policy.
 
@@ -282,8 +294,9 @@ with per-token baselines, copied from the desk's `feed_seen` design.
 
 ## Still open
 
-1. S4K's poll interval: it sets the buffer. Re-run `scripts/channel-sim/broadcast.py`
-   with S4K's interval added to each marketplace's lag before going live.
+1. S4K's poll interval: with disjoint pools it no longer races Exos, but it is
+   still the lag between S4K's marketplaces on S4K's own pool (rejections are
+   S4K's to absorb).
 2. Fees: none for now (operator 2026-10-13: treated as growth spend). Consignment terms still to write.
 3. Mapping S4K's internal ids (`internalId` is null until a pairing call exists).
 4. Phase 2 if S4K wants it: `/feed/full` + `/feed/changes` with per-token baselines.

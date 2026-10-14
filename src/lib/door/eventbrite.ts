@@ -16,6 +16,8 @@ export interface EventbriteLink {
   syncing: boolean;
   attendees: number;
   voided: number;
+  /** Checked in on Eventbrite's own app (mig 20261014120000): the Exos door counts them as in. */
+  checkedInOnEventbrite: number;
   /** Attendees the last pass couldn't add (e.g. a barcode another guest has); retried each pass. */
   rowErrors: number;
 }
@@ -55,6 +57,7 @@ export function parseEventbriteStatus(raw: any): EventbriteStatus {
         syncing: l.syncing === true,
         attendees: Number(l.attendees) || 0,
         voided: Number(l.voided) || 0,
+        checkedInOnEventbrite: Number(l.checked_in_on_eventbrite) || 0,
         rowErrors: Number(l.row_errors) || 0,
       }
       : null,

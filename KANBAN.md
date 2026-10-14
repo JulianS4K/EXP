@@ -69,13 +69,27 @@
    (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`), one GA line per ticket type at free − 1 pack;
    S4K buys back with `POST /exos/events/{id}/orders` (idempotent; a sale Exos can't fill is rejected with a 409
    and logged, the marketplace penalty is S4K's); signed coalesced webhook as the secondary signal; org opt-in +
-   per-event route, one route at a time. No S4K fee for now (operator 2026-10-13: growth spend). Open: S4K's poll interval (sets the buffer), id mapping.
+   per-event route, one route at a time. No S4K fee for now (operator 2026-10-13: growth spend). The count is now
+   S4K's own pool (item 10). Open: id mapping.
 8. ✅ **Eventbrite inventory** (built 2026-10-13, mig `20261014110000`, not applied; `docs/marketplace/eventbrite/README.md`
    "Inventory"): an owner / manager maps each EXISTING Eventbrite ticket class to an Exos ticket type (Exos never
    creates ticket classes or events there); Eventbrite sales take Exos seats (refunds give them back, a sale with
    no seat left is counted as oversold); each class's capacity is set to Eventbrite sold + (free on Exos - one
    pack). The one write is Update a Ticket Class with `capacity` only, dry run unless the org's switch AND
    `EXOS_EVENTBRITE_WRITES=on`. Next: first live test on the test org; inventory-tier classes not supported.
+9. ✅ **Eventbrite check-ins at the Exos door + one status vocabulary** (built 2026-10-14, mig `20261014120000`,
+   not applied; `docs/marketplace/eventbrite/README.md` "Check-ins at the Exos door"): the sync reads Eventbrite's
+   `checked_in` and every barcode's status into their own tables (Eventbrite codes never mixed with Exos ticket
+   codes); the door, online and offline, refuses a guest Eventbrite already checked in. Exos states map to
+   Eventbrite's words (Attending / Checked In / Not Attending / Transferred); **Find an attendee** on the event
+   report searches Exos tickets, Eventbrite and guest lists in those words. Still a 2-minute window for a ticket
+   scanned on both apps.
+10. ✅ **Two inventory pools** (built 2026-10-14, mig `20261014130000`, not applied; `docs/marketplace/s4k-feed.md`
+   "The count"): on an S4K-route event the organizer gives S4K a number of seats per ticket type (or a % of each);
+   Exos + Eventbrite share the rest. S4K's pool is an allocation row the other pool can't sell; the feed shows
+   it exactly (no buffer); an S4K order takes seats from it only, a cancel returns them to it; leaving the route
+   releases its unsold seats. Replaces the shared count minus a buffer. Open: an auto split for the S4K pool
+   (like `20261014090000`'s 10% → 1 pack), and whether unsold S4K seats should come back to Exos before doors.
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

@@ -90,20 +90,37 @@ export function ebErrorMessage(r: { status: number; error?: string }): string {
 // ---- Shapes (only the fields we read) --------------------------------------
 
 export interface EbPagination { has_more_items?: boolean; continuation?: string | null }
+export interface EbBarcode {
+  barcode?: string | null;
+  status?: string;
+  /** 0 not validated, 1 by scanner, 2 by name. */
+  checkin_type?: number;
+  changed?: string;
+}
 export interface EbAttendee {
   id?: string;
   status?: string;
   cancelled?: boolean;
   refunded?: boolean;
+  checked_in?: boolean;
+  changed?: string;
   ticket_class_name?: string;
   profile?: { name?: string; first_name?: string; last_name?: string; email?: string };
-  barcodes?: Array<{ barcode?: string | null; status?: string }>;
+  barcodes?: EbBarcode[];
 }
 export interface EbEvent {
   id?: string;
   name?: { text?: string };
   start?: { utc?: string };
   status?: string;
+}
+
+/** One barcode as Eventbrite has it (stored apart from Exos codes). */
+export interface ApplyBarcode {
+  code: string;
+  status: 'unused' | 'used' | 'refunded';
+  checkin_type?: 0 | 1 | 2;
+  changed?: string;
 }
 
 /** One row for exos_eventbrite_apply. */
@@ -115,7 +132,16 @@ export interface ApplyRow {
   ticket?: string;
   void: boolean;
   reason?: string;
+  /** What Eventbrite says (mig 20261014120000): read only, never written back. */
+  checked_in: boolean;
+  status?: string;
+  refunded?: true;
+  cancelled?: true;
+  changed?: string;
+  barcodes?: ApplyBarcode[];
 }
+
+const BARCODE_STATUS = new Set(['unused', 'used', 'refunded']);
 
 const VOID_STATUS: Record<string, string> = {
   "not attending": "not attending",
@@ -129,8 +155,10 @@ const VOID_STATUS: Record<string, string> = {
 /**
  * An attendee as a door row. Voided when Eventbrite says refunded, cancelled,
  * not attending, deleted or transferred, or when every barcode is refunded.
- * The barcode is the first one that isn't refunded (else the first). NULL
- * when the attendee has no usable id.
+ * The barcode is the first one that isn't refunded (else the first). It also
+ * carries what Eventbrite says about check-in (their flag, or a used barcode)
+ * and every barcode with Eventbrite's status, for exos_eventbrite_barcodes
+ * (mig 20261014120000). NULL when the attendee has no usable id.
  */
 export function toApplyRow(a: EbAttendee): ApplyRow | null {
   if (!a || !isEbId(a.id)) return null;
@@ -144,12 +172,31 @@ export function toApplyRow(a: EbAttendee): ApplyRow | null {
   else if (codes.length > 0 && codes.every((b) => b.status === "refunded")) reason = "refunded";
   const p = a.profile ?? {};
   const name = (p.name ?? [p.first_name, p.last_name].filter(Boolean).join(" ")).trim();
-  const row: ApplyRow = { ref: a.id, void: reason !== undefined };
+  const row: ApplyRow = {
+    ref: a.id,
+    void: reason !== undefined,
+    // Checked in on Eventbrite: their flag, or a used barcode.
+    checked_in: a.checked_in === true || codes.some((b) => b.status === 'used'),
+  };
   if (live?.barcode) row.code = live.barcode.trim();
   if (name) row.name = name.slice(0, 80);
   if (p.email) row.email = p.email.trim();
   if (a.ticket_class_name) row.ticket = a.ticket_class_name.trim().slice(0, 80);
   if (reason) row.reason = reason;
+  if (a.status && a.status.trim()) row.status = a.status.trim().slice(0, 40);
+  if (a.refunded === true) row.refunded = true;
+  if (a.cancelled === true) row.cancelled = true;
+  if (typeof a.changed === 'string' && a.changed) row.changed = a.changed;
+  const barcodes: ApplyBarcode[] = [];
+  for (const b of codes.slice(0, 20)) {
+    const status = (b.status ?? '').toLowerCase();
+    if (!BARCODE_STATUS.has(status)) continue;
+    const out: ApplyBarcode = { code: b.barcode!.trim(), status: status as ApplyBarcode['status'] };
+    if (b.checkin_type === 0 || b.checkin_type === 1 || b.checkin_type === 2) out.checkin_type = b.checkin_type;
+    if (typeof b.changed === 'string' && b.changed) out.changed = b.changed;
+    barcodes.push(out);
+  }
+  if (barcodes.length > 0) row.barcodes = barcodes;
   return row;
 }
 
