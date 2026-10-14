@@ -83,6 +83,16 @@ export interface CatalogTierRow {
   sales_end: string | null;
   price_schedule?: unknown;
   exclusive_tax_percent?: number | string | null;
+  /** What Exos itself can sell now (mig 20261014160000): S4K's and the
+   *  marketplaces' pools left out; null = no cap; absent before the migration. */
+  available?: number | null;
+}
+
+/** Seats an Exos checkout can sell: `available` when the view has it, else
+ *  capacity - sold (Infinity = no cap). Shared with the MCP tools. */
+export function exosLeft(t: { capacity: number; sold: number; available?: number | null }): number {
+  if (t.available !== undefined) return t.available === null ? Infinity : Math.max(0, Number(t.available));
+  return t.capacity > 0 ? Math.max(0, t.capacity - t.sold) : Infinity;
 }
 
 export interface CatalogOrg {
@@ -182,7 +192,7 @@ interface TierState {
 function tierState(t: CatalogTierRow, now: Date): TierState {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
   const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0);
-  const left = t.capacity > 0 ? t.capacity - t.sold : Infinity;
+  const left = exosLeft(t);
   const opensAt = t.sales_start ? Date.parse(t.sales_start) : NaN;
   const endsAt = t.sales_end ? Date.parse(t.sales_end) : NaN;
   const notYet = !Number.isNaN(opensAt) && opensAt > now.getTime();

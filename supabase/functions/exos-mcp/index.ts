@@ -137,8 +137,11 @@ function supabaseData(sb: SupabaseClient): ExosData {
       return (data as unknown as PublicEvent | null) ?? null;
     },
     async tiersFor(eventId: string): Promise<PublicTier[]> {
-      const { data, error } = await sb.from("exos_public_tiers").select(TIER_COLS)
+      // `available` (mig 20261014160000): what Exos can sell; missing before it.
+      const run = (cols: string) => sb.from("exos_public_tiers").select(cols)
         .eq("event_id", eventId).order("sort_order", { ascending: true });
+      let { data, error } = await run(TIER_COLS + ", available");
+      if (error?.code === "42703") ({ data, error } = await run(TIER_COLS));
       if (error) throw new Error(`tiers: ${error.message}`);
       return (data ?? []) as unknown as PublicTier[];
     },

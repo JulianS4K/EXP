@@ -112,6 +112,10 @@ BEGIN
      AND (pg_temp.pool('d1')).status = 'planned', 'P2: pool holds 30';
   -- Pool 1 (Exos + Eventbrite) is the other 70.
   ASSERT public.exos_effective_available(pg_temp.u('d1')) = 70, 'P2: Exos sees 70';
+  -- What the catalog feed and the MCP tools read (mig 20261014160000).
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'exos_public_tiers' AND column_name = 'available') THEN
+    ASSERT (SELECT available FROM public.exos_public_tiers WHERE id = pg_temp.u('d1')) = 70, 'P2: public tiers say 70';
+  END IF;
   ASSERT public.exos_seats_available(pg_temp.u('d1'), 70) AND NOT public.exos_seats_available(pg_temp.u('d1'), 71),
          'P2: a checkout can''t take S4K''s seats';
   -- Exos sells its 70: S4K still has its 30.

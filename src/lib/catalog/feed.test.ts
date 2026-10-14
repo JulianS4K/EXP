@@ -7,6 +7,7 @@ import {
   csvField,
   formatPrice,
   parseFeedPath,
+  exosLeft,
   priceAndAvailability,
   renderCatalog,
   resolvePlatform,
@@ -231,5 +232,19 @@ describe('request parsing', () => {
     expect(resolvePlatform('xml', 'tiktok')).toEqual({ error: 'tiktok feeds are served as .csv' });
     expect(resolvePlatform('csv', 'google')).toEqual({ error: 'google feeds are served as .xml' });
     expect(resolvePlatform('csv', 'snap')).toEqual({ error: 'format must be meta, tiktok or google' });
+  });
+});
+
+describe('exosLeft (mig 20261014160000)', () => {
+  it('uses what Exos can sell when the view has it', () => {
+    expect(exosLeft({ capacity: 100, sold: 20, available: 5 })).toBe(5);
+    expect(exosLeft({ capacity: 100, sold: 20, available: null })).toBe(Infinity);
+    expect(exosLeft({ capacity: 100, sold: 20 })).toBe(80);
+    expect(exosLeft({ capacity: 0, sold: 20 })).toBe(Infinity);
+    expect(exosLeft({ capacity: 100, sold: 20, available: -3 })).toBe(0);
+  });
+  it('a tier whose rest is held for S4K or marketplaces is out of stock on Exos', () => {
+    const r = priceAndAvailability(ev(), [tier({ available: 0 })], NOW);
+    expect(r?.availability).toBe('out of stock');
   });
 });

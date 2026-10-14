@@ -98,8 +98,12 @@
    `docs/marketplace/s4k-feed.md` "Listings for Albert"): Exos → Albert → S4K → Automatiq. Three listings per ticket
    type (default 8 each, organizer-set), refilled from S4K's pool; when it runs short, rebalanced from Exos +
    Eventbrite down to one listing set, which the primary QR source (Exos or Eventbrite) sells. A diff-synced
-   Realtime table read by Albert's linked integration user. Next: Meta catalog feed; agent checkout (Claude,
-   ChatGPT, Meta) once Stripe is live.
+   Realtime table read by Albert's linked integration user.
+13. ✅ **Catalog feed + MCP sell from Exos's own pool** (mig `20261014160000`): `exos_public_tiers.available`
+   (what an Exos checkout can take) drives the Meta / TikTok / Google catalog's in-stock and the MCP tools' "how
+   many left", so ads and assistants never send a buyer to seats held for S4K or a marketplace. The Meta catalog
+   feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
+   Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

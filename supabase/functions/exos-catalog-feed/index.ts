@@ -107,8 +107,12 @@ async function readCatalogInput(sb: SupabaseClient, slug: string, now: Date) {
   const tiers: CatalogTierRow[] = [];
   const ids = events.map((e) => e.id);
   for (let i = 0; i < ids.length; i += 200) {
-    const { data: t, error: tErr } = await sb.from("exos_public_tiers").select(TIER_COLS)
+    // `available` (mig 20261014160000): what Exos can sell. Before the
+    // migration the column is missing (42703): capacity - sold, as before.
+    const run = (cols: string) => sb.from("exos_public_tiers").select(cols)
       .in("event_id", ids.slice(i, i + 200)).order("sort_order", { ascending: true });
+    let { data: t, error: tErr } = await run(TIER_COLS + ", available");
+    if (tErr?.code === "42703") ({ data: t, error: tErr } = await run(TIER_COLS));
     if (tErr) throw new Error(`tiers: ${tErr.message}`);
     tiers.push(...((t ?? []) as unknown as CatalogTierRow[]));
   }
