@@ -284,6 +284,6 @@ with per-token baselines, copied from the desk's `feed_seen` design.
 
 1. S4K's poll interval: it sets the buffer. Re-run `scripts/channel-sim/broadcast.py`
    with S4K's interval added to each marketplace's lag before going live.
-2. Fees and consignment: S4K's margin on top of `netToOrganizer`.
+2. Fees: none for now (operator 2026-10-13: treated as growth spend). Consignment terms still to write.
 3. Mapping S4K's internal ids (`internalId` is null until a pairing call exists).
 4. Phase 2 if S4K wants it: `/feed/full` + `/feed/changes` with per-token baselines.

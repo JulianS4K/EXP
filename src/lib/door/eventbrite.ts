@@ -5,6 +5,7 @@
 
 import { supabase } from '../supabase';
 import { isMissingRpc } from './net';
+import { parseInventoryStatus, type EbInventoryStatus, type EbTicketClassChoice } from './eventbriteInventoryModel';
 
 export interface EventbriteLink {
   ebEventId: string;
@@ -139,3 +140,31 @@ export const unlinkEventbrite = (eventId: string) =>
 
 export const syncEventbrite = (eventId: string) =>
   call<{ sync: SyncSummary | null }>('/sync', { method: 'POST', body: { event: eventId } });
+
+// ---- Inventory: one shared count (mig 20261014110000) ----------------------
+
+export { mappingLine, parseInventoryStatus, unshareable } from './eventbriteInventoryModel';
+export type { EbInventoryStatus, EbMapping, EbTicketClassChoice } from './eventbriteInventoryModel';
+
+/** null when the migration isn't deployed. */
+export async function fetchInventoryStatus(eventId: string): Promise<EbInventoryStatus | null> {
+  const { data, error } = await supabase.rpc('exos_eventbrite_inventory_status', { p_event_id: eventId });
+  if (error) {
+    if (isMissingRpc(error)) return null;
+    throw error;
+  }
+  return parseInventoryStatus(data);
+}
+
+export async function listEbTicketClasses(eventId: string): Promise<EbTicketClassChoice[]> {
+  const r = await call<{ ticket_classes?: EbTicketClassChoice[] }>(`/ticket-classes?event=${encodeURIComponent(eventId)}`, { method: 'GET' });
+  return Array.isArray(r.ticket_classes) ? r.ticket_classes : [];
+}
+
+export const mapEbTicketClass = (eventId: string, ticketClassId: string, ticketClassName: string | null, tierId: string | null) =>
+  call<{ mapped: boolean }>('/map', {
+    method: 'POST', body: { event: eventId, ticket_class_id: ticketClassId, ticket_class_name: ticketClassName, tier: tierId },
+  });
+
+export const setEbWrites = (orgId: string, on: boolean) =>
+  call<{ writes_enabled: boolean; live: boolean }>('/writes', { method: 'POST', body: { org: orgId, on } });

@@ -14,18 +14,31 @@ Code: `supabase/functions/_shared/eventbrite/client.ts` (tested by
 `src/lib/eventbrite.test.ts`), the `exos-eventbrite-sync` edge function, and
 `src/lib/door/eventbrite.ts` + `src/components/EventbriteSync.tsx` in the app.
 
-## Read only, by construction
+## Read only, except one capacity update
 
-Hard Rule #2 (`CLAUDE.md`). Every request goes through `ebGet`, which sends
-only `GET` to `www.eventbriteapi.com` (`ALLOWED_HTTP_METHODS = {GET}`;
-`assertReadonlyMethod` throws on anything else). Exos never:
+Hard Rule #2 (`CLAUDE.md`). Every read goes through `ebGet`, which sends only
+`GET` to `www.eventbriteapi.com` (`ALLOWED_HTTP_METHODS = {GET}`;
+`assertReadonlyMethod` throws on anything else).
+
+The **one write** (mig `20261014110000`, operator choice 2026-10-13: "dry run,
+then a per-org switch") is **Update a Ticket Class with the `capacity` field
+only**, on a ticket class the organizer already has on Eventbrite and mapped
+to an Exos ticket type. It lives in its own module,
+`_shared/eventbrite/writer.ts`, whose `assertCapacityOnly` refuses any other
+path or any other field. It is a dry run (the plan is recorded and shown, not
+sent) unless **both** the org's owner switched sending on
+(`exos_eventbrite_accounts.writes_enabled`) **and** the operator set
+`EXOS_EVENTBRITE_WRITES=on` on `exos-eventbrite-sync`.
+
+Exos never:
+- creates ticket classes, events, discounts, holds or anything else (the
+  organizer makes their Eventbrite tickets on Eventbrite),
+- changes a price, a name, sale dates or any field but `capacity`,
 - writes check-ins back (`checked_in` stays Eventbrite's own),
 - registers or changes webhooks (`POST /webhooks/` is a write, so the sync
-  polls instead),
-- creates, changes or cancels events, orders, ticket classes, discounts or
-  anything else.
+  polls instead).
 
-Every non-GET endpoint below is **✖ forbidden**, not merely unused.
+Every other non-GET endpoint below is **✖ forbidden**, not merely unused.
 
 ## Auth
 
@@ -66,10 +79,59 @@ Not built.
   doesn't move the cursor, so it is retried; the panel shows how many.
   Voiding never changes the house capacity.
 
+## Inventory: one shared count (mig `20261014110000`)
+
+Read from the spec before building: a ticket class has `capacity` (how many it
+may sell in total, required for a normal non-tiered class) and `quantity_sold`
+(read only); `quantity_total` is what is actually available after event and
+inventory-tier limits. Update a Ticket Class takes `capacity`. A class inside
+an **inventory tier** (`inventory_tier_id` set) is limited by the tier instead;
+those classes are skipped for now (the tier endpoints would be a second write,
+not built). The event-level capacity tier is left alone.
+
+How it works:
+1. **Map.** In `/door` (the event's Eventbrite card), an owner or manager picks
+   which Exos ticket type each existing Eventbrite ticket class sells from
+   (`POST /map`; one class per ticket type). The function re-reads the class
+   from Eventbrite first. Free ticket types can be shared: Eventbrite may sell
+   them, resale marketplaces don't. **Not shareable** (refused at map, skipped
+   if it changes later): Eventbrite classes in an inventory tier, donation and
+   add-on classes; Exos ticket types with no capacity set, or in a shared
+   capacity group (a quota counts minted tickets, not these seats).
+2. **Count.** Every 2 minutes for each link with a mapping
+   (`exos_eventbrite_inventory_due`, apart from the attendee cadence) and on
+   Sync now, the function reads `GET /events/{id}/ticket_classes/` and
+   `exos_eventbrite_inventory_apply` takes each class's new Eventbrite sales
+   from the Exos ticket type (refunds give seats back). A sale Exos had no seat
+   left for is counted as **oversold** and shown in red; a later refund clears
+   oversold first. A read older than the last one applied is ignored, so two
+   overlapping passes can't turn into a false refund. An unmapped class keeps
+   its count, so mapping it again doesn't count its sales twice. Locks: all the
+   event's mapping rows (class order), then the ticket type, then the event
+   (checkout's order).
+3. **Set.** The target capacity is `quantity_sold + max(0, free on Exos - one
+   pack)` (one pack = max per order, else 8), or `quantity_sold` once the event
+   is cancelled or over (a cancelled event stays on the 2-minute schedule until
+   Eventbrite is set). With a house cap, its remainder is split across the
+   classes rather than offered to each. When the target differs from
+   Eventbrite's capacity, the writer plans `{"ticket_class": {"capacity": N}}`
+   and sends it only when sending is live. **A target of 0 is never sent**
+   (Eventbrite refuses 0 on a normal class and reads it as unlimited on a
+   donation): the panel says to hide or end that ticket on Eventbrite instead.
+
+Known limits: Eventbrite's `quantity_sold` doesn't include carts in progress,
+so at the very end a cart can complete into oversold (shown, not hidden).
+
+Not checked against a live account yet: whether Eventbrite accepts a partial
+update with only `capacity` (the spec lists the Update fields as required).
+First live test: the operator's test org, one mapped class, with sending
+switched on for that org only.
+
 ## Endpoints
 
 Access:
 - **R**: read, fine to call.
+- **W**: the one write, gated as above.
 - **✖**: forbidden. Never sent.
 
 | Endpoint | Access | Used by Exos | Name in the spec |
@@ -158,8 +220,8 @@ Access:
 | `POST /events/{event_id}/ticket_buyer_settings/` | ✖ |  | Update Ticket Buyer Settings for an Event |
 | `GET /events/{event_id}/ticket_classes/{ticket_class_id}/` | R |  | Retrieve a Ticket Class |
 | `POST /events/{event_id}/ticket_classes/` | ✖ |  | Create a Ticket Class |
-| `POST /events/{event_id}/ticket_classes/{ticket_class_id}/` | ✖ |  | Update a Ticket Class |
-| `GET /events/{event_id}/ticket_classes/` | R |  | List Ticket Classes by Event |
+| `POST /events/{event_id}/ticket_classes/{ticket_class_id}/` | **W** (capacity only, gated) | inventory sync: `{"ticket_class": {"capacity": N}}` | Update a Ticket Class |
+| `GET /events/{event_id}/ticket_classes/` | R | inventory sync + the mapping picker | List Ticket Classes by Event |
 | `GET /events/{event_id}/ticket_classes/for_sale/` | R |  | List Ticket Classes Available For Sale by Event |
 | `GET /ticket_groups/{ticket_group_id}/` | R |  | Retrieve a Ticket Group |
 | `POST /organizations/{organization_id}/ticket_groups/` | ✖ |  | Create a Ticket Group |
