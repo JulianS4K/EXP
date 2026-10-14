@@ -20,6 +20,10 @@ export const en = {
   'nav.profile': 'Profile',
 
   'event.buy': 'Buy Tickets',
+  'event.getFree': 'Get free tickets',
+  'event.withAddons': 'incl. {amount} of add-ons',
+  'event.less': 'One fewer ticket',
+  'event.more': 'One more ticket',
   'event.onSaleSoon': 'On sale soon',
   'event.onSaleSoonHint': 'Paid tickets for this event aren\'t on sale yet. Tap Save below and we\'ll let you know when they are.',
   'event.tierSoldOut': 'Sold out · join the waitlist',
@@ -141,6 +145,10 @@ export const es: Record<DictKey, string> = {
   'nav.profile': 'Perfil',
 
   'event.buy': 'Comprar Entradas',
+  'event.getFree': 'Conseguir entradas gratis',
+  'event.withAddons': 'incl. {amount} de extras',
+  'event.less': 'Una entrada menos',
+  'event.more': 'Una entrada más',
   'event.onSaleSoon': 'Pronto a la venta',
   'event.onSaleSoonHint': 'Las entradas de pago aún no están a la venta. Toca Guardar abajo y te avisaremos cuando lo estén.',
   'event.tierSoldOut': 'Agotado · únete a la lista de espera',

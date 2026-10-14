@@ -355,7 +355,7 @@ export default function OrganizerEventReport() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                    <th className="py-2 font-black">Ticket</th>
+                    <th className="py-2 font-black">Attendee</th>
                     <th className="py-2 font-black">Tier</th>
                     <th className="py-2 font-black">Status</th>
                     <th className="py-2 font-black text-right">Action</th>
@@ -378,7 +378,10 @@ export default function OrganizerEventReport() {
                         key={t.id}
                         className={`border-b border-slate-50 last:border-b-0 ${isVoided ? 'opacity-40' : ''}`}
                       >
-                        <td className="py-2 text-slate-700 font-mono text-xs">{t.id.slice(0, 12)}…</td>
+                        <td className="py-2 text-slate-700">
+                          <span className="block text-sm">{t.attendeeName || t.buyerEmail || 'No name yet'}</span>
+                          <span className="block text-slate-400 font-mono text-[10px]">{t.id.slice(0, 8)}</span>
+                        </td>
                         <td className="py-2 text-slate-700">{t.tierName || 'Standard'}</td>
                         <td className="py-2">
                           <span className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest border rounded-full ${statusBadge.cls}`}>

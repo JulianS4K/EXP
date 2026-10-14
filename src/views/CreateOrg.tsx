@@ -185,7 +185,7 @@ export default function CreateOrg() {
                 </p>
               ) : (
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  Lowercase letters, numbers, and dashes. Becomes your storefront URL when white-label ships.
+                  Lowercase letters, numbers, and dashes. Your storefront lives at /o/your-slug.
                 </p>
               )}
             </div>

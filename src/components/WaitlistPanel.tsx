@@ -49,8 +49,21 @@ export default function WaitlistPanel({ eventId }: { eventId: string }) {
   // Still loading, or the summary couldn't be read (logged above): render
   // nothing rather than crash the report tab.
   if (loading || !summary) return null;
-  // Nothing has ever hit the waitlist — keep the report clean.
-  if (summary.waiting === 0 && summary.offered === 0 && summary.converted === 0) return null;
+  // Nothing has hit the waitlist yet: say it exists and how it fills.
+  if (summary.waiting === 0 && summary.offered === 0 && summary.converted === 0) {
+    return (
+      <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Bell className="w-4 h-4 text-slate-500" />
+          <h3 className="text-sm font-bold text-slate-700">Waitlist</h3>
+        </div>
+        <p className="text-xs text-slate-400">
+          Nobody's waiting yet. When this event or a ticket type sells out, buyers can join the waitlist from the event
+          page; you'll see them here and can offer each one a spot.
+        </p>
+      </div>
+    );
+  }
 
   const s = summary;
   return (

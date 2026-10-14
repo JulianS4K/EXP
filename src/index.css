@@ -148,3 +148,7 @@
 @media (prefers-reduced-motion: reduce) {
   .anim-slide-in, .anim-fade-in, .anim-pop-in { animation: none; }
 }
+
+/* A browser's "please fill out this field" bubble, and focus() scrolling,
+   land a field under the fixed header without this. */
+input, select, textarea { scroll-margin-top: 7rem; }

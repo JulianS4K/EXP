@@ -944,7 +944,17 @@ export default function EventDetails() {
               <div className="p-7">
                 <div className="mb-8">
                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
-                    <p className="disp text-6xl neon tracking-tight">{formatCurrency(priceToDisplay * quantity, event.currency)}</p>
+                    {/* The order total: tickets plus add-ons (what Stripe will charge). */}
+                    <p className="disp text-6xl neon tracking-tight">
+                      {priceToDisplay * quantity + addonSel.totalCents / 100 === 0
+                        ? t('event.free')
+                        : formatCurrency(priceToDisplay * quantity + addonSel.totalCents / 100, event.currency)}
+                    </p>
+                    {addonSel.totalCents > 0 && (
+                      <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
+                        {t('event.withAddons', { amount: formatCurrency(addonSel.totalCents / 100, event.currency) })}
+                      </p>
+                    )}
                     <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
                       {selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
                     </p>
@@ -1030,10 +1040,13 @@ export default function EventDetails() {
                   </div>
                 )}
 
+                {(!soldOut || voucher?.canBypass) && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
                       <button
+                        type="button"
+                        aria-label={t('event.less')}
                         onClick={() => setQuantity(Math.max(1, quantity - 1))}
                         className="w-10 h-10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
                       >
@@ -1041,6 +1054,8 @@ export default function EventDetails() {
                       </button>
                       <span className="disp text-2xl flex-1 text-center">{quantity}</span>
                       <button
+                        type="button"
+                        aria-label={t('event.more')}
                         onClick={() => setQuantity(Math.min(maxPerOrder, quantity + 1))}
                         className="w-10 h-10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
                       >
@@ -1049,6 +1064,7 @@ export default function EventDetails() {
                    </div>
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
                 </div>
+                )}
 
                 {/* Who is going — optional per-ticket names. FREE claim path only:
                     the paid path hands off to Stripe and never sees these (the
@@ -1076,10 +1092,12 @@ export default function EventDetails() {
                   <div className="divide-y divide-white/5 border-t border-white/5">
                     <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
                       <span className="text-white/60">status</span>
-                      <span className={soldOut ? 'text-brand-accent' : 'neon'}>
-                        {soldOut ? t('event.soldOut') : t('event.available')}
+                      <span className={soldOut ? 'text-brand-accent' : paidNotOnSale ? 'text-white/60' : 'neon'}>
+                        {soldOut ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon') : t('event.available')}
                       </span>
                     </div>
+                    {/* Paid tickets that can't be bought yet: no "N available" next to "On sale soon". */}
+                    {!paidNotOnSale && (
                     <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
                       <span className="text-white/60">tickets available</span>
                       <span className="text-white">
@@ -1091,6 +1109,7 @@ export default function EventDetails() {
                           : `${event.totalTickets - event.ticketsSold}`}
                       </span>
                     </div>
+                    )}
                   </div>
                 </div>
 
@@ -1121,7 +1140,8 @@ export default function EventDetails() {
                   ) : (
                     <>
                       <Ticket className="w-5 h-5" />
-                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon') : t('event.buy')}</span>
+                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon')
+                        : priceToDisplay === 0 && addonSel.totalCents === 0 ? t('event.getFree') : t('event.buy')}</span>
                     </>
                   )}
                 </button>

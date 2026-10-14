@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { publicUrl } from '../lib/utils';
+import { paymentsEnabled } from '../lib/payments';
 import { buildEmbedSnippet } from '../lib/embed';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
@@ -172,10 +173,22 @@ export default function PromoteEvent() {
 
         {justPublished && published && (
           <div className="mb-8 p-5 border border-brand-primary/40 bg-brand-primary/10">
-            <p className="disp text-3xl tracking-wide text-brand-primary leading-none mb-2">You're live ✦</p>
-            <p className="type text-white/70 text-sm">
-              {event.title} is on sale. Copy the link below and post it, or share the QR code at the venue.
-            </p>
+            {(() => {
+              // Paid tickets can't sell until payments are on: don't say "on sale".
+              const paid = (event.ticketTiers ?? []).some((t) => Number(t.price) > 0);
+              const free = (event.ticketTiers ?? []).some((t) => !(Number(t.price) > 0));
+              const waiting = paid && !paymentsEnabled();
+              return (
+                <>
+                  <p className="disp text-3xl tracking-wide text-brand-primary leading-none mb-2">{waiting ? 'Published ✦' : "You're live ✦"}</p>
+                  <p className="type text-white/70 text-sm">
+                    {waiting
+                      ? `${event.title} is up${free ? ' and free tickets can be claimed now' : ''}. Paid tickets go on sale once payments are switched on. You can share the link already.`
+                      : `${event.title} is on sale. Copy the link below and post it, or share the QR code at the venue.`}
+                  </p>
+                </>
+              );
+            })()}
           </div>
         )}
         <p className="type text-[10px] text-white/40 uppercase tracking-widest mb-2">Promote</p>

@@ -105,6 +105,49 @@
    feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
    Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
 
+## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
+
+Easiest first. ✅ = done in this pass.
+
+**Tier 1, copy and one-liners**
+1. ✅ Home day chips said "WEEKEND"/"SUNDAY" on any day: work them out from the date.
+2. ✅ Home header city hard-coded "NEW YORK". (kept: NYC is the launch market; the fake city-picker caret removed)
+3. ✅ Free tiers say "$0.00" / "Buy Tickets": say Free / Get free tickets.
+4. ✅ Promo field placeholder cut off on phone.
+5. ✅ Quantity −/+ buttons have no screen-reader labels.
+6. ✅ Internal words in organizer copy: Sprint 3/4, Lysted, "rename in a future sprint", raw owner UUID, vibepass.io slug prefix, "when white-label ships".
+7. ✅ Org settings S4K card still says "one shared count" (it's two pools now).
+8. ✅ Event report Money: "paid out by Stripe directly" shown when nothing is connected.
+
+**Tier 2, small UI fixes**
+9. ✅ Org settings Developer section: white text on a light background.
+10. ✅ Edit event: the Marketplaces heading overlaps its description.
+11. ✅ Create event: the browser's "fill out this field" bubble hides under the fixed header.
+12. ✅ Sold-out tier still shows the quantity stepper and promo field. (the code field stays: a code can unlock a sold-out event)
+13. ✅ Ticket page: the open-pass link and "code expires in" show while the QR is still locked.
+14. ✅ Contradictory sale copy: "You're live… on sale" for the organizer and "Available · 100 tickets" for the buyer while paid tiers can't sell (payments off).
+15. ✅ S4K: joining the network has no confirm; on the S4K route the direct marketplace boxes stay active.
+16. ✅ Waitlist panel hidden until someone joins.
+17. ✅ Event report Attendees lists ticket ids, not names.
+
+**Tier 3, logic**
+18. The 250-capacity resale rule counts a table as one seat, not its party size (client and server).
+19. ✅ Stripe Connect has no status: show "finish setup" / "charges on" / "payouts on" and a readable error.
+20. ✅ Order total (tickets + add-ons) before Stripe.
+21. Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
+22. Door times in the event's time zone, not the browser's.
+23. Promoter `/l/…` link previews show the org, not the promoter; no-image fallback card size.
+24. Ads / catalog / audience panels: say when they're live only once the operator deploys them.
+
+**Tier 4, bigger**
+25. Guests can't use a promo / presale code or join a waitlist without signing in.
+26. Offline at the door: the ticket page never loads after a reload (keep the last copy on the device).
+27. Phone: door scanner below the fold, three offline banners at once, org settings tabs scroll sideways.
+28. Discoverability: Eventbrite mapping only in /door, scheduled pricing on the report, vouchers / add-ons only after create.
+29. Buyer refund request (not built).
+30. Wallet passes (credentials, operator).
+31. Payments live (Stripe, operator).
+
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 
 The four audits' findings are summarized here. Marketing graded **C** (strong organic and promoter tools, no

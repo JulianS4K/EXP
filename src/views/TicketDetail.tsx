@@ -370,7 +370,8 @@ export default function TicketDetail() {
                              Cancel the transfer to use this ticket again
                           </p>
                        </div>
-                    ) : (
+                    ) : qrUnlocked && (
+                       // No countdown while the code itself is still locked.
                        <div className="mt-7 flex flex-col items-center">
                           <p className="type text-[11px] text-black/60 uppercase tracking-widest">{t('ticket.expiresIn')}</p>
                           <p className="disp text-4xl text-black tracking-tight leading-none mt-1">00:{timeLeft.toString().padStart(2, '0')}</p>
@@ -514,6 +515,7 @@ export default function TicketDetail() {
                         mid-walk-up flips the screen within ~15s. The native
                         wallet buttons above are the add-on for holders who
                         want the ticket in Apple / Google Wallet. */}
+                    {qrUnlocked && (
                     <Link
                       to={`/wallet/pass/${currentTicket.id}`}
                       className="type flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white/60 py-4 text-[11px] uppercase tracking-widest hover:border-white hover:text-white transition-colors"
@@ -521,6 +523,7 @@ export default function TicketDetail() {
                       <Smartphone className="w-4 h-4 text-brand-primary" aria-hidden="true" />
                       open pass (fullscreen)
                     </Link>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => setShowShare(true)}
