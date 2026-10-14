@@ -170,6 +170,10 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
   no capacity, and events whose overall cap is below the types' sum.
 - Leaving the S4K route (or the owner leaving the network) releases every
   unsold S4K seat to pool 1; S4K's sold count is kept for when it comes back.
+- A pool keeps its seats if its ticket type later leaves the feed (hidden,
+  past its sales end): set S4K's seats to what it sold to give them back.
+  A refund or void of an S4K ticket done in Exos (not an S4K cancel) gives the
+  seat to pool 1, as for marketplaces.
 - `exos_s4k_pool_status(event)` shows both pools per ticket type;
   `exos_set_s4k_split(event, [{tier_id, seats}])` sets them (owner /
   manager, all or none).

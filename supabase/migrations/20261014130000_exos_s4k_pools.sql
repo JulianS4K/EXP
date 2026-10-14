@@ -138,6 +138,7 @@ DECLARE
   v_held  int;
   v_avail int;
   q       record;
+  v_tiers uuid[] := '{}';
 BEGIN
   -- The same lock as a route change: a split can't race the event leaving S4K.
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
@@ -145,7 +146,10 @@ BEGIN
   IF e.id IS NULL OR NOT (public.exos_is_admin() OR public.exos_has_org_role(e.org_id, ARRAY['owner', 'manager'])) THEN
     RAISE EXCEPTION 'exos_set_s4k_split: not allowed' USING ERRCODE = '42501';
   END IF;
-  SELECT s4k_network INTO v_on FROM public.exos_orgs WHERE id = e.org_id;
+  -- The owner leaving the network takes the org row first: hold it (shared)
+  -- so the two can't interleave, then re-read the route under it.
+  SELECT s4k_network INTO v_on FROM public.exos_orgs WHERE id = e.org_id FOR SHARE;
+  SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;
   IF NOT coalesce(v_on, false) OR e.distribution_route IS DISTINCT FROM 's4k' THEN
     RAISE EXCEPTION 'exos_set_s4k_split: put this event on the S4K network first' USING ERRCODE = '22023';
   END IF;
@@ -158,12 +162,29 @@ BEGIN
   SELECT coalesce(sum(capacity), 0), bool_or(capacity = 0) INTO v_sum, v_uncap
     FROM public.exos_ticket_tiers WHERE event_id = p_event_id;
 
-  -- Ticket types in a fixed order, so two splits on one event lock alike.
-  FOR s IN SELECT value FROM jsonb_array_elements(p_splits) ORDER BY value->>'tier_id' LOOP
-    IF jsonb_typeof(s) <> 'object' OR coalesce(s->>'tier_id', '') !~* '^[0-9a-f-]{36}$'
+  -- Shape first, then every lock up front in one order (the pools, then
+  -- their quotas, then the ticket types: an S4K order's pool -> quota ->
+  -- tier, a checkout's quota -> tier), so a split over several ticket types
+  -- can't deadlock with a sale on one of them.
+  FOR s IN SELECT value FROM jsonb_array_elements(p_splits) LOOP
+    IF jsonb_typeof(s) <> 'object' OR coalesce(s->>'tier_id', '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
        OR coalesce(s->>'seats', '') !~ '^[0-9]{1,5}$' THEN
       RAISE EXCEPTION 'exos_set_s4k_split: each split is {tier_id, seats} with seats 0-99999' USING ERRCODE = '22023';
     END IF;
+    v_tiers := v_tiers || (s->>'tier_id')::uuid;
+  END LOOP;
+  PERFORM 1 FROM public.exos_distribution_listings
+   WHERE event_id = p_event_id AND channel = 's4k' AND tier_id = ANY (v_tiers)
+   ORDER BY tier_id FOR UPDATE;
+  PERFORM 1 FROM public.exos_quotas
+   WHERE id IN (SELECT quota_id FROM public.exos_quota_tiers WHERE tier_id = ANY (v_tiers))
+   ORDER BY id FOR UPDATE;
+  PERFORM 1 FROM public.exos_ticket_tiers
+   WHERE event_id = p_event_id AND id = ANY (v_tiers)
+   ORDER BY id FOR UPDATE;
+
+  -- Ticket types in a fixed order, so two splits on one event lock alike.
+  FOR s IN SELECT value FROM jsonb_array_elements(p_splits) ORDER BY value->>'tier_id' LOOP
     v_tier := (s->>'tier_id')::uuid;
     v_seats := (s->>'seats')::int;
     SELECT * INTO t FROM public.exos_ticket_tiers WHERE id = v_tier AND event_id = p_event_id;
@@ -193,11 +214,8 @@ BEGIN
         USING ERRCODE = '22023';
     END IF;
     v_held := CASE WHEN d.status IN ('pending', 'planned', 'listing', 'listed') THEN greatest(coalesce(d.requested_qty, 0), 0) ELSE 0 END;
-    -- Raising it: the extra must be free in pool 1 now, checked under the
-    -- checkout locks (quotas, then the ticket type) so it can't race a sale.
-    FOR q IN SELECT quota_id FROM public.exos_quota_tiers WHERE tier_id = t.id ORDER BY quota_id LOOP
-      PERFORM 1 FROM public.exos_quotas WHERE id = q.quota_id FOR UPDATE;
-    END LOOP;
+    -- Raising it: the extra must be free in pool 1 now, read under the
+    -- checkout locks taken above, so it can't race a sale.
     UPDATE public.exos_ticket_tiers SET sort_order = sort_order WHERE id = t.id;
     IF v_seats - coalesce(d.sold_qty, 0) > v_held THEN
       v_avail := greatest(coalesce(public.exos_effective_available(t.id), 0), 0);   -- excludes this pool
@@ -305,10 +323,14 @@ SELECT pg_temp.exos_patch_n('public.exos_set_distribution_route(uuid, text)',
   $o$  PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
   SELECT * INTO e FROM public.exos_events WHERE id = p_event_id FOR UPDATE;$o$,
   $n$  PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
-  -- S4K pools first (mig 20261014130000), then the event, as an S4K order.
-  PERFORM 1 FROM public.exos_distribution_listings d
-   WHERE d.event_id = p_event_id AND d.channel = 's4k' AND d.tier_id IS NOT NULL
-   ORDER BY d.tier_id FOR UPDATE;
+  -- S4K pools first (mig 20261014130000), then the event, as an S4K order;
+  -- only for a caller who may change the route (checked again below).
+  IF EXISTS (SELECT 1 FROM public.exos_events x WHERE x.id = p_event_id
+              AND public.exos_has_org_role(x.org_id, ARRAY['owner','manager'])) THEN
+    PERFORM 1 FROM public.exos_distribution_listings d
+     WHERE d.event_id = p_event_id AND d.channel = 's4k' AND d.tier_id IS NOT NULL
+     ORDER BY d.tier_id FOR UPDATE;
+  END IF;
   SELECT * INTO e FROM public.exos_events WHERE id = p_event_id FOR UPDATE;$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_set_s4k_network(uuid, boolean)',
@@ -426,6 +448,15 @@ SELECT pg_temp.exos_patch_n('public.exos_feed_cancel_order(text, uuid)',
   $n$  -- S4K pool (mig 20261014130000) first, then as the mint: event, then tier.
   PERFORM 1 FROM public.exos_distribution_listings WHERE id = o.distribution_listing_id FOR UPDATE;
   SELECT * INTO e FROM public.exos_events WHERE id = o.event_id FOR UPDATE;$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_feed_cancel_order(text, uuid)',
+  'quotas before the tier (mig 20261014130000)',
+  $o$  PERFORM 1 FROM public.exos_ticket_tiers WHERE id = o.tier_id FOR UPDATE;$o$,
+  $n$  -- The seats go back into S4K's hold, which locks quotas: quotas before the tier (mig 20261014130000), as a checkout.
+  PERFORM 1 FROM public.exos_quotas
+   WHERE id IN (SELECT quota_id FROM public.exos_quota_tiers WHERE tier_id = o.tier_id)
+   ORDER BY id FOR UPDATE;
+  PERFORM 1 FROM public.exos_ticket_tiers WHERE id = o.tier_id FOR UPDATE;$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_feed_cancel_order(text, uuid)',
   'sold_qty = greatest(0, sold_qty - v_n)',

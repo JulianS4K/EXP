@@ -113,11 +113,18 @@ COMMENT ON TABLE public.exos_eventbrite_barcodes IS
   'Eventbrite''s barcodes with Eventbrite''s status. Kept apart from Exos ticket codes (exos_tickets). Service role only. mig 20261014120000.';
 
 -- An ISO time from Eventbrite, or NULL (never an error mid-sync).
+-- The regex keeps the format; the cast can still refuse an impossible date
+-- (2026-02-30), which is caught too.
 CREATE OR REPLACE FUNCTION public._exos_eb_ts(p text)
-RETURNS timestamptz LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
-  SELECT CASE WHEN p ~ '^[0-9]{4}-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9](\.[0-9]{1,6})?(Z|[+-][0-9]{2}:?[0-9]{2})$'
-              THEN p::timestamptz END
-$$;
+RETURNS timestamptz LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp AS $$
+BEGIN
+  IF p IS NULL OR p !~ '^[0-9]{4}-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9](\.[0-9]{1,6})?(Z|[+-][0-9]{2}:?[0-9]{2})$' THEN
+    RETURN NULL;
+  END IF;
+  RETURN p::timestamptz;
+EXCEPTION WHEN data_exception THEN
+  RETURN NULL;
+END $$;
 REVOKE ALL ON FUNCTION public._exos_eb_ts(text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_eb_ts(text) TO service_role;
 
@@ -201,7 +208,7 @@ SELECT pg_temp.exos_patch_n('public.exos_eventbrite_apply(uuid, uuid, jsonb, tex
          FROM public.exos_guest_list_entries x
         WHERE x.event_id = p_event_id AND x.external_ref = v_ref;
     EXCEPTION
-      WHEN unique_violation OR check_violation OR foreign_key_violation OR not_null_violation THEN
+      WHEN unique_violation OR check_violation OR foreign_key_violation OR not_null_violation OR data_exception THEN
         v_errors := v_errors + 1;
     END;
     g := NULL;

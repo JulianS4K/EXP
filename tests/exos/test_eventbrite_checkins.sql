@@ -167,6 +167,8 @@ BEGIN
                        'status', 'Attending', 'changed', 'yesterday',
                        'barcodes', jsonb_build_array(jsonb_build_object('code', '61000004', 'status', 'used', 'changed', '14/10/2026')))));
   ASSERT r->>'errors' = '0', 'K4: ' || r::text;
+  ASSERT public._exos_eb_ts('2026-02-30T10:00:00Z') IS NULL AND public._exos_eb_ts('2026-13-01T10:00:00Z') IS NULL
+     AND public._exos_eb_ts('2026-10-14T21:04:30Z') = '2026-10-14T21:04:30Z'::timestamptz, 'K4: impossible dates are NULL';
   ASSERT (pg_temp.att('7104')).checked_in AND (pg_temp.att('7104')).eb_changed_at IS NULL
          AND (pg_temp.att('7104')).checked_in_at IS NOT NULL, 'K4: barcode used = in';
   PERFORM pg_temp.act('e6000000-0000-0000-0000-0000000000a3');
