@@ -186,6 +186,37 @@ The earlier design (one shared count minus a 1-pack buffer, from the
 broadcast simulation in `channel-sim.md`) is replaced: with disjoint pools
 there is no Exos-side race to buffer against.
 
+## Listings for Albert (mig `20261014150000`)
+
+The chain is **Exos → Albert → S4K → Automatiq** (S4K's account). Exos publishes;
+Albert reads and pushes on. Exos writes nothing to S4K or Automatiq.
+
+- **Three listings per ticket type** in S4K's pool, in `exos_s4k_listings`, each up to
+  the event's listing quantity L (`resale_listing_qty`, default 8, set by the organizer
+  in the pools panel). Listing *i* shows `min(L, held − (i−1)·L)`, so a sale refills it
+  from S4K's pool on the next sync. `listing_id` (`exos-<tier>-<slot>`) is stable.
+- **Rebalance** (on by default, `s4k_rebalance`): when S4K's pool can't fill all three
+  (held < 3L), the every-minute feed cron grows S4K's split with seats free in Exos +
+  Eventbrite's pool, until one listing set (L seats) is left there.
+- **The last set goes to the primary QR source** (`primary_source`):
+  - `exos`: on an S4K-route event, Eventbrite's capacity sync keeps at least L back
+    (buffer max(one pack, L)), so Exos sells the last set.
+  - `eventbrite` (needs an Eventbrite link): on ticket types mapped to Eventbrite, the
+    last L free seats are held off Exos checkout and Eventbrite's capacity includes them.
+- **How Albert reads it:** like Terminal-2's N2S feed. The table syncs by diff (a quiet
+  minute writes nothing), has `REPLICA IDENTITY FULL` and is in the `supabase_realtime`
+  publication. Albert signs in as a dedicated integration user linked to the S4K
+  consumer, reads `GET /rest/v1/exos_s4k_listings`, and subscribes to Realtime
+  `postgres_changes` (INSERT / UPDATE / DELETE; a DELETE means take that listing down).
+  RLS lets only a live consumer's linked user read it.
+- **Orders** still come back through `POST /exos/events/{id}/orders` (the S4K pool, all
+  or nothing), so a sale on any of the three listings takes seats from the same pool.
+
+Operator steps to connect Albert: create the consumer (`exos_feed_create_consumer`), create
+a dedicated Supabase Auth user with a password for the integration (Auth → Users → Add user,
+Auto Confirm; not a staff Google login), then link it as the service role:
+`select exos_feed_link_user('S4K', '<integration user email>');`.
+
 ## Sales back: S4K buys from Exos
 
 The desk is read-only because S4K fulfils a Paciolan sale by **buying the

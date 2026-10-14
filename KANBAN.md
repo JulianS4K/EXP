@@ -94,6 +94,12 @@
    `docs/marketplace/README.md`): StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats, TEvo and the S4K route
    only for events with a max capacity of 250+; enforced in every resale entry point, shown in the event editors.
    The number is an operator setting (`exos_platform_settings.resale_min_capacity`).
+12. ✅ **S4K listings for Albert** (operator design 2026-10-14, mig `20261014150000`, not applied;
+   `docs/marketplace/s4k-feed.md` "Listings for Albert"): Exos → Albert → S4K → Automatiq. Three listings per ticket
+   type (default 8 each, organizer-set), refilled from S4K's pool; when it runs short, rebalanced from Exos +
+   Eventbrite down to one listing set, which the primary QR source (Exos or Eventbrite) sells. A diff-synced
+   Realtime table read by Albert's linked integration user. Next: Meta catalog feed; agent checkout (Claude,
+   ChatGPT, Meta) once Stripe is live.
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

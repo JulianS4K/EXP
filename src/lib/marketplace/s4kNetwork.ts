@@ -5,7 +5,7 @@
 
 import { supabase } from '../supabase';
 import { isMissingRpc } from '../door/net';
-import { parsePoolStatus, type PoolStatus } from './s4kPools';
+import { parsePoolStatus, type PoolStatus, type PrimarySource } from './s4kPools';
 
 export type DistributionRoute = 'direct' | 's4k';
 
@@ -39,4 +39,17 @@ export async function setS4kSplit(eventId: string, splits: { tierId: string; sea
   });
   if (error) throw error;
   return parsePoolStatus(data);
+}
+
+/** Listing size, primary QR source and rebalancing (mig 20261014150000). Omitted = unchanged. */
+export async function setResaleOptions(
+  eventId: string, opts: { listingQty?: number; primarySource?: PrimarySource; rebalance?: boolean },
+): Promise<void> {
+  const { error } = await supabase.rpc('exos_set_resale_options', {
+    p_event_id: eventId,
+    p_listing_qty: opts.listingQty ?? null,
+    p_primary_source: opts.primarySource ?? null,
+    p_rebalance: opts.rebalance ?? null,
+  });
+  if (error) throw error;
 }

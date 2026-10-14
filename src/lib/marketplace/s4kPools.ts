@@ -16,11 +16,20 @@ export interface PoolTier {
   /** Free now for Exos + Eventbrite (null: no cap). */
   sharedFree: number | null;
   eventbriteMapped: boolean;
+  /** The listings Albert sees for this ticket type (mig 20261014150000): up to three quantities. */
+  listings: number[];
 }
+
+export type PrimarySource = 'exos' | 'eventbrite';
 
 export interface PoolStatus {
   route: 'direct' | 's4k';
   onFeed: boolean;
+  /** Each S4K listing's most tickets (default 8); also the set left to the primary source. */
+  listingQty: number;
+  primarySource: PrimarySource;
+  rebalance: boolean;
+  eventbriteLinked: boolean;
   tiers: PoolTier[];
 }
 
@@ -30,6 +39,10 @@ export function parsePoolStatus(raw: any): PoolStatus {
   return {
     route: raw?.route === 's4k' ? 's4k' : 'direct',
     onFeed: raw?.on_feed === true,
+    listingQty: n(raw?.listing_qty) || 8,
+    primarySource: raw?.primary_source === 'eventbrite' ? 'eventbrite' : 'exos',
+    rebalance: raw?.rebalance !== false,
+    eventbriteLinked: raw?.eventbrite_linked === true,
     tiers: (Array.isArray(raw?.tiers) ? raw.tiers : [])
       .filter((t: any) => typeof t?.tier_id === 'string')
       .map((t: any) => ({
@@ -43,6 +56,7 @@ export function parsePoolStatus(raw: any): PoolStatus {
         s4kHeld: n(t.s4k_held),
         sharedFree: t.shared_free == null ? null : n(t.shared_free),
         eventbriteMapped: t.eventbrite_mapped === true,
+        listings: Array.isArray(t.listings) ? t.listings.map(n).filter((q: number) => q > 0) : [],
       })),
   };
 }
@@ -76,4 +90,15 @@ export function poolsAfter(t: PoolTier, seats: number): { s4k: number; shared: n
   const s4k = Math.max(0, seats - t.s4kSold);
   if (t.sharedFree == null) return { s4k, shared: null };
   return { s4k, shared: Math.max(0, t.sharedFree + t.s4kHeld - s4k) };
+}
+
+/** What three listings of up to `qty` show for `held` seats in S4K's pool. */
+export function listingQuantities(held: number, qty: number): number[] {
+  const out: number[] = [];
+  const q = Math.max(1, Math.trunc(qty));
+  for (let i = 0; i < 3; i++) {
+    const left = Math.max(0, Math.trunc(held) - i * q);
+    if (left > 0) out.push(Math.min(q, left));
+  }
+  return out;
 }

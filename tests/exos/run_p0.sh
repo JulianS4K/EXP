@@ -99,7 +99,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261014110000_exos_eventbrite_inventory \
          20261014120000_exos_eventbrite_checkins \
          20261014130000_exos_s4k_pools \
-         20261014140000_exos_resale_min_capacity; do
+         20261014140000_exos_resale_min_capacity \
+         20261014150000_exos_s4k_listings; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
@@ -219,7 +220,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261014110000_exos_eventbrite_inventory \
          20261014120000_exos_eventbrite_checkins \
          20261014130000_exos_s4k_pools \
-         20261014140000_exos_resale_min_capacity; do
+         20261014140000_exos_resale_min_capacity \
+         20261014150000_exos_s4k_listings; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -246,3 +248,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrit
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_checkins.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_s4k_pools.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_resale_min_capacity.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_s4k_listings.sql"

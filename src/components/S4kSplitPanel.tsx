@@ -4,8 +4,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { fetchS4kPools, setS4kSplit } from '../lib/marketplace/s4kNetwork';
-import { maxSplit, poolsAfter, splitError, splitForPercent, type PoolStatus } from '../lib/marketplace/s4kPools';
+import { fetchS4kPools, setResaleOptions, setS4kSplit } from '../lib/marketplace/s4kNetwork';
+import { maxSplit, poolsAfter, splitError, splitForPercent, type PoolStatus, type PrimarySource } from '../lib/marketplace/s4kPools';
 
 export default function S4kSplitPanel({ eventId }: { eventId: string }) {
   const [status, setStatus] = useState<PoolStatus | null>(null);
@@ -60,6 +60,21 @@ export default function S4kSplitPanel({ eventId }: { eventId: string }) {
     }));
   };
 
+  const saveOptions = async (opts: { listingQty?: number; primarySource?: PrimarySource; rebalance?: boolean }) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await setResaleOptions(eventId, opts);
+      const next = await fetchS4kPools(eventId);
+      if (next) seed(next);
+      setMsg({ text: 'Saved. Albert sees the new listings within a minute.', ok: true });
+    } catch (err) {
+      setMsg({ text: (err as Error)?.message?.replace(/^exos_set_resale_options: /, '') || 'Not saved.', ok: false });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
     setBusy(true);
     setMsg(null);
@@ -84,6 +99,41 @@ export default function S4kSplitPanel({ eventId }: { eventId: string }) {
           once; raising it only takes seats that are still free.
         </p>
       </div>
+      <div className="space-y-2 border-t border-white/10 pt-3">
+        <p className="type text-xs text-white/60">
+          S4K gets three listings per ticket type (through Albert), each refilled from S4K's seats as it sells.
+          {status.rebalance
+            ? ` When S4K runs short, it takes more from Exos + Eventbrite until one listing (${status.listingQty}) is left there, for ${status.primarySource === 'eventbrite' ? 'Eventbrite' : 'Exos'}.`
+            : ' Rebalancing is off: S4K only sells what you give it.'}
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="type text-[11px] text-white/60 flex items-center gap-2">
+            Tickets per listing
+            <input aria-label="Tickets per listing" inputMode="numeric" defaultValue={status.listingQty} key={`q${status.listingQty}`}
+              onBlur={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isInteger(v) && v >= 1 && v <= 50 && v !== status.listingQty) void saveOptions({ listingQty: v });
+              }}
+              className="w-14 bg-transparent border border-white/20 px-2 py-1 text-xs text-white" />
+          </label>
+          <label className="type text-[11px] text-white/60 flex items-center gap-2">
+            <input type="checkbox" checked={status.rebalance} disabled={busy}
+              onChange={(e) => void saveOptions({ rebalance: e.target.checked })} className="accent-brand-primary" />
+            Refill S4K from Exos + Eventbrite
+          </label>
+          {status.eventbriteLinked && (
+            <label className="type text-[11px] text-white/60 flex items-center gap-2">
+              Primary QR source
+              <select value={status.primarySource} disabled={busy}
+                onChange={(e) => void saveOptions({ primarySource: e.target.value as PrimarySource })}
+                className="bg-black border border-white/20 px-2 py-1 text-xs text-white">
+                <option value="exos">Exos</option>
+                <option value="eventbrite">Eventbrite</option>
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="s4k-pct" className="type text-[11px] text-white/60">Give S4K</label>
         <input id="s4k-pct" inputMode="numeric" value={pct} onChange={(e) => setPct(e.target.value.replace(/[^0-9]/g, '').slice(0, 3))}
@@ -102,6 +152,7 @@ export default function S4kSplitPanel({ eventId }: { eventId: string }) {
               <th className="py-1 pr-3 font-normal">Capacity</th>
               <th className="py-1 pr-3 font-normal">S4K seats</th>
               <th className="py-1 pr-3 font-normal">S4K left</th>
+              <th className="py-1 pr-3 font-normal">Listings</th>
               <th className="py-1 font-normal">Exos + Eventbrite free</th>
             </tr>
           </thead>
@@ -135,6 +186,7 @@ export default function S4kSplitPanel({ eventId }: { eventId: string }) {
                     )}
                   </td>
                   <td className="py-1.5 pr-3">{after.s4k}</td>
+                  <td className="py-1.5 pr-3">{t.listings.length ? t.listings.join(' · ') : '—'}</td>
                   <td className="py-1.5">{after.shared ?? 'no cap'}</td>
                 </tr>
               );
