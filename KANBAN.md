@@ -136,8 +136,8 @@ Easiest first. ✅ = done in this pass.
 20. ✅ Order total (tickets + add-ons) before Stripe.
 21. ✅ Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
 22. ✅ Door times in the event's time zone, not the browser's.
-23. Promoter `/l/…` link previews show the org, not the promoter; no-image fallback card size.
-24. Ads / catalog / audience panels: say when they're live only once the operator deploys them.
+23. ✅ Promoter `/l/…` link previews show the org, not the promoter; no-image fallback card size.
+24. ✅ Ads / catalog / audience panels: say when they're live only once the operator deploys them.
 
 **Tier 4, bigger**
 25. Guests can't use a promo / presale code or join a waitlist without signing in.

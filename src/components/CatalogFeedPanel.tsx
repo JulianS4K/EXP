@@ -2,6 +2,7 @@
 // The feed itself is public (exos-catalog-feed reads only what the event pages
 // show), so any org member may see and copy the links.
 
+import { useEffect, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { catalogFeedLinks } from '../lib/audienceCsv';
@@ -16,6 +17,19 @@ function functionsBase(): string {
 export default function CatalogFeedPanel({ orgSlug }: { orgSlug: string }) {
   const { toast } = useToast();
   const links = catalogFeedLinks(functionsBase(), orgSlug);
+  const probe = links[0]?.url ?? '';
+  // Is the feed up on this install? A HEAD request (no body); 404 = not deployed.
+  const [live, setLive] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!probe) return undefined;
+    let alive = true;
+    fetch(probe, { method: 'HEAD' })
+      .then((r) => alive && setLive(r.status !== 404))
+      .catch(() => alive && setLive(null));
+    return () => {
+      alive = false;
+    };
+  }, [probe]);
   if (!links.length) return null;
 
   const copy = (url: string) => {
@@ -34,6 +48,11 @@ export default function CatalogFeedPanel({ orgSlug }: { orgSlug: string }) {
         Center); it refreshes itself. Item ids are event ids, the same ids your pixels send.
         Prices are all-in; links carry <code className="font-mono">utm_campaign=catalog</code>.
       </p>
+      {live === false && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+          The feed isn't live on this Exos install yet, so these links don't answer. Add them once it is.
+        </p>
+      )}
       <ul className="space-y-3">
         {links.map((l) => (
           <li key={l.platform}>

@@ -6,7 +6,7 @@ import crypto from "crypto";
 import fs from "fs";
 import { securityHeaders } from "./src/lib/hosting/headers";
 import { isLinkCrawler } from "./src/lib/hosting/crawler";
-import { buildLlmsTxt, buildPreviewPage, buildSitemap, inject, injectBody, previewTarget, type PublicReader } from "./src/lib/hosting/seo";
+import { buildLlmsTxt, buildPreviewPage, buildSitemap, inject, injectBody, previewTarget, type PromoterReader, type PublicReader } from "./src/lib/hosting/seo";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,6 +146,7 @@ async function startServer() {
   // Anon key + the exos_public_* projections only: published events, public
   // tiers, public orgs. Nothing here can read private data.
   let reader: PublicReader | null | undefined;
+  let promoterReader: PromoterReader | undefined;
   const getReader = async (): Promise<PublicReader | null> => {
     if (reader !== undefined) return reader;
     const sbUrl = process.env.VITE_SUPABASE_URL;
@@ -161,6 +162,12 @@ async function startServer() {
       const { data, error } = await q.limit(limit);
       if (error) throw error;
       return (data ?? []) as unknown as Array<Record<string, unknown>>;
+    };
+    promoterReader = async (orgSlug, code) => {
+      const { data, error } = await sb.rpc('exos_public_promoter', { p_org_slug: orgSlug, p_code: code });
+      if (error || !data) return null;
+      const name = (data as { promoter?: { name?: unknown } }).promoter?.name;
+      return typeof name === 'string' && name.trim() ? name.trim() : null;
     };
     return reader;
   };
@@ -287,7 +294,7 @@ async function startServer() {
           const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?") + 1) : "";
           const target = previewTarget(page, query);
           const read = target ? await getReader() : null;
-          const preview = target && read ? await buildPreviewPage(read, target, publicBase(req), { content: aiDiscovery }) : null;
+          const preview = target && read ? await buildPreviewPage(read, target, publicBase(req), { content: aiDiscovery, promoter: promoterReader }) : null;
           if (preview) return res.type("html").send(injectBody(inject(getShell(), preview.tags), preview.body));
         } catch (err) {
           console.error(JSON.stringify({ lvl: "error", msg: "link preview failed", path: req.path, error: String(err) }));

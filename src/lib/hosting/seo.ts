@@ -24,11 +24,11 @@ const EVENT_RE = new RegExp(`^event/(${UUID})/?$`);
 const EVENT_SLUG_RE = new RegExp(`^e/(${SLUG})/?$`);
 const ORG_RE = new RegExp(`^o/(${SLUG})/?$`);
 const PROMOTER_RE = new RegExp(`^promoter/(${UUID})/[A-Za-z0-9_-]{1,64}/?$`);
-// Promoter link-in-bio (/l/:orgSlug/:code) previews as the organizer.
-const BIO_RE = new RegExp(`^l/(${SLUG})/[A-Za-z0-9_-]{1,64}/?$`);
+// Promoter link-in-bio (/l/:orgSlug/:code): the promoter's name and the organizer.
+const BIO_RE = new RegExp(`^l/(${SLUG})/([A-Za-z0-9_-]{1,64})/?$`);
 const UUID_RE = new RegExp(`^${UUID}$`);
 
-export type PreviewKind = 'event' | 'event_slug' | 'org' | 'promoter' | 'checkout_event' | 'checkout_tier';
+export type PreviewKind = 'event' | 'event_slug' | 'org' | 'bio' | 'promoter' | 'checkout_event' | 'checkout_tier';
 export type PreviewTarget = [PreviewKind, string];
 
 /** Which record a /bridge/<page>?<query> link previews, or null. */
@@ -36,7 +36,8 @@ export function previewTarget(page: string, query = ''): PreviewTarget | null {
   let m: RegExpMatchArray | null;
   if ((m = page.match(EVENT_RE))) return ['event', m[1].toLowerCase()];
   if ((m = page.match(EVENT_SLUG_RE))) return ['event_slug', m[1]];
-  if ((m = page.match(ORG_RE) || page.match(BIO_RE))) return ['org', m[1]];
+  if ((m = page.match(ORG_RE))) return ['org', m[1]];
+  if ((m = page.match(BIO_RE))) return ['bio', `${m[1]}/${m[2]}`];
   if ((m = page.match(PROMOTER_RE))) return ['promoter', m[1].toLowerCase()];
   if (page.replace(/\/+$/, '') === 'checkout') {
     const q = new URLSearchParams(query || '');
@@ -186,6 +187,8 @@ export function esc(v: unknown): string {
 
 function tags(title: string, desc: string, url: string, image: string, ogType: string, noindex: boolean, extra = ''): string {
   const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(image)];
+  // The fallback is the square app icon: a big card would crop it.
+  const card = image.endsWith('/bridge/icon-512.png') ? 'summary' : 'summary_large_image';
   const lines = [
     `<title>${t}</title>`,
     `<meta name="description" content="${d}" />`,
@@ -197,7 +200,7 @@ function tags(title: string, desc: string, url: string, image: string, ogType: s
     `<meta property="og:url" content="${u}" />`,
     `<meta property="og:image" content="${img}" />`,
     '<meta property="og:locale" content="en_US" />',
-    '<meta name="twitter:card" content="summary_large_image" />',
+    `<meta name="twitter:card" content="${card}" />`,
     `<meta name="twitter:title" content="${t}" />`,
     `<meta name="twitter:description" content="${d}" />`,
     `<meta name="twitter:image" content="${img}" />`,
@@ -258,6 +261,17 @@ export function orgTags(org: Row, canonicalUrl: string, defaultImage: string): s
   return tags(String(name).slice(0, 200), desc, canonicalUrl, image, 'website', false);
 }
 
+/** A promoter's link-in-bio: '<promoter> · <org>', the org's image, never indexed. */
+export function bioTags(promoterName: string, org: Row, canonicalUrl: string, defaultImage: string): string | null {
+  const name = str(org?.name);
+  const who = str(promoterName);
+  if (!name || !who) return null;
+  const marketing = org.marketing && typeof org.marketing === 'object' ? (org.marketing as Row) : {};
+  const theme = org.theme && typeof org.theme === 'object' ? (org.theme as Row) : {};
+  const image = str(marketing.shareImageUrl) ?? str(theme.logoUrl) ?? defaultImage;
+  return tags(`${who} · ${name}`.slice(0, 200), `Tickets from ${who} for ${name}'s events.`.slice(0, 300), canonicalUrl, image, 'website', true);
+}
+
 /** Swap the SSR_META block in the SPA shell for `tagBlock`; no-op on any miss. */
 export function inject(shell: string, tagBlock: string | null | undefined): string {
   if (!tagBlock) return shell;
@@ -282,6 +296,9 @@ export type PublicReader = (
   opts?: { gte?: { col: string; val: string }; order?: string },
 ) => Promise<Row[]>;
 
+/** The active promoter's display name for a /l/ link (exos_public_promoter), or null. */
+export type PromoterReader = (orgSlug: string, code: string) => Promise<string | null>;
+
 const EVENT_COLS =
   'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url';
 // Added by mig 20261005090000; read with a fallback until prod has it.
@@ -299,8 +316,10 @@ async function readWithFallback(
 }
 
 /** Resolve a preview target against the public views and return the tag block, or null. */
-export async function buildPreview(read: PublicReader, target: PreviewTarget, baseUrl: string): Promise<string | null> {
-  return (await buildPreviewPage(read, target, baseUrl))?.tags ?? null;
+export async function buildPreview(
+  read: PublicReader, target: PreviewTarget, baseUrl: string, promoter?: PromoterReader,
+): Promise<string | null> {
+  return (await buildPreviewPage(read, target, baseUrl, { promoter }))?.tags ?? null;
 }
 
 export interface PreviewPage {
@@ -321,14 +340,28 @@ const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capac
  * and FAQPage JSON-LD. Hidden (noindex) events never get the content.
  */
 export async function buildPreviewPage(
-  read: PublicReader, target: PreviewTarget, baseUrl: string, opts: { content?: boolean } = {},
+  read: PublicReader, target: PreviewTarget, baseUrl: string, opts: { content?: boolean; promoter?: PromoterReader } = {},
 ): Promise<PreviewPage | null> {
-  return previewParts(read, target, baseUrl, opts.content === true);
+  return previewParts(read, target, baseUrl, opts.content === true, opts.promoter);
 }
 
-async function previewParts(read: PublicReader, target: PreviewTarget, baseUrl: string, content: boolean): Promise<PreviewPage | null> {
+async function previewParts(
+  read: PublicReader, target: PreviewTarget, baseUrl: string, content: boolean, promoter?: PromoterReader,
+): Promise<PreviewPage | null> {
   let [kind, key] = target;
   const defaultImage = `${baseUrl}/bridge/icon-512.png`;
+
+  if (kind === 'bio') {
+    const [slug, code] = key.split('/');
+    const orgs = await read('exos_public_orgs', 'id,name,slug,theme,description,marketing', { col: 'slug', val: slug }, 1);
+    if (!orgs.length) return null;
+    let who: string | null = null;
+    try { who = promoter ? await promoter(slug, code) : null; } catch { who = null; }
+    const url = `${baseUrl}/bridge/l/${encodeURIComponent(slug)}/${encodeURIComponent(code)}`;
+    // Unknown or paused promoter: the organizer's card, still kept out of the index.
+    const t = who ? bioTags(who, orgs[0], url, defaultImage) : orgTags(orgs[0], url, defaultImage)?.replace('index, follow', 'noindex, nofollow');
+    return t ? { tags: t, body: null } : null;
+  }
 
   if (kind === 'org') {
     const orgs = await read('exos_public_orgs', 'id,name,slug,theme,description,marketing', { col: 'slug', val: key }, 1);
