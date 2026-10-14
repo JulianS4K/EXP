@@ -173,7 +173,8 @@ BEGIN
   ASSERT NOT has_table_privilege('authenticated', 'public.exos_platform_settings', 'SELECT'), 'R8: settings';
   ASSERT NOT has_function_privilege('authenticated', 'public.exos_event_max_capacity(uuid)', 'EXECUTE'), 'R8: max capacity';
   ASSERT NOT has_function_privilege('authenticated', 'public.exos_resale_unlocked(uuid)', 'EXECUTE'), 'R8: unlocked';
-  ASSERT has_function_privilege('anon', 'public.exos_resale_min_capacity()', 'EXECUTE'), 'R8: the number is public';
+  ASSERT NOT has_function_privilege('anon', 'public.exos_resale_min_capacity()', 'EXECUTE'), 'R8: not anon (definer)';
+  ASSERT has_function_privilege('authenticated', 'public.exos_resale_min_capacity()', 'EXECUTE'), 'R8: the number';
 END $$;
 
 \echo 'test_resale_min_capacity: all passed'

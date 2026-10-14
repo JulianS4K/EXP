@@ -76,8 +76,8 @@ RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, p
                                THEN (value #>> '{}')::int END
                      FROM public.exos_platform_settings WHERE key = 'resale_min_capacity'), 250)
 $$;
-REVOKE ALL ON FUNCTION public.exos_resale_min_capacity() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.exos_resale_min_capacity() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exos_resale_min_capacity() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_resale_min_capacity() TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.exos_event_max_capacity(p_event_id uuid)
 RETURNS integer
