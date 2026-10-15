@@ -14,7 +14,7 @@ import {
 const REF_HELP: Record<SyncProvider, { label: string; placeholder: string; missing: string }> = {
   pretix: { label: 'pretix event link or short name', placeholder: 'https://pretix.eu/myclub/spring/', missing: 'Paste the pretix event link or its short name.' },
   hievents: { label: 'hi.events check-in list link', placeholder: 'https://…/check-in/cil_…', missing: 'Paste the hi.events check-in list link.' },
-  luma: { label: 'Luma event manage link or event id', placeholder: 'https://luma.com/event/manage/evt-…', missing: 'Paste the Luma manage link (it has the evt-… id).' },
+  luma: { label: 'Luma event link', placeholder: 'https://luma.com/my-event', missing: 'Paste the Luma event link (or its evt-… id).' },
 };
 
 const BTN = 'type text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary disabled:opacity-40';
@@ -174,8 +174,8 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
               )}
               {syncProvider === 'luma' && (
                 <p className="type text-[11px] text-white/40">
-                  Open the event in Luma's Manage view and paste that link (it has the evt-… id). Luma ticket QR codes
-                  scan at the Exos door; pending and waitlisted guests show as not admitted.
+                  Paste the event's Luma link; the event must be on the calendar whose API key you saved. Luma ticket
+                  QR codes scan at the Exos door; pending and waitlisted guests show as not admitted.
                 </p>
               )}
               <button type="button" onClick={() => void link()} disabled={busy || !ref.trim()} className={BTN}>Link and sync</button>

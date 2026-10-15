@@ -99,7 +99,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!org) return json({ error: "event not found" }, 404, cors);
       const check = await checkRef(sb, org, provider, ref);
       if (!check.ok) return json({ error: check.error }, 400, cors);
-      const r = await sbUser.rpc("exos_backend_link", { p_event_id: event, p_provider: provider, p_ref: ref, p_name: check.name ?? null });
+      // Luma accepts the public event link too; the link stores the evt- id it resolves to.
+      const r = await sbUser.rpc("exos_backend_link", { p_event_id: event, p_provider: provider, p_ref: check.id ?? ref, p_name: check.name ?? null });
       if (r.error) return rpcError(r.error, cors);
       const sync = await syncOne(sb, event);
       return json({ ...(r.data as object), sync }, 200, cors);
@@ -155,7 +156,7 @@ async function providerConfig(sb: SupabaseClient, org: string, provider: string)
   return data as { config: Record<string, unknown>; secret: string | null } | null;
 }
 
-async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: string): Promise<{ ok: boolean; id?: string; name?: string; error?: string }> {
   const c = await providerConfig(sb, org, provider);
   if (!c) return { ok: false, error: `Connect ${PROVIDER_NAME[provider]} in Integrations first.` };
   if (provider === "luma") {

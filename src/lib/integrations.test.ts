@@ -31,7 +31,9 @@ describe('integrations', () => {
     expect(refFromLink('hievents', 'not a link')).toBeNull();
     expect(refFromLink('luma', 'https://luma.com/event/manage/evt-AbC123xyz/guests')).toBe('evt-AbC123xyz');
     expect(refFromLink('luma', 'evt-AbC123xyz')).toBe('evt-AbC123xyz');
-    expect(refFromLink('luma', 'https://luma.com/my-party')).toBeNull();
+    expect(refFromLink('luma', 'https://luma.com/my-party')).toBe('my-party');
+    expect(refFromLink('luma', 'https://example.com/my-party')).toBeNull();
+    expect(refFromLink('luma', 'https://luma.com/user/someone')).toBeNull();
   });
 
   it('luma: an API key, no other fields; a backend that syncs to the door', () => {

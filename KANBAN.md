@@ -121,8 +121,10 @@
 8. hi.events rotating QR codes can't be checked at the Exos door (found by name instead).
 9. Custom domains need the operator to add each verified domain to the web host for HTTPS.
 10. ✅ Luma as a ticket backend (operator ask 2026-10-15): calendar API key in Integrations, event linked by its
-    evt- id, guests synced read-only to the door with the Luma QR key (`_shared/backends/luma.ts`). Not yet run
-    against a live Luma calendar: the build sandbox can't reach luma.com. First real link = the check.
+    public link or evt- id, guests synced read-only to the door with the Luma QR key (`_shared/backends/luma.ts`).
+    Built against Luma's openapi.json (calendars/get, entities/lookup, events/get, events/guests/list); not yet
+    run against a live calendar (the build sandbox can't reach luma.com). Luma also has guest/event/ticket write
+    endpoints and webhooks: none are used (upstream read-only).
 
 ## Public-sector RFP readiness 2026-10-15 (from the open-RFP research)
 

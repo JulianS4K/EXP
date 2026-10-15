@@ -63,7 +63,7 @@ export const PROVIDERS: ProviderInfo[] = [
     blurb: 'Sell on your Luma calendar. Exos reads each linked event\'s guests for the door; nothing is written back.',
     fields: [],
     secretLabel: 'API key',
-    secretHelp: 'Luma → your calendar → Settings → Developer → API keys (needs Luma Plus; one key per calendar).',
+    secretHelp: 'Luma → your calendar → Settings → Developer → API keys (needs Luma Plus; one key per calendar). Exos only reads with it.',
     docsUrl: 'https://docs.luma.com/reference/getting-started-with-your-api',
   },
   {
@@ -176,11 +176,23 @@ export const BACKEND_LABEL: Record<TicketBackend, string> = {
 export const parseBackend = (v: unknown): TicketBackend =>
   v === 'eventbrite' || v === 'pretix' || v === 'hievents' || v === 'luma' ? v : 'exos';
 
-/** The pretix event short name, hi.events check-in list id or Luma event id
- *  (evt-…, from the event's manage link) from a pasted link (or the id itself). */
+/** The pretix event short name, hi.events check-in list id or Luma event
+ *  (evt-… from any Luma link, or the slug of its public link) from a pasted
+ *  link (or the id itself). */
 export function refFromLink(provider: SyncProvider, input: string): string | null {
   const s = input.trim();
-  if (provider === 'luma') return s.match(/\bevt-[A-Za-z0-9]{4,40}\b/)?.[0] ?? null;
+  if (provider === 'luma') {
+    const evt = s.match(/\bevt-[A-Za-z0-9]{4,40}\b/)?.[0];
+    if (evt) return evt;
+    // A public event link (luma.com/<slug>): the server resolves the slug with Luma's lookup.
+    try {
+      const u = new URL(s);
+      const parts = u.pathname.split('/').filter(Boolean);
+      return /(^|\.)(luma\.com|lu\.ma)$/.test(u.hostname) && parts.length === 1 && /^[A-Za-z0-9._-]{3,64}$/.test(parts[0]) ? parts[0] : null;
+    } catch {
+      return null;
+    }
+  }
   if (/^[A-Za-z0-9._-]{1,64}$/.test(s)) return s;
   try {
     const parts = new URL(s).pathname.split('/').filter(Boolean);

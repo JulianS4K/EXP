@@ -3,8 +3,9 @@
 // Guests -> one door row per guest. A Luma ticket's QR code is a link,
 // https://luma.com/check-in/<evt-…>?pk=<g-…>; the pk (the guest key) is the
 // code, and the door scanner already reads query values out of scanned links.
-// API: https://public-api.luma.com/v1  user/get-self, event/get,
-//      event/get-guests?event_id=…&pagination_cursor=…  (docs.luma.com)
+// API (public-api.luma.com/openapi.json): calendars/get, entities/lookup,
+//      events/get, events/guests/list?event_id=…&pagination_cursor=…
+//      Rate limit 200 requests / minute per calendar key.
 import { type BackendRow, joinName } from "./rows.ts";
 
 type Fetch = typeof fetch;
@@ -33,23 +34,20 @@ export function lumaKey(qr: unknown): string | null {
   }
 }
 
-/** One get-guests entry (legacy {guest: {…}} or flat) -> a door row. */
-export function guestRow(entry: any): BackendRow | null {
-  const g = entry?.guest && typeof entry.guest === "object" ? entry.guest : entry;
-  const id = g?.api_id ?? g?.id ?? entry?.api_id;
+/** One events/guests/list entry (the Guest schema) -> a door row. */
+export function guestRow(g: any): BackendRow | null {
+  const id = g?.id;
   if (typeof id !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(id)) return null;
-  const status = String(g.approval_status ?? "approved");
+  const status = String(g.approval_status ?? "");
   const reason = status === "approved" || status === "session" ? undefined : (VOID_REASON[status] ?? "not approved");
-  const tickets: any[] = Array.isArray(g.event_tickets) ? g.event_tickets : g.event_ticket ? [g.event_ticket] : [];
-  const live = tickets.filter((t) => t && t.is_canceled !== true && t.cancelled !== true);
-  const type = live.map((t) => t?.name ?? t?.ticket_type_name).find((n) => typeof n === "string" && n.trim());
-  const ticket = typeof type === "string" ? `${type.trim().slice(0, 70)}${live.length > 1 ? ` ×${live.length}` : ""}` : null;
-  const email = g.user_email ?? g.email;
+  const tickets: any[] = Array.isArray(g.event_tickets) ? g.event_tickets : [];
+  const type = tickets.map((t) => t?.name).find((n) => typeof n === "string" && n.trim());
+  const ticket = typeof type === "string" ? `${type.trim().slice(0, 70)}${tickets.length > 1 ? ` ×${tickets.length}` : ""}` : null;
   return {
     ref: id,
-    code: lumaKey(g.check_in_qr_code) ?? lumaKey(g.guest_key ?? g.key),
-    name: joinName(g.user_name ?? g.name) ?? joinName(g.user_first_name ?? g.first_name, g.user_last_name ?? g.last_name),
-    email: typeof email === "string" && email ? email : null,
+    code: lumaKey(g.check_in_qr_code),
+    name: joinName(g.user_name) ?? joinName(g.user_first_name, g.user_last_name),
+    email: typeof g.user_email === "string" && g.user_email ? g.user_email : null,
     ticket,
     void: reason !== undefined,
     ...(reason !== undefined ? { reason } : {}),
@@ -66,35 +64,44 @@ function refused(status: number): string | null {
   return null;
 }
 
-/** Whose key it is: GET user/get-self. */
+/** Which calendar the key belongs to: GET calendars/get. */
 export async function lumaWhoAmI(f: Fetch, key: string): Promise<{ ok: boolean; name?: string; error?: string }> {
-  const r = await f(`${LUMA_API}/user/get-self`, { method: "GET", headers: headers(key), redirect: "manual" });
+  const r = await f(`${LUMA_API}/calendars/get`, { method: "GET", headers: headers(key), redirect: "manual" });
   if (!r.ok) return { ok: false, error: refused(r.status) ?? `Luma answered ${r.status}.` };
   const b = await r.json().catch(() => ({}));
-  const u = b?.user ?? b;
-  const name = [u?.name, u?.email].find((x) => typeof x === "string" && x);
-  return { ok: true, name: typeof name === "string" ? name : "Luma calendar" };
+  return { ok: true, name: typeof b?.name === "string" && b.name ? b.name.slice(0, 120) : "Luma calendar" };
 }
 
-/** The event's name: proves the id is on this key's calendar. */
-export async function lumaEvent(f: Fetch, key: string, eventId: string): Promise<{ ok: boolean; name?: string; error?: string }> {
-  if (!LUMA_EVENT.test(eventId)) return { ok: false, error: "A Luma event id starts with evt-." };
-  const q = new URLSearchParams({ event_id: eventId, api_id: eventId });
-  const r = await f(`${LUMA_API}/event/get?${q}`, { method: "GET", headers: headers(key), redirect: "manual" });
-  if (r.status === 404 || r.status === 400) return { ok: false, error: "Luma has no event with that id on this calendar." };
+/** The event (by evt- id, or by its public slug via entities/lookup), and
+ *  only if this key's calendar manages it: the guest list needs manage access. */
+export async function lumaEvent(f: Fetch, key: string, ref: string): Promise<{ ok: boolean; id?: string; name?: string; error?: string }> {
+  let id = ref;
+  if (!LUMA_EVENT.test(ref)) {
+    const q = new URLSearchParams({ slug: ref });
+    const r = await f(`${LUMA_API}/entities/lookup?${q}`, { method: "GET", headers: headers(key), redirect: "manual" });
+    if (!r.ok) return { ok: false, error: refused(r.status) ?? `Luma answered ${r.status}.` };
+    const b = await r.json().catch(() => ({}));
+    const e = b?.entity;
+    if (e?.type !== "event" || typeof e?.event?.id !== "string" || !LUMA_EVENT.test(e.event.id)) {
+      return { ok: false, error: "Luma has no event at that link." };
+    }
+    id = e.event.id;
+  }
+  const r = await f(`${LUMA_API}/events/get?${new URLSearchParams({ event_id: id })}`, { method: "GET", headers: headers(key), redirect: "manual" });
+  if (r.status === 404 || r.status === 400) return { ok: false, error: "Luma has no event with that id." };
   if (!r.ok) return { ok: false, error: refused(r.status) ?? `Luma answered ${r.status}.` };
   const b = await r.json().catch(() => ({}));
-  const name = b?.event?.name ?? b?.name;
-  return { ok: true, name: typeof name === "string" && name ? name.slice(0, 200) : eventId };
+  if (b?.access !== "manage") return { ok: false, error: "That event isn't managed by this Luma calendar, so its guests can't be read." };
+  return { ok: true, id, name: typeof b?.name === "string" && b.name ? b.name.slice(0, 200) : id };
 }
 
 export interface LumaPage { rows: BackendRow[]; next: string | null; status: number }
 
 export async function lumaGuestsPage(f: Fetch, key: string, eventId: string, cursor: string | null): Promise<LumaPage> {
-  // event_api_id is the older name of the same parameter.
-  const q = new URLSearchParams({ event_id: eventId, event_api_id: eventId, pagination_limit: "50" });
+  // Oldest first, so pages stay stable while new guests register mid-pass.
+  const q = new URLSearchParams({ event_id: eventId, pagination_limit: "100", sort_column: "created_at", sort_direction: "asc" });
   if (cursor) q.set("pagination_cursor", cursor);
-  const r = await f(`${LUMA_API}/event/get-guests?${q}`, { method: "GET", headers: headers(key), redirect: "manual" });
+  const r = await f(`${LUMA_API}/events/guests/list?${q}`, { method: "GET", headers: headers(key), redirect: "manual" });
   if (!r.ok) return { rows: [], next: null, status: r.status };
   const b = await r.json().catch(() => ({}));
   const entries = Array.isArray(b?.entries) ? b.entries : [];

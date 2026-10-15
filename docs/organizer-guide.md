@@ -321,8 +321,8 @@ You can keep your ticket shop where it is and use Exos for the event page, marke
   - **hi.events**: your hi.events address, then a check-in list's share link (Check-in lists → share). No password
     is stored. Rotating QR codes can't be checked by Exos; those guests are found by name.
   - **Luma**: an API key for your calendar (Luma → calendar settings → Developer; Luma Plus, one key per
-    calendar). Paste the event's Manage link (it has the `evt-…` id). Approved guests' Luma QR codes scan at the
-    door; pending, invited, waitlisted and declined guests show as not admitted.
+    calendar). Paste the event's Luma link; the event has to be on that calendar. Approved guests' Luma QR codes
+    scan at the door; pending, invited, waitlisted and declined guests show as not admitted.
   - **Eventbrite**: as above (*Tickets sold somewhere else*).
 - Guests sync every 2 minutes from two days before the event (every 30 minutes before that) into a guest list
   named after the platform. **Sync now** on the panel pulls immediately. Nothing is written back.
