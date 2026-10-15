@@ -29,6 +29,26 @@ export interface GuestEntry {
    *  Eventbrite sync): the door refuses it. */
   voided?: boolean;
   voidReason?: string | null;
+  /** Checked in by the platform that sold it (mig 20261014120000: the
+   *  Eventbrite sync reads it, never writes it). Counts as one in. */
+  elsewhere?: Elsewhere | null;
+  /** That platform's own status word ("Attending", "Checked In", ...). */
+  ebStatus?: string | null;
+}
+
+export interface Elsewhere {
+  where: string;
+  at: string | null;
+  method: 'scan' | 'name' | null;
+}
+
+export function mapElsewhere(r: any): Elsewhere | null {
+  if (!r || typeof r !== 'object' || typeof r.where !== 'string') return null;
+  return {
+    where: r.where,
+    at: typeof r.at === 'string' ? r.at : null,
+    method: r.method === 'scan' || r.method === 'name' ? r.method : null,
+  };
 }
 
 export interface GuestListMeta {
@@ -58,6 +78,8 @@ export function mapGuestEntry(r: any): GuestEntry {
     source: r.source ?? null,
     voided: r.voided === true,
     voidReason: r.void_reason ?? null,
+    elsewhere: mapElsewhere(r.elsewhere),
+    ebStatus: typeof r.eb_status === 'string' ? r.eb_status : null,
   };
 }
 
@@ -72,8 +94,12 @@ export function mapGuestListMeta(r: any): GuestListMeta {
 }
 
 export const partySize = (e: Pick<GuestEntry, 'plusOnes'>): number => 1 + Math.max(0, e.plusOnes);
-export const remainingFor = (e: Pick<GuestEntry, 'plusOnes' | 'arrived'>): number =>
-  Math.max(0, partySize(e) - e.arrived);
+/** Heads in: the Exos door's arrivals plus one when the selling platform
+ *  checked the guest in (never more than the party). */
+export const headsIn = (e: Pick<GuestEntry, 'plusOnes' | 'arrived' | 'elsewhere'>): number =>
+  Math.min(partySize(e), e.arrived + (e.elsewhere ? 1 : 0));
+export const remainingFor = (e: Pick<GuestEntry, 'plusOnes' | 'arrived' | 'elsewhere'>): number =>
+  Math.max(0, partySize(e) - headsIn(e));
 
 export interface ListCounts {
   entries: number;
@@ -86,7 +112,7 @@ export function listCounts(entries: GuestEntry[]): ListCounts {
   let arrived = 0;
   for (const e of entries) {
     heads += partySize(e);
-    arrived += e.arrived;
+    arrived += headsIn(e);
   }
   return { entries: entries.length, heads, arrived };
 }
@@ -97,11 +123,11 @@ export function countsByList(entries: GuestEntry[], listIds: string[] = []): Rec
   const out: Record<string, ListCounts> = {};
   for (const id of listIds) out[id] = { entries: 0, heads: 0, arrived: 0 };
   for (const e of entries) {
-    if (e.voided && e.arrived === 0) continue;
+    if (e.voided && headsIn(e) === 0) continue;
     const c = (out[e.listId] ??= { entries: 0, heads: 0, arrived: 0 });
     c.entries += 1;
     c.heads += partySize(e);
-    c.arrived += e.arrived;
+    c.arrived += headsIn(e);
   }
   return out;
 }
@@ -165,7 +191,7 @@ export function searchGuests(entries: GuestEntry[], query: string, limit = 50): 
   return scored.slice(0, limit).map((s) => s.e);
 }
 
-export type ArrivalRefusal = 'over' | 'used' | 'bad-count' | 'voided';
+export type ArrivalRefusal = 'over' | 'used' | 'bad-count' | 'voided' | 'checked-in-elsewhere';
 
 export interface ArrivalResult {
   ok: boolean;
@@ -181,7 +207,7 @@ export function applyArrival(e: GuestEntry, count: number, nowIso = new Date().t
   const left = remainingFor(e);
   if (e.voided) return { ok: false, reason: 'voided', remaining: 0 };
   if (!Number.isInteger(count) || count < 1) return { ok: false, reason: 'bad-count', remaining: left };
-  if (left === 0) return { ok: false, reason: 'used', remaining: 0 };
+  if (left === 0) return { ok: false, reason: e.elsewhere && e.arrived === 0 ? 'checked-in-elsewhere' : 'used', remaining: 0 };
   if (count > left) return { ok: false, reason: 'over', remaining: left };
   const next = { ...e, arrived: e.arrived + count, arrivedAt: e.arrivedAt ?? nowIso };
   return { ok: true, entry: next, remaining: left - count };
@@ -215,6 +241,19 @@ export function overlayPending(entries: GuestEntry[], queue: PendingArrival[]): 
   );
 }
 
+/** What the door says about a guest the selling platform already checked in. */
+export function elsewhereText(e: Pick<GuestEntry, 'guestName' | 'elsewhere'>): string {
+  const x = e.elsewhere;
+  const where = x?.where || 'the platform that sold it';
+  let when = '';
+  if (x?.at) {
+    const d = new Date(x.at);
+    if (!Number.isNaN(d.getTime())) when = ` at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  }
+  const how = x?.method === 'name' ? ' (by name)' : x?.method === 'scan' ? ' (scanned)' : '';
+  return `${e.guestName}: already checked in on ${where}${when}${how}.`;
+}
+
 /** What the door says about a voided guest. */
 export function voidedText(e: Pick<GuestEntry, 'guestName' | 'source' | 'voidReason'>): string {
   return `${e.guestName}: not valid. The ticket was ${e.voidReason || 'refunded'} on ${e.source || 'the platform that sold it'}.`;
@@ -238,6 +277,8 @@ export function arrivalReasonText(reason: string, remaining?: number): string {
       return "You're not assigned to scan this event.";
     case 'voided':
       return 'Not valid: this ticket was refunded or cancelled.';
+    case 'checked-in-elsewhere':
+      return 'Already checked in on the platform that sold it.';
     default:
       return 'Could not check this guest in.';
   }

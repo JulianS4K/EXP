@@ -84,7 +84,8 @@ export default function DeveloperSettings({ orgId, canEdit }: { orgId: string; c
     setHookTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   return (
-    <fieldset className="border border-white/10 p-5 space-y-6">
+    // Its own dark panel: the settings page around it is light.
+    <fieldset className="bg-[#111] rounded-2xl border border-white/10 p-5 space-y-6">
       <legend className="text-[10px] text-white/60 font-black uppercase tracking-widest px-2">
         Developer — API &amp; webhooks
       </legend>

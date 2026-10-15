@@ -65,7 +65,32 @@ describe('toApplyRow', () => {
       id: '9001', status: 'Attending', ticket_class_name: 'GA ',
       profile: { name: 'Ada Lovelace', email: 'ada@x.com' },
       barcodes: [{ barcode: '7001 0001', status: 'unused' }],
-    })).toEqual({ ref: '9001', code: '7001 0001', name: 'Ada Lovelace', email: 'ada@x.com', ticket: 'GA', void: false });
+    })).toEqual({
+      ref: '9001', code: '7001 0001', name: 'Ada Lovelace', email: 'ada@x.com', ticket: 'GA', void: false,
+      checked_in: false, status: 'Attending', barcodes: [{ code: '7001 0001', status: 'unused' }],
+    });
+  });
+  it('carries Eventbrite check-ins: their flag, or a used barcode', () => {
+    expect(toApplyRow({ id: '11', checked_in: true })?.checked_in).toBe(true);
+    const r = toApplyRow({
+      id: '12', status: 'Checked In', changed: '2026-10-14T21:05:00Z',
+      barcodes: [{ barcode: 'B1', status: 'used', checkin_type: 1, changed: '2026-10-14T21:04:30Z' }],
+    });
+    expect(r).toMatchObject({
+      checked_in: true, status: 'Checked In', changed: '2026-10-14T21:05:00Z',
+      barcodes: [{ code: 'B1', status: 'used', checkin_type: 1, changed: '2026-10-14T21:04:30Z' }],
+    });
+    expect(toApplyRow({ id: '13', barcodes: [{ barcode: 'B2', status: 'unused' }] })?.checked_in).toBe(false);
+  });
+  it('keeps every barcode with a known status, drops the rest', () => {
+    const r = toApplyRow({
+      id: '14', refunded: true,
+      barcodes: [{ barcode: 'R1', status: 'refunded', checkin_type: 0 }, { barcode: 'X', status: 'weird' },
+                 { barcode: 'U1', status: 'USED', checkin_type: 7 as never }],
+    });
+    expect(r?.barcodes).toEqual([{ code: 'R1', status: 'refunded', checkin_type: 0 }, { code: 'U1', status: 'used' }]);
+    expect(r?.refunded).toBe(true);
+    expect(r?.cancelled).toBeUndefined();
   });
   it('voids refunded, cancelled, not attending, deleted, all-barcodes-refunded', () => {
     expect(toApplyRow({ id: '1', refunded: true })?.reason).toBe('refunded');

@@ -131,7 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.signOut({ scope });
     if (error && scope === 'global') await supabase.auth.signOut({ scope: 'local' });
     // The door scanner caches every ticket's barcode secret + attendee names
-    // for offline use; never leave that on a shared device after sign-out.
+    // for offline use, and ticket pages keep their last copy (lib/passCache,
+    // registry_pass_*); never leave that on a shared device after sign-out.
     // pending_updates_* (ticket ids only) stays so unsynced check-ins replay.
     try {
       const keys: string[] = [];

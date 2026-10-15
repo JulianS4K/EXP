@@ -22,6 +22,7 @@ import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
 import DoorSummaryPanel from '../components/DoorSummaryPanel';
 import DoorImport from '../components/DoorImport';
+import EventbriteSync from '../components/EventbriteSync';
 import WaitlistPanel from '../components/WaitlistPanel';
 import AnnouncementsPanel from '../components/AnnouncementsPanel';
 import RemindersPanel from '../components/RemindersPanel';
@@ -41,6 +42,8 @@ import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
 import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
+import AttendeeLookup from '../components/AttendeeLookup';
+import RefundAsksPanel from '../components/RefundAsksPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -331,6 +334,10 @@ export default function OrganizerEventReport() {
         </>)}
 
         {tab === 'attendees' && (<>
+        {/* One lookup across Exos tickets, Eventbrite and guest lists, in
+            Eventbrite's status words (mig 20261014120000). */}
+        <AttendeeLookup eventId={eventId!} canView={canAct} />
+
         {/* Access needs guests shared (mig 20260926090000). */}
         <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
 
@@ -350,7 +357,7 @@ export default function OrganizerEventReport() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                    <th className="py-2 font-black">Ticket</th>
+                    <th className="py-2 font-black">Attendee</th>
                     <th className="py-2 font-black">Tier</th>
                     <th className="py-2 font-black">Status</th>
                     <th className="py-2 font-black text-right">Action</th>
@@ -373,7 +380,10 @@ export default function OrganizerEventReport() {
                         key={t.id}
                         className={`border-b border-slate-50 last:border-b-0 ${isVoided ? 'opacity-40' : ''}`}
                       >
-                        <td className="py-2 text-slate-700 font-mono text-xs">{t.id.slice(0, 12)}…</td>
+                        <td className="py-2 text-slate-700">
+                          <span className="block text-sm">{t.attendeeName || t.buyerEmail || 'No name yet'}</span>
+                          <span className="block text-slate-400 font-mono text-[10px]">{t.id.slice(0, 8)}</span>
+                        </td>
                         <td className="py-2 text-slate-700">{t.tierName || 'Standard'}</td>
                         <td className="py-2">
                           <span className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest border rounded-full ${statusBadge.cls}`}>
@@ -421,6 +431,13 @@ export default function OrganizerEventReport() {
           )}
         </div>
 
+        {/* Buyers' refund requests (mig 20261015090000): refund or decline. */}
+        <RefundAsksPanel
+          eventId={event.id}
+          canAct={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+          onRefunded={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+        />
+
         {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
         <RefundPanel
           event={event}
@@ -452,6 +469,12 @@ export default function OrganizerEventReport() {
         {canAct && (
           <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
             <DoorImport eventId={event.id} />
+          </div>
+        )}
+        {/* Eventbrite link + sync, also on /door: organizers looked for it here. */}
+        {canAct && event.orgId && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
+            <EventbriteSync eventId={event.id} orgId={event.orgId} />
           </div>
         )}
         </>)}

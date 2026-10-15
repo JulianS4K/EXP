@@ -2,6 +2,8 @@ import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
+import { loadPasses, savePasses } from '../lib/passCache';
+import RefundAskCard from '../components/RefundAskCard';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
@@ -37,6 +39,8 @@ export default function TicketDetail() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
+  // Shown from the copy saved on this device (no signal): when it was saved.
+  const [savedCopyAt, setSavedCopyAt] = useState<number | null>(null);
   const [barcode, setBarcode] = useState('');
   // Signing failed (no secret / no Web Crypto). No unsigned fallback: the
   // door refuses those, so the pass says so instead.
@@ -78,6 +82,17 @@ export default function TicketDetail() {
   useEffect(() => {
     async function fetchData() {
       if (!id || !user) return;
+      // The copy on this device, for a door with no signal.
+      const useSavedCopy = (): boolean => {
+        const saved = loadPasses(user.uid, id);
+        if (!saved || !saved.tickets.length) return false;
+        setEvent(saved.event);
+        setTickets(saved.tickets);
+        const i = saved.tickets.findIndex((t) => t.id === id);
+        setCurrentIndex(i !== -1 ? i : 0);
+        setSavedCopyAt(saved.savedAt);
+        return true;
+      };
       try {
         const ticketData = await getTicket(id);
         if (ticketData) {
@@ -100,6 +115,8 @@ export default function TicketDetail() {
           };
           const sorted = [...allTickets].sort((a, b) => sortRank(a) - sortRank(b));
           setTickets(sorted);
+          setSavedCopyAt(null);
+          savePasses(user.uid, id, ticketData.event ?? null, sorted);
 
           // Default the carousel to the URL-matched ticket if it's
           // scannable; otherwise jump to the first scannable ticket
@@ -123,6 +140,9 @@ export default function TicketDetail() {
         }
       } catch (err) {
         console.error(err);
+        if (!useSavedCopy() && typeof navigator !== 'undefined' && navigator.onLine === false) {
+          toast({ kind: 'error', message: 'No connection, and this ticket has not been opened on this phone before.' });
+        }
       } finally {
         setLoading(false);
       }
@@ -263,6 +283,12 @@ export default function TicketDetail() {
           back to tickets
         </button>
 
+        {savedCopyAt !== null && (
+          <p role="status" className="type text-[11px] text-amber-300 border border-amber-300/30 bg-amber-300/5 px-3 py-2 mb-6">
+            No connection: showing the copy saved on this phone ({new Date(savedCopyAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}). The code still works at the door.
+          </p>
+        )}
+
         <div className="relative">
           <AnimatePresence mode="wait">
             <motion.div
@@ -370,7 +396,8 @@ export default function TicketDetail() {
                              Cancel the transfer to use this ticket again
                           </p>
                        </div>
-                    ) : (
+                    ) : qrUnlocked && (
+                       // No countdown while the code itself is still locked.
                        <div className="mt-7 flex flex-col items-center">
                           <p className="type text-[11px] text-black/60 uppercase tracking-widest">{t('ticket.expiresIn')}</p>
                           <p className="disp text-4xl text-black tracking-tight leading-none mt-1">00:{timeLeft.toString().padStart(2, '0')}</p>
@@ -514,6 +541,7 @@ export default function TicketDetail() {
                         mid-walk-up flips the screen within ~15s. The native
                         wallet buttons above are the add-on for holders who
                         want the ticket in Apple / Google Wallet. */}
+                    {qrUnlocked && (
                     <Link
                       to={`/wallet/pass/${currentTicket.id}`}
                       className="type flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white/60 py-4 text-[11px] uppercase tracking-widest hover:border-white hover:text-white transition-colors"
@@ -521,6 +549,7 @@ export default function TicketDetail() {
                       <Smartphone className="w-4 h-4 text-brand-primary" aria-hidden="true" />
                       open pass (fullscreen)
                     </Link>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => setShowShare(true)}
@@ -561,6 +590,8 @@ export default function TicketDetail() {
                         </button>
                       )}
                     </div>
+                    {/* Ask for a refund (the buyer only; hidden offline: it needs the server). */}
+                    {event?.id && savedCopyAt === null && <RefundAskCard eventId={event.id} ticketId={currentTicket.id} />}
                  </div>
               </div>
 

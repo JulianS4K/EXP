@@ -18,6 +18,16 @@ Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
 (`openapi/`), and a README with the endpoint map.
 
+**Resale needs a max capacity of 250** (operator rule 2026-10-14, mig
+`20261014140000`): the six marketplaces above and the S4K route are off for an
+event whose max capacity (its overall cap, never above what its capped ticket
+types add up to; else the capped types' sum) is under 250. Nothing can be
+allocated, ticked marketplaces make no event rows, the auto split plans
+nothing, S4K can't be chosen and the feed leaves the event out; an event that
+drops below 250 later has its pools planned to 0. Eventbrite isn't resale and
+isn't affected. The number is an operator setting (`exos_platform_settings`
+key `resale_min_capacity`, default 250).
+
 **Hard Rule #2 applies** (see `CLAUDE.md`): upstream ticketing APIs are
 read-only. Every endpoint is tagged below as **read** or **write**. A write
 (listing create/update/delete, sale fulfilment, account or webhook changes)

@@ -29,7 +29,7 @@ describe('previewTarget', () => {
     [`event/${EV.toUpperCase()}/`, '', ['event', EV]],
     ['e/fall-party', '', ['event_slug', 'fall-party']],
     ['o/brooklyn-nights', '', ['org', 'brooklyn-nights']],
-    ['l/brooklyn-nights/dj-kay', '', ['org', 'brooklyn-nights']],
+    ['l/brooklyn-nights/dj-kay', '', ['bio', 'brooklyn-nights/dj-kay']],
     ['l/brooklyn-nights/bad code', '', null],
     [`promoter/${EV}/dj-kay`, '', ['promoter', EV]],
     ['checkout', `event=${EV}&products=${TIER}:2`, ['checkout_event', EV]],
@@ -192,6 +192,28 @@ describe('buildPreview', () => {
     expect(await buildPreview(sb(), ['promoter', EV], base)).toContain('noindex');
     expect(await buildPreview(sb(), ['org', 'bk-nights'], base)).toContain('Brooklyn Nights');
     expect(await buildPreview(sb(), ['event', '33333333-3333-4333-8333-333333333333'], base)).toBeNull();
+  });
+
+  it('a promoter link previews as the promoter, never indexed', async () => {
+    const who = async (slug: string, code: string) => (slug === 'bk-nights' && code === 'kay' ? 'DJ Kay' : null);
+    const bio = await buildPreview(sb(), ['bio', 'bk-nights/kay'], base, who);
+    expect(bio).toContain('DJ Kay · Brooklyn Nights');
+    expect(bio).toContain('noindex');
+    expect(bio).toContain(`canonical" href="${base}/bridge/l/bk-nights/kay"`);
+    const paused = await buildPreview(sb(), ['bio', 'bk-nights/gone'], base, who);
+    expect(paused).toContain('Brooklyn Nights');
+    expect(paused).toContain('noindex');
+    expect(await buildPreview(sb(), ['bio', 'nope/kay'], base, who)).toBeNull();
+  });
+
+  it('no image: the small card, not a cropped icon', async () => {
+    expect(await buildPreview(sb(), ['event', EV], base)).toContain('twitter:card" content="summary"');
+    const withImg = fake({
+      exos_public_events: [{ id: EV, org_id: 'o1', name: 'Fall Party', image_url: 'https://cdn.x/p.jpg', starts_at: '2026-10-03T02:00:00Z' }],
+      exos_public_tiers: [],
+      exos_public_orgs: [],
+    });
+    expect(await buildPreview(withImg, ['event', EV], base)).toContain('summary_large_image');
   });
 
   it('returns null on misses', async () => {

@@ -75,8 +75,9 @@ await run('checkout link pre-fills tier, quantity and add-on; survives reload', 
   const check = async (label) => {
     await page.waitForTimeout(800);
     const body = await page.locator('body').innerText();
-    // VIP ($50) x 3 = $150; the default tier (GA $20) x 3 would be $60.
-    assert(/\$150/.test(body), label + ': total is VIP x 3 ($150), page shows ' + (body.match(/\$\d+(\.\d+)?/g) || []).join(','));
+    // The order total: VIP ($50) x 3 + 2 posters ($5) = $160 (GA x 3 would be $70).
+    assert(/\$160/.test(body), label + ': total is VIP x 3 + add-ons ($160), page shows ' + (body.match(/\$\d+(\.\d+)?/g) || []).join(','));
+    assert(/incl\. \$10(\.00)? of add-ons/i.test(body), label + ': says what the add-ons add');
     const posterRow = page.locator('div.border-2', { hasText: 'Poster' }).first();
     assert(/\b2\b/.test(await posterRow.innerText()), label + ': add-on quantity 2');
   };

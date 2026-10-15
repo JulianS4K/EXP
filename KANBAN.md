@@ -69,13 +69,100 @@
    (`/exos/events?updatedSince=`, `/exos/events/{id}/tickets`), one GA line per ticket type at free − 1 pack;
    S4K buys back with `POST /exos/events/{id}/orders` (idempotent; a sale Exos can't fill is rejected with a 409
    and logged, the marketplace penalty is S4K's); signed coalesced webhook as the secondary signal; org opt-in +
-   per-event route, one route at a time. No S4K fee for now (operator 2026-10-13: growth spend). Open: S4K's poll interval (sets the buffer), id mapping.
+   per-event route, one route at a time. No S4K fee for now (operator 2026-10-13: growth spend). The count is now
+   S4K's own pool (item 10). Open: id mapping.
 8. ✅ **Eventbrite inventory** (built 2026-10-13, mig `20261014110000`, not applied; `docs/marketplace/eventbrite/README.md`
    "Inventory"): an owner / manager maps each EXISTING Eventbrite ticket class to an Exos ticket type (Exos never
    creates ticket classes or events there); Eventbrite sales take Exos seats (refunds give them back, a sale with
    no seat left is counted as oversold); each class's capacity is set to Eventbrite sold + (free on Exos - one
    pack). The one write is Update a Ticket Class with `capacity` only, dry run unless the org's switch AND
    `EXOS_EVENTBRITE_WRITES=on`. Next: first live test on the test org; inventory-tier classes not supported.
+9. ✅ **Eventbrite check-ins at the Exos door + one status vocabulary** (built 2026-10-14, mig `20261014120000`,
+   not applied; `docs/marketplace/eventbrite/README.md` "Check-ins at the Exos door"): the sync reads Eventbrite's
+   `checked_in` and every barcode's status into their own tables (Eventbrite codes never mixed with Exos ticket
+   codes); the door, online and offline, refuses a guest Eventbrite already checked in. Exos states map to
+   Eventbrite's words (Attending / Checked In / Not Attending / Transferred); **Find an attendee** on the event
+   report searches Exos tickets, Eventbrite and guest lists in those words. Still a 2-minute window for a ticket
+   scanned on both apps.
+10. ✅ **Two inventory pools** (built 2026-10-14, mig `20261014130000`, not applied; `docs/marketplace/s4k-feed.md`
+   "The count"): on an S4K-route event the organizer gives S4K a number of seats per ticket type (or a % of each);
+   Exos + Eventbrite share the rest. S4K's pool is an allocation row the other pool can't sell; the feed shows
+   it exactly (no buffer); an S4K order takes seats from it only, a cancel returns them to it; leaving the route
+   releases its unsold seats. Replaces the shared count minus a buffer. Open: an auto split for the S4K pool
+   (like `20261014090000`'s 10% → 1 pack), and whether unsold S4K seats should come back to Exos before doors.
+11. ✅ **Resale unlocks at 250 capacity** (operator rule 2026-10-14, mig `20261014140000`, not applied;
+   `docs/marketplace/README.md`): StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats, TEvo and the S4K route
+   only for events with a max capacity of 250+; enforced in every resale entry point, shown in the event editors.
+   The number is an operator setting (`exos_platform_settings.resale_min_capacity`).
+12. ✅ **S4K listings for Albert** (operator design 2026-10-14, mig `20261014150000`, not applied;
+   `docs/marketplace/s4k-feed.md` "Listings for Albert"): Exos → Albert → S4K → Automatiq. Three listings per ticket
+   type (default 8 each, organizer-set), refilled from S4K's pool; when it runs short, rebalanced from Exos +
+   Eventbrite down to one listing set, which the primary QR source (Exos or Eventbrite) sells. A diff-synced
+   Realtime table read by Albert's linked integration user.
+13. ✅ **Catalog feed + MCP sell from Exos's own pool** (mig `20261014160000`): `exos_public_tiers.available`
+   (what an Exos checkout can take) drives the Meta / TikTok / Google catalog's in-stock and the MCP tools' "how
+   many left", so ads and assistants never send a buyer to seats held for S4K or a marketplace. The Meta catalog
+   feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
+   Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
+
+## Public-sector RFP readiness 2026-10-15 (from the open-RFP research)
+
+Few ticketing RFPs are open now; the next wave is fairs (Dec–Apr) and colleges (Jan–Mar), on 3–5 year terms.
+These are the pass/fail lines that keep coming up. Doing PCI now; the rest is parked until a target bid needs it.
+
+1. ✅ PCI DSS SAQ A (code side): `docs/pci.md`; the embed card page's CSP runs only our code and Stripe's (test
+   pins it); CI fails on high/critical runtime advisories; Dependabot weekly; runtime deps patched to 0 advisories.
+2. PCI operator steps: SAQ A + AOC in the Stripe Dashboard, Stripe's Level 1 AOC, MFA on every admin account,
+   quarterly external scan if Stripe's SAQ flow says it applies (`docs/pci.md` checklist). *(operator)*
+3. Parked: insurance (general liability + cyber / tech E&O, about $3–10k a year). *(operator)*
+4. Parked: VPAT / WCAG 2.1 AA audit (about $1–3k plus fixes); ADA Title II deadline April 2027 / 2028 for buyers.
+5. Parked: security packet (HECVAT Lite, Supabase + Stripe reports, a pen test) and an SLA / event-day support plan.
+6. Parked: reserved seating, season tickets, box-office card payments (Stripe Terminal) and ticket printing.
+7. Parked: agency payment gateways (e.g. TouchNet) and campus SSO (SAML).
+8. Parked: SOC 2 Type II (about $30–110k, 6–12 months): only when a target bid makes it pass/fail.
+
+## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
+
+Easiest first. ✅ = done in this pass.
+
+**Tier 1, copy and one-liners**
+1. ✅ Home day chips said "WEEKEND"/"SUNDAY" on any day: work them out from the date.
+2. ✅ Home header city hard-coded "NEW YORK". (kept: NYC is the launch market; the fake city-picker caret removed)
+3. ✅ Free tiers say "$0.00" / "Buy Tickets": say Free / Get free tickets.
+4. ✅ Promo field placeholder cut off on phone.
+5. ✅ Quantity −/+ buttons have no screen-reader labels.
+6. ✅ Internal words in organizer copy: Sprint 3/4, Lysted, "rename in a future sprint", raw owner UUID, vibepass.io slug prefix, "when white-label ships".
+7. ✅ Org settings S4K card still says "one shared count" (it's two pools now).
+8. ✅ Event report Money: "paid out by Stripe directly" shown when nothing is connected.
+
+**Tier 2, small UI fixes**
+9. ✅ Org settings Developer section: white text on a light background.
+10. ✅ Edit event: the Marketplaces heading overlaps its description.
+11. ✅ Create event: the browser's "fill out this field" bubble hides under the fixed header.
+12. ✅ Sold-out tier still shows the quantity stepper and promo field. (the code field stays: a code can unlock a sold-out event)
+13. ✅ Ticket page: the open-pass link and "code expires in" show while the QR is still locked.
+14. ✅ Contradictory sale copy: "You're live… on sale" for the organizer and "Available · 100 tickets" for the buyer while paid tiers can't sell (payments off).
+15. ✅ S4K: joining the network has no confirm; on the S4K route the direct marketplace boxes stay active.
+16. ✅ Waitlist panel hidden until someone joins.
+17. ✅ Event report Attendees lists ticket ids, not names.
+
+**Tier 3, logic**
+18. ✅ The 250-capacity resale rule counts a table as one seat, not its party size (client and server).
+19. ✅ Stripe Connect has no status: show "finish setup" / "charges on" / "payouts on" and a readable error.
+20. ✅ Order total (tickets + add-ons) before Stripe.
+21. ✅ Claim page (transfers, StubHub / S4K buyers): show the event, date, venue and who sent it.
+22. ✅ Door times in the event's time zone, not the browser's.
+23. ✅ Promoter `/l/…` link previews show the org, not the promoter; no-image fallback card size.
+24. ✅ Ads / catalog / audience panels: say when they're live only once the operator deploys them.
+
+**Tier 4, bigger**
+25. ✅ Guests can't use a promo / presale code or join a waitlist without signing in. (kept by design: codes and waitlists need an account so guessing and list-stuffing stay throttled; now one emailed code, and the waitlist form opens by itself after)
+26. ✅ Offline at the door: the ticket page never loads after a reload (keep the last copy on the device).
+27. ✅ Phone: door scanner below the fold, three offline banners at once, org settings tabs scroll sideways.
+28. ✅ Discoverability: Eventbrite mapping only in /door, scheduled pricing on the report, vouchers / add-ons only after create.
+29. ✅ Buyer refund request: the payer asks from the ticket within the event's refund policy; the organizer refunds (exos-refund, nonce `ask:<id>`) or declines with a note (mig 20261015090000, `test_refund_asks.sql`).
+30. Wallet passes (operator: Apple / Google pass credentials into the secret store; code is built).
+31. Payments live (operator: Stripe live keys + webhook, docs/payments-go-live.md; agent checkout follows).
 
 ## Build plan 2026-09-29 (from the marketing, door, event-creation and money audits)
 

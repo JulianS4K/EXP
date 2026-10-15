@@ -160,7 +160,14 @@ export default function OrgSettings() {
       window.location.href = url;
     } catch (err: unknown) {
       console.error('Stripe onboarding failed:', err);
-      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Payments are not enabled yet.' });
+      // The edge function's raw "non-2xx" message means nothing to an organizer.
+      const raw = err instanceof Error ? err.message : '';
+      toast({
+        kind: 'error',
+        message: !raw || /non-2xx|Failed to fetch|FunctionsHttpError/i.test(raw)
+          ? "Couldn't open Stripe. Try again in a minute; if it keeps failing, contact support."
+          : raw,
+      });
     } finally {
       setPaymentsBusy(false);
     }
@@ -287,7 +294,7 @@ export default function OrgSettings() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-6 border-b border-slate-200 mb-8">
+        <div className="flex flex-wrap gap-x-4 md:gap-x-6 border-b border-slate-200 mb-8 whitespace-nowrap">
           <button className="pb-3 text-sm font-bold text-slate-900 border-b-2 border-tm-blue -mb-px">General</button>
           <button
             onClick={() => navigate(`/orgs/${org.id}/members`)}
@@ -309,7 +316,6 @@ export default function OrgSettings() {
               Payouts
             </button>
           )}
-          <span className="pb-3 text-sm font-bold text-slate-300 cursor-default">Billing</span>
         </div>
 
         {!canEdit && (
@@ -596,16 +602,34 @@ export default function OrgSettings() {
                 Connect Stripe to sell paid tickets — payouts go to your account and the
                 platform takes a fee. Free events need nothing here.
               </p>
-              {stripeEnabled ? (
-                <button
-                  type="button"
-                  onClick={handleSetupPayments}
-                  disabled={!canEdit || paymentsBusy}
-                  className="w-full border border-slate-200 rounded py-2.5 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:border-tm-blue hover:text-tm-blue transition-colors disabled:opacity-50"
-                >
-                  {paymentsBusy ? 'Opening Stripe…' : 'Set up payments'}
-                </button>
-              ) : (
+              {stripeEnabled ? (() => {
+                // Where Stripe Connect is: not started, details still owed,
+                // taking payments, payouts on (stripe-webhook keeps these).
+                const p = org.payments ?? {};
+                const state = !p.connectedAccountId ? 'none' : !p.chargesEnabled ? 'pending' : !p.payoutsEnabled ? 'charges' : 'live';
+                const label = { none: 'Set up payments', pending: 'Finish Stripe setup', charges: 'Update Stripe details', live: 'Update Stripe details' }[state];
+                const note = {
+                  none: null,
+                  pending: 'Stripe still needs some details before you can take payments.',
+                  charges: 'Taking payments. Payouts start once Stripe has verified your bank details.',
+                  live: 'Taking payments and paying out to your bank.',
+                }[state];
+                return (
+                  <>
+                    {note && (
+                      <p className={`text-xs mb-3 ${state === 'pending' ? 'text-amber-600' : 'text-emerald-600'}`}>{note}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSetupPayments}
+                      disabled={!canEdit || paymentsBusy}
+                      className="w-full border border-slate-200 rounded py-2.5 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:border-tm-blue hover:text-tm-blue transition-colors disabled:opacity-50"
+                    >
+                      {paymentsBusy ? 'Opening Stripe…' : label}
+                    </button>
+                  </>
+                );
+              })() : (
                 <p className="text-[10px] text-slate-400 uppercase tracking-widest">
                   Paid ticketing isn't enabled yet — coming soon.
                 </p>
@@ -623,20 +647,12 @@ export default function OrgSettings() {
             {/* Meta info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-xs text-slate-500 space-y-2">
               <div>
-                <span className="font-black uppercase tracking-widest text-slate-400">Slug:</span>{' '}
-                {org.slug} (rename in a future sprint)
+                <span className="font-black uppercase tracking-widest text-slate-400">Storefront address:</span>{' '}
+                /o/{org.slug} (contact support to change it)
               </div>
               <div>
-                <span className="font-black uppercase tracking-widest text-slate-400">Owner:</span>{' '}
-                <span className="font-mono break-all">{org.ownerUid}</span>
-              </div>
-              <div>
-                <span className="font-black uppercase tracking-widest text-slate-400">Stripe Connect:</span>{' '}
-                {org.payments?.connectedAccountId ? 'Connected' : 'Not connected (Sprint 3)'}
-              </div>
-              <div>
-                <span className="font-black uppercase tracking-widest text-slate-400">Distribution:</span>{' '}
-                {org.distribution?.enabled ? 'Lysted enabled' : 'Lysted not enabled (Sprint 4)'}
+                <span className="font-black uppercase tracking-widest text-slate-400">Payments:</span>{' '}
+                {org.payments?.chargesEnabled ? 'Taking payments' : org.payments?.connectedAccountId ? 'Stripe setup not finished' : 'Not set up'}
               </div>
             </div>
           </div>
@@ -652,6 +668,10 @@ function S4kNetworkCard({ orgId, initial, canEdit }: { orgId: string; initial: b
   const [saving, setSaving] = useState(false);
 
   const flip = async () => {
+    const ok = window.confirm(on
+      ? 'Leave the S4K network? Every event on the S4K route goes back to listing directly, and S4K\'s unsold seats come back to Exos.'
+      : 'Join the S4K network? You can then send events to S4K, which lists them on the resale marketplaces from its own accounts. Nothing is listed until you pick S4K on an event and give it seats.');
+    if (!ok) return;
     setSaving(true);
     try {
       const next = await setS4kNetwork(orgId, !on);
@@ -669,9 +689,10 @@ function S4kNetworkCard({ orgId, initial, canEdit }: { orgId: string; initial: b
       <h2 className={`${SECTION} mb-3`}>S4K network</h2>
       <p className="text-xs text-slate-400 mb-4">
         S4K lists the events you send it on StubHub, SeatGeek, Vivid Seats, Gametime, GoTickets and Ticket Evolution, from
-        its own seller accounts, so you need none. Every channel sells from one shared count. A marketplace sale becomes an
-        Exos order only when seats are left: if not, it's refused and S4K handles the marketplace side. Then choose S4K per
-        event under Marketplaces.
+        its own seller accounts, so you need none. Per event you choose how many seats S4K gets; Exos and Eventbrite sell
+        the rest, and neither side can sell the other's. A marketplace sale becomes an Exos order only from S4K's seats: if
+        they're gone, it's refused and S4K handles the marketplace side. Choose S4K per event under Marketplaces. (S4K
+        starts listing once the operator turns its feed on.)
       </p>
       <div className="flex items-center gap-3">
         <span className="text-sm text-slate-700">{on ? 'In the network' : 'Not in the network'}</span>

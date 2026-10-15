@@ -278,6 +278,12 @@ export default function AdConversionsSettings({ orgId, canEdit }: { orgId: strin
                         {s.lastSentAt ? ` · last sent ${new Date(s.lastSentAt).toLocaleString()}` : ''}
                       </p>
                     )}
+                    {s && s.pending > 0 && !s.lastSentAt && s.sent30d === 0 && (
+                      <p className="text-[11px] text-amber-700">
+                        Purchases are queued but nothing has been sent yet: the server sender isn't running on
+                        this Exos install. They go out once it's switched on.
+                      </p>
+                    )}
                     {canEdit && (
                       <button
                         type="button"

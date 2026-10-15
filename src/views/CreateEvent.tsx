@@ -73,6 +73,7 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // gate the call behind an env flag — otherwise every event creation 404s and
 // writes a misleading `syncStatus: 'failed'` to the doc.
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
@@ -1562,6 +1563,10 @@ export default function CreateEvent() {
             <p className="type text-xs text-white/50 mt-2 leading-relaxed">
               After you publish, open Edit event → Vouchers to make codes that unlock a hidden ticket type, pin a price, or let someone buy when sold out.
             </p>
+            <p className="type text-xs text-white/50 mt-2 leading-relaxed">
+              Also after you create: add-ons and merch (Edit event), and price steps by date such as early bird
+              (the event report → Settings → Scheduled pricing).
+            </p>
           </div>
         {/* Rarely-needed settings stay folded so the form reads as name →
             when/where → tickets → publish. */}
@@ -1687,12 +1692,21 @@ export default function CreateEvent() {
              per marketplace later, so nothing is listed or sold there today.
            </p>
            
+           {(() => {
+             // Resale unlocks at a max capacity of 250 (mig 20261014140000).
+             const cap = eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table)));
+             return resaleUnlocked(cap) ? null : (
+               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
+             );
+           })()}
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (
                 <label key={network.id} className="flex items-center space-x-3 p-4 bg-black/40 cursor-pointer hover:bg-black/60 transition-colors border border-white/10 has-[:checked]:border-brand-primary has-[:checked]:bg-brand-primary/10">
                    <input
                      type="checkbox"
-                     className="w-4 h-4 accent-brand-primary"
+                     disabled={!(formData.distributionNetworks).includes(network.id)
+                       && !resaleUnlocked(eventMaxCapacity(Number(formData.totalTickets) || 0, ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table))))}
+                     className="w-4 h-4 accent-brand-primary disabled:opacity-40"
                      // Bound to formData.distributionNetworks so the user's
                      // choice is actually persisted. Previously this was a
                      // defaultChecked={true} cosmetic that no code read.

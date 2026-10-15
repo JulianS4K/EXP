@@ -4,7 +4,9 @@ import {
   capLeft,
   countsByList,
   dropFromQueue,
+  elsewhereText,
   enqueueArrival,
+  headsIn,
   listCounts,
   mapGuestEntry,
   normalizeForSearch,
@@ -93,5 +95,35 @@ describe('voided guests (Eventbrite sync)', () => {
   it('a voided guest who never came is not expected; one who came still counts', () => {
     const came = { ...v, id: 'v2', arrived: 1 };
     expect(countsByList([v, came, g('3', 'Dee')]).L1).toEqual({ entries: 2, heads: 2, arrived: 1 });
+  });
+});
+
+describe('checked in on Eventbrite (mig 20261014120000)', () => {
+  const k = mapGuestEntry({
+    id: 'k1', list_id: 'L1', guest_name: 'Kim', plus_ones: 0, arrived: 0, source: 'Eventbrite',
+    elsewhere: { where: 'Eventbrite', at: '2026-10-14T21:04:30Z', method: 'scan' }, eb_status: 'Checked In',
+  });
+  it('maps it and counts it as one in', () => {
+    expect(k.elsewhere).toEqual({ where: 'Eventbrite', at: '2026-10-14T21:04:30Z', method: 'scan' });
+    expect(k.ebStatus).toBe('Checked In');
+    expect(headsIn(k)).toBe(1);
+    expect(remainingFor(k)).toBe(0);
+    expect(countsByList([k]).L1).toEqual({ entries: 1, heads: 1, arrived: 1 });
+    expect(mapGuestEntry({ id: 'x', list_id: 'L1', guest_name: 'X', elsewhere: null }).elsewhere).toBeNull();
+    expect(mapGuestEntry({ id: 'x', list_id: 'L1', guest_name: 'X', elsewhere: { at: 'x' } }).elsewhere).toBeNull();
+  });
+  it('the offline door refuses them, with where and how', () => {
+    expect(applyArrival(k, 1)).toEqual({ ok: false, reason: 'checked-in-elsewhere', remaining: 0 });
+    expect(elsewhereText(k)).toMatch(/^Kim: already checked in on Eventbrite at .+ \(scanned\)\.$/);
+    expect(elsewhereText({ guestName: 'Lee', elsewhere: { where: 'Eventbrite', at: null, method: 'name' } }))
+      .toBe('Lee: already checked in on Eventbrite (by name).');
+  });
+  it('in at Exos too reads as used, and never counts past the party', () => {
+    const both = { ...k, arrived: 1 };
+    expect(headsIn(both)).toBe(1);
+    expect(applyArrival(both, 1)).toMatchObject({ ok: false, reason: 'used' });
+    const party = { ...k, plusOnes: 2 };
+    expect(remainingFor(party)).toBe(2);
+    expect(applyArrival(party, 2)).toMatchObject({ ok: true, remaining: 0 });
   });
 });

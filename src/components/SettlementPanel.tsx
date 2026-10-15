@@ -86,7 +86,7 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
         </button>
       </div>
       <p className="text-xs text-slate-400 mb-4">
-        Exos sales are paid out by Stripe directly to your connected account. Exos never holds that money.
+        Once Stripe is connected (organization settings, Payments), Exos sales are paid out by Stripe directly to your account. Exos never holds that money.
         {hasMarketplace && ' Marketplace sales are paid by Exos after the marketplace pays us (see Payouts).'}
       </p>
 

@@ -6,15 +6,18 @@
 --   F2 the token gate: an unknown or revoked token reads nothing
 --   F3 call 1 lists only s4k events of opted-in orgs, published, before doors;
 --      updatedSince returns only what moved
---   F4 call 2: one line per sellable ticket type (free, hidden, off-sale left
---      out), quantity = free − one pack, net after the Exos fee
+--   F4 call 2: one line per sellable ticket type with an S4K split (free,
+--      hidden, off-sale left out), quantity = what the S4K pool holds, net
+--      after the Exos fee (pools: 20261014130000, test_s4k_pools.sql)
 --   F5 refresh moves updated_at only on a real change
 --   F6 an order takes seats and mints tickets with claim links; the same
 --      externalRef again returns the first order
---   F7 rejections, nothing taken: sold out (all or nothing), price below the
---      current one, over max per order, off the feed; each one logged; the
---      last pack (inside the buffer) can still be bought
---   F8 cancel before doors voids the tickets and returns the seats
+--   F7 rejections, nothing taken: sold out (all or nothing: more than the
+--      S4K pool holds), price below the current one, over max per order, off
+--      the feed; each one logged; Exos selling out its own pool leaves S4K's
+--      alone, and the pool's last seats can be bought
+--   F8 cancel before doors voids the tickets and returns the seats to the
+--      S4K pool
 --   F9 an event that drops off comes back once as withdrawn
 --   F10 webhook: due rows coalesce changes since the cursor; ack advances it,
 --       a failure backs off and keeps it
@@ -90,6 +93,8 @@ BEGIN
     UPDATE public.exos_events SET distribution_route = 'direct' WHERE id = pg_temp.ev(); ok := true;
   EXCEPTION WHEN insufficient_privilege THEN ok := false; END;
   ASSERT NOT ok, 'F1: no direct table update of the route';
+  -- The split: S4K gets 12 of GA's 20; Exos + Eventbrite share the other 8.
+  PERFORM public.exos_set_s4k_split(pg_temp.ev(), jsonb_build_array(jsonb_build_object('tier_id', pg_temp.ga(), 'seats', 12)));
 
   -- One route at a time: no direct allocation, no auto split plan.
   UPDATE public.exos_events SET distribution_networks = ARRAY['stubhub'] WHERE id = pg_temp.ev();
@@ -129,13 +134,13 @@ BEGIN
   p := public.exos_feed_events_page(pg_temp.h());
   ASSERT (p ->> 'total')::int = 1, 'F3: only the s4k event of the opted-in org: ' || p::text;
   ASSERT p #>> '{events,0,event_id}' = pg_temp.ev()::text AND p #>> '{events,0,status}' = 'active', 'F3: the row';
-  -- GA 20 − pack 4 = 16 (free, hidden and off-sale tiers out).
-  ASSERT (p #>> '{events,0,available}')::int = 16 AND (p #>> '{events,0,total_capacity}')::int = 20, 'F3: counts ' || p::text;
+  -- GA's S4K pool: 12 (free, hidden and off-sale tiers out).
+  ASSERT (p #>> '{events,0,available}')::int = 12 AND (p #>> '{events,0,total_capacity}')::int = 12, 'F3: counts ' || p::text;
 
   t := public.exos_feed_event_tickets(pg_temp.h(), pg_temp.ev());
   ASSERT jsonb_array_length(t -> 'tickets') = 1, 'F4: one sellable line: ' || t::text;
   l := t -> 'tickets' -> 0;
-  ASSERT l ->> 'tier_id' = pg_temp.ga()::text AND (l ->> 'quantity')::int = 16 AND (l ->> 'max_per_order')::int = 4
+  ASSERT l ->> 'tier_id' = pg_temp.ga()::text AND (l ->> 'quantity')::int = 12 AND (l ->> 'max_per_order')::int = 4
      AND (l ->> 'price')::numeric = 30 AND l ->> 'split' = 'any', 'F4: line ' || l::text;
   ASSERT (l ->> 'net')::numeric = round(30 - round(30 * public.exos_org_fee_bps('a6000000-0000-0000-0000-000000000001', now()) / 10000.0, 2), 2), 'F4: net ' || l::text;
   ASSERT public.exos_feed_event_tickets(pg_temp.h(), 'a6000000-0000-0000-0000-0000000000e2') IS NULL, 'F4: direct event: not found';
@@ -181,7 +186,7 @@ BEGIN
   r2 := public.exos_feed_place_order(pg_temp.h(), pg_temp.ev(), pg_temp.ga(), 3, 'AQ-1001', 'StubHub', 30);
   ASSERT r2 ->> 'result' = 'existing' AND r2 ->> 'order_id' = v_order::text, 'F6: idempotent ' || r2::text;
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 3, 'F6: no second take';
-  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 13, 'F6: feed refreshed (17 − 4)';
+  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 9, 'F6: feed refreshed (12 − 3)';
   RAISE NOTICE 'F6 ok';
 END $$;
 
@@ -198,23 +203,31 @@ BEGIN
   r := public.exos_feed_place_order(pg_temp.h(), pg_temp.ev(), 'a6000000-0000-0000-0000-0000000000d2', 1, 'AQ-2004', NULL, 0);
   ASSERT r ->> 'reason' = 'ticket_not_on_feed', 'F7: free tier ' || r::text;
 
-  -- Exos sells all but 3 elsewhere; S4K asks for 4: all or nothing.
-  UPDATE public.exos_ticket_tiers SET sold = 17 WHERE id = pg_temp.ga();
+  -- Exos sells all 8 of its own pool: S4K's 9 are untouched.
+  UPDATE public.exos_ticket_tiers SET sold = sold + 8 WHERE id = pg_temp.ga();
+  ASSERT public.exos_effective_available(pg_temp.ga()) = 0, 'F7: Exos pool sold out';
+  PERFORM public.exos_feed_refresh(pg_temp.ev());
+  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 9, 'F7: S4K still has 9';
+  -- S4K asks for 4 and the pool holds 3 after a manager lowers the split: all or nothing.
+  PERFORM pg_temp.act('a6000000-0000-0000-0000-0000000000a1');
+  PERFORM public.exos_set_s4k_split(pg_temp.ev(), jsonb_build_array(jsonb_build_object('tier_id', pg_temp.ga(), 'seats', 6)));
+  PERFORM pg_temp.act(NULL);
   r := public.exos_feed_place_order(pg_temp.h(), pg_temp.ev(), pg_temp.ga(), 4, 'AQ-2005', 'vivid', 30);
   ASSERT r ->> 'result' = 'rejected' AND r ->> 'reason' = 'sold_out' AND (r ->> 'available')::int = 3, 'F7: sold out ' || r::text;
-  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 17, 'F7: nothing taken';
+  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 11, 'F7: nothing taken';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_marketplace_orders WHERE external_order_id = 'AQ-2005'), 'F7: no order left behind';
-  -- The buffer is not a reserve: the last 3 can be bought (the feed showed 0).
-  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 0, 'F7: feed shows 0 inside the buffer';
+  -- The 6 seats it gave back went to Exos's pool, not to S4K.
+  ASSERT public.exos_effective_available(pg_temp.ga()) = 6, 'F7: lowered split back to Exos';
   r := public.exos_feed_place_order(pg_temp.h(), pg_temp.ev(), pg_temp.ga(), 3, 'AQ-2005', 'vivid', 30);
   ASSERT r ->> 'result' = 'created', 'F7: the same ref retried, now fillable ' || r::text;
-  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 20, 'F7: sold out exactly';
+  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 14, 'F7: S4K pool sold out exactly';
+  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 0, 'F7: feed shows 0';
 
   ASSERT (SELECT count(*) FROM public.exos_feed_rejections WHERE consumer_id = (SELECT id FROM tok WHERE name = 's4k')) = 5, 'F7: five logged';
   -- A rejection leaves no trace for the organizer: no alert, no "action needed" mail.
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE template = 'marketplace-attention'), 'F7: no attention mail';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_marketplace_attention_alerts), 'F7: no attention alert';
-  ASSERT (SELECT tickets_sold FROM public.exos_events WHERE id = pg_temp.ev()) = 6, 'F7: house counter: the two filled orders only';
+  ASSERT (SELECT tickets_sold FROM public.exos_events WHERE id = pg_temp.ev()) = 6, 'F7: house counter: the two filled orders only (3 + 3)';
   ASSERT EXISTS (SELECT 1 FROM public.exos_feed_rejections WHERE reason = 'sold_out' AND marketplace = 'vivid' AND available = 3 AND quantity = 4), 'F7: the sold-out row';
   RAISE NOTICE 'F7 ok';
 END $$;
@@ -228,10 +241,15 @@ BEGIN
   ASSERT r ->> 'result' = 'unauthorized', 'F8: revoked token';
   r := public.exos_feed_cancel_order(pg_temp.h(), v_order);
   ASSERT r ->> 'result' = 'cancelled' AND (r ->> 'released')::int = 3, 'F8: cancelled ' || r::text;
-  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 17, 'F8: seats back';
+  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 11, 'F8: seats back';
+  -- Back to S4K's pool: its split is 6, it has sold 3 now.
+  ASSERT (SELECT requested_qty = 3 AND sold_qty = 3 FROM public.exos_distribution_listings
+           WHERE event_id = pg_temp.ev() AND channel = 's4k'), 'F8: returned to the S4K pool';
+  ASSERT (SELECT available FROM public.exos_feed_events WHERE event_id = pg_temp.ev()) = 3, 'F8: feed shows them';
+  ASSERT public.exos_effective_available(pg_temp.ga()) = 6, 'F8: Exos pool unchanged';
   ASSERT (SELECT count(*) FROM public.exos_tickets WHERE order_ref = 's4k:AQ-1001' AND status = 'voided') = 3, 'F8: tickets voided';
   ASSERT public.exos_feed_cancel_order(pg_temp.h(), v_order) ->> 'result' = 'cancelled', 'F8: again is a no-op';
-  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 17, 'F8: not released twice';
+  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.ga()) = 11, 'F8: not released twice';
   -- A scanned ticket blocks it.
   SELECT id INTO v_order FROM public.exos_marketplace_orders WHERE external_order_id = 'AQ-2005';
   UPDATE public.exos_tickets SET status = 'used' WHERE id = (SELECT ticket_ids[1] FROM public.exos_marketplace_orders WHERE id = v_order);

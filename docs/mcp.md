@@ -18,7 +18,7 @@ Everything is **read-only**. Nothing is bought, held or changed; a purchase is a
 | Tool | Who | What it does |
 |---|---|---|
 | `search_events` | anyone | Upcoming published events by keyword, city, date range |
-| `get_event` | anyone | One event: date, venue, description, ticket types with **all-in** price, on-sale status, roughly how many left |
+| `get_event` | anyone | One event: date, venue, description, ticket types with **all-in** price, on-sale status, roughly how many left (what Exos itself can sell: `exos_public_tiers.available`, so seats held for S4K or a marketplace never show; mig `20261014160000`) |
 | `get_ticket_link` | anyone | A checkout link with the ticket type and quantity in the cart (`/checkout?products=…`, tagged `utm_source=ai_assistant`, optional promoter code). The person finishes checkout. |
 | `search`, `fetch` | anyone | The same event data in the shape ChatGPT connectors and deep research expect (`{results:[{id,title,url}]}` / `{id,title,text,url,metadata}`) |
 | `my_events` | organizer key | The org's events and tickets sold |
@@ -84,3 +84,9 @@ The client screens change often; the principle stays the same: add a custom MCP 
 - Write tools behind explicit confirmation (draft an event, issue comps, send a message to ticket holders). These
   need per-org permissions and an audit trail first.
 - ChatGPT Apps SDK / MCP UI widgets (an event card with a Buy button) on top of the same tools.
+- **Agent checkout** (operator direction 2026-10-14: Claude, ChatGPT and Meta). The assistant completes the
+  purchase instead of handing a link: ChatGPT's Instant Checkout (Agentic Commerce Protocol: a product feed, then
+  `create / update / complete checkout` endpoints the merchant hosts, paid with a delegated Stripe payment token),
+  the same endpoints exposed as MCP tools for Claude, and Meta's checkout on the catalog products. All sell from
+  the Exos + Eventbrite pool through the existing checkout (holds, quotas, the 250 rule doesn't apply: it's not
+  resale). Blocked on Stripe going live (`docs/payments-go-live.md`); the product feed half is the catalog feed.

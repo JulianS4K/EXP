@@ -17,7 +17,10 @@ import {
   arrivalReasonText,
   countsByList,
   dropFromQueue,
+  elsewhereText,
   enqueueArrival,
+  headsIn,
+  mapElsewhere,
   partySize,
   remainingFor,
   searchGuests,
@@ -155,7 +158,9 @@ export default function GuestListDoor({
     if (!local.ok || !local.entry) {
       setFlash({
         id: g.id,
-        text: local.reason === 'voided' ? voidedText(g) : arrivalReasonText(local.reason ?? 'bad-count', local.remaining),
+        text: local.reason === 'voided' ? voidedText(g)
+          : local.reason === 'checked-in-elsewhere' ? elsewhereText(g)
+          : arrivalReasonText(local.reason ?? 'bad-count', local.remaining),
         ok: false,
       });
       return;
@@ -187,6 +192,13 @@ export default function GuestListDoor({
         // Voided since this device downloaded the lists.
         patchGuest(g.id, (e) => ({ ...e, voided: true }));
         setFlash({ id: g.id, text: voidedText(g), ok: false });
+        return;
+      }
+      if (r.reason === 'checked-in-elsewhere') {
+        // Checked in on the selling platform since this device downloaded the lists.
+        const elsewhere = mapElsewhere(r.elsewhere) ?? { where: g.source || 'Eventbrite', at: null, method: null };
+        patchGuest(g.id, (e) => ({ ...e, elsewhere }));
+        setFlash({ id: g.id, text: elsewhereText({ ...g, elsewhere }), ok: false });
         return;
       }
       setFlash({ id: g.id, text: arrivalReasonText(r.reason, r.remaining), ok: false });
@@ -223,7 +235,7 @@ export default function GuestListDoor({
       return;
     }
     if (remainingFor(g) === 0) {
-      setCodeFlash({ text: `${g.guestName}: already checked in.`, ok: false });
+      setCodeFlash({ text: g.elsewhere && g.arrived === 0 ? elsewhereText(g) : `${g.guestName}: already checked in.`, ok: false });
       return;
     }
     setCodeFlash({
@@ -406,8 +418,16 @@ export default function GuestListDoor({
                     )}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 shrink-0">
-                    <Users className="w-3.5 h-3.5" /> {g.arrived}/{partySize(g)}
+                    <Users className="w-3.5 h-3.5" /> {headsIn(g)}/{partySize(g)}
                   </span>
+                  {g.elsewhere && !g.voided && (
+                    <span
+                      className="text-[10px] font-black text-sky-700 uppercase tracking-widest shrink-0"
+                      title={elsewhereText(g)}
+                    >
+                      In on {g.elsewhere.where}
+                    </span>
+                  )}
                   {g.voided ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-600 uppercase tracking-widest shrink-0">
                       <Ban className="w-4 h-4" /> {g.voidReason || 'Refunded'}

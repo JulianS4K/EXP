@@ -34,7 +34,8 @@ Exos never:
 - creates ticket classes, events, discounts, holds or anything else (the
   organizer makes their Eventbrite tickets on Eventbrite),
 - changes a price, a name, sale dates or any field but `capacity`,
-- writes check-ins back (`checked_in` stays Eventbrite's own),
+- writes check-ins back (`checked_in` is read only there; Exos reads it, see
+  "Check-ins at the Exos door"),
 - registers or changes webhooks (`POST /webhooks/` is a write, so the sync
   polls instead).
 
@@ -79,7 +80,39 @@ Not built.
   doesn't move the cursor, so it is retried; the panel shows how many.
   Voiding never changes the house capacity.
 
+## Check-ins at the Exos door (mig `20261014120000`)
+
+The API gives each attendee `checked_in`, `refunded`, `cancelled`, a status
+word, and every barcode with `status` (`unused` / `used` / `refunded`) and
+`checkin_type` (0 not validated, 1 scanner, 2 name). The sync stores them,
+read only:
+
+- **Two barcode stores.** Eventbrite's codes go to `exos_eventbrite_barcodes`
+  with Eventbrite's status; Exos tickets keep their rotating codes in
+  `exos_tickets`. They're never merged. The guest entry keeps one Eventbrite
+  code as its door code, as before.
+- **Two check-in records.** `exos_eventbrite_attendees` holds what Eventbrite
+  saw (checked in, when, scan or name); the guest's `arrived` counts Exos door
+  scans only. The door adds them: a guest Eventbrite checked in is refused
+  online and offline as **already checked in on Eventbrite** (with the time),
+  and a check-out on Eventbrite lets them in again after the next sync.
+- **Limit:** the sync runs every 2 minutes near the event, so a ticket scanned
+  on both apps within that window can still get in twice. One scanning app
+  per event is still the advice.
+
+**One status vocabulary.** `exos_eb_status_word` maps Exos states to
+Eventbrite's words: active → Attending, used → Checked In, transferred →
+Transferred, voided → Not Attending (guests: expected / in / voided). The event
+report's **Find an attendee** (`exos_attendee_lookup`, owner / manager)
+searches Exos tickets, Eventbrite attendees and every guest list by name,
+email, order or barcode, filters by those words, and says where each person
+was checked in (Exos door, Eventbrite's app, or both).
+
 ## Inventory: one shared count (mig `20261014110000`)
+
+With S4K's pools on (mig `20261014130000`, `docs/marketplace/s4k-feed.md`),
+"free on Exos" below is pool 1: Exos and Eventbrite share what S4K's split
+leaves.
 
 Read from the spec before building: a ticket class has `capacity` (how many it
 may sell in total, required for a normal non-tiered class) and `quantity_sold`
@@ -118,6 +151,12 @@ How it works:
    and sends it only when sending is live. **A target of 0 is never sent**
    (Eventbrite refuses 0 on a normal class and reads it as unlimited on a
    donation): the panel says to hide or end that ticket on Eventbrite instead.
+
+Simulated (`scripts/channel-sim/eventbrite_dual.py`, report `eventbrite-dual-report.txt`): with sending
+live, a 2-minute sync and a 1-pack buffer, steady demand never oversold; an on-sale rush oversold about 1
+order per 800-seat sell-out (2.7 tickets per 1,000). A late cron is the risk in a rush (10 minutes: about 11
+orders per 800-seat sell-out). Sending off (count only) oversells about 20% of a sell-out. A velocity buffer
+(at least one pack, or twice what Exos sold in the last window) cut the rush to 0.24 and the late cron to 0.
 
 Known limits: Eventbrite's `quantity_sold` doesn't include carts in progress,
 so at the very end a cart can complete into oversold (shown, not hidden).

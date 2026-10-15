@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTransfer, claimTransfer } from '../lib/tickets';
 import { getPublicEvent } from '../lib/events';
+import { getPublicOrg } from '../lib/orgs';
+import { formatInTz } from '../lib/datetime';
 import { useAuth } from '../context/AuthContext';
 import { Event, Transfer } from '../types';
 import { ShieldCheck, ArrowRight, XCircle, CheckCircle2 } from 'lucide-react';
@@ -40,6 +42,7 @@ export default function ClaimTicket() {
   const t = useT();
   const [transfer, setTransfer] = useState<Transfer | null>(null);
   const [event, setEvent] = useState<Event | null>(null);
+  const [orgName, setOrgName] = useState('');
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState(false);
 
@@ -61,6 +64,11 @@ export default function ClaimTicket() {
           try {
             const ev = await getPublicEvent(transData.eventId);
             if (ev) setEvent(ev);
+            // Marketplace sales and comps come from the organizer, with no
+            // sender email: name the org instead.
+            if (ev?.orgId) {
+              getPublicOrg(ev.orgId).then((o) => setOrgName(o?.name ?? '')).catch(() => {});
+            }
           } catch (eventErr) {
             console.warn('Could not enrich claim screen with event:', eventErr);
           }
@@ -142,6 +150,11 @@ export default function ClaimTicket() {
   const displayTitle = event?.title || transfer.eventTitle || 'Event';
   const displayImage = event?.image || transfer.eventImage || '';
   const displayTier = transfer.tierName || 'General Entry';
+  const displayWhen = event?.date
+    ? formatInTz(event.date.toDate(), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : '';
+  const displayWhere = [event?.location, event?.address?.city].filter(Boolean).join(' · ');
+  const displaySender = transfer.senderEmail || orgName || t('claim.sender');
 
   return (
     <div className="wall min-h-screen">
@@ -169,6 +182,9 @@ export default function ClaimTicket() {
                 ticket for
               </p>
               <h2 className="disp text-3xl tracking-tight leading-none mb-3">{displayTitle}</h2>
+              {(displayWhen || displayWhere) && (
+                <p className="type text-xs text-white/60 mb-3">{[displayWhen, displayWhere].filter(Boolean).join(' · ')}</p>
+              )}
               <div className="flex items-center gap-3">
                 <span className="type text-[9px] text-white/60 bg-white/5 border border-white/10 px-3 py-1 uppercase tracking-widest">
                   {displayTier}
@@ -180,6 +196,9 @@ export default function ClaimTicket() {
           <div className="p-8 bg-black/40">
             {!user ? (
               <div className="text-center">
+                {(transfer.senderEmail || orgName) && (
+                  <p className="type text-white/70 text-sm mb-3">From {displaySender}</p>
+                )}
                 <p className="type text-white/50 text-sm mb-8">
                   {t('claim.signInPrompt')}
                 </p>
@@ -206,7 +225,7 @@ export default function ClaimTicket() {
                       <p className="type text-[9px] text-white/30 uppercase tracking-widest mb-1">
                         from
                       </p>
-                      <p className="disp text-lg tracking-tight truncate">{transfer.senderEmail || t('claim.sender')}</p>
+                      <p className="disp text-lg tracking-tight truncate">{displaySender}</p>
                     </div>
                     <ArrowRight className="text-brand-primary w-6 h-6 mx-4 shrink-0" aria-hidden="true" />
                     <div className="text-right min-w-0">

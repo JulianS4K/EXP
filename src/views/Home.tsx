@@ -180,13 +180,14 @@ export default function Home() {
   // Date scroller — next four days from now, each a real day filter. Clicking
   // a pill filters the page to that day; clicking the active pill clears it.
   const datePills = useMemo(() => {
-    const kickers = ['tonight', 'tomorrow', 'weekend', 'sunday'];
     const now = new Date();
     return Array.from({ length: 4 }, (_, i) => {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
       const wd = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-      return { kicker: kickers[i], label: `${wd} ${d.getDate()}`, key: dayKey(d) };
+      // From the date itself: tonight, tomorrow, then the weekday's name.
+      const kicker = i === 0 ? 'tonight' : i === 1 ? 'tomorrow' : d.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+      return { kicker, label: `${wd} ${d.getDate()}`, key: dayKey(d) };
     });
     // dayKey is a stable pure closure; recompute only on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -232,8 +233,8 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-14 relative z-10">
           <div className="inline-flex items-center gap-2 border border-brand-primary/60 text-white px-3 py-1.5 mb-8">
             <MapPin className="w-4 h-4 text-brand-primary" />
+            {/* The launch market (docs/gtm-nyc.md); no city picker yet, so no caret. */}
             <span className="disp text-lg tracking-wide leading-none pt-0.5">NEW YORK</span>
-            <span className="text-[11px] text-white/50">▼</span>
           </div>
 
           <div className="relative max-w-4xl mb-7">

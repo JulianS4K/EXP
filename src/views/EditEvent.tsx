@@ -74,6 +74,7 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
+import { eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
@@ -1605,14 +1606,14 @@ export default function EditEvent() {
                 </label>
                 <div className="relative">
                   <span className="absolute left-6 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold font-mono">
-                    vibepass.io/e/
+                    /e/
                   </span>
                   <input
                     id="edit-event-slug"
                     type="text"
                     maxLength={SLUG_MAX}
                     placeholder="summer-horizon-2026"
-                    className="w-full bg-black border border-white/20 py-4 pl-32 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
+                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
                     value={eventData.branding?.customSlug || ''}
                     onChange={(e) =>
                       setEventData({
@@ -1669,21 +1670,37 @@ export default function EditEvent() {
               <Globe className="text-brand-primary w-5 h-5" />
               <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Marketplaces</h2>
            </div>
-           <p className="type text-xs text-white/50 -mt-4">
+           <p className="type text-xs text-white/50 mt-2">
              Sell this event's own tickets on marketplaces too, at the price you set. Tick the ones to use, then choose how
              many seats of each ticket type each one gets below: GA on StubHub only, VIP everywhere, anything in between.
            </p>
-           <p className="type text-xs text-white/60 leading-relaxed -mt-4 border-l-2 border-brand-secondary pl-3">
+           <p className="type text-xs text-white/60 leading-relaxed mt-2 border-l-2 border-brand-secondary pl-3">
              Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
              per marketplace later, so nothing is listed or sold there today.
            </p>
 
+           {(() => {
+             // Resale unlocks at a max capacity of 250 (mig 20261014140000).
+             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])));
+             return resaleUnlocked(cap) ? null : (
+               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
+             );
+           })()}
+           {eventData.distributionRoute === 's4k' && (
+             <p role="status" className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">
+               This event is on the S4K network, so S4K lists it on these marketplaces. Switch "Who lists it" below to
+               Exos to pick marketplaces yourself.
+             </p>
+           )}
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {MARKETPLACE_NETWORKS.map(network => (
                 <label key={network.id} className="flex items-center space-x-3 p-4 bg-black/40 cursor-pointer hover:bg-black/60 transition-colors border border-white/10 has-[:checked]:border-brand-primary has-[:checked]:bg-brand-primary/10">
                    <input
                      type="checkbox"
-                     className="w-4 h-4 accent-brand-primary"
+                     disabled={!(eventData.distributionNetworks || []).includes(network.id)
+                       && (eventData.distributionRoute === 's4k'   // S4K lists it: no direct marketplaces
+                         || !resaleUnlocked(eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))))}
+                     className="w-4 h-4 accent-brand-primary disabled:opacity-40"
                      // Bound to distributionNetworks (saved by handleSubmit), like
                      // CreateEvent. Was defaultChecked={true}, which saved nothing.
                      checked={(eventData.distributionNetworks || []).includes(network.id)}
@@ -1718,6 +1735,7 @@ export default function EditEvent() {
                eventId={eventId}
                route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
                onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
+               maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))}
              />
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (

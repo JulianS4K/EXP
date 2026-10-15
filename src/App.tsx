@@ -116,7 +116,8 @@ function ChromeLayout({ children }: { children: ReactNode }) {
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
       <Footer />
-      <PwaShell />
+      {/* The door pages show their own offline state (with the saved list's time). */}
+      <PwaShell offlineBanner={!(location.pathname.startsWith('/checkin/') || location.pathname === '/door')} />
       <ConsentBanner />
     </div>
   );

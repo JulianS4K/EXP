@@ -16,6 +16,7 @@
 // injected ExosData so this file has no Deno or Supabase imports.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
+import { exosLeft } from '../catalog/feed.ts';
 import { ToolError, int, isoDate, str, type McpServer, type ToolDefinition } from './protocol.ts';
 
 export interface PublicEvent {
@@ -55,6 +56,8 @@ export interface PublicTier {
   price_schedule: unknown;
   exclusive_tax_percent: number | string | null;
   accessible: boolean | null;
+  /** What Exos can sell now (mig 20261014160000); absent before it. */
+  available?: number | null;
 }
 
 export interface EventSearch {
@@ -143,7 +146,9 @@ export function eventUrl(appBase: string, e: Pick<PublicEvent, 'id' | 'slug'>): 
 export function tierView(t: PublicTier, now: Date) {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
   const allIn = money(allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0));
-  const left = t.capacity > 0 ? Math.max(0, t.capacity - t.sold) : null;
+  // Exos's own pool (S4K's and the marketplaces' seats aren't Exos's to sell).
+  const pool = exosLeft(t);
+  const left = Number.isFinite(pool) ? pool : null;
   const notYet = t.sales_start && Date.parse(t.sales_start) > now.getTime();
   const ended = t.sales_end && Date.parse(t.sales_end) < now.getTime();
   const status = notYet ? 'not_on_sale_yet' : ended ? 'sales_ended' : left === 0 ? 'sold_out' : 'on_sale';
