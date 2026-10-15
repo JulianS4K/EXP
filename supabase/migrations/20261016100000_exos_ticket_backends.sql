@@ -1,5 +1,5 @@
 -- ============================================================================
--- Ticket backends: sell on Exos, or on Eventbrite / pretix / hi.events
+-- Ticket backends: sell on Exos, or on Eventbrite / pretix / hi.events / Luma
 -- ============================================================================
 -- Touches:  W: TABLE exos_events (+ ticket_backend, external_ticket_url)
 --           W: VIEW exos_public_events (+ ticket_backend, external_ticket_url)
@@ -19,16 +19,18 @@
 --   eventbrite the organizer's Eventbrite event
 --   pretix     the organizer's pretix shop (pretix.eu or self-hosted)
 --   hievents   the organizer's hi.events (hosted or self-hosted)
+--   luma       the organizer's Luma calendar (luma.com)
 -- With another backend, the event page's buy button links to that shop
 -- (external_ticket_url) and Exos's own sale paths refuse the event (cart
 -- holds, free claims; exos-checkout checks too). Exos still runs the event
 -- page, marketing, door and reports.
 --
--- The door: pretix and hi.events attendees are synced read-only into a guest
--- list ("pretix" / "hi.events"), with their QR code, like the Eventbrite sync
+-- The door: pretix, hi.events and Luma attendees are synced read-only into a
+-- guest list ("pretix" / "hi.events" / "Luma"), with their QR code, like the Eventbrite sync
 -- (which keeps its own tables). pretix reads orders with the org's API token
 -- (Integrations); hi.events reads a check-in list's public attendee feed
--- (the list's short id from its share link; no account password is stored).
+-- (the list's short id from its share link; no account password is stored);
+-- Luma reads an event's guests with the calendar's API key (Integrations).
 -- A cancelled / refunded order voids its guests. Nothing is written back.
 --
 -- Re-run safe. Prod apply needs operator OK.
@@ -41,7 +43,7 @@ DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_events_ticket_backend_chk') THEN
     ALTER TABLE public.exos_events ADD CONSTRAINT exos_events_ticket_backend_chk
-      CHECK (ticket_backend IN ('exos', 'eventbrite', 'pretix', 'hievents'));
+      CHECK (ticket_backend IN ('exos', 'eventbrite', 'pretix', 'hievents', 'luma'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_events_external_ticket_url_chk') THEN
     ALTER TABLE public.exos_events ADD CONSTRAINT exos_events_external_ticket_url_chk
@@ -91,7 +93,7 @@ BEGIN
   IF NOT FOUND OR coalesce(public._exos_integ_role(e.org_id, auth.uid()), '') NOT IN ('owner', 'manager') THEN
     RAISE EXCEPTION 'exos_set_ticket_backend: owner or manager only' USING ERRCODE = '42501';
   END IF;
-  IF p_backend IS NULL OR p_backend NOT IN ('exos', 'eventbrite', 'pretix', 'hievents') THEN
+  IF p_backend IS NULL OR p_backend NOT IN ('exos', 'eventbrite', 'pretix', 'hievents', 'luma') THEN
     RAISE EXCEPTION 'exos_set_ticket_backend: unknown backend' USING ERRCODE = '22023';
   END IF;
   IF p_backend <> 'exos' AND (v_url IS NULL OR v_url !~ '^https://[^\s/]+\.[^\s]+$' OR length(v_url) > 500) THEN
@@ -168,14 +170,15 @@ SELECT pg_temp.exos_patch_n(
 CREATE TABLE IF NOT EXISTS public.exos_backend_links (
   event_id       uuid PRIMARY KEY REFERENCES public.exos_events (id) ON DELETE CASCADE,
   org_id         uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
-  provider       text NOT NULL CHECK (provider IN ('pretix', 'hievents')),
-  -- pretix: the event slug; hi.events: the check-in list short id (from its share link).
+  provider       text NOT NULL CHECK (provider IN ('pretix', 'hievents', 'luma')),
+  -- pretix: the event slug; hi.events: the check-in list short id (from its share link);
+  -- Luma: the event id (evt-…).
   external_ref   text NOT NULL CHECK (external_ref ~ '^[A-Za-z0-9._-]{1,64}$'),
   external_name  text CHECK (external_name IS NULL OR length(external_name) <= 200),
   list_id        uuid NOT NULL REFERENCES public.exos_guest_lists (id) ON DELETE CASCADE,
   linked_by      uuid,
   linked_at      timestamptz NOT NULL DEFAULT now(),
-  sync_cursor    text CHECK (sync_cursor IS NULL OR length(sync_cursor) <= 200),  -- pretix modified_since / hi.events page
+  sync_cursor    text CHECK (sync_cursor IS NULL OR length(sync_cursor) <= 200),  -- pretix modified_since / hi.events page / Luma cursor
   pass_started_at timestamptz,
   lease_id       uuid,
   lease_until    timestamptz,
@@ -197,15 +200,15 @@ AS $$
 DECLARE
   e       public.exos_events%ROWTYPE;
   v_list  uuid;
-  v_lname text := CASE p_provider WHEN 'pretix' THEN 'pretix' ELSE 'hi.events' END;
+  v_lname text := CASE p_provider WHEN 'pretix' THEN 'pretix' WHEN 'luma' THEN 'Luma' ELSE 'hi.events' END;
   v_ref   text := btrim(coalesce(p_ref, ''));
 BEGIN
   SELECT * INTO e FROM public.exos_events WHERE id = p_event_id;
   IF NOT FOUND OR coalesce(public._exos_integ_role(e.org_id, auth.uid()), '') NOT IN ('owner', 'manager') THEN
     RAISE EXCEPTION 'exos_backend_link: owner or manager only' USING ERRCODE = '42501';
   END IF;
-  IF p_provider IS NULL OR p_provider NOT IN ('pretix', 'hievents') THEN
-    RAISE EXCEPTION 'exos_backend_link: pretix or hievents' USING ERRCODE = '22023';
+  IF p_provider IS NULL OR p_provider NOT IN ('pretix', 'hievents', 'luma') THEN
+    RAISE EXCEPTION 'exos_backend_link: pretix, hievents or luma' USING ERRCODE = '22023';
   END IF;
   IF v_ref !~ '^[A-Za-z0-9._-]{1,64}$' THEN
     RAISE EXCEPTION 'exos_backend_link: that % id doesn''t look right', v_lname USING ERRCODE = '22023';
@@ -274,7 +277,7 @@ BEGIN
     'external_ticket_url', e.external_ticket_url,
     'can_manage', coalesce(public._exos_integ_role(e.org_id, auth.uid()), '') IN ('owner', 'manager'),
     'connected', (SELECT jsonb_agg(i.provider) FROM public.exos_org_integrations i
-                   WHERE i.org_id = e.org_id AND i.provider IN ('pretix', 'hievents') AND i.status <> 'disabled'),
+                   WHERE i.org_id = e.org_id AND i.provider IN ('pretix', 'hievents', 'luma') AND i.status <> 'disabled'),
     'link', CASE WHEN lk.event_id IS NULL THEN NULL ELSE jsonb_build_object(
               'provider', lk.provider, 'external_name', lk.external_name,
               'external_ref', CASE WHEN lk.provider = 'pretix' THEN lk.external_ref END,
@@ -364,8 +367,8 @@ BEGIN
     RAISE EXCEPTION 'exos_backend_apply: rows must be an array of at most 2000' USING ERRCODE = '22023';
   END IF;
   SELECT * INTO l FROM public.exos_guest_lists WHERE id = lk.list_id;
-  v_prefix := CASE lk.provider WHEN 'pretix' THEN 'px:' ELSE 'he:' END;
-  v_source := CASE lk.provider WHEN 'pretix' THEN 'pretix' ELSE 'hi.events' END;
+  v_prefix := CASE lk.provider WHEN 'pretix' THEN 'px:' WHEN 'luma' THEN 'lu:' ELSE 'he:' END;
+  v_source := CASE lk.provider WHEN 'pretix' THEN 'pretix' WHEN 'luma' THEN 'Luma' ELSE 'hi.events' END;
 
   FOR r IN SELECT value FROM jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) LOOP
     IF jsonb_typeof(r) <> 'object' OR coalesce(r->>'ref', '') !~ '^[A-Za-z0-9._-]{1,64}$' THEN

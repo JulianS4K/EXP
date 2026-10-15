@@ -1,7 +1,7 @@
 # Self-hosting Exos
 
 Exos is a React SPA (served by a small Node server) on Supabase: Postgres with RLS, Vault for secrets, pg_cron
-for schedules, and Deno edge functions. Everything an organizer connects (Stripe, pretix, hi.events, Eventbrite,
+for schedules, and Deno edge functions. Everything an organizer connects (Stripe, pretix, hi.events, Luma, Eventbrite,
 Twilio / Telnyx, resale marketplaces) is their own account, entered in the app. Nothing in this guide needs an
 Exos-the-company account.
 
@@ -62,7 +62,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
-Integrations** (pretix, hi.events, Twilio, Telnyx, marketplaces) or the door app (Eventbrite). They're stored in
+Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite). They're stored in
 Vault (`exos_integration:<org>:<provider>`), read only by edge functions, never shown again.
 
 ## 4. The web app
@@ -109,12 +109,12 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 | Job | Every | Function |
 |---|---|---|
 | `exos-eventbrite-sync-2min` | 2 min (odd) | `exos-eventbrite-sync/cron` |
-| `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events door sync) |
+| `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events, Luma door sync) |
 | `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
 
 ## Upstream rules (kept in code, not configuration)
 
-Ticketing platforms and marketplaces are **read**. pretix, hi.events and the marketplaces are only read;
+Ticketing platforms and marketplaces are **read**. pretix, hi.events, Luma and the marketplaces are only read;
 Eventbrite's one write is the opt-in capacity sync. Don't add order, hold, price or inventory writes to a third
 party (CLAUDE.md).

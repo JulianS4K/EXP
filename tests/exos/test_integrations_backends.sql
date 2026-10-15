@@ -10,6 +10,8 @@
 --   B3 link pretix: needs the integration; guest list made; claim + apply
 --      (add, update, void, restore, bad rows); lease lost refused
 --   B4 status for door staff, never a secret; unlink keeps the guests
+--   B5 Luma: API key saved, backend + link, guests applied under lu: with the
+--      g- key as the code; pending guests voided
 -- Self-contained ids 5e…; runs after the full run_p0.sh chain.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -175,6 +177,33 @@ BEGIN
      AND (SELECT external_ticket_url FROM public.exos_events WHERE id = pg_temp.u('0000000000e1')) IS NULL, 'B4: back to exos';
   ASSERT current_setting('in.rm')::boolean
      AND (SELECT count(*) FROM vault.secrets WHERE name = 'exos_integration:' || pg_temp.u('000000000001') || ':pretix') = 0, 'I3: secret deleted';
+END $$;
+
+-- B5 ----------------------------------------------------------------------
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('5e000000-0000-0000-0000-0000000000a1');
+SELECT set_config('in.lu_nolink', pg_temp.refused($$SELECT public.exos_backend_link(pg_temp.u('0000000000e1'), 'luma', 'evt-AbC123xyz')$$, 'connect Luma in Integrations first')::text, true);
+SELECT public.exos_save_integration(pg_temp.u('000000000001'), 'luma', '{}', 'secret-luma-key-0001');
+SELECT public.exos_set_ticket_backend(pg_temp.u('0000000000e1'), 'luma', 'https://luma.com/in-one');
+SELECT public.exos_backend_link(pg_temp.u('0000000000e1'), 'luma', 'evt-AbC123xyz', 'IN One on Luma');
+SELECT set_config('in.lu_st', public.exos_backend_status(pg_temp.u('0000000000e1'))::text, true);
+RESET ROLE;
+DO $$
+DECLARE c record; j jsonb; s jsonb := current_setting('in.lu_st')::jsonb;
+BEGIN
+  ASSERT current_setting('in.lu_nolink')::boolean, 'B5: link needs the integration';
+  ASSERT s->>'ticket_backend' = 'luma' AND s->'link'->>'provider' = 'luma' AND s->'connected' ? 'luma', 'B5: status ' || s::text;
+  ASSERT s::text NOT LIKE '%secret-luma%', 'B5: never the key';
+  ASSERT (SELECT name FROM public.exos_guest_lists WHERE id = (SELECT list_id FROM public.exos_backend_links WHERE event_id = pg_temp.u('0000000000e1'))) = 'Luma', 'B5: list';
+  SELECT * INTO c FROM public.exos_backend_sync_claim(10, pg_temp.u('0000000000e1'));
+  ASSERT c.provider = 'luma' AND c.external_ref = 'evt-AbC123xyz', 'B5: claimed';
+  j := public.exos_backend_apply(pg_temp.u('0000000000e1'), c.lease_id, jsonb_build_array(
+         jsonb_build_object('ref', 'gst-Ana1', 'code', 'g-AnaKey123', 'name', 'Ana Luma', 'ticket', 'GA'),
+         jsonb_build_object('ref', 'gst-Wait2', 'code', 'g-WaitKey456', 'name', 'Wai Ting', 'void', true, 'reason', 'waitlist')),
+         'done', NULL);
+  ASSERT (j->>'added')::int = 1 AND (j->>'skipped')::int = 1, 'B5: apply ' || j::text;
+  ASSERT (SELECT source || ' ' || external_code FROM public.exos_guest_list_entries WHERE external_ref = 'lu:gst-Ana1') = 'Luma G-ANAKEY123', 'B5: code + source';
+  ASSERT (SELECT sync_cursor FROM public.exos_backend_links WHERE event_id = pg_temp.u('0000000000e1')) IS NULL, 'B5: pass starts over';
 END $$;
 
 \echo 'test_integrations_backends: all passed'

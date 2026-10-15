@@ -6,7 +6,7 @@
 import { supabase } from './supabase';
 
 export type ProviderId =
-  | 'pretix' | 'hievents' | 'twilio' | 'telnyx'
+  | 'pretix' | 'hievents' | 'luma' | 'twilio' | 'telnyx'
   | 'stubhub' | 'seatgeek' | 'vivid' | 'tickpick' | 'gametime' | 'tevo';
 
 export type ProviderGroup = 'backend' | 'sms' | 'marketplace';
@@ -57,6 +57,14 @@ export const PROVIDERS: ProviderInfo[] = [
     ],
     secretLabel: null,
     docsUrl: 'https://hi.events/docs',
+  },
+  {
+    id: 'luma', label: 'Luma', group: 'backend',
+    blurb: 'Sell on your Luma calendar. Exos reads each linked event\'s guests for the door; nothing is written back.',
+    fields: [],
+    secretLabel: 'API key',
+    secretHelp: 'Luma → your calendar → Settings → Developer → API keys (needs Luma Plus; one key per calendar).',
+    docsUrl: 'https://docs.luma.com/reference/getting-started-with-your-api',
   },
   {
     id: 'twilio', label: 'Twilio', group: 'sms',
@@ -155,18 +163,24 @@ export function parseIntegration(r: any): IntegrationRow {
 
 // ── Ticket backends ─────────────────────────────────────────────────────
 
-export type TicketBackend = 'exos' | 'eventbrite' | 'pretix' | 'hievents';
+export type TicketBackend = 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma';
+
+/** The backends Exos syncs to the door itself (Eventbrite has its own sync). */
+export type SyncProvider = 'pretix' | 'hievents' | 'luma';
+export const SYNC_PROVIDERS: SyncProvider[] = ['pretix', 'hievents', 'luma'];
 
 export const BACKEND_LABEL: Record<TicketBackend, string> = {
-  exos: 'Exos', eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events',
+  exos: 'Exos', eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma',
 };
 
 export const parseBackend = (v: unknown): TicketBackend =>
-  v === 'eventbrite' || v === 'pretix' || v === 'hievents' ? v : 'exos';
+  v === 'eventbrite' || v === 'pretix' || v === 'hievents' || v === 'luma' ? v : 'exos';
 
-/** The pretix event short name or hi.events check-in list id from a pasted link (or the id itself). */
-export function refFromLink(provider: 'pretix' | 'hievents', input: string): string | null {
+/** The pretix event short name, hi.events check-in list id or Luma event id
+ *  (evt-…, from the event's manage link) from a pasted link (or the id itself). */
+export function refFromLink(provider: SyncProvider, input: string): string | null {
   const s = input.trim();
+  if (provider === 'luma') return s.match(/\bevt-[A-Za-z0-9]{4,40}\b/)?.[0] ?? null;
   if (/^[A-Za-z0-9._-]{1,64}$/.test(s)) return s;
   try {
     const parts = new URL(s).pathname.split('/').filter(Boolean);
@@ -185,7 +199,7 @@ export interface BackendStatus {
   canManage: boolean;
   connected: string[];
   link: null | {
-    provider: 'pretix' | 'hievents';
+    provider: SyncProvider;
     externalName: string | null;
     syncedCount: number;
     rowErrors: number;
@@ -202,7 +216,7 @@ export function parseBackendStatus(d: any): BackendStatus {
     canManage: d?.can_manage === true,
     connected: Array.isArray(d?.connected) ? d.connected : [],
     link: l ? {
-      provider: l.provider === 'hievents' ? 'hievents' : 'pretix',
+      provider: l.provider === 'hievents' || l.provider === 'luma' ? l.provider : 'pretix',
       externalName: l.external_name ?? null,
       syncedCount: Number(l.synced_count) || 0,
       rowErrors: Number(l.row_errors) || 0,
@@ -273,7 +287,7 @@ export async function setTicketBackend(eventId: string, backend: TicketBackend, 
   if (error) throw rpcMsg(error);
 }
 
-export const linkBackend = (eventId: string, provider: 'pretix' | 'hievents', ref: string) =>
+export const linkBackend = (eventId: string, provider: SyncProvider, ref: string) =>
   callFn<{ linked: boolean; sync: { ok: boolean; added?: number; error?: string } }>('/link', { event: eventId, provider, ref });
 
 export const syncBackend = (eventId: string) =>

@@ -2,6 +2,7 @@
 // provider, never a send or a write. Returns the account's display name.
 import { baseUrl } from "./rows.ts";
 import { pretixWhoAmI } from "./pretix.ts";
+import { lumaWhoAmI } from "./luma.ts";
 
 type Fetch = typeof fetch;
 export interface TestResult { ok: boolean | null; name?: string; error?: string }
@@ -26,6 +27,10 @@ export async function testProvider(
       // Any API answer (even 404 for event 0) means the address is a hi.events backend.
       const isApi = (r.headers.get("content-type") ?? "").includes("json");
       return isApi ? { ok: true, name: new URL(base).host } : { ok: false, error: "That address didn't answer like a hi.events API." };
+    }
+    case "luma": {
+      if (!secret) return { ok: false, error: "Paste a Luma API key." };
+      return lumaWhoAmI(f, secret);
     }
     case "twilio": {
       const sid = String(config.account_sid ?? "");

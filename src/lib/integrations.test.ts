@@ -29,6 +29,18 @@ describe('integrations', () => {
     expect(refFromLink('pretix', 'https://pretix.eu/club')).toBeNull();
     expect(refFromLink('hievents', 'https://app.example.com/check-in/cil_AbC123')).toBe('cil_AbC123');
     expect(refFromLink('hievents', 'not a link')).toBeNull();
+    expect(refFromLink('luma', 'https://luma.com/event/manage/evt-AbC123xyz/guests')).toBe('evt-AbC123xyz');
+    expect(refFromLink('luma', 'evt-AbC123xyz')).toBe('evt-AbC123xyz');
+    expect(refFromLink('luma', 'https://luma.com/my-party')).toBeNull();
+  });
+
+  it('luma: an API key, no other fields; a backend that syncs to the door', () => {
+    const lu = providerInfo('luma')!;
+    expect(lu.group).toBe('backend');
+    expect(configError(lu, {}, '', false)).toMatch(/api key/i);
+    expect(configError(lu, {}, 'k', false)).toBeNull();
+    expect(parseBackend('luma')).toBe('luma');
+    expect(parseBackendStatus({ ticket_backend: 'luma', link: { provider: 'luma' } }).link?.provider).toBe('luma');
   });
 
   it('parses rows', () => {

@@ -71,7 +71,7 @@ jobs:
           exit $fail
 
       - name: Deno tests (ssrf, ticket backends, sms)
-        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/sms/sms_test.ts
+        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/sms/sms_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)

@@ -1,15 +1,21 @@
 // Edit event → Where tickets are sold (mig 20261016100000). Exos, or the
-// organizer's own Eventbrite / pretix / hi.events shop: the buy button links
-// there, and pretix / hi.events attendees sync to the door (read-only).
+// organizer's own Eventbrite / pretix / hi.events / Luma shop: the buy button
+// links there, and pretix / hi.events / Luma attendees sync to the door (read-only).
 
 import { useCallback, useEffect, useState } from 'react';
 import { Store } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import {
-  BACKEND_LABEL, fetchBackendStatus, linkBackend, refFromLink, setTicketBackend, syncBackend, unlinkBackend,
-  type BackendStatus, type TicketBackend,
+  BACKEND_LABEL, fetchBackendStatus, linkBackend, refFromLink, setTicketBackend, SYNC_PROVIDERS, syncBackend, unlinkBackend,
+  type BackendStatus, type SyncProvider, type TicketBackend,
 } from '../lib/integrations';
+
+const REF_HELP: Record<SyncProvider, { label: string; placeholder: string; missing: string }> = {
+  pretix: { label: 'pretix event link or short name', placeholder: 'https://pretix.eu/myclub/spring/', missing: 'Paste the pretix event link or its short name.' },
+  hievents: { label: 'hi.events check-in list link', placeholder: 'https://…/check-in/cil_…', missing: 'Paste the hi.events check-in list link.' },
+  luma: { label: 'Luma event manage link or event id', placeholder: 'https://luma.com/event/manage/evt-…', missing: 'Paste the Luma manage link (it has the evt-… id).' },
+};
 
 const BTN = 'type text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary disabled:opacity-40';
 const FLD = 'w-full bg-black border border-white/20 px-3 py-2 text-xs text-white';
@@ -32,7 +38,7 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
 
   if (hidden || !st) return null;
   const changed = backend !== st.ticketBackend || (backend !== 'exos' && url.trim() !== (st.externalTicketUrl ?? ''));
-  const syncProvider = backend === 'pretix' || backend === 'hievents' ? backend : null;
+  const syncProvider = (SYNC_PROVIDERS as string[]).includes(backend) ? backend as SyncProvider : null;
   const connected = syncProvider ? st.connected.includes(syncProvider) : false;
 
   const save = async () => {
@@ -52,7 +58,7 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
     if (!syncProvider) return;
     const id = refFromLink(syncProvider, ref);
     if (!id) {
-      toast({ kind: 'error', message: syncProvider === 'pretix' ? 'Paste the pretix event link or its short name.' : 'Paste the hi.events check-in list link.' });
+      toast({ kind: 'error', message: REF_HELP[syncProvider].missing });
       return;
     }
     setBusy(true);
@@ -106,7 +112,7 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
         take payment; the event page, marketing and the door stay on Exos.
       </p>
       <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Ticket backend">
-        {(['exos', 'eventbrite', 'pretix', 'hievents'] as TicketBackend[]).map((b) => (
+        {(['exos', 'eventbrite', 'pretix', 'hievents', 'luma'] as TicketBackend[]).map((b) => (
           <button key={b} type="button" role="radio" aria-checked={backend === b} disabled={!st.canManage || busy}
             onClick={() => setBackend(b)}
             className={`${BTN} ${backend === b ? 'border-brand-primary text-brand-primary' : ''}`}>
@@ -155,15 +161,21 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
             <div className="space-y-2">
               <label className="block">
                 <span className="type block text-[10px] uppercase tracking-widest text-white/50 mb-1">
-                  {syncProvider === 'pretix' ? 'pretix event link or short name' : 'hi.events check-in list link'}
+                  {REF_HELP[syncProvider].label}
                 </span>
                 <input className={FLD} value={ref} onChange={(e) => setRef(e.target.value)}
-                  placeholder={syncProvider === 'pretix' ? 'https://pretix.eu/myclub/spring/' : 'https://…/check-in/cil_…'} />
+                  placeholder={REF_HELP[syncProvider].placeholder} />
               </label>
               {syncProvider === 'hievents' && (
                 <p className="type text-[11px] text-white/40">
                   In hi.events: Check-in lists → make one for this event → share. Rotating QR codes can't be checked by
                   Exos; those guests are found by name.
+                </p>
+              )}
+              {syncProvider === 'luma' && (
+                <p className="type text-[11px] text-white/40">
+                  Open the event in Luma's Manage view and paste that link (it has the evt-… id). Luma ticket QR codes
+                  scan at the Exos door; pending and waitlisted guests show as not admitted.
                 </p>
               )}
               <button type="button" onClick={() => void link()} disabled={busy || !ref.trim()} className={BTN}>Link and sync</button>
