@@ -13,6 +13,7 @@ import { Timestamp } from './timestamp';
 import { supabase } from './supabase';
 import { Organization, OrgMembership, OrgRole } from '../types';
 import { publicUrl } from './utils';
+import { parseSite } from './site';
 
 // --- Slug helpers (pure) ---------------------------------------------------
 
@@ -56,6 +57,7 @@ function mapOrg(row: any, secrets?: any): Organization {
     s4kNetwork: row.s4k_network === true,
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
+    site: parseSite(row.site),
     // payments/distribution live in exos_org_secrets (owner/finance RLS); absent
     // for non-privileged readers.
     payments: secrets?.payments ?? undefined,
@@ -128,6 +130,7 @@ function mapPublicOrg(row: any): Organization {
     description: row.description ?? undefined, followersCount: row.followers_count ?? 0,
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
+    site: parseSite(row.site),
   };
 }
 

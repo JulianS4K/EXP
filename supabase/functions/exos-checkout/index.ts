@@ -106,6 +106,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
   if (allowed.length === 0) return json({ error: "server misconfigured: EXOS_REDIRECT_ORIGINS unset" }, 500);
+  // The event's org may also send buyers back to its own verified domains
+  // (custom domains, mig 20261016130000). Missing view: env list only.
+  {
+    const sbDom = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: ev0 } = await sbDom.from("exos_events").select("org_id").eq("id", event_id).maybeSingle();
+    const orgId0 = (ev0 as { org_id?: string } | null)?.org_id;
+    if (orgId0) {
+      const { data: doms } = await sbDom.from("exos_public_org_domains").select("domain").eq("org_id", orgId0).limit(3);
+      for (const d of (doms ?? []) as { domain?: string }[]) {
+        if (typeof d.domain === "string" && /^[a-z0-9.-]{3,253}$/.test(d.domain)) allowed.push(`https://${d.domain}`);
+      }
+    }
+  }
   if (embedded) {
     // Only our own /embed/return page on an allowlisted origin.
     if (!isAllowedEmbedReturn(returnUrl, allowed)) {

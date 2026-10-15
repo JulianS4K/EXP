@@ -91,6 +91,19 @@ The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bri
 2. Org settings → Integrations → connect pretix with a read-only token → **Save and test** says Connected.
 3. Stripe test mode: one paid checkout end to end (`docs/payments-go-live.md` test cases).
 
+## Organizers' own domains
+
+An org can serve its storefront on its own domain (Org settings → Website → Your own domain):
+
+1. The org adds `tickets.theirvenue.com`, points it at your web host with a **CNAME**, and adds the **TXT** record
+   `_exos-verify.<domain>` shown in the app. **Check** verifies it (`exos-integrations/verify-domain`).
+2. **You** add the domain to the web host so it gets HTTPS (Render: service → Settings → Custom domains; behind
+   Cloudflare, Cloudflare for SaaS). Exos can't issue certificates itself.
+3. Add the domain to Supabase Auth → URL configuration → redirect URLs if fans will sign in there.
+4. The server sends the domain's root to `/bridge/o/<slug>`; every other path is the normal app. Stripe checkout
+   may return to a verified domain of the event's org (no `EXOS_REDIRECT_ORIGINS` change needed).
+   `EXOS_PRIMARY_HOSTS` (comma list) names extra hosts that are the platform itself, never an org's.
+
 ## What runs on a schedule
 
 | Job | Every | Function |

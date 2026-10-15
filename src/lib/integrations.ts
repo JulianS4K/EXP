@@ -216,7 +216,7 @@ export function parseBackendStatus(d: any): BackendStatus {
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
-async function callFn<T>(path: string, body: unknown): Promise<T> {
+export async function callFn<T>(path: string, body: unknown): Promise<T> {
   const url = (env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
   if (!url) throw new Error('Integrations are not configured.');
   const { data } = await supabase.auth.getSession();

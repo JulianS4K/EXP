@@ -200,6 +200,18 @@ event's time zone); their tickets stay valid.
 - **Moving it again** closes the earlier offer. Offer refunds again on the new change if you want
   holders to keep the option.
 
+### Your website
+
+**Org settings → Website**:
+
+- **Sections**: your storefront (`/o/<your slug>`) is built from sections you pick and order: a banner (title,
+  subtitle, image, button), the upcoming events grid, about, text, FAQ, photos, link buttons and a text-list
+  sign-up. Text takes simple markdown; links must be https.
+- **Your own domain**: add `tickets.yourvenue.com`, set the CNAME and TXT records shown, then **Check**. Once
+  verified (and the platform operator has added it for HTTPS), your domain opens your storefront.
+- **Widgets** for any other site (WordPress, Squarespace, Webflow): an event list, a month-by-month calendar, and per
+  event (Promote page) a buy button or a ticket box with checkout on your own page.
+
 ### Promo links
 
 **Event report → Marketing → Promo links**: one link per place you post it (an Instagram story, an SMS blast, a

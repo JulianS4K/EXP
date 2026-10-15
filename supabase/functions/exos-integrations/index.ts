@@ -15,6 +15,8 @@
 //   /link  {event, provider, ref}    owner / manager: checks the pretix event /
 //          hi.events check-in list, links it, runs the first sync.
 //   /sync  {event}                   door staff / owner / manager: "Sync now".
+//   /verify-domain {org, domain}     owner / manager: checks the TXT record
+//          _exos-verify.<domain> for the domain's token (mig 20261016130000).
 //   /cron                            X-Cron-Secret: due links, within a budget.
 // Deploy with --no-verify-jwt (CORS preflight; /cron is gated by the secret).
 //
@@ -108,12 +110,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ sync: await syncOne(sb, event) }, 200, cors);
     }
 
+    if (route === "verify-domain") {
+      const org = String(body?.org ?? "");
+      const domain = String(body?.domain ?? "").trim().toLowerCase();
+      if (!UUID.test(org) || !/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+        return json({ error: "missing or bad org / domain" }, 400, cors);
+      }
+      // The list RPC checks owner / manager.
+      const list = await sbUser.rpc("exos_list_org_domains", { p_org_id: org });
+      if (list.error) return rpcError(list.error, cors);
+      const tok = await sb.rpc("exos_org_domain_token", { p_org_id: org, p_domain: domain });
+      if (tok.error || typeof tok.data !== "string") return json({ error: "Add the domain first." }, 404, cors);
+      const found = await txtRecords(`_exos-verify.${domain}`);
+      const ok = found.includes(tok.data);
+      const error = ok ? null : found.length ? "The TXT record is there but has a different value." : "No TXT record found yet (DNS can take an hour).";
+      await sb.rpc("exos_mark_org_domain", { p_domain: domain, p_ok: ok, p_error: error });
+      return json({ ok, error }, 200, cors);
+    }
+
     return json({ error: "not found" }, 404, cors);
   } catch (err) {
     console.error("exos-integrations failed", redactError(err));
     return json({ error: "something went wrong" }, 500, cors);
   }
 });
+
+async function txtRecords(name: string): Promise<string[]> {
+  try {
+    const recs = await Deno.resolveDns(name, "TXT");
+    return recs.map((chunks) => chunks.join("").trim());
+  } catch {
+    return [];
+  }
+}
 
 interface Claimed { event_id: string; org_id: string; provider: string; external_ref: string; sync_cursor: string | null; lease_id: string }
 

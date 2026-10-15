@@ -105,6 +105,22 @@
    feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
    Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
 
+## Open-source build 2026-10-16 (operator ask: BYO credentials, backends, promo links, SMS, white-label)
+
+1. ✅ Bring your own credentials: Org settings → Integrations (Vault), tested with reads only (mig 20261016090000).
+2. ✅ Ticket backends: Exos / Eventbrite / pretix / hi.events per event; buy button links out; read-only pretix
+   and hi.events door sync (mig 20261016100000, `exos-integrations`).
+3. ✅ Promo links with redemption limits, visits and channel attribution (mig 20261016110000).
+4. ✅ SMS marketing from the org's own Twilio / Telnyx: consent, quiet hours, monthly cap, STOP; dry run until
+   `EXOS_SMS_LIVE=on` (mig 20261016120000, `exos-sms-drain`).
+5. ✅ White-label: event list / calendar / buy-button widgets, storefront sections, custom domains with TXT
+   verification, routing and checkout return (mig 20261016130000).
+6. ✅ `docs/self-hosting.md`.
+7. Open source: export a baseline schema (`00000000000000_exos_baseline.sql`) so a fresh database can be built
+   from this repo alone (needs a `supabase db dump` of prod's `exos_*` objects). *(operator)*
+8. hi.events rotating QR codes can't be checked at the Exos door (found by name instead).
+9. Custom domains need the operator to add each verified domain to the web host for HTTPS.
+
 ## Public-sector RFP readiness 2026-10-15 (from the open-RFP research)
 
 Few ticketing RFPs are open now; the next wave is fairs (Dec–Apr) and colleges (Jan–Mar), on 3–5 year terms.
