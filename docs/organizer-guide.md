@@ -74,8 +74,12 @@ shows on your event page:
 - **Age limit** (all ages, 16+, 18+, 21+) shows as a badge. Marketplace listings and Google use it
   too.
 - **Refund policy** and **Good to know** (dress code, bag policy, re-entry) show together near
-  the bottom. The refund policy is what you tell buyers. Refunds themselves are still yours to
-  issue from the event dashboard.
+  the bottom. The refund policy is what you tell buyers, and it sets when they can **ask for a
+  refund** from their ticket: never ("all sales final"), up to 7 days or 24 hours before the start,
+  or until the start (also the rule when no policy is set). Only the person who paid can ask, and
+  not for a comp, a marketplace ticket or one already scanned in. Requests land in **Refund
+  requests** on the event report: **Refund** sends the usual Stripe refund (the ticket stops
+  working) and **Decline** sends the buyer your note. Nothing is refunded without you.
 
 *This section appears once the store-page database update is live. Until then the form shows the
 plain description box.*

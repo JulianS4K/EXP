@@ -43,6 +43,7 @@ import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import AttendeeLookup from '../components/AttendeeLookup';
+import RefundAsksPanel from '../components/RefundAsksPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -429,6 +430,13 @@ export default function OrganizerEventReport() {
             </div>
           )}
         </div>
+
+        {/* Buyers' refund requests (mig 20261015090000): refund or decline. */}
+        <RefundAsksPanel
+          eventId={event.id}
+          canAct={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+          onRefunded={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+        />
 
         {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
         <RefundPanel

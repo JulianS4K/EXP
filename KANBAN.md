@@ -160,7 +160,7 @@ Easiest first. ✅ = done in this pass.
 26. ✅ Offline at the door: the ticket page never loads after a reload (keep the last copy on the device).
 27. ✅ Phone: door scanner below the fold, three offline banners at once, org settings tabs scroll sideways.
 28. ✅ Discoverability: Eventbrite mapping only in /door, scheduled pricing on the report, vouchers / add-ons only after create.
-29. Buyer refund request (not built; next build item: request → organizer approves → exos-refund).
+29. ✅ Buyer refund request: the payer asks from the ticket within the event's refund policy; the organizer refunds (exos-refund, nonce `ask:<id>`) or declines with a note (mig 20261015090000, `test_refund_asks.sql`).
 30. Wallet passes (operator: Apple / Google pass credentials into the secret store; code is built).
 31. Payments live (operator: Stripe live keys + webhook, docs/payments-go-live.md; agent checkout follows).
 
