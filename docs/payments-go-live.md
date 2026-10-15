@@ -34,6 +34,13 @@ the details with counsel.)
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
 - [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
       delayed methods would outlive the 30-minute seat hold.
+- [ ] Apple Pay and Google Pay switched on (no code: `payment_method_types: ["card"]` already
+      carries both wallets). In the live Dashboard: Settings → Payment methods → Apple Pay and
+      Google Pay on. The event-page checkout runs on `checkout.stripe.com`, so nothing else is needed
+      there. For the venue embed (Embedded Checkout on our page), add our public domain under
+      Settings → Payment method domains (test and live). `public/embed.js` already gives its iframe
+      `allow="payment"`, which wallets inside a venue's page need. Check on a real iPhone (Safari)
+      and an Android phone (Chrome) with a card saved in the wallet.
 - [x] Platform fee decided (operator, 2026-09-28): **Exos keeps 3% of every transaction, after
       Stripe, paid by the organizer.** On an Exos checkout the application fee is 3% + Stripe's card
       fee, because with destination charges the platform pays Stripe (`checkoutApplicationFeeCents`,
