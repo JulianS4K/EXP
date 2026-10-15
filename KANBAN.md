@@ -105,6 +105,22 @@
    feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
    Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
 
+## Public-sector RFP readiness 2026-10-15 (from the open-RFP research)
+
+Few ticketing RFPs are open now; the next wave is fairs (Dec–Apr) and colleges (Jan–Mar), on 3–5 year terms.
+These are the pass/fail lines that keep coming up. Doing PCI now; the rest is parked until a target bid needs it.
+
+1. ✅ PCI DSS SAQ A (code side): `docs/pci.md`; the embed card page's CSP runs only our code and Stripe's (test
+   pins it); CI fails on high/critical runtime advisories; Dependabot weekly; runtime deps patched to 0 advisories.
+2. PCI operator steps: SAQ A + AOC in the Stripe Dashboard, Stripe's Level 1 AOC, MFA on every admin account,
+   quarterly external scan if Stripe's SAQ flow says it applies (`docs/pci.md` checklist). *(operator)*
+3. Parked: insurance (general liability + cyber / tech E&O, about $3–10k a year). *(operator)*
+4. Parked: VPAT / WCAG 2.1 AA audit (about $1–3k plus fixes); ADA Title II deadline April 2027 / 2028 for buyers.
+5. Parked: security packet (HECVAT Lite, Supabase + Stripe reports, a pen test) and an SLA / event-day support plan.
+6. Parked: reserved seating, season tickets, box-office card payments (Stripe Terminal) and ticket printing.
+7. Parked: agency payment gateways (e.g. TouchNet) and campus SSO (SAML).
+8. Parked: SOC 2 Type II (about $30–110k, 6–12 months): only when a target bid makes it pass/fail.
+
 ## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
 
 Easiest first. ✅ = done in this pass.

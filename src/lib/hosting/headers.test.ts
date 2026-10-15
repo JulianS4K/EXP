@@ -59,6 +59,16 @@ describe('bridgeCsp', () => {
     expect(bridgeCsp('/bridge/event/1')).not.toContain('https://www.youtube.com');
   });
 
+  it("the card page (Embedded Checkout) runs only our code and Stripe's (PCI SAQ A)", () => {
+    const csp = bridgeCsp('/bridge/embed/event/1');
+    const script = csp.split('; ').find((d) => d.startsWith('script-src'))!;
+    expect(script).toBe("script-src 'self' https://js.stripe.com");
+    expect(csp).not.toContain("'unsafe-eval'");
+    expect(csp).not.toContain('connect.facebook.net');
+    expect(csp).not.toContain('*.googleapis.com');
+    expect(bridgeCsp('/bridge/embed/return')).toContain("script-src 'self' https://js.stripe.com;");
+  });
+
   it('lets only the embed be framed', () => {
     expect(bridgeCsp('/bridge/embed/event/1')).toContain('frame-ancestors *;');
     expect(bridgeCsp('/bridge/event/1')).toContain("frame-ancestors 'none';");

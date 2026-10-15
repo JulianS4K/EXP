@@ -34,7 +34,9 @@ const PIXEL_CONNECT =
   ' https://alb.reddit.com https://pixel-config.reddit.com' +
   ' https://tr.snapchat.com https://tr-shadow.snapchat.com' +
   ' https://analytics.twitter.com https://t.co';
-const PIXEL_PREFIXES = ['/bridge/event/', '/bridge/e/', '/bridge/o/', '/bridge/organizer/', '/bridge/embed/event/', '/bridge/l/'];
+// Not /bridge/embed/: that page holds Stripe's card form (Embedded Checkout),
+// so it runs only our own code and Stripe's (PCI DSS SAQ A, docs/pci.md).
+const PIXEL_PREFIXES = ['/bridge/event/', '/bridge/e/', '/bridge/o/', '/bridge/organizer/', '/bridge/l/'];
 
 /** The Stripe return: /bridge/my-tickets?checkout=success&session_id=cs_… */
 export function isCheckoutReturn(path: string, search: string): boolean {
@@ -59,8 +61,8 @@ export const isEmbedPath = (path: string) => path.startsWith('/bridge/embed/');
 export function bridgeCsp(path: string, search = ''): string {
   const pixels = path === '/bridge' || path === '/bridge/' || startsWithAny(path, PIXEL_PREFIXES)
     || isCheckoutReturn(path, search);
-  const maps = startsWithAny(path, MAPS_PREFIXES);
   const embed = isEmbedPath(path);
+  const maps = !embed && startsWithAny(path, MAPS_PREFIXES);
   const video = startsWithAny(path, VIDEO_PREFIXES);
   return (
     "default-src 'self'; " +

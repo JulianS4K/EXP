@@ -185,7 +185,8 @@ function enterScope(orgId: string | null): boolean {
 
 // Public listing pages an org's pixels may see. Everything else (tickets,
 // wallet, transfers, account, dashboards, door check-in) is untracked.
-const PIXEL_ROUTE_PREFIXES = ['/event/', '/e/', '/o/', '/organizer/', '/embed/event/', '/l/'];
+// Not /embed/: it holds Stripe's card form (docs/pci.md); its CSP blocks pixels.
+const PIXEL_ROUTE_PREFIXES = ['/event/', '/e/', '/o/', '/organizer/', '/l/'];
 // Exact public pages that aren't one org's (no org pixels fire there anyway).
 const PIXEL_ROUTES_EXACT = new Set(['/', '/map']);
 export function isPixelRoute(pathname: string): boolean {
