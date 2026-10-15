@@ -6,6 +6,7 @@ import crypto from "crypto";
 import fs from "fs";
 import { securityHeaders } from "./src/lib/hosting/headers";
 import { isLinkCrawler } from "./src/lib/hosting/crawler";
+import { domainRedirect, hostOnly, isPrimary, primaryHosts, ttlCache } from "./src/lib/hosting/domains";
 import { buildLlmsTxt, buildPreviewPage, buildSitemap, inject, injectBody, previewTarget, type PromoterReader, type PublicReader } from "./src/lib/hosting/seo";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -171,6 +172,36 @@ async function startServer() {
     };
     return reader;
   };
+
+  // -- Custom domains (mig 20261016130000) -----------------------------------
+  // tickets.venue.com: a verified org domain serves this app; its bare root
+  // goes to the org's storefront. Lookups are cached for 5 minutes.
+  const primaries = primaryHosts(process.env.EXOS_PUBLIC_BASE_URL, (process.env.EXOS_PRIMARY_HOSTS ?? '').split(',').filter(Boolean));
+  const domainSlugs = ttlCache<string | null>(5 * 60_000);
+  app.use(async (req, res, next) => {
+    const host = hostOnly(req.get('host'));
+    if (!host || isPrimary(host, primaries) || (req.method !== 'GET' && req.method !== 'HEAD')) return next();
+    if (req.path !== '/' && req.path !== '/bridge' && req.path !== '/bridge/') return next();
+    let slug = domainSlugs.get(host);
+    if (slug === undefined) {
+      slug = null;
+      try {
+        const sbUrl = process.env.VITE_SUPABASE_URL;
+        const sbKey = process.env.VITE_SUPABASE_ANON_KEY;
+        if (sbUrl && sbKey) {
+          const { createClient } = await import('@supabase/supabase-js');
+          const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } });
+          const { data } = await sb.from('exos_public_org_domains').select('org_slug').eq('domain', host).maybeSingle();
+          slug = (data as { org_slug?: string } | null)?.org_slug ?? null;
+        }
+      } catch {
+        slug = null;
+      }
+      domainSlugs.set(host, slug);
+    }
+    const to = domainRedirect(req.path, slug);
+    return to ? res.redirect(302, to) : next();
+  });
 
   // -- robots.txt -----------------------------------------------------------
   // On this host the app lives under /bridge/ (vite base). Through the Render

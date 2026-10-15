@@ -58,6 +58,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 
 - [`docs/onboarding.md`](docs/onboarding.md): start here as a developer
 - [`docs/payments-go-live.md`](docs/payments-go-live.md): switching Stripe on (operator runbook)
+- [`docs/self-hosting.md`](docs/self-hosting.md): running your own Exos (Supabase, edge functions, secrets, the web app, schedules)
 - [`docs/pci.md`](docs/pci.md): PCI DSS scope (SAQ A), the controls that keep it, and the yearly operator checklist
 - [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
 - [`docs/strategy.md`](docs/strategy.md): where Exos is going and the phased build plan

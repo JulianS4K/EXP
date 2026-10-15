@@ -200,6 +200,39 @@ event's time zone); their tickets stay valid.
 - **Moving it again** closes the earlier offer. Offer refunds again on the new change if you want
   holders to keep the option.
 
+### Your website
+
+**Org settings → Website**:
+
+- **Sections**: your storefront (`/o/<your slug>`) is built from sections you pick and order: a banner (title,
+  subtitle, image, button), the upcoming events grid, about, text, FAQ, photos, link buttons and a text-list
+  sign-up. Text takes simple markdown; links must be https.
+- **Your own domain**: add `tickets.yourvenue.com`, set the CNAME and TXT records shown, then **Check**. Once
+  verified (and the platform operator has added it for HTTPS), your domain opens your storefront.
+- **Widgets** for any other site (WordPress, Squarespace, Webflow): an event list, a month-by-month calendar, and per
+  event (Promote page) a buy button or a ticket box with checkout on your own page.
+
+### Promo links
+
+**Event report → Marketing → Promo links**: one link per place you post it (an Instagram story, an SMS blast, a
+partner's newsletter). Each link has a name, a channel, a **limit** (tickets), an optional discount and an expiry.
+It opens your event with the code already applied; when the limit is reached or it expires, the code stops working.
+Visits and redemptions show per link, and sales are attributed to the channel under *Sales by source*.
+
+### Text messages
+
+Fans opt in from their ticket ("Get texts about … next events"), with the consent words stored. To send:
+
+1. Connect **Twilio** or **Telnyx** in Org settings → Integrations with your own number (you register it for
+   business texting: 10DLC or toll-free). Point the number's incoming-message webhook at the address shown there
+   so STOP replies are recorded.
+2. **Event report → Marketing → Text messages**: write it, pick this event's ticket holders or everyone on your list,
+   send now or schedule.
+
+Exos adds your org's name and "Reply STOP to opt out" to every text, sends only 9:00 to 20:00 (event time), at most
+8 texts per person per month, and never to someone who replied STOP. On a fresh install sending stays off (dry run)
+until the operator switches it on.
+
 ## 5. At the door (`/checkin/:eventId`)
 
 - Staff with the **scanner** role scan the attendee's live QR code. It changes every 30 seconds
@@ -273,6 +306,23 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
   - Posh, DICE and the others: import their CSV (they have no API we can use yet).
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
+
+### Selling on another platform (pretix, hi.events, Eventbrite)
+
+You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.
+
+- **Edit event → Where tickets are sold**: pick Exos, Eventbrite, pretix or hi.events and paste the link to your
+  ticket page there. The buy button then sends fans to that shop, and Exos doesn't take payment for the event
+  (it can't be switched once tickets have sold on Exos).
+- **The door**: connect the platform once in **Org settings → Integrations**, then link the event:
+  - **pretix**: an API token from a team that can only view orders, your pretix address (pretix.eu or your own
+    server) and organizer short name. Paste the event's shop link. Paid orders come in with their QR codes;
+    cancelled, expired or unpaid ones are refused at the door.
+  - **hi.events**: your hi.events address, then a check-in list's share link (Check-in lists → share). No password
+    is stored. Rotating QR codes can't be checked by Exos; those guests are found by name.
+  - **Eventbrite**: as above (*Tickets sold somewhere else*).
+- Guests sync every 2 minutes from two days before the event (every 30 minutes before that) into a guest list
+  named after the platform. **Sync now** on the panel pulls immediately. Nothing is written back.
 
 ### Check-in lists and re-entry
 

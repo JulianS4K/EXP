@@ -31,6 +31,8 @@ import { initOrgPixels } from '../lib/pixels';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import SocialLinks from '../components/SocialLinks';
 import SubscribeCalendar from '../components/SubscribeCalendar';
+import SiteSections from '../components/SiteSections';
+import { splitAroundEvents } from '../lib/site';
 import { orgFeedLinks } from '../lib/calendar';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
@@ -132,6 +134,8 @@ function StorefrontInner({ org }: ResolvedOrg) {
     }
   };
 
+  const parts = splitAroundEvents(org.site ?? null);
+  const site = { ...parts, eventsTitle: org.site?.sections.find((x) => x.type === 'events')?.title };
   return (
     <div className="wall min-h-screen text-white">
       {/* ---- Org-branded nav (white-label) ---- */}
@@ -187,7 +191,8 @@ function StorefrontInner({ org }: ResolvedOrg) {
       {/* ---- Hero banner ---- */}
       <header className="relative h-72 overflow-hidden flex items-end border-b border-white/10">
         <img
-          src={theme.logoUrl && org.marketing?.shareImageUrl ? org.marketing.shareImageUrl : DEMO_HERO}
+          src={site.hero?.image && /^https:\/\//.test(site.hero.image) ? site.hero.image
+            : theme.logoUrl && org.marketing?.shareImageUrl ? org.marketing.shareImageUrl : DEMO_HERO}
           className="xerox absolute inset-0 w-full h-full object-cover opacity-40"
           alt=""
         />
@@ -203,10 +208,16 @@ function StorefrontInner({ org }: ResolvedOrg) {
             className="disp text-6xl md:text-8xl tracking-tight leading-[0.82] mt-2 uppercase"
             style={{ transform: 'skewX(-4deg)' }}
           >
-            {org.name}
+            {site.hero?.title || org.name}
           </h1>
-          {org.description && (
-            <p className="type text-white/55 text-sm mt-3 max-w-lg">{org.description}</p>
+          {(site.hero?.subtitle || org.description) && (
+            <p className="type text-white/55 text-sm mt-3 max-w-lg">{site.hero?.subtitle || org.description}</p>
+          )}
+          {site.hero?.button_url && /^https:\/\//.test(site.hero.button_url) && (
+            <a href={site.hero.button_url} target="_blank" rel="noopener noreferrer"
+              className="disp inline-block mt-4 px-6 py-2 text-lg tracking-wide text-black" style={{ background: accent }}>
+              {site.hero.button_label || 'Learn more'}
+            </a>
           )}
           <SocialLinks
             socials={org.marketing?.socials}
@@ -214,6 +225,9 @@ function StorefrontInner({ org }: ResolvedOrg) {
           />
         </div>
       </header>
+
+      {/* ---- Site sections before the events (mig 20261016130000) ---- */}
+      <SiteSections sections={site.before} accent={accent} orgId={org.id} />
 
       {/* ---- Event grid ---- */}
       <motion.main
@@ -224,7 +238,7 @@ function StorefrontInner({ org }: ResolvedOrg) {
       >
         <div className="flex items-end justify-between mb-8">
           <h2 className="disp text-3xl tracking-tight uppercase" style={{ transform: 'skewX(-4deg)' }}>
-            Upcoming
+            {site.eventsTitle || 'Upcoming'}
           </h2>
           {!loading && events.length > 0 && (
             <span className="marker text-white/35 text-lg" style={{ transform: 'rotate(-3deg)' }}>
@@ -296,6 +310,8 @@ function StorefrontInner({ org }: ResolvedOrg) {
           </div>
         )}
       </motion.main>
+
+      <SiteSections sections={site.after} accent={accent} orgId={org.id} />
 
       {/* ---- Footer ---- */}
       <footer className="border-t border-white/10 py-8 text-center">

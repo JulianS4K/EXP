@@ -96,6 +96,8 @@ export interface Organization {
   // Growth/marketing config (D4-OPS-14, mig 20260523200000). Public IDs/handles
   // only (no secrets). Socials render on the storefront; pixels load on public
   // pages behind the consent gate (lib/consent.ts + lib/pixels.ts).
+  // Venue site sections for the storefront (mig 20261016130000).
+  site?: import('./lib/site').Site | null;
   marketing?: {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
     /** Public pixel ids (formats: lib/pixelIds.ts). x* are X event ids (tw-<pixel>-<event>). */
@@ -357,6 +359,10 @@ export interface Event {
   format?: import('./lib/onlineEvents').EventFormat;
   whatToBring?: string;
   noindex?: boolean;
+  // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
+  // organizer's own shop on another platform, linked from the buy button.
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents';
+  externalTicketUrl?: string;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

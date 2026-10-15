@@ -23,6 +23,8 @@ import { getOrganization, updateOrganization } from '../lib/orgs';
 import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
+import WebsitePanel from '../components/WebsitePanel';
+import IntegrationsPanel from '../components/IntegrationsPanel';
 import DeveloperSettings from '../components/DeveloperSettings';
 import PixelIdsEditor, { pixelIdsSavable } from '../components/PixelIdsEditor';
 import { paymentsEnabled } from '../lib/payments';
@@ -588,6 +590,17 @@ export default function OrgSettings() {
                 Copy snippet
               </button>
             </div>
+
+            {/* Website: storefront sections, custom domain, widgets (mig 20261016130000). */}
+            {org.slug && (
+              <WebsitePanel orgId={org.id} orgName={org.name} orgSlug={org.slug} site={org.site}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
+
+            {/* Bring-your-own accounts: ticket backends, SMS, marketplaces (mig 20261016090000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />

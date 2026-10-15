@@ -145,6 +145,7 @@ export default function PromoteEvent() {
   // Loader snippet (public/embed.js): the fan picks tickets and pays inside
   // the iframe without leaving the venue's site (lib/embed.ts).
   const embedSnippet = buildEmbedSnippet({ loaderUrl: publicUrl('embed.js'), eventId: eventId ?? '', title });
+  const buttonSnippet = `<a data-exos-button="${eventId ?? ''}" data-exos-label="Get tickets"></a>\n<script src="${publicUrl('embed.js')}" async></script>`;
 
   const twitterHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(`${title} ${url}`)}`;
   const facebookHref = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
@@ -331,6 +332,11 @@ export default function PromoteEvent() {
           <pre className="bg-black border border-white/10 text-brand-primary text-[11px] p-4 overflow-x-auto font-mono whitespace-pre-wrap break-all">{embedSnippet}</pre>
           <button onClick={() => copy(embedSnippet, 'Embed snippet copied.')} className="mt-3 flex items-center gap-2 px-4 py-2.5 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest hover:bg-brand-primary/90 transition-colors">
             <Copy className="w-3.5 h-3.5" /> Copy embed code
+          </button>
+          <p className="type text-[11px] text-white/50 mt-5 mb-2">Or just a buy button (opens the event page; no frame):</p>
+          <pre className="bg-black border border-white/10 text-brand-primary text-[11px] p-4 overflow-x-auto font-mono whitespace-pre-wrap break-all">{buttonSnippet}</pre>
+          <button onClick={() => copy(buttonSnippet, 'Button code copied.')} className="mt-3 flex items-center gap-2 px-4 py-2.5 border border-white/20 text-white text-[10px] font-black uppercase tracking-widest hover:border-brand-primary transition-colors">
+            <Copy className="w-3.5 h-3.5" /> Copy button code
           </button>
         </section>
 
