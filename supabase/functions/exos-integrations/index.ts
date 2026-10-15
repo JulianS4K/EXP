@@ -1,10 +1,11 @@
-// exos-integrations — bring-your-own credentials and the pretix / hi.events
+// exos-integrations — bring-your-own credentials and the pretix / hi.events / Luma
 // ticket-backend sync (migs 20261016090000, 20261016100000; docs/self-hosting.md,
 // docs/organizer-guide.md "Selling on another platform").
 //
 // Every call to a provider is a READ (CLAUDE.md: upstream ticketing APIs are
 // read-only). pretix: orders + items with the org's API token. hi.events: a
-// check-in list's public attendee feed. Twilio / Telnyx: an account read to
+// check-in list's public attendee feed. Luma: guests with the calendar's API
+// key. Twilio / Telnyx: an account read to
 // check the credentials (sending is the SMS drain's job, with consent).
 // Organizer-supplied addresses go through the SSRF guard; redirects are not
 // followed. Secrets never leave the server.
@@ -13,7 +14,7 @@
 //   /test  {org, provider}           owner / manager / finance: checks the saved
 //          credentials, marks the integration connected / error.
 //   /link  {event, provider, ref}    owner / manager: checks the pretix event /
-//          hi.events check-in list, links it, runs the first sync.
+//          hi.events check-in list / Luma event, links it, runs the first sync.
 //   /sync  {event}                   door staff / owner / manager: "Sync now".
 //   /verify-domain {org, domain}     owner / manager: checks the TXT record
 //          _exos-verify.<domain> for the domain's token (mig 20261016130000).
@@ -32,10 +33,13 @@ import { baseUrl, SLUG } from "../_shared/backends/rows.ts";
 import { cursorString, parseCursor, pretixItems, pretixOrdersPage } from "../_shared/backends/pretix.ts";
 import { hiEventsAttendeesPage, hiEventsList } from "../_shared/backends/hievents.ts";
 import { testProvider } from "../_shared/backends/providers.ts";
+import { lumaEvent, lumaGuestsPage } from "../_shared/backends/luma.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 100_000;
 const PAGES_PER_RUN = 10;
+const BACKENDS = ["pretix", "hievents", "luma"];
+const PROVIDER_NAME: Record<string, string> = { pretix: "pretix", hievents: "hi.events", luma: "Luma" };
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
@@ -89,13 +93,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const provider = String(body?.provider ?? "");
       const ref = typeof body?.ref === "string" ? body.ref.trim() : "";
       if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
-      if (provider !== "pretix" && provider !== "hievents") return json({ error: "pretix or hievents" }, 400, cors);
+      if (!BACKENDS.includes(provider)) return json({ error: "pretix, hievents or luma" }, 400, cors);
       if (!SLUG.test(ref)) return json({ error: "That id doesn't look right." }, 400, cors);
       const org = await eventOrg(sb, event);
       if (!org) return json({ error: "event not found" }, 404, cors);
       const check = await checkRef(sb, org, provider, ref);
       if (!check.ok) return json({ error: check.error }, 400, cors);
-      const r = await sbUser.rpc("exos_backend_link", { p_event_id: event, p_provider: provider, p_ref: ref, p_name: check.name ?? null });
+      // Luma accepts the public event link too; the link stores the evt- id it resolves to.
+      const r = await sbUser.rpc("exos_backend_link", { p_event_id: event, p_provider: provider, p_ref: check.id ?? ref, p_name: check.name ?? null });
       if (r.error) return rpcError(r.error, cors);
       const sync = await syncOne(sb, event);
       return json({ ...(r.data as object), sync }, 200, cors);
@@ -151,9 +156,13 @@ async function providerConfig(sb: SupabaseClient, org: string, provider: string)
   return data as { config: Record<string, unknown>; secret: string | null } | null;
 }
 
-async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: string): Promise<{ ok: boolean; id?: string; name?: string; error?: string }> {
   const c = await providerConfig(sb, org, provider);
-  if (!c) return { ok: false, error: `Connect ${provider === "pretix" ? "pretix" : "hi.events"} in Integrations first.` };
+  if (!c) return { ok: false, error: `Connect ${PROVIDER_NAME[provider]} in Integrations first.` };
+  if (provider === "luma") {
+    if (!c.secret) return { ok: false, error: "Paste the Luma API key in Integrations first." };
+    return lumaEvent(fetch, c.secret, ref);
+  }
   if (provider === "pretix") {
     const base = baseUrl(c.config.base_url ?? "https://pretix.eu");
     if (!base || await urlIsBlocked(base)) return { ok: false, error: "The pretix address isn't usable." };
@@ -207,6 +216,21 @@ async function syncClaimed(sb: SupabaseClient, c: Claimed, deadline: number) {
         added += Number((r.data as { added?: number } | null)?.added ?? 0);
         if (!more) return { ok: true, added };
         page += 1;
+      }
+      return { ok: true, added, more: true };
+    }
+    if (c.provider === "luma") {
+      const key = cfg.secret ?? "";
+      let cursor = c.sync_cursor || null;
+      for (let i = 0; i < PAGES_PER_RUN && Date.now() < deadline; i++) {
+        const p = await lumaGuestsPage(fetch, key, c.external_ref, cursor);
+        if (p.status >= 400) throw new Error(`Luma answered ${p.status}`);
+        if (p.next && p.next.length > 200) throw new Error("Luma page cursor too long to store");
+        // No "changed since" either: each pass reads every page; done starts over.
+        const r = await apply(p.rows, p.next ? "more" : "done", p.next);
+        added += Number((r.data as { added?: number } | null)?.added ?? 0);
+        if (!p.next) return { ok: true, added };
+        cursor = p.next;
       }
       return { ok: true, added, more: true };
     }

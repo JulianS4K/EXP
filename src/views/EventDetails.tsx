@@ -297,9 +297,9 @@ export default function EventDetails() {
   const stripeEnabled = paymentsEnabled();
   // Same routing rule as handlePurchase: anything priced needs checkout.
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
-  // Sold on the organizer's own Eventbrite / pretix / hi.events shop (mig 20261016100000).
+  // Sold on the organizer's own Eventbrite / pretix / hi.events / Luma shop (mig 20261016100000).
   const externalShop = event?.ticketBackend && event.ticketBackend !== 'exos' && event.externalTicketUrl
-    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events' } as const)[event.ticketBackend] }
+    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma' } as const)[event.ticketBackend] }
     : null;
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
