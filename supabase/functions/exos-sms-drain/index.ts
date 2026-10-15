@@ -103,7 +103,8 @@ async function drain(sb: SupabaseClient) {
       continue;
     }
     const r = await sendSms(fetch, cfg, m.phone, m.body);
-    if (r.ok) {
+    // `in` narrows the union whether or not strictNullChecks is on (CI's deno check has it off).
+    if ("id" in r) {
       await sb.rpc("exos_sms_mark", { p_id: m.id, p_status: "sent", p_provider_id: r.id });
       sent++;
     } else {
