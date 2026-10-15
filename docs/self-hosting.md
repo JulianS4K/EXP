@@ -42,7 +42,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
 `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
 `exos-marketplace-sales`, `exos-mcp`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
-`exos-s4k-feed`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
+`exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
 
 ## 3. Secrets (Project settings → Edge functions → Secrets)
 
@@ -59,6 +59,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `EXOS_GUEST_IP_SALT` | guest checkout | any long random string |
 | `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync | `on` to allow; each org also switches it on |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
+| `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
 Integrations** (pretix, hi.events, Twilio, Telnyx, marketplaces) or the door app (Eventbrite). They're stored in
@@ -96,6 +97,7 @@ The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bri
 |---|---|---|
 | `exos-eventbrite-sync-2min` | 2 min (odd) | `exos-eventbrite-sync/cron` |
 | `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events door sync) |
+| `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
 
 ## Upstream rules (kept in code, not configuration)

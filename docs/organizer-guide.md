@@ -200,6 +200,27 @@ event's time zone); their tickets stay valid.
 - **Moving it again** closes the earlier offer. Offer refunds again on the new change if you want
   holders to keep the option.
 
+### Promo links
+
+**Event report → Marketing → Promo links**: one link per place you post it (an Instagram story, an SMS blast, a
+partner's newsletter). Each link has a name, a channel, a **limit** (tickets), an optional discount and an expiry.
+It opens your event with the code already applied; when the limit is reached or it expires, the code stops working.
+Visits and redemptions show per link, and sales are attributed to the channel under *Sales by source*.
+
+### Text messages
+
+Fans opt in from their ticket ("Get texts about … next events"), with the consent words stored. To send:
+
+1. Connect **Twilio** or **Telnyx** in Org settings → Integrations with your own number (you register it for
+   business texting: 10DLC or toll-free). Point the number's incoming-message webhook at the address shown there
+   so STOP replies are recorded.
+2. **Event report → Marketing → Text messages**: write it, pick this event's ticket holders or everyone on your list,
+   send now or schedule.
+
+Exos adds your org's name and "Reply STOP to opt out" to every text, sends only 9:00 to 20:00 (event time), at most
+8 texts per person per month, and never to someone who replied STOP. On a fresh install sending stays off (dry run)
+until the operator switches it on.
+
 ## 5. At the door (`/checkin/:eventId`)
 
 - Staff with the **scanner** role scan the attendee's live QR code. It changes every 30 seconds

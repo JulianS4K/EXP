@@ -66,7 +66,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { key: 'from', label: 'Sending number or Messaging Service SID', placeholder: '+12125550100 or MG…', kind: 'text', required: true },
     ],
     secretLabel: 'Auth token',
-    secretHelp: 'Twilio Console → Account info. An API key secret works too if you put the key SID above.',
+    secretHelp: 'Twilio Console → Account info. For STOP replies, set the number\'s incoming-message webhook to …/functions/v1/exos-sms-drain/inbound/twilio?org=<your org id>.',
     docsUrl: 'https://www.twilio.com/docs/usage/api',
   },
   {
@@ -75,6 +75,8 @@ export const PROVIDERS: ProviderInfo[] = [
     fields: [
       { key: 'from', label: 'Sending number', placeholder: '+12125550100', kind: 'phone', required: true },
       { key: 'messaging_profile_id', label: 'Messaging profile id (optional)', kind: 'text' },
+      { key: 'webhook_public', label: 'Webhook public key (for STOP replies)', kind: 'text',
+        help: 'Telnyx portal → Keys & credentials → Public key. Inbound webhook: …/functions/v1/exos-sms-drain/inbound/telnyx?org=<your org id>' },
     ],
     secretLabel: 'API key',
     docsUrl: 'https://developers.telnyx.com/docs/messaging',
