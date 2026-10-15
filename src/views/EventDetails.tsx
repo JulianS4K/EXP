@@ -25,6 +25,7 @@ import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
 import { applyMeta } from '../lib/meta';
 import { getPublicOrg } from '../lib/orgs';
+import { codeFromSearch, recordPromoHit } from '../lib/promoLinks';
 import { initOrgPixels, pixelsLive, trackPixelEvent } from '../lib/pixels';
 import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from '../lib/purchasePixel';
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
@@ -89,6 +90,7 @@ export default function EventDetails() {
   // the visit so it survives sign-in; and a cart pre-filled by a checkout link.
   const [attribution, setAttribution] = useState<Attribution>({});
   const [prefill, setPrefill] = useState<CheckoutPrefill | null>(null);
+  const [promoCode, setPromoCode] = useState<string | null>(null);
   // Accounts a share tags: the organizer and the promoter who brought this fan.
   const shareTags = useShareTags({ org, promoterCode: attribution.promoter, enabled: !!org });
   useEffect(() => {
@@ -97,6 +99,10 @@ export default function EventDetails() {
     // Ad click ids (gclid, ttclid, ...) for the checkout record, kept for the visit.
     captureClickIds(id, window.location.search);
     setPrefill(readPrefill(id));
+    // A promo link (?code=…, mig 20261016110000): pre-fill the code and count the visit.
+    const promo = codeFromSearch(window.location.search);
+    setPromoCode(promo);
+    if (promo) recordPromoHit(id, promo);
   }, [id]);
   const location = useLocation();
   useEffect(() => {
@@ -291,7 +297,11 @@ export default function EventDetails() {
   const stripeEnabled = paymentsEnabled();
   // Same routing rule as handlePurchase: anything priced needs checkout.
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
-  const paidNotOnSale = !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
+  // Sold on the organizer's own Eventbrite / pretix / hi.events shop (mig 20261016100000).
+  const externalShop = event?.ticketBackend && event.ticketBackend !== 'exos' && event.externalTicketUrl
+    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events' } as const)[event.ticketBackend] }
+    : null;
+  const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
   // Sign in, then pick up the purchase where the buyer left it.
   const signInToBuy = async () => {
@@ -1113,12 +1123,25 @@ export default function EventDetails() {
                   </div>
                 </div>
 
+                {externalShop ? (
+                  <>
+                    <a href={externalShop.url} target="_blank" rel="noopener noreferrer"
+                      onClick={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })}
+                      className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide flex items-center justify-center gap-3 hover:scale-[1.01] transition-transform">
+                      <Ticket className="w-5 h-5" />
+                      <span className="tracking-wide">{t('event.getTickets')}</span>
+                    </a>
+                    <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">
+                      Tickets are sold by the organizer on {externalShop.name}. You'll check out there.
+                    </p>
+                  </>
+                ) : (<>
                 {/* A valid voucher can unlock a sold-out event (or pin a price). */}
                 <VoucherField
                   eventId={event.id}
                   email={user?.email ?? null}
                   onApplied={setVoucher}
-                  initialCode={prefill?.coupon}
+                  initialCode={prefill?.coupon ?? promoCode ?? undefined}
                 />
 
                 {(!soldOut || voucher?.canBypass) && (
@@ -1145,6 +1168,7 @@ export default function EventDetails() {
                     </>
                   )}
                 </button>
+                </>)}
 
                 {paidNotOnSale && !soldOut && (
                   <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">

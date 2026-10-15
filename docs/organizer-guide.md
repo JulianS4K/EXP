@@ -274,6 +274,23 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
 
+### Selling on another platform (pretix, hi.events, Eventbrite)
+
+You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.
+
+- **Edit event → Where tickets are sold**: pick Exos, Eventbrite, pretix or hi.events and paste the link to your
+  ticket page there. The buy button then sends fans to that shop, and Exos doesn't take payment for the event
+  (it can't be switched once tickets have sold on Exos).
+- **The door**: connect the platform once in **Org settings → Integrations**, then link the event:
+  - **pretix**: an API token from a team that can only view orders, your pretix address (pretix.eu or your own
+    server) and organizer short name. Paste the event's shop link. Paid orders come in with their QR codes;
+    cancelled, expired or unpaid ones are refused at the door.
+  - **hi.events**: your hi.events address, then a check-in list's share link (Check-in lists → share). No password
+    is stored. Rotating QR codes can't be checked by Exos; those guests are found by name.
+  - **Eventbrite**: as above (*Tickets sold somewhere else*).
+- Guests sync every 2 minutes from two days before the event (every 30 minutes before that) into a guest list
+  named after the platform. **Sync now** on the panel pulls immediately. Nothing is written back.
+
 ### Check-in lists and re-entry
 
 **Re-entry is off unless you turn it on.** By default every ticket gets in once, at any door, and a

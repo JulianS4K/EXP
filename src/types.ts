@@ -357,6 +357,10 @@ export interface Event {
   format?: import('./lib/onlineEvents').EventFormat;
   whatToBring?: string;
   noindex?: boolean;
+  // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
+  // organizer's own shop on another platform, linked from the buy button.
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents';
+  externalTicketUrl?: string;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

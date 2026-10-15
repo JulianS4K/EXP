@@ -129,6 +129,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const ev = (tier as unknown as { exos_events: { org_id: string; name: string; status: string; currency: string | null } }).exos_events;
   if (ev.status !== "published") return json({ error: "event not on sale" }, 409);
+  // Another platform sells this event (mig 20261016100000): Exos doesn't take
+  // money for it. An older database without the column reads as 'exos'.
+  {
+    const { data: be } = await sb.from("exos_events").select("ticket_backend").eq("id", event_id).maybeSingle();
+    const backend = (be as { ticket_backend?: string } | null)?.ticket_backend ?? "exos";
+    if (backend !== "exos") return json({ error: "tickets for this event are sold on another site", reason: "external_backend" }, 409);
+  }
 
   // Voucher (pretix-style access token) — validated server-side. May bypass a
   // sold-out tier and/or pin a price; consumed on fulfillment by a DB trigger

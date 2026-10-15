@@ -43,6 +43,7 @@ import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import AttendeeLookup from '../components/AttendeeLookup';
+import PromoLinksPanel from '../components/PromoLinksPanel';
 import RefundAsksPanel from '../components/RefundAsksPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
@@ -483,6 +484,10 @@ export default function OrganizerEventReport() {
         {/* Sales by source: UTM, promoter code and ad platform (click ids) per
             paid order, with a CSV (owner / manager / finance; hidden if unreadable). */}
         <SourcesPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+
+        {/* Promo links: a URL per channel with a redemption limit (mig 20261016110000). */}
+        <PromoLinksPanel eventId={event.id} currency={event.currency}
+          canCreate={canAct} canView={canSeeMoney(activeRole, isAdmin) || canAct} />
 
         {/* Attendee updates — broadcast a message to ticket holders (email +
             in-app). Composer is owner/manager-only; the RPC re-checks server-side.
