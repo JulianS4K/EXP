@@ -717,7 +717,9 @@ CREATE OR REPLACE FUNCTION pg_temp.exos_patch(p_fn regprocedure, p_marker text, 
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE v_def text; v_hits int;
 BEGIN
-  v_def := pg_get_functiondef(p_fn);
+  -- Pasted through a browser the patch text can carry CRLF line ends; compare without CRs.
+  v_def := replace(pg_get_functiondef(p_fn), chr(13), '');
+  p_marker := replace(p_marker, chr(13), ''); p_old := replace(p_old, chr(13), ''); p_new := replace(p_new, chr(13), '');
   IF position(p_marker in v_def) > 0 THEN
     RAISE NOTICE '%: already patched (%)', p_fn, p_marker;
     RETURN;

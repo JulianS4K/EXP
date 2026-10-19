@@ -1,5 +1,5 @@
 // Org settings → Integrations (mig 20261016090000): the org's own accounts
-// for ticket backends (pretix, hi.events), SMS (Twilio, Telnyx) and resale
+// for ticket backends (pretix, hi.events, Luma), SMS (Twilio, Telnyx) and resale
 // marketplaces. Secrets are pasted once and never shown again.
 
 import { Fragment, useCallback, useEffect, useState } from 'react';

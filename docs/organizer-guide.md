@@ -307,11 +307,32 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
 
-### Selling on another platform (pretix, hi.events, Eventbrite)
+### Selling on Eventbrite too (one event, every platform)
+
+Create the event once, in Exos, and sell it on Eventbrite as well, with one shared count of tickets.
+
+- **Create event → Ticketing**: pick the **primary ticketing system** (Exos or Eventbrite) and tick **Also sell
+  on**. The primary is whose QR codes the event goes out with when it is shared on other markets (the last listing
+  set is sold there), and where comps go (Eventbrite can't add guests through its API, so comps stay Exos tickets).
+- Exos then **creates the event on Eventbrite** with the same name, date, venue, description and ticket types with
+  prices, and publishes it when you publish. Change something in Exos and it is changed there on the next sync
+  (every 2 minutes, or **Sync now** under Edit event → Also sell on). Edit in Exos, not on Eventbrite: a change made
+  directly there is replaced by the next change in Exos.
+- **One count**: Eventbrite's sales come off the Exos ticket types, and Eventbrite's capacity is kept at what Exos
+  has free (less one order's worth, the buffer for the sync's lag). Its buyers are on the door list with their QR codes.
+- Already have the event on Eventbrite? Under **Also sell on**, paste its link instead: Exos takes it over and adds
+  any ticket types it is missing.
+- Cancelling in Exos cancels it on Eventbrite (Eventbrite refuses once it has orders: cancel and refund there).
+- **Sending is off until you switch it on**: the org owner turns on Eventbrite writes in the door app, and the
+  server setting must allow it. Until then Exos records what it would send, and nothing changes on Eventbrite.
+- Table ticket types and ones in a shared capacity group stay on Exos.
+- Luma works the same way and is built in, but it is switched off for now (its API needs Luma Plus).
+
+### Selling on another platform (pretix, hi.events, Luma, Eventbrite)
 
 You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.
 
-- **Edit event → Where tickets are sold**: pick Exos, Eventbrite, pretix or hi.events and paste the link to your
+- **Edit event → Where tickets are sold**: pick Exos, Eventbrite, pretix, hi.events or Luma and paste the link to your
   ticket page there. The buy button then sends fans to that shop, and Exos doesn't take payment for the event
   (it can't be switched once tickets have sold on Exos).
 - **The door**: connect the platform once in **Org settings → Integrations**, then link the event:
@@ -320,6 +341,9 @@ You can keep your ticket shop where it is and use Exos for the event page, marke
     cancelled, expired or unpaid ones are refused at the door.
   - **hi.events**: your hi.events address, then a check-in list's share link (Check-in lists → share). No password
     is stored. Rotating QR codes can't be checked by Exos; those guests are found by name.
+  - **Luma**: an API key for your calendar (Luma → calendar settings → Developer; Luma Plus, one key per
+    calendar). Paste the event's Luma link; the event has to be on that calendar. Approved guests' Luma QR codes
+    scan at the door; pending, invited, waitlisted and declined guests show as not admitted.
   - **Eventbrite**: as above (*Tickets sold somewhere else*).
 - Guests sync every 2 minutes from two days before the event (every 30 minutes before that) into a guest list
   named after the platform. **Sync now** on the panel pulls immediately. Nothing is written back.

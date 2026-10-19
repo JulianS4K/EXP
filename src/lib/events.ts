@@ -133,7 +133,7 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     // Where tickets are sold (mig 20261016100000); likewise.
     ...('ticket_backend' in row
       ? {
-          ticketBackend: (['eventbrite', 'pretix', 'hievents'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
+          ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
           externalTicketUrl: typeof row.external_ticket_url === 'string' && row.external_ticket_url.startsWith('https://')
             ? row.external_ticket_url : undefined,
         }

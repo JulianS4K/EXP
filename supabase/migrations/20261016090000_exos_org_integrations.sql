@@ -20,7 +20,7 @@
 -- account id) live in `config`, readable by the org.
 --
 -- Providers (each a read or a send the org itself owns):
---   ticket backends (read-only sync): pretix, hievents
+--   ticket backends (read-only sync): pretix, hievents, luma
 --   SMS: twilio, telnyx (the org's own sender; Exos sends only with consent)
 --   resale marketplaces (reads only; writes stay dry-run, CLAUDE.md):
 --     stubhub, seatgeek, vivid, tickpick, gametime, tevo
@@ -38,7 +38,7 @@ RETURNS text[]
 LANGUAGE sql IMMUTABLE
 SET search_path = public, pg_temp
 AS $$
-  SELECT ARRAY['pretix', 'hievents', 'twilio', 'telnyx',
+  SELECT ARRAY['pretix', 'hievents', 'luma', 'twilio', 'telnyx',
                'stubhub', 'seatgeek', 'vivid', 'tickpick', 'gametime', 'tevo']::text[]
 $$;
 GRANT EXECUTE ON FUNCTION public.exos_integration_providers() TO anon, authenticated, service_role;

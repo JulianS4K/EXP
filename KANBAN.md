@@ -105,6 +105,20 @@
    feed itself already existed (`exos-catalog-feed`, `docs/marketing-catalog.md`). Next: **agent checkout** for
    Claude, ChatGPT (Agentic Commerce Protocol) and Meta, once Stripe is live (`docs/mcp.md` "Next").
 
+## Channels 2026-10-19 (operator ask: Exos, Eventbrite, Luma mapped 1-1)
+
+1. ✅ Create event → Ticketing: pick the primary ticketing system (QR codes for other markets, comps) and the
+   platforms to also sell on; Edit event → Also sell on (create / link / sync now / stop) (mig 20261019090000).
+2. ✅ `exos-channel-sync`: Exos is the source. Creates the event on Eventbrite / Luma with venue, ticket types and
+   prices, publishes, updates on change (content hash), cancels (Eventbrite) or closes registration (Luma).
+   Eventbrite's count is the existing inventory sync; Luma's is new (guest counts -> exos_luma_inventory_apply).
+3. ✅ Comps on a Luma-primary event go on Luma (queue); Eventbrite can't add attendees, so its comps stay Exos.
+4. ✅ Writes: org switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`; dry run otherwise.
+5. Luma is switched OFF (operator 2026-10-19: its API needs Luma Plus, $59/mo): `EXOS_LUMA_ENABLED` and
+   `VITE_EXOS_LUMA` unset, so nothing calls Luma and the app hides it. Turn both on to use it.
+6. Not mirrored yet: cover images (both need an upload to their CDN), Eventbrite online events, ticket sales
+   windows. Not run against a live Eventbrite / Luma account from the build sandbox.
+
 ## Open-source build 2026-10-16 (operator ask: BYO credentials, backends, promo links, SMS, white-label)
 
 1. ✅ Bring your own credentials: Org settings → Integrations (Vault), tested with reads only (mig 20261016090000).
@@ -120,6 +134,11 @@
    from this repo alone (needs a `supabase db dump` of prod's `exos_*` objects). *(operator)*
 8. hi.events rotating QR codes can't be checked at the Exos door (found by name instead).
 9. Custom domains need the operator to add each verified domain to the web host for HTTPS.
+10. ✅ Luma as a ticket backend (operator ask 2026-10-15): calendar API key in Integrations, event linked by its
+    public link or evt- id, guests synced read-only to the door with the Luma QR key (`_shared/backends/luma.ts`).
+    Built against Luma's openapi.json (calendars/get, entities/lookup, events/get, events/guests/list); not yet
+    run against a live calendar (the build sandbox can't reach luma.com). Luma also has guest/event/ticket write
+    endpoints and webhooks: none are used (upstream read-only).
 
 ## Public-sector RFP readiness 2026-10-15 (from the open-RFP research)
 
