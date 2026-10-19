@@ -41,7 +41,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
 `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
 `exos-channel-sync`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
-`exos-marketplace-sales`, `exos-mcp`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
+`exos-marketplace-sales`, `exos-mcp`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
 `exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
 
 ## 3. Secrets (Project settings → Edge functions → Secrets)
