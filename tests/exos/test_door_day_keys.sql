@@ -11,6 +11,7 @@
 --   K7 an offline scan an hour old is checked with that hour's day key
 --   K8 a live wallet pass adds its Apple hash + Google key, for its epoch
 --   K9 grants
+--   K10 a wallet pass change is in the since form
 -- Self-contained (BEGIN / ROLLBACK). Org dk…01 owned by …a1; scanner …a3
 -- (unscoped), scanner …a4 (assigned to e2 only), holder …a5, finance …a8.
 -- ============================================================================
@@ -248,6 +249,19 @@ BEGIN
   ASSERT has_function_privilege('authenticated', 'public.exos_event_door_roster(uuid, timestamptz)', 'EXECUTE'), 'K9 roster';
   ASSERT has_function_privilege('authenticated', 'public.exos_door_ticket_keys(uuid)', 'EXECUTE'), 'K9 ticket keys';
   RAISE NOTICE 'K9 ok: grants';
+END $$;
+
+-- K10. A wallet pass issued since the last pull is in the delta (mig 20261019120000).
+DO $$
+BEGIN
+  PERFORM pg_temp.act('d7000000-0000-0000-0000-0000000000a3');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_event_door_roster('d7000000-0000-0000-0000-0000000000e1', now() + interval '1 minute')),
+         'K10 nothing changed after now';
+  UPDATE public.exos_wallet_passes SET updated_at = now() + interval '2 minutes'
+   WHERE ticket_id = '11111111-2222-3333-4444-555555555555';
+  ASSERT (SELECT array_agg(ticket_id) FROM public.exos_event_door_roster('d7000000-0000-0000-0000-0000000000e1', now() + interval '1 minute'))
+         = ARRAY['11111111-2222-3333-4444-555555555555'::uuid], 'K10 the pass change brings its ticket';
+  RAISE NOTICE 'K10 ok: wallet pass changes are in the delta';
 END $$;
 
 SELECT '*** door day keys: ALL ASSERTIONS PASSED ***' AS result;
