@@ -22,7 +22,7 @@
 // Deploy with --no-verify-jwt (CORS preflight; /cron is gated by the secret).
 //
 // Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET,
-//      EXOS_REDIRECT_ORIGINS.
+//      EXOS_REDIRECT_ORIGINS, EXOS_LUMA_ENABLED (Luma is off unless "on": no Luma call is made).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
@@ -34,6 +34,10 @@ import { cursorString, parseCursor, pretixItems, pretixOrdersPage } from "../_sh
 import { hiEventsAttendeesPage, hiEventsList } from "../_shared/backends/hievents.ts";
 import { testProvider } from "../_shared/backends/providers.ts";
 import { lumaEvent, lumaGuestsPage } from "../_shared/backends/luma.ts";
+
+// Luma is plugged in but off until the operator sets EXOS_LUMA_ENABLED=on: no Luma API call is made.
+const lumaOn = () => Deno.env.get("EXOS_LUMA_ENABLED") === "on";
+const LUMA_OFF = "Luma is switched off for now.";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 100_000;
@@ -79,6 +83,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const cfg = await sb.rpc("exos_integration_config", { p_org_id: org, p_provider: provider });
       if (cfg.error || !cfg.data) return json({ error: "Not found." }, 404, cors);
       const c = cfg.data as { config: Record<string, unknown>; secret: string | null };
+      if (provider === "luma" && !lumaOn()) return json({ ok: null, account_name: null, error: LUMA_OFF }, 200, cors);
       const res = await testProvider(fetch, provider, c.config ?? {}, c.secret ?? null, (u) => urlIsBlocked(u));
       if (res.ok !== null) {
         await sb.rpc("exos_integration_mark", {
@@ -94,6 +99,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const ref = typeof body?.ref === "string" ? body.ref.trim() : "";
       if (!UUID.test(event)) return json({ error: "missing or bad event" }, 400, cors);
       if (!BACKENDS.includes(provider)) return json({ error: "pretix, hievents or luma" }, 400, cors);
+      if (provider === "luma" && !lumaOn()) return json({ error: LUMA_OFF }, 400, cors);
       if (!SLUG.test(ref)) return json({ error: "That id doesn't look right." }, 400, cors);
       const org = await eventOrg(sb, event);
       if (!org) return json({ error: "event not found" }, 404, cors);
@@ -220,6 +226,7 @@ async function syncClaimed(sb: SupabaseClient, c: Claimed, deadline: number) {
       return { ok: true, added, more: true };
     }
     if (c.provider === "luma") {
+      if (!lumaOn()) throw new Error(LUMA_OFF);
       const key = cfg.secret ?? "";
       let cursor = c.sync_cursor || null;
       for (let i = 0; i < PAGES_PER_RUN && Date.now() < deadline; i++) {

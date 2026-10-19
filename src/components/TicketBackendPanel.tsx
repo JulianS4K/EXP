@@ -7,7 +7,7 @@ import { Store } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import {
-  BACKEND_LABEL, fetchBackendStatus, linkBackend, refFromLink, setTicketBackend, SYNC_PROVIDERS, syncBackend, unlinkBackend,
+  BACKEND_LABEL, fetchBackendStatus, LUMA_ENABLED, linkBackend, refFromLink, setTicketBackend, SYNC_PROVIDERS, syncBackend, unlinkBackend,
   type BackendStatus, type SyncProvider, type TicketBackend,
 } from '../lib/integrations';
 
@@ -112,7 +112,8 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
         take payment; the event page, marketing and the door stay on Exos.
       </p>
       <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Ticket backend">
-        {(['exos', 'eventbrite', 'pretix', 'hievents', 'luma'] as TicketBackend[]).map((b) => (
+        {(['exos', 'eventbrite', 'pretix', 'hievents', 'luma'] as TicketBackend[])
+          .filter((b) => b !== 'luma' || LUMA_ENABLED || st.ticketBackend === 'luma').map((b) => (
           <button key={b} type="button" role="radio" aria-checked={backend === b} disabled={!st.canManage || busy}
             onClick={() => setBackend(b)}
             className={`${BTN} ${backend === b ? 'border-brand-primary text-brand-primary' : ''}`}>

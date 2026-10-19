@@ -31,7 +31,12 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `apply_migration`, DML/DDL, cron changes, and edge-function deploys need explicit
   operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
-  Never add order/hold/price/inventory writes to a third party.
+  Never add order/hold/price/inventory writes to a third party. The one
+  exception (operator decision 2026-10-19) is the organizer's OWN Eventbrite
+  and Luma accounts, mirrored 1-1 from Exos (`exos-channel-sync`,
+  `_shared/channels/`): writes only to each module's allowlist, and only with
+  the org's switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`
+  (otherwise dry run). Luma is off entirely until `EXOS_LUMA_ENABLED=on`.
   Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
   endpoint tagged read or write. The StubHub write foundation
   (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it

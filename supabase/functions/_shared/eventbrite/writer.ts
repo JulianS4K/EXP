@@ -1,6 +1,7 @@
-// Eventbrite: the ONE write Exos makes (docs/marketplace/eventbrite/README.md
+// Eventbrite: the inventory sync's capacity write (docs/marketplace/eventbrite/README.md
 // "Inventory"; mig 20261014110000). Separate from client.ts, which stays GET
-// only.
+// only. Events Exos mirrors there (mig 20261019090000) are created and kept in
+// step by _shared/channels/eventbrite.ts, with its own allowlist.
 //
 // What it can send: Update a Ticket Class
 //   POST /events/{event_id}/ticket_classes/{ticket_class_id}/

@@ -14,7 +14,7 @@ Code: `supabase/functions/_shared/eventbrite/client.ts` (tested by
 `src/lib/eventbrite.test.ts`), the `exos-eventbrite-sync` edge function, and
 `src/lib/door/eventbrite.ts` + `src/components/EventbriteSync.tsx` in the app.
 
-## Read only, except one capacity update
+## Read only, except the capacity update and mirrored events
 
 Hard Rule #2 (`CLAUDE.md`). Every read goes through `ebGet`, which sends only
 `GET` to `www.eventbriteapi.com` (`ALLOWED_HTTP_METHODS = {GET}`;
@@ -38,6 +38,18 @@ Exos never:
   "Check-ins at the Exos door"),
 - registers or changes webhooks (`POST /webhooks/` is a write, so the sync
   polls instead).
+
+**Mirrored events (mig `20261019090000`, operator decision 2026-10-19: "Exos,
+Eventbrite and Luma mapped 1-1").** For an event the organizer creates in Exos
+and chooses to also sell on Eventbrite, `exos-channel-sync`
+(`_shared/channels/eventbrite.ts`) creates and keeps in step, on the
+organizer's own account: the venue, the event (name, dates, description,
+currency), its ticket classes (name, price, hidden; the first capacity), publish
+and cancel. Only the paths in `EB_WRITES` (marked **M** below), under the same
+gate (org switch + `EXOS_EVENTBRITE_WRITES=on`, dry run otherwise). Capacity
+afterwards stays the inventory sync's job. The list above ("Exos never") holds
+for every event Exos did not create there, and for orders, discounts, holds,
+check-ins and webhooks on any event.
 
 Every other non-GET endpoint below is **✖ forbidden**, not merely unused.
 
@@ -170,7 +182,8 @@ switched on for that org only.
 
 Access:
 - **R**: read, fine to call.
-- **W**: the one write, gated as above.
+- **W**: the capacity write, gated as above.
+- **M**: a mirrored-event write (`exos-channel-sync`), gated as above.
 - **✖**: forbidden. Never sent.
 
 | Endpoint | Access | Used by Exos | Name in the spec |
@@ -203,15 +216,15 @@ Access:
 | `POST /events/{event_id}/teams/{team_id}/check_password/` | ✖ |  | Verify password for a team |
 | `GET /events/{event_id}/teams/search/?term={term}` | R |  | Search teams by name Team |
 | `GET /events/{event_id}/` | R | link: confirms the token can read the event | Retrieve an Event |
-| `POST /organizations/{organization_id}/events/` | ✖ |  | Create an Event |
-| `POST /events/{event_id}/` | ✖ |  | Update an Event |
+| `POST /organizations/{organization_id}/events/` | **M** | channel sync: create the mirrored event | Create an Event |
+| `POST /events/{event_id}/` | **M** | channel sync: update the mirrored event | Update an Event |
 | `GET /venues/{venue_id}/events/` | R |  | List Events by Venue |
 | `GET /organizations/{organization_id}/events/` | R | event picker (`status=live,started,draft`, `time_filter=current_future`) | List Events by Organization |
 | `GET /series/{event_series_id}/events/` | R |  | List Events by Series |
-| `POST /events/{event_id}/publish/` | ✖ |  | Publish an Event |
+| `POST /events/{event_id}/publish/` | **M** | channel sync: publish when Exos publishes | Publish an Event |
 | `POST /events/{event_id}/unpublish/` | ✖ |  | Unpublish an Event |
 | `POST /events/{event_id}/copy/` | ✖ |  | Copy an Event |
-| `POST /events/{event_id}/cancel/` | ✖ |  | Cancel an Event |
+| `POST /events/{event_id}/cancel/` | **M** | channel sync: cancel when Exos cancels | Cancel an Event |
 | `DELETE /events/{event_id}/` | ✖ |  | Delete an Event |
 | `GET /formats/{format_id}/` | R |  | Retrieve a Format |
 | `GET /formats/` | R |  | List Formats |
@@ -258,8 +271,8 @@ Access:
 | `GET /events/{event_id}/ticket_buyer_settings/` | R |  | Retrieve Ticket Buyer Settings by Event |
 | `POST /events/{event_id}/ticket_buyer_settings/` | ✖ |  | Update Ticket Buyer Settings for an Event |
 | `GET /events/{event_id}/ticket_classes/{ticket_class_id}/` | R |  | Retrieve a Ticket Class |
-| `POST /events/{event_id}/ticket_classes/` | ✖ |  | Create a Ticket Class |
-| `POST /events/{event_id}/ticket_classes/{ticket_class_id}/` | **W** (capacity only, gated) | inventory sync: `{"ticket_class": {"capacity": N}}` | Update a Ticket Class |
+| `POST /events/{event_id}/ticket_classes/` | **M** | channel sync: one per Exos ticket type | Create a Ticket Class |
+| `POST /events/{event_id}/ticket_classes/{ticket_class_id}/` | **W** / **M** (gated) | inventory sync: `{"ticket_class": {"capacity": N}}`; channel sync: name, price, hidden of a mirrored class | Update a Ticket Class |
 | `GET /events/{event_id}/ticket_classes/` | R | inventory sync + the mapping picker | List Ticket Classes by Event |
 | `GET /events/{event_id}/ticket_classes/for_sale/` | R |  | List Ticket Classes Available For Sale by Event |
 | `GET /ticket_groups/{ticket_group_id}/` | R |  | Retrieve a Ticket Group |
@@ -271,7 +284,7 @@ Access:
 | `GET /users/{user_id}/` | R |  | Retrieve Information about a User Account |
 | `GET /users/me/` | R | connect: checks the token, shows the account name | Retrieve Information About Your User Account |
 | `GET /venues/{venue_id}/` | R |  | Retrieve a Venue |
-| `POST /organizations/{organization_id}/venues/` | ✖ |  | Create a Venue |
+| `POST /organizations/{organization_id}/venues/` | **M** | channel sync: the mirrored event's venue | Create a Venue |
 | `POST /venues/{venue_id}/` | ✖ |  | Update a Venue |
 | `GET /organizations/{organization_id}/venues/` | R |  | List Venues by Organization |
 | `POST /organizations/{organization_id}/webhooks/` | ✖ |  | Create Webhooks by Organization ID |

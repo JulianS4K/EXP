@@ -16,6 +16,8 @@ import { createEvent, getEventForEdit, type EventInput } from '../lib/events';
 import { uploadEventImage, deleteStorageObject } from '../lib/storage';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
+import ChannelChoicePicker from '../components/ChannelChoicePicker';
+import { applyChoice, type ChannelChoice } from '../lib/channels';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Calendar as CalendarIcon, MapPin, Tag, ListOrdered, Upload, ShieldCheck, Loader2, X } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -103,6 +105,8 @@ export default function CreateEvent() {
   const cloneFromId = searchParams.get('clone');
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  // Ticketing (mig 20261019090000): primary QR platform + the other platforms to sell on.
+  const [channels, setChannels] = useState<ChannelChoice>({ primary: 'exos', also: [] });
   const [hydratingClone, setHydratingClone] = useState<boolean>(!!cloneFromId);
   const [uploadingImage, setUploadingImage] = useState(false);
   // Track every Storage path the user has uploaded during this session.
@@ -822,6 +826,15 @@ export default function CreateEvent() {
             toast({ kind: 'error', message: 'Event saved, but the join link did not save. Open Edit event to add it again.' });
           }
         }
+        // Other platforms (Eventbrite / Luma): created there by the channel sync.
+        if (channels.also.length || channels.primary !== 'exos') {
+          try {
+            await applyChoice(created.eventId, channels);
+          } catch (chErr) {
+            console.error('channel setup failed:', chErr);
+            toast({ kind: 'error', message: `Event saved, but selling on other platforms didn't turn on: ${(chErr as Error).message} Open Edit event → Also sell on.` });
+          }
+        }
         // Pin the venue for the map (server-side geocode; best-effort).
         if (!onlineOk || needsVenue(formData.online.format)) void geocodeEvent(created.eventId);
       } catch (commitErr) {
@@ -1539,6 +1552,8 @@ export default function CreateEvent() {
               ))}
            </div>
         </div>
+
+        <ChannelChoicePicker orgId={activeOrg?.id} value={channels} onChange={setChannels} />
 
         {/* Venue access info (mig 20260926090000): shown on the event page.
             Hidden until the columns exist, so a save can't hit a missing one. */}

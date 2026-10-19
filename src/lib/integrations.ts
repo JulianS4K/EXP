@@ -5,6 +5,10 @@
 
 import { supabase } from './supabase';
 
+const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+/** Luma is plugged in but hidden until the operator sets VITE_EXOS_LUMA=on (and EXOS_LUMA_ENABLED=on on the edge functions). */
+export const LUMA_ENABLED = viteEnv.VITE_EXOS_LUMA === 'on';
+
 export type ProviderId =
   | 'pretix' | 'hievents' | 'luma' | 'twilio' | 'telnyx'
   | 'stubhub' | 'seatgeek' | 'vivid' | 'tickpick' | 'gametime' | 'tevo';
@@ -34,7 +38,7 @@ export interface ProviderInfo {
   docsUrl?: string;
 }
 
-export const PROVIDERS: ProviderInfo[] = [
+export const ALL_PROVIDERS: ProviderInfo[] = [
   {
     id: 'pretix', label: 'pretix', group: 'backend',
     blurb: 'Sell on your pretix shop (pretix.eu or your own server). Exos reads orders for the door; nothing is written back.',
@@ -98,7 +102,10 @@ export const PROVIDERS: ProviderInfo[] = [
   })),
 ];
 
-export const providerInfo = (id: string): ProviderInfo | undefined => PROVIDERS.find((p) => p.id === id);
+/** What Integrations offers: Luma only while it is switched on. */
+export const PROVIDERS: ProviderInfo[] = ALL_PROVIDERS.filter((p) => p.id !== 'luma' || LUMA_ENABLED);
+
+export const providerInfo = (id: string): ProviderInfo | undefined => ALL_PROVIDERS.find((p) => p.id === id);
 
 /** Why a settings form can't be saved, or null. Mirrors the SQL rules. */
 export function configError(p: ProviderInfo, config: Record<string, string>, secret: string, hasSecret: boolean): string | null {

@@ -40,7 +40,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
 `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
-`exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
+`exos-channel-sync`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
 `exos-marketplace-sales`, `exos-mcp`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
 `exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
 
@@ -57,7 +57,9 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `RESEND_API_KEY`, `EXOS_MAIL_FROM` | ticket / transfer / refund mail | without them the mail drain answers 500 and nothing sends |
 | `GOOGLE_MAPS_SERVER_KEY` | geocoding | optional |
 | `EXOS_GUEST_IP_SALT` | guest checkout | any long random string |
-| `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync | `on` to allow; each org also switches it on |
+| `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync + event mirroring | `on` to allow; each org also switches it on |
+| `EXOS_LUMA_ENABLED` | Luma at all | `on` to let Exos call Luma's API (needs the organizer's Luma Plus). Off: Luma is plugged in but never called |
+| `EXOS_LUMA_WRITES` | Luma event mirroring + capacity + comps | `on` to allow; each org also switches it on |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
@@ -81,6 +83,7 @@ npm ci --include=dev && npm run build && npm start
 | `VITE_GOOGLE_MAPS_API_KEY`, `VITE_GOOGLE_MAPS_MAP_ID`, `VITE_SENTRY_DSN` | optional |
 | `TRUST_PROXY_HOPS` | number of proxies in front (Render: 1) |
 | `EXOS_AI_DISCOVERY` | leave off until you want crawler / AI pages |
+| `VITE_EXOS_LUMA` | `on` shows Luma in the app (Integrations, ticketing choices); set with `EXOS_LUMA_ENABLED` |
 
 The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bridge/` or change `base` and
 `EXOS_APP_URL` together.
@@ -110,11 +113,13 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 |---|---|---|
 | `exos-eventbrite-sync-2min` | 2 min (odd) | `exos-eventbrite-sync/cron` |
 | `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events, Luma door sync) |
+| `exos-channel-sync-2min` | 2 min (odd) | `exos-channel-sync/cron` (Eventbrite / Luma mirrors, Luma's count) |
 | `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
 
 ## Upstream rules (kept in code, not configuration)
 
 Ticketing platforms and marketplaces are **read**. pretix, hi.events, Luma and the marketplaces are only read;
-Eventbrite's one write is the opt-in capacity sync. Don't add order, hold, price or inventory writes to a third
+Eventbrite and Luma are written only for the organizer's own events mirrored from Exos, behind the org's switch and
+the `EXOS_*_WRITES` flags. Don't add order, hold, price or inventory writes to a third
 party (CLAUDE.md).

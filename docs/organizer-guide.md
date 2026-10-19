@@ -307,6 +307,27 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
 
+### Selling on Eventbrite too (one event, every platform)
+
+Create the event once, in Exos, and sell it on Eventbrite as well, with one shared count of tickets.
+
+- **Create event → Ticketing**: pick the **primary ticketing system** (Exos or Eventbrite) and tick **Also sell
+  on**. The primary is whose QR codes the event goes out with when it is shared on other markets (the last listing
+  set is sold there), and where comps go (Eventbrite can't add guests through its API, so comps stay Exos tickets).
+- Exos then **creates the event on Eventbrite** with the same name, date, venue, description and ticket types with
+  prices, and publishes it when you publish. Change something in Exos and it is changed there on the next sync
+  (every 2 minutes, or **Sync now** under Edit event → Also sell on). Edit in Exos, not on Eventbrite: a change made
+  directly there is replaced by the next change in Exos.
+- **One count**: Eventbrite's sales come off the Exos ticket types, and Eventbrite's capacity is kept at what Exos
+  has free (less one order's worth, the buffer for the sync's lag). Its buyers are on the door list with their QR codes.
+- Already have the event on Eventbrite? Under **Also sell on**, paste its link instead: Exos takes it over and adds
+  any ticket types it is missing.
+- Cancelling in Exos cancels it on Eventbrite (Eventbrite refuses once it has orders: cancel and refund there).
+- **Sending is off until you switch it on**: the org owner turns on Eventbrite writes in the door app, and the
+  server setting must allow it. Until then Exos records what it would send, and nothing changes on Eventbrite.
+- Table ticket types and ones in a shared capacity group stay on Exos.
+- Luma works the same way and is built in, but it is switched off for now (its API needs Luma Plus).
+
 ### Selling on another platform (pretix, hi.events, Luma, Eventbrite)
 
 You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.
