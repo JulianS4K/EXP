@@ -47,8 +47,11 @@ passes to a wallet"). Code: `src/components/WalletButtons.tsx`, `src/lib/walletA
 
 ## The door codes
 
-The app's QR rotates every 30 seconds: `T-{ticket}:{owner}:{bucket}:{HMAC-SHA256(barcode_secret)}`
-(`src/lib/barcode.ts`), and `exos_check_in_ticket` accepts ±2 buckets. A pass can't run
+The app's QR rotates every 30 seconds: `T-{ticket}:{owner}:{bucket}:{HMAC-SHA256(day_key)}`
+(`src/lib/barcode.ts`), and `exos_check_in_ticket` accepts ±2 buckets. `day_key` is derived
+from `barcode_secret` for the bucket's UTC day (mig `20261019100000`, see "Door keys" below);
+a code signed with the secret itself, from an app that hasn't reloaded, is still accepted
+online. A pass can't run
 that code, so passes carry a `W-` code, which `exos_check_in_ticket` now also accepts
 (the migration patches it; the scanner's local check in `src/lib/barcode.ts` knows it too):
 
@@ -67,6 +70,24 @@ The code and the TOTP key are derived **in SQL** (`_exos_wallet_apple_code`,
 and never sees `barcode_secret`. The `wallet-a:` / `wallet-g:` prefixes keep these MACs
 apart from the `T-` HMAC. `src/lib/wallet/walletCodes.test.ts` and
 `test_wallet_passes.sql` (W0) pin the TypeScript and SQL versions to the same vectors.
+
+## Door keys
+
+Door phones never hold `barcode_secret` (mig `20261019100000`,
+`supabase/functions/_shared/doorKeys.ts`). The roster (`exos_event_door_roster`) and the
+single-ticket lookup (`exos_door_ticket_keys`) give each ticket's door keys instead:
+
+- `d`: `base64url(HMAC-SHA256(barcode_secret, "door-day:{ticket}:{day}"))` for yesterday,
+  today and tomorrow (UTC days, `day = floor(bucket / 2880)`). The `T-` code is signed
+  with that day's key, so the door checks it offline, and a lost door phone can only mint
+  codes for those three days.
+- `wa`, `wg`, `we`: for a live pass, the SHA-256 of its Apple code, its Google TOTP key,
+  and its epoch. Both are already bound to that one pass.
+
+`exos_ticket_barcode_secrets` now answers only the ticket's holder, its buyer and platform
+admins. The old roster RPCs still answer (an app that hasn't reloaded calls them) with
+`barcode_secret` NULL. `src/lib/doorKeys.test.ts` and `test_door_day_keys.sql` (K1) pin
+the TypeScript and SQL versions to the same vectors.
 
 ### What each code resists (the security trade-off)
 

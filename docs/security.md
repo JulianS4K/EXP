@@ -151,7 +151,10 @@ without a pinned `search_path`; it now has `public, pg_temp`.
 `exos_public_*` are column projections of published rows for buyers; they run
 as their owner so anon needs no grant on the base tables or the tax helpers.
 `exos_ticket_barcode_secrets` and `exos_ticket_buyer_emails` filter rows
-internally (`exos_can_read_ticket_secret`, `exos_has_org_role`). Don't flip
+internally (`exos_can_read_ticket_secret`, `exos_has_org_role`). Since mig
+`20261019100000` the secret view answers only a ticket's holder, buyer and
+platform admins; door staff get per-day door keys instead (`docs/wallet.md`
+"Door keys"). Don't flip
 them to `security_invoker` to quiet the advisor: anon would then need SELECT
 on the base tables and EXECUTE on the helpers revoked above, which is exactly
 what these views avoid.

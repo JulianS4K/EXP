@@ -750,8 +750,8 @@ export default function OrganizerCheckIn() {
       }
       const full = roster === null;
       if (!roster) {
-        // listEventTicketsForRegistry resolves owner display names + carries the
-        // per-ticket barcode_secret (staff RLS) so the offline HMAC check works.
+        // listEventTicketsForRegistry resolves owner display names + carries each
+        // ticket's door keys so the offline HMAC check works.
         roster = buildRoster(await listEventTicketsForRegistry(eventId));
       }
       // The page moved to another event while this ran: drop the result.
@@ -1274,9 +1274,10 @@ export default function OrganizerCheckIn() {
     setExitScan(false);
     let admittedId: string | null = null;
     try {
-      // Local signature check against the downloaded list, on the
-      // server-corrected clock.
-      const verify = cached?.barcodeSecret && !code.bare ? await verifyBarcode(raw, cached.barcodeSecret, { now }) : null;
+      // Local signature check against the downloaded list's door keys, on the
+      // server-corrected clock. No key for the code's day = not checked.
+      const checked = cached?.doorKeys && !code.bare ? await verifyBarcode(raw, cached.doorKeys, { now }) : null;
+      const verify = checked?.reason === 'no-key' ? null : checked;
       const name = cached?.name || '';
       const ctx = { raw, src, reason, note: opts.note, name, tier: cached?.tier, verify };
       const d = decideScan({ ...base, recent: null, verify, network });
@@ -1369,11 +1370,13 @@ export default function OrganizerCheckIn() {
             });
             return;
           }
-          // Local signature check (fast fail) with the secret just read; the
-          // server re-checks it either way.
-          if (!code.bare && scanTicket.barcodeSecret) {
-            const v = await verifyBarcode(raw, scanTicket.barcodeSecret, { now: serverNow() });
-            if (!v.ok) {
+          // Local signature check (fast fail) with the door keys just read; the
+          // server re-checks it either way. A signature that doesn't match goes
+          // to the server: an app that hasn't reloaded still signs with the
+          // ticket's secret, which only the server can check.
+          if (!code.bare && scanTicket.doorKeys) {
+            const v = await verifyBarcode(raw, scanTicket.doorKeys, { now: serverNow() });
+            if (!v.ok && v.reason !== 'no-key' && v.reason !== 'signature-mismatch') {
               setFoundTicket(scanTicket);
               setBuyerName(scanTicket.ownerName);
               denyLocal(scanTicket.id, scanTicket.ownerName, v, src);

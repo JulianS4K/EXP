@@ -1,4 +1,4 @@
-// The door's offline copy: the roster (every ticket + its barcode secret),
+// The door's offline copy: the roster (every ticket + its per-day door keys),
 // a small overlay of what this device changed since the download, and the
 // event header the scanner needs to start with no network.
 //
@@ -20,6 +20,7 @@ import { isRegistryFresh } from '../offlineCheckins';
 import { parseNameCheckinMode, type DoorGate, type NameCheckinMode } from './decide';
 import { DEVICE_KEY, isSealed, storageKeys, type DoorCipher, type DoorKV, type SealedBlob, type StorageLike } from './kv';
 import type { DoorCheckinList, ListState } from './lists';
+import { doorKeysFromSecret, type DoorKeys } from '../../../supabase/functions/_shared/doorKeys.ts';
 
 export const ROSTER_PAGE_SIZE = 1000;
 /** Safety stop: 1000 pages of 1000 = a million tickets. */
@@ -68,6 +69,10 @@ export interface DoorRosterEntry {
   name: string;
   tier: string;
   ownerId?: string;
+  /** Per-day keys for this ticket's codes (mig 20261019100000); never the
+   *  barcode secret itself. */
+  doorKeys?: DoorKeys | null;
+  /** Saved by an older build: upgraded to doorKeys on load, then dropped. */
   barcodeSecret?: string;
   promoterId?: string;
   /** Pending-transfer lock: the offline path refuses while it's set. */
@@ -93,7 +98,7 @@ export interface RosterRow {
   ownerId: string;
   name: string;
   tier: string;
-  barcodeSecret: string;
+  doorKeys: DoorKeys | null;
   promoterId: string;
   pendingTransferId: string | null;
   parked?: boolean;
@@ -112,7 +117,7 @@ export function buildRoster(rows: RosterRow[]): DoorRoster {
       name: e.name,
       tier: e.tier,
       ownerId: e.ownerId,
-      barcodeSecret: e.barcodeSecret,
+      doorKeys: e.doorKeys,
       promoterId: e.promoterId,
       pendingTransferId: e.pendingTransferId,
       ...(e.parked
@@ -202,6 +207,23 @@ function parseSealedRoster(raw: unknown, now: number): SealedRoster | null {
   return { _savedAt: r._savedAt as number, sealed: r.sealed };
 }
 
+/** A roster saved before per-day keys holds raw barcode secrets: swap each
+ *  for its door keys (derived here, no network) and drop the secret. */
+export async function upgradeLegacySecrets(data: DoorRoster, now: number): Promise<{ data: DoorRoster; changed: boolean }> {
+  let changed = false;
+  const out: DoorRoster = {};
+  for (const [id, e] of Object.entries(data)) {
+    if (e && typeof e === 'object' && e.barcodeSecret) {
+      const { barcodeSecret, ...rest } = e;
+      out[id] = { ...rest, doorKeys: await doorKeysFromSecret(id, e.ownerId ?? '', barcodeSecret, now) };
+      changed = true;
+    } else {
+      out[id] = e;
+    }
+  }
+  return { data: changed ? out : data, changed };
+}
+
 /** Load this event's roster: the door store first, then a copy an older build
  *  left in localStorage (moved into the store). Stale copies are deleted.
  *  With a cipher, a sealed copy is opened and a plain-text one (saved before
@@ -213,6 +235,21 @@ export async function loadRoster(
   eventId: string,
   now: number,
   cipher: DoorCipher | null = null,
+): Promise<StoredRoster | null> {
+  const got = await loadRosterRaw(kv, legacy, eventId, now, cipher);
+  if (!got) return null;
+  const up = await upgradeLegacySecrets(got.data, now);
+  if (!up.changed) return got;
+  await saveRoster(kv, eventId, up.data, got._savedAt, cipher);
+  return { _savedAt: got._savedAt, data: up.data };
+}
+
+async function loadRosterRaw(
+  kv: DoorKV,
+  legacy: StorageLike | null,
+  eventId: string,
+  now: number,
+  cipher: DoorCipher | null,
 ): Promise<StoredRoster | null> {
   const key = rosterKey(eventId);
   const raw = await kv.get(key);
@@ -445,7 +482,7 @@ export function pruneLocalDoorCaches(storage: StorageLike | null, now: number): 
   }
 }
 
-/** Sign-out: the roster holds every ticket's barcode secret. The device key
+/** Sign-out: the roster holds every ticket's door keys. The device key
  *  goes too (a new one is made on the next download). */
 export async function wipeDoorRosters(kv: DoorKV): Promise<void> {
   for (const k of await kv.keys('registry_')) await kv.del(k);

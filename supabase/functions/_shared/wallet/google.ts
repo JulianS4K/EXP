@@ -61,7 +61,7 @@ export function buildEventTicketClass(p: WalletPayload, issuerId: string): Recor
     if (ev.doors_at) dt.doorsOpen = localIso(ev.doors_at, ev.timezone);
     cls.dateTime = dt;
   }
-  if (typeof ev.lat === "number" && typeof ev.lng === "number") {
+  if (ev.format !== "online" && typeof ev.lat === "number" && typeof ev.lng === "number") {
     cls.locations = [{ latitude: ev.lat, longitude: ev.lng }];
   }
   return cls;

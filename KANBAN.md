@@ -1,48 +1,40 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-10-08)
+## Prod state vs this repo (updated 2026-10-19)
 
-- **DB:** every Exos migration through `20260929150000_exos_reschedule_refunds` is applied to prod
-  (operator-approved; `130000`–`150000` applied 2026-09-29, checked against `schema_migrations` 2026-10-06).
-  **Not applied** (waiting on operator OK, in order):
-  `20260930100000_exos_marketing_conversions`, `20260930101000_exos_audience_export`,
-  `20260930102000_exos_oauth_google`, `20261001100000_exos_invoices_credit_notes`,
-  `20261001101000_exos_disputes_reconciliation`, `20261005090000_exos_online_events` (EXP #28, merged) and
-  `20261008090000_exos_door_delta_summary` (roster delta + door summary) and `20261013090000_exos_door_imports`
-  (Exos Door) and `20261013100000_exos_eventbrite_sync` (Eventbrite attendee sync; deploy `exos-eventbrite-sync`
-  with `--no-verify-jwt` first, the migration schedules its cron). **Both applied 2026-10-13** (operator OK;
-  the Eventbrite one in parts, its disconnect / unlink functions pasted by the operator).
-  `20261014090000_exos_auto_channel_split` (auto split: 10% reserve → 1 pack at T-48h; free tiers stay on
-  Exos) is not applied. `20261014100000_exos_s4k_feed` (S4K network feed; deploy `exos-s4k-feed` with
-  `--no-verify-jwt` first, the migration schedules its 1-minute cron) is not applied. `20261014110000_exos_eventbrite_inventory`
-  (shared count with Eventbrite; redeploy `exos-eventbrite-sync` after) is not applied. `20261008100000`'s two GRANTs were run on prod by the operator on 2026-10-08.
-  `20261002101500_exos_transfer_expiry` is on EXP #27 (another session's PR).
-- **Edge functions:** 16 deployed (checkout, stripe-webhook, refund, reconcile checkouts, webhook drain, connect
-  onboard, payouts, mail drain, wallet, calendar, MCP, API, Google feed, POS, geocode, geocode refresh). Not
-  deployed: `exos-distribute`, `exos-marketplace-sales`, `exos-conversions-drain`, `exos-oauth-google`,
-  `exos-catalog-feed`, `exos-reconcile-stripe`; `stripe-webhook`'s dispute handling (#26) and the MCP / Google-feed
-  `noindex` changes (#28) need a redeploy once their migrations are applied.
+- **DB:** every Exos migration through `20261019090000_exos_channel_mirrors` is applied to prod (the operator
+  pasted the bundles, 2026-10-19; checked against `schema_migrations`). **Not applied:**
+  `20261019100000_exos_door_day_keys` and `20261019110000_exos_online_event_followups`. Apply the door keys one
+  **before** the app that signs with day keys ships, or new ticket codes are refused at the door.
+- **Edge functions:** all of `supabase/functions/` is deployed (2026-10-19, single-file bundles through MCP; a CLI
+  deploy from the repo replaces them). `exos-checkout` and `exos-pos` keep JWT verification; the rest are
+  `--no-verify-jwt` per `docs/self-hosting.md`. Expected errors: `exos-mail-drain` 500 (`RESEND_API_KEY` unset,
+  mail is off) and `exos-wallet` 503 (wallets not configured).
 - **Crons live:** expire holds, checkout reminders, event reminders, mail follow-ups, reconcile checkouts (15 min),
-  webhook drain (3 min), mail drain (2 min), wallet push (5 min), geocode refresh and payouts (daily, dry-run).
+  webhook drain (3 min), mail drain (2 min), wallet push (5 min), Eventbrite sync, channel sync and integrations
+  sync (2 min), S4K feed and SMS drain (1 min), geocode refresh and payouts (daily, dry-run).
+- **Writes to other platforms are off:** channel mirrors and the Eventbrite count are dry runs until the org's
+  switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`; Luma is off entirely (`EXOS_LUMA_ENABLED`,
+  `VITE_EXOS_LUMA` unset). SMS is a dry run unless `EXOS_SMS_LIVE=on`.
 - **Payments are off until the secrets are set:** `STRIPE_SECRET_KEY` (test key set 2026-10-08),
   `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET`, `EXOS_REDIRECT_ORIGINS`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`, `EXOS_APP_BASE_URL`, `GOOGLE_MAPS_SERVER_KEY`.
 - **Hosting:** `exos-web` on Render serves `/bridge/` from main; Terminal-2 reverse-proxies to it when `EXOS_ORIGIN`
-  is set. Terminal-2's own `static/bridge` fallback is EXP `198ef91` (Terminal-2 #1016, 2026-09-29); EXP #25 and
-  #26 aren't in it yet.
+  is set. Terminal-2's own `static/bridge` fallback is EXP `198ef91` (Terminal-2 #1016, 2026-09-29).
 
-## Waiting on the operator (2026-10-08)
+## Waiting on the operator (2026-10-19)
 
-1. OK to apply the seven migrations above (then redeploy `stripe-webhook`, `exos-mcp`, `exos-google-feed`).
+1. Apply `20261019100000` + `20261019110000` (door keys, online-event follow-ups), then merge their PR.
 2. Stripe test mode (`docs/payments-go-live.md`): the test secret key is in; still to do: the two webhook
    endpoints and their `whsec_…` secrets, `EXOS_REDIRECT_ORIGINS`, and `VITE_STRIPE_PUBLISHABLE_KEY` (`pk_test_…`)
    on the `exos-web` build.
 3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
 4. Supabase Auth redirect allowlist: add `/bridge/**`.
-5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base.
+5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base; the
+   channels "something else" write scope; whether unsold S4K seats come back to Exos before doors.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
-7. Ship a new `/bridge` bundle to Terminal-2 (#25, #26, and #28 once merged).
-8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, redeploy `exos-checkout`, decide the training-crawler
-   policy (allow all today).
+7. Ship a new `/bridge` bundle to Terminal-2 (only matters while `EXOS_ORIGIN` is unset).
+8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, decide the training-crawler policy (allow all today).
+9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table.
 
 ## Next to build (2026-10-13, pick order)
 
@@ -52,10 +44,11 @@
    barcodes or check in by name (offline too), own install manifest; the door download is now scanner-scoped.
    Next: landing pages for Events, Promote and Money; a public "free door app" page for organizers on other
    platforms.
-1. **Door:** ✅ end-of-night door summary and roster delta RPC (built 2026-10-08, mig `20261008090000`, not
-   applied); still open: per-day door keys (stop shipping raw per-ticket secrets to door phones).
-2. **Online events follow-ups:** wallet passes drop the geofence for online events; public calendar feeds honor
-   `noindex`.
+1. **Door:** ✅ end-of-night door summary and roster delta RPC (mig `20261008090000`). ✅ **Per-day door keys**
+   (built 2026-10-19, mig `20261019100000`, not applied; `docs/wallet.md` "Door keys"): door phones get three
+   days of keys per ticket, never its barcode secret; the secret view answers only the holder, buyer and admins.
+2. ✅ **Online events follow-ups** (built 2026-10-19, mig `20261019110000`, not applied): an online event's wallet
+   pass carries no location (no geofence); org and venue calendar feeds leave out `noindex` events.
 3. **Group buy v1:** host pays, friends get claim links plus a pay-back link.
 4. **Money:** minimal double-entry journal; sales-tax report; order rows for free claims and comps.
 5. ✅ **Reachable by crawlers and AI** (built 2026-10-08, **off until launch**: `EXOS_AI_DISCOVERY=on` on `exos-web`,
@@ -236,7 +229,8 @@ How we build it (techniques):
   that changed (ticket row, pending transfer, holder name, or a scan) since a server-clock cursor; the door asks for
   that each minute with a 2-minute overlap and does a full pull every 10 minutes, on a tap of "Download", or when
   a list's re-entry switch changes. Falls back to full pulls on a database without it.
-- ⬜ Per-day door keys (stop shipping raw per-ticket secrets).
+- ✅ **Per-day door keys** (mig `20261019100000`): the roster and the scanner's lookup carry three days of keys per
+  ticket, never its barcode secret; a saved roster from an older build trades its secrets for keys on load.
 - ✅ **Name check-in** (mig `20260929130000`, live): door staff check anyone in by name, claimed or not
   (`exos_door_checkin_by_name`, logged as `name`, optional note); a per-event setting says who may (all door
   staff by default, owners / managers only, or off = QR only); an unclaimed ticket's claim link is cancelled; the

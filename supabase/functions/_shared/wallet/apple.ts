@@ -116,7 +116,8 @@ export function buildApplePassJson(
     }];
     pass.expirationDate = localIso(new Date(end + 12 * HOUR).toISOString(), tz);
   }
-  if (typeof ev.lat === "number" && typeof ev.lng === "number") {
+  // An online event has no door to be near: no location, so no geofence.
+  if (ev.format !== "online" && typeof ev.lat === "number" && typeof ev.lng === "number") {
     pass.locations = [{ latitude: ev.lat, longitude: ev.lng, relevantText: `${ev.name}: show your ticket at the door` }];
   }
 

@@ -17,11 +17,15 @@
 //      it (migration 20260702123000).
 //
 //   2. The barcode is `T-{ticketId}:{ownerId}:{bucket}:{hmac}` where
-//      `bucket = floor(now / 30_000)` and `hmac = HMAC-SHA256(secret,
-//      "ticketId:ownerId:bucket")`, base64url-encoded.
+//      `bucket = floor(now / 30_000)` and `hmac = HMAC-SHA256(dayKey,
+//      "ticketId:ownerId:bucket")`, base64url-encoded. `dayKey` is derived
+//      from the secret for the bucket's UTC day (mig 20261019100000,
+//      supabase/functions/_shared/doorKeys.ts): the door holds three days'
+//      keys, never the secret. The server still accepts a code signed with
+//      the secret itself (an app that hasn't reloaded yet).
 //
-//   3. OrganizerCheckIn parses the barcode, reads the ticket, recomputes
-//      the HMAC against the stored secret, and refuses if either the
+//   3. OrganizerCheckIn parses the barcode, recomputes the HMAC with the
+//      day key it holds, and refuses if either the
 //      bucket is out of window (more than one bucket old) or the HMAC
 //      mismatches. The check-in RPC re-runs the SAME HMAC/owner/bucket
 //      check server-side (migration 20260702120000), so the browser check
@@ -49,6 +53,7 @@
 //     the first win — the second loses the race and is refused, with both
 //     attempts visible in the audit log.
 
+import { doorCodeMac, doorDay, doorDayKey, verifyWalletWithKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
 import { verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
 
 const BUCKET_MS = 30_000;
@@ -73,16 +78,6 @@ export function currentBucket(now: number = Date.now()): number {
   return Math.floor(now / BUCKET_MS);
 }
 
-function bytesToBase64Url(bytes: ArrayBuffer): string {
-  const arr = new Uint8Array(bytes);
-  let bin = '';
-  for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i]);
-  return btoa(bin)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
 /**
  * Verify SubtleCrypto is reachable. The Web Crypto API is only
  * exposed on secure contexts (HTTPS or localhost). In production we
@@ -96,30 +91,6 @@ function ensureCryptoSubtleAvailable(): void {
         'in production, the build will fail at scan time.',
     );
   }
-}
-
-async function hmacSha256(secret: string, message: string): Promise<string> {
-  ensureCryptoSubtleAvailable();
-  const enc = new TextEncoder();
-  // An empty secret would still produce a valid HMAC — the verifier
-  // would happily compare it against itself — but the only place that
-  // happens today is a misconfigured ticket without a barcodeSecret
-  // (we now mint one at fulfillment). Refuse early to surface the bug.
-  if (!secret) {
-    throw new Error(
-      'Refusing to sign barcode with empty secret. The ticket doc ' +
-        'should carry a barcodeSecret minted at fulfillment time.',
-    );
-  }
-  const key = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
-  return bytesToBase64Url(sig);
 }
 
 /**
@@ -154,9 +125,17 @@ export async function signBarcode(
   secret: string,
   bucket: number = currentBucket(),
 ): Promise<string> {
-  const message = `${ticketId}:${ownerId}:${bucket}`;
-  const sig = await hmacSha256(secret, message);
-  return `T-${ticketId}:${ownerId}:${bucket}:${sig}`;
+  ensureCryptoSubtleAvailable();
+  if (!secret) {
+    throw new Error(
+      'Refusing to sign barcode with empty secret. The ticket doc ' +
+        'should carry a barcodeSecret minted at fulfillment time.',
+    );
+  }
+  // Signed with the day's key, not the secret itself, so the door only ever
+  // holds keys for a few days (supabase/functions/_shared/doorKeys.ts).
+  const dayKey = await doorDayKey(ticketId, secret, doorDay(bucket));
+  return `T-${ticketId}:${ownerId}:${bucket}:${await doorCodeMac(ticketId, ownerId, bucket, dayKey)}`;
 }
 
 export interface VerifyResult {
@@ -166,7 +145,9 @@ export interface VerifyResult {
     | 'bad-bucket'
     | 'bucket-expired'
     | 'signature-mismatch'
-    | 'legacy-no-secret';
+    | 'legacy-no-secret'
+    /** The door holds no key for this code's day (or no wallet keys): not checked. */
+    | 'no-key';
   legacy: boolean;
   ticketId?: string;
   ownerId?: string;
@@ -177,7 +158,7 @@ export interface VerifyResult {
 }
 
 /**
- * Verify a scanned barcode against an expected per-ticket secret.
+ * Verify a scanned barcode against the door keys held for the ticket.
  *
  * On the legacy 3-segment shape, returns `legacy: true` and lets the
  * caller decide whether to accept. We do NOT compute or compare the
@@ -186,15 +167,19 @@ export interface VerifyResult {
  */
 export async function verifyBarcode(
   payload: string,
-  secret: string,
+  /** The door's keys for the ticket, or (holder-side tools, tests) its secret. */
+  keys: DoorKeys | string | null,
   options: { now?: number } = {},
 ): Promise<VerifyResult> {
   // Wallet pass codes (W-…, Apple static / Google TOTP; docs/wallet.md). The
   // signature is checked here; the server also requires the pass to be live
   // at that epoch (a voided / reissued pass is refused there).
   if (typeof payload === 'string' && payload.startsWith('W-')) {
-    const w = await verifyWalletCode(payload, secret, options);
+    const w = typeof keys === 'string'
+      ? await verifyWalletCode(payload, keys, options)
+      : await verifyWalletWithKeys(payload, keys, options);
     if (!w.code) return { ok: false, reason: 'malformed', legacy: false };
+    if ('noKey' in w && w.noKey) return { ok: false, reason: 'no-key', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
     return w.ok
       ? { ok: true, legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId }
       : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
@@ -230,7 +215,10 @@ export async function verifyBarcode(
   }
   const now = options.now ?? Date.now();
   const cur = currentBucket(now);
-  const expected = await hmacSha256(secret, `${ticketId}:${ownerId}:${bucket}`);
+  const dayKey = typeof keys === 'string'
+    ? (keys ? await doorDayKey(ticketId, keys, doorDay(bucket)) : undefined)
+    : keys?.d[String(doorDay(bucket))];
+  const expected = dayKey ? await doorCodeMac(ticketId, ownerId, bucket, dayKey) : null;
   if (Math.abs(cur - bucket) > BUCKET_TOLERANCE) {
     return {
       ok: false,
@@ -239,8 +227,11 @@ export async function verifyBarcode(
       ticketId,
       ownerId,
       bucket,
-      signatureValid: timingSafeEqual(expected, hmac),
+      signatureValid: expected != null && timingSafeEqual(expected, hmac),
     };
+  }
+  if (expected == null) {
+    return { ok: false, reason: 'no-key', legacy: false, ticketId, ownerId, bucket };
   }
   if (!timingSafeEqual(expected, hmac)) {
     return {

@@ -72,6 +72,14 @@ describe('pass.json', () => {
     expect(pass.locations[0]).toMatchObject({ latitude: 40.7057, longitude: -74.0018 });
   });
 
+  it('an online event has no location (no geofence)', () => {
+    const p = payload();
+    const online: Json = buildApplePassJson({ ...p, event: { ...p.event, format: 'online' } }, ID, TOKEN);
+    expect(online.locations).toBeUndefined();
+    const hybrid: Json = buildApplePassJson({ ...p, event: { ...p.event, format: 'hybrid' } }, ID, TOKEN);
+    expect(hybrid.locations).toHaveLength(1);
+  });
+
   it('barcode is the W- code the door accepts', () => {
     expect(pass.barcodes).toEqual([{
       format: 'PKBarcodeFormatQR', message: SQL_APPLE_CODE, messageEncoding: 'iso-8859-1', altText: '11111111',
