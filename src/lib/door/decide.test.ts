@@ -74,6 +74,13 @@ describe('decideScan: offline and flaky network', () => {
     expect(decideScan(input({ network: 'unreachable', verify: { ok: false, reason: 'signature-mismatch' } }))).toMatchObject({ reason: 'invalid-barcode' });
   });
 
+  it('a code the saved list has no key for: refused offline, the server decides online', () => {
+    const noKey = { ok: false, reason: 'no-key' };
+    expect(decideScan(input({ network: 'offline', verify: noKey }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+    expect(decideScan(input({ network: 'unreachable', verify: noKey }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+    expect(decideScan(input({ network: 'online', verify: noKey }))).toEqual({ action: 'ask-server', ticketId: T1 });
+  });
+
   it('a ticket queued on this device counts as used, online too', () => {
     expect(decideScan(input({ network: 'offline', queued: true }))).toMatchObject({ action: 'reject', reason: 'used' });
     expect(decideScan(input({ network: 'online', queued: true }))).toMatchObject({ action: 'reject', reason: 'used' });

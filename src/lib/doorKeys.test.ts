@@ -89,3 +89,19 @@ describe('door day keys', () => {
     expect(data[TICKET].doorKeys).toEqual(await doorKeysFromSecret(TICKET, OWNER, SECRET, NOW));
   });
 });
+
+describe('offline door: codes it cannot check are refused', () => {
+  it('a W- code for a ticket with no wallet pass on the saved list is no-key, never ok', async () => {
+    const { decideScan } = await import('./door/decide');
+    const keys = await doorKeysFromSecret(TICKET, OWNER, SECRET, NOW);
+    const forged = `W-${TICKET}:${OWNER}:a1:anything`;
+    const v = await verifyBarcode(forged, keys, { now: NOW });
+    expect(v).toMatchObject({ ok: false, reason: 'no-key' });
+    const d = decideScan({
+      code: { raw: forged, ticketId: TICKET, bare: false } as any, source: 'camera', eventId: 'e',
+      entry: { used: false, voided: false, pendingTransferId: null }, verify: v, network: 'offline',
+      gate: { opensAt: NOW - 3_600_000, testUntil: null }, now: NOW, canOverride: false,
+    });
+    expect(d).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+  });
+});
