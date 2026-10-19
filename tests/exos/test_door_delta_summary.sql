@@ -126,7 +126,7 @@ BEGIN
   SELECT * INTO a FROM public.exos_event_checkin_roster('d2000000-0000-0000-0000-0000000000e1') WHERE ticket_id = pg_temp.tk('c1002');
   SELECT * INTO b FROM public.exos_event_checkin_roster_since('d2000000-0000-0000-0000-0000000000e1', now() - interval '1 hour');
   ASSERT row_to_json(a)::jsonb = row_to_json(b)::jsonb, 'R2: same row as the full roster: ' || row_to_json(b)::text;
-  ASSERT b.status = 'voided' AND b.owner_name = 'Holly Holder' AND b.barcode_secret = 'sek-c1002', 'R2: columns';
+  ASSERT b.status = 'voided' AND b.owner_name = 'Holly Holder' AND b.barcode_secret IS NULL, 'R2: columns (no secret since mig 20261019100000)';
 END $$;
 
 -- R3. A check-in row alone (no ticket update: an exit on a re-entry list).

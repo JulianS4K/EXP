@@ -59,7 +59,7 @@ const row = (i: number, over: Partial<RosterRow> = {}): RosterRow => ({
   ownerId: 'o',
   name: `Guest ${i}`,
   tier: 'GA',
-  barcodeSecret: 's',
+  doorKeys: null,
   promoterId: '',
   pendingTransferId: null,
   ...over,
@@ -279,7 +279,7 @@ describe('event header cache (offline cold start)', () => {
 
 describe('incremental refresh (roster delta)', () => {
   const rowOf = (id: string, status = 'active'): RosterRow => ({
-    id, status, ownerId: 'o', name: id.toUpperCase(), tier: 'GA', barcodeSecret: `s-${id}`, promoterId: '', pendingTransferId: null,
+    id, status, ownerId: 'o', name: id.toUpperCase(), tier: 'GA', doorKeys: { d: { 1: `k-${id}` } }, promoterId: '', pendingTransferId: null,
   });
   const T0 = 1_800_000_000_000;
   const sync = (over: Partial<RosterSync> = {}): RosterSync => ({
@@ -323,7 +323,7 @@ describe('incremental refresh (roster delta)', () => {
     expect(Object.keys(next).sort()).toEqual(['a', 'b', 'c']);
     expect(next.a).toBe(base.a);
     expect(next.b.used).toBe(true);
-    expect(next.c.barcodeSecret).toBe('s-c');
+    expect(next.c.doorKeys).toEqual({ d: { 1: 'k-c' } });
     expect(base.b.used).toBe(false);
   });
 });

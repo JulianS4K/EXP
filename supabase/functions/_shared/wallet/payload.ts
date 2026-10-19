@@ -31,6 +31,8 @@ export interface WalletPayload {
     venue_location: string | null;
     lat: number | null;
     lng: number | null;
+    /** in_person | online | hybrid (mig 20261005090000); absent on older payloads. */
+    format?: string | null;
   };
   org_name: string | null;
   /** W-…:a{epoch}:… — null once the pass is voided. */

@@ -33,6 +33,12 @@ describe('EventTicketClass', () => {
     });
     expect(c.issuerName).toBe('Test Org');
   });
+  it('an online event has no location', () => {
+    const p = payload();
+    const c: Json = buildEventTicketClass({ ...p, event: { ...p.event, format: 'online' } }, ISSUER);
+    expect(c.locations).toBeUndefined();
+  });
+
   it('issuer id must be numeric', () => {
     expect(() => buildEventTicketClass(payload(), 'abc')).toThrow();
   });

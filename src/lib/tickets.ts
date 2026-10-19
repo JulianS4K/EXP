@@ -23,6 +23,7 @@ import { estimateOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
 import { fetchAllPages } from './door/roster';
 import { parseListState, type ListState } from './door/lists';
+import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
 
 const toTs = (iso?: string | null): Timestamp =>
   Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
@@ -261,10 +262,12 @@ export async function getTransfer(transferId: string): Promise<Transfer | null> 
 
 // --- Organizer / staff reads (RLS: org-staff only) -------------------------
 
-export type ScanTicket = Ticket & { ownerName: string };
+export type ScanTicket = Ticket & { ownerName: string; doorKeys: DoorKeys | null };
 
-/** Look up one ticket for the door scanner — includes barcode_secret (staff
- *  RLS) for HMAC verification + the owner's display name. */
+/** Look up one ticket for the door scanner: the ticket, the owner's display
+ *  name and the ticket's door keys (exos_door_ticket_keys, mig 20261019100000;
+ *  door staff never read the barcode secret). On a database without it the
+ *  keys are derived from the secret the gated view still returns there. */
 export async function getTicketForScan(ticketId: string): Promise<ScanTicket | null> {
   const { data, error } = await supabase
     .from('exos_tickets')
@@ -273,13 +276,22 @@ export async function getTicketForScan(ticketId: string): Promise<ScanTicket | n
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  // Scanner needs the secret for HMAC verification — fetch it from the view.
-  const [row] = await withBarcodeSecrets([data]);
-  const names = await fetchProfileNames([row.owner_id]);
-  const ticket = mapTicket(row);
+  const tRow = data as any;
+  let doorKeys: DoorKeys | null = null;
+  const keys = await supabase.rpc('exos_door_ticket_keys', { p_ticket_id: ticketId });
+  if (!keys.error) {
+    doorKeys = parseDoorKeys(keys.data);
+  } else if (missingFn(keys.error)) {
+    const [row] = await withBarcodeSecrets([tRow]);
+    if (row.barcode_secret) doorKeys = await doorKeysFromSecret(ticketId, row.owner_id ?? '', row.barcode_secret, Date.now());
+  } else {
+    throw keys.error;
+  }
+  const names = await fetchProfileNames([tRow.owner_id]);
+  const ticket = mapTicket(tRow);
   // The person the ticket is FOR (attendee_name, set by the holder) beats the
-  // account that holds it — same coalesce as exos_event_checkin_roster.
-  return { ...ticket, ownerName: ticket.attendeeName || names.get(row.owner_id) || 'Anonymous attendee' };
+  // account that holds it — same coalesce as the door roster.
+  return { ...ticket, ownerName: ticket.attendeeName || names.get(tRow.owner_id) || 'Anonymous attendee', doorKeys };
 }
 
 export interface RegistryEntry {
@@ -288,7 +300,9 @@ export interface RegistryEntry {
   ownerId: string;
   name: string;
   tier: string;
-  barcodeSecret: string;
+  /** Per-day door keys (mig 20261019100000). On a database without the
+   *  door roster they are derived here from the secret the old roster sends. */
+  doorKeys: DoorKeys | null;
   promoterId: string;
   pendingTransferId: string | null;
   /** Unclaimed ticket held on the org for its buyer (mig 20260929130000). */
@@ -302,14 +316,17 @@ export interface RegistryEntry {
   listState?: ListState;
 }
 
-function mapRegistryRow(r: any): RegistryEntry {
+async function mapRegistryRow(r: any, now: number): Promise<RegistryEntry> {
+  const doorKeys = r.door_keys !== undefined
+    ? parseDoorKeys(r.door_keys)
+    : r.barcode_secret ? await doorKeysFromSecret(r.ticket_id, r.owner_id ?? '', r.barcode_secret, now) : null;
   return {
     id: r.ticket_id,
     status: r.status,
     ownerId: r.owner_id ?? '',
     name: r.owner_name || 'Anonymous',
     tier: r.tier_name || 'Standard',
-    barcodeSecret: r.barcode_secret || '',
+    doorKeys,
     promoterId: r.promoter_id || '',
     pendingTransferId: r.pending_transfer_id ?? null,
     parked: r.parked === true,
@@ -321,22 +338,41 @@ function mapRegistryRow(r: any): RegistryEntry {
 }
 
 /** Tickets of the event that changed at or after `sinceMs` (server clock),
- *  same rows as listEventTicketsForRegistry (exos_event_checkin_roster_since,
- *  mig 20261008090000). Paged the same way. */
+ *  same rows as listEventTicketsForRegistry (mig 20261008090000). Paged the
+ *  same way. */
 export async function listEventTicketsChangedSince(eventId: string, sinceMs: number): Promise<RegistryEntry[]> {
-  const since = new Date(sinceMs).toISOString();
-  const rows = await fetchAllPages<any>(
-    async (from, to) => {
-      const { data, error } = await supabase
-        .rpc('exos_event_checkin_roster_since', { p_event_id: eventId, p_since: since })
-        .order('ticket_id', { ascending: true })
-        .range(from, to);
-      if (error) throw error;
-      return data ?? [];
-    },
-    (r) => String(r.ticket_id),
-  );
-  return rows.map(mapRegistryRow);
+  return fetchDoorRoster(eventId, new Date(sinceMs).toISOString());
+}
+
+/** A function this database doesn't have yet (PostgREST / Postgres codes). */
+const missingFn = (e: { code?: string } | null) => e?.code === 'PGRST202' || e?.code === '42883';
+
+/** The door roster, paged: exos_event_door_roster (per-day keys, mig
+ *  20261019100000), or on a database without it the older roster RPCs, whose
+ *  barcode secrets are turned into door keys in mapRegistryRow. */
+async function fetchDoorRoster(eventId: string, since: string | null): Promise<RegistryEntry[]> {
+  const page = (fn: string, args: Record<string, unknown>) => (from: number, to: number) =>
+    supabase.rpc(fn, args).order('ticket_id', { ascending: true }).range(from, to);
+  const run = async (get: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>) =>
+    fetchAllPages<any>(
+      async (from, to) => {
+        const { data, error } = await get(from, to);
+        if (error) throw error;
+        return data ?? [];
+      },
+      (r) => String(r.ticket_id),
+    );
+  let rows: any[];
+  try {
+    rows = await run(page('exos_event_door_roster', { p_event_id: eventId, p_since: since }));
+  } catch (e) {
+    if (!missingFn(e as { code?: string })) throw e;
+    rows = await run(since
+      ? page('exos_event_checkin_roster_since', { p_event_id: eventId, p_since: since })
+      : page('exos_event_checkin_roster', { p_event_id: eventId }));
+  }
+  const now = Date.now();
+  return Promise.all(rows.map((r) => mapRegistryRow(r, now)));
 }
 
 /** The database clock (exos_server_time), ms. */
@@ -348,30 +384,15 @@ export async function fetchServerTimeMs(): Promise<number> {
   return t;
 }
 
-/** Every ticket for an event, for the offline check-in registry (staff RLS).
- *  One SECURITY DEFINER call (exos_event_checkin_roster, migration
- *  20260702240000) that authorizes the whole roster with a single org-role
- *  check and returns id + owner name + barcode_secret in one round-trip —
- *  replacing the prior three-read fan-out (tickets + per-row secrets view +
- *  profiles), which re-evaluated a SECURITY DEFINER gate PER ROW and got
- *  progressively slower on large events. Door roles only (owner/manager/
- *  scanner or admin), same gate as the barcode-secret view. */
+/** Every ticket for an event, for the offline check-in registry. One
+ *  SECURITY DEFINER call that authorizes the whole roster with a single
+ *  org-role check (door roles only: owner / manager / scanner or admin) and
+ *  returns id + owner name + the ticket's door keys, never its secret. Paged
+ *  (ranges of ROSTER_PAGE_SIZE until a page comes back empty): a single call
+ *  is capped at PostgREST max_rows, which would silently cut the offline list
+ *  of a large event short. */
 export async function listEventTicketsForRegistry(eventId: string): Promise<RegistryEntry[]> {
-  // Paged (ranges of ROSTER_PAGE_SIZE until a page comes back empty): a single
-  // call is capped at PostgREST max_rows, which would silently cut the offline
-  // list of a large event short.
-  const rows = await fetchAllPages<any>(
-    async (from, to) => {
-      const { data, error } = await supabase
-        .rpc('exos_event_checkin_roster', { p_event_id: eventId })
-        .order('ticket_id', { ascending: true })
-        .range(from, to);
-      if (error) throw error;
-      return data ?? [];
-    },
-    (r) => String(r.ticket_id),
-  );
-  return rows.map(mapRegistryRow);
+  return fetchDoorRoster(eventId, null);
 }
 
 /** All tickets for an event (event report). Staff RLS; buyer emails only for

@@ -30,8 +30,8 @@ class Mem implements StorageLike {
 }
 
 const roster: DoorRoster = {
-  't-1': { used: false, name: 'Ada Lovelace', tier: 'VIP', barcodeSecret: 'super-secret-1', tierId: 'tier-vip' },
-  't-2': { used: true, name: 'Grace Hopper', tier: 'GA', barcodeSecret: 'super-secret-2', lists: { 'l-1': 'exit' } },
+  't-1': { used: false, name: 'Ada Lovelace', tier: 'VIP', doorKeys: { d: { 20725: 'super-key-1' } }, tierId: 'tier-vip' },
+  't-2': { used: true, name: 'Grace Hopper', tier: 'GA', doorKeys: { d: { 20725: 'super-key-2' } }, lists: { 'l-1': 'exit' } },
 };
 
 const bytes = (v: unknown) => {
@@ -61,7 +61,7 @@ describe('doorCipher', () => {
     const b = await c.seal(roster);
     expect(isSealed(a)).toBe(true);
     expect(Buffer.from(a.iv).equals(Buffer.from(b.iv))).toBe(false);
-    expect(bytes(a)).not.toContain('super-secret');
+    expect(bytes(a)).not.toContain('super-key');
   });
 
   it('another device key cannot open it', async () => {
