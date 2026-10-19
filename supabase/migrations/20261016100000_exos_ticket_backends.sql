@@ -138,7 +138,9 @@ BEGIN
     RAISE NOTICE '%: not present, skipped', p_sig;
     RETURN;
   END IF;
-  v_def := pg_get_functiondef(p_fn);
+  -- Pasted through a browser the patch text can carry CRLF line ends; compare without CRs.
+  v_def := replace(pg_get_functiondef(p_fn), chr(13), '');
+  p_marker := replace(p_marker, chr(13), ''); p_old := replace(p_old, chr(13), ''); p_new := replace(p_new, chr(13), '');
   IF position(p_marker in v_def) > 0 THEN
     RAISE NOTICE '%: already patched (%)', p_fn, p_marker;
     RETURN;
