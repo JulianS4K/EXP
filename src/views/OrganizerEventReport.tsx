@@ -38,6 +38,8 @@ import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import { canSeeMoney } from '../lib/settlement';
+import { can, cannotReason } from '../lib/orgRoles';
+import { FIGURES, ticketFigures } from '../lib/eventFigures';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
@@ -80,7 +82,7 @@ export default function OrganizerEventReport() {
   };
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
-  const { activeRole, activeOrg } = useOrganization();
+  const { activeOrg, roleIn, loading: orgsLoading } = useOrganization();
   const { toast } = useToast();
 
   const [event, setEvent] = useState<Event | null>(null);
@@ -128,6 +130,10 @@ export default function OrganizerEventReport() {
     };
   }, [eventId, analyticsKey]);
 
+  // The caller's role in THIS event's org, not in whichever org is active in
+  // the switcher (an owner of org B looking at B's event while A is active).
+  const activeRole = roleIn(event?.orgId);
+
   if (!user) {
     return (
       <div className="max-w-3xl mx-auto p-12 text-center text-slate-500">
@@ -140,21 +146,24 @@ export default function OrganizerEventReport() {
   // exposed the report to content staff — gate explicitly on the finance-capable
   // roles. (Buyer emails are column-scoped to these roles server-side, mig
   // 20260925013000.) Falls back to legacy organizerId.
-  const allowedByRole =
-    isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance';
+  const allowedByRole = can(activeRole, 'viewMoney', isAdmin);
   const allowedByLegacy = event?.organizerId === user.uid;
   // Actions below go through org-role-gated RPCs (owner/manager) — a legacy
   // organizerId match can read the report but cannot act, so it must not open
   // the action panels (they would just 42501).
   const canAct = isAdmin || activeRole === 'owner' || activeRole === 'manager';
-  if (event && !allowedByRole && !allowedByLegacy) {
+  // Per-ticket buttons follow their RPCs: void is owner / manager / finance,
+  // release is owner / manager. A legacy-organizer or demoted viewer gets none.
+  const canVoid = can(activeRole, 'voidTicket', isAdmin);
+  const canRelease = can(activeRole, 'releaseSeat', isAdmin);
+  if (event && !orgsLoading && !allowedByRole && !allowedByLegacy) {
     return (
       <div className="max-w-3xl mx-auto p-12 text-center text-slate-500">
         You don't have access to this event's analytics.
       </div>
     );
   }
-  if (loading || !event) {
+  if (loading || !event || orgsLoading) {
     return (
       <div className="max-w-7xl mx-auto p-24 text-center text-slate-300 font-bold uppercase tracking-[0.3em] animate-pulse">
         Loading…
@@ -246,16 +255,10 @@ export default function OrganizerEventReport() {
     }
   };
 
-  // Compute aggregates from the loaded ticket set. Voided tickets are
-  // excluded from sold/revenue counts but kept in the attendees list
-  // (greyed out) so the organizer can audit the void rationale.
-  const activeTickets = tickets.filter(
-    (t) => t.status !== 'cancelled' && t.status !== 'voided',
-  );
-  const totalSold = activeTickets.length;
-  const totalRevenue = activeTickets.reduce((sum, t) => sum + (t.pricePaid || 0), 0);
-
-  const checkedIn = activeTickets.filter((t) => t.status === 'used').length;
+  // Header figures from the loaded ticket set, with the same definitions the
+  // sales chart and Attendance use (src/lib/eventFigures.ts). Voided tickets
+  // stay in the attendees list (greyed out) so the void can be audited.
+  const { sold: totalSold, sales: totalRevenue, checkedIn } = ticketFigures(tickets);
   const currency = event.currency || 'USD';
 
   return (
@@ -287,9 +290,10 @@ export default function OrganizerEventReport() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
+          <Stat label={FIGURES.ticketsSold.label} hint={FIGURES.ticketsSold.hint} value={String(totalSold)} icon={<Users size={16} />} />
           <Stat
-            label="Ticket sales"
+            label={FIGURES.ticketSales.label}
+            hint={FIGURES.ticketSales.hint}
             value={formatCurrency(totalRevenue, currency)}
             icon={<DollarSign size={16} />}
           />
@@ -325,7 +329,7 @@ export default function OrganizerEventReport() {
             hidden before the money views exist). Read-only. */}
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
-        <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
+        <DisputesPanel eventId={event.id} eventName={event.title} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
@@ -422,9 +426,9 @@ export default function OrganizerEventReport() {
                           ) : null}
                         </td>
                         <td className="py-2 text-right">
-                          {t.status === 'active' ? (
+                          {t.status === 'active' && (canVoid || canRelease) ? (
                             <span className="inline-flex flex-wrap justify-end gap-1">
-                              {(t.pricePaid ?? 0) === 0 && (
+                              {canRelease && (t.pricePaid ?? 0) === 0 && (
                                 <button
                                   onClick={() => handleReleaseTicket(t)}
                                   disabled={releasingId === t.id || voidingId === t.id}
@@ -435,6 +439,7 @@ export default function OrganizerEventReport() {
                                   {releasingId === t.id ? 'Releasing…' : 'Release seat'}
                                 </button>
                               )}
+                              {canVoid && (
                               <button
                                 onClick={() => handleVoidTicket(t)}
                                 disabled={voidingId === t.id || releasingId === t.id}
@@ -443,9 +448,11 @@ export default function OrganizerEventReport() {
                                 <Ban size={12} aria-hidden="true" />
                                 {voidingId === t.id ? 'Voiding…' : 'Void'}
                               </button>
+                              )}
                             </span>
                           ) : (
-                            <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">—</span>
+                            <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest"
+                              title={t.status === 'active' ? cannotReason('voidTicket') : undefined}>—</span>
                           )}
                         </td>
                       </tr>
@@ -577,14 +584,15 @@ export default function OrganizerEventReport() {
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
+function Stat({ label, value, icon, hint }: { label: string; value: string; icon: ReactNode; hint?: string }) {
   return (
-    <div className="bg-white p-5 rounded border border-slate-200 shadow-sm">
+    <div className="bg-white p-5 rounded border border-slate-200 shadow-sm" title={hint}>
       <div className="flex justify-between items-start mb-3">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{label}</p>
         <span className="text-slate-400">{icon}</span>
       </div>
       <p className="disp text-4xl text-slate-900 tracking-tight" style={{ transform: 'skewX(-3deg)' }}>{value}</p>
+      {hint && <p className="text-[10px] text-slate-400 mt-2 leading-snug">{hint}</p>}
     </div>
   );
 }

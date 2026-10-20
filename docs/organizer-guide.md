@@ -20,10 +20,12 @@ Needs a signed-in account. Buying or holding tickets also needs a **confirmed em
 | Role | Can |
 |---|---|
 | owner | everything, including payments and the comp budget |
-| manager | events, comps, waitlist, reminders, releases |
-| finance | analytics and money reports |
+| manager | events, comps, waitlist, reminders, releases, money reports and refunds |
+| finance | analytics, money reports, refunds, voids, recording promoter payouts |
 | scanner | door check-in and the offline roster |
-| content | copy and media |
+| content | read-only for now (can't create or edit events) |
+
+The full matrix on the Team page comes from `src/lib/orgRoles.ts`, which a test checks against the RLS policies and RPCs.
 
 ## 2. Get paid (`/orgs/:orgId/settings`)
 

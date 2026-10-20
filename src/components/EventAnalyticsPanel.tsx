@@ -20,6 +20,7 @@ import {
 } from '../lib/analytics';
 import { csvFileName, downloadCsv } from '../lib/csv';
 import { formatCurrency } from '../lib/utils';
+import { FIGURES } from '../lib/eventFigures';
 import type { Ticket } from '../types';
 
 interface Props {
@@ -123,15 +124,16 @@ export default function EventAnalyticsPanel({ eventId, eventTitle, currency, tic
 
       {/* Funnel */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {/* Not "net": fees aren't off yet (that's Organizer net, under Money). */}
         <Stat
-          label="Net revenue"
+          label={FIGURES.salesAfterRefunds.label}
           value={formatCurrency(a.netRevenue, currency)}
           sub={`tickets ${formatCurrency(a.revenue, currency)} + add-ons ${formatCurrency(a.addonRevenue, currency)}${
             a.partialRefunds > 0 ? ` − refunds ${formatCurrency(a.partialRefunds, currency)}` : ''
           }`}
           icon={<DollarSign size={16} />}
         />
-        <Stat label="Checked in" value={pct(a.checkinRate)} sub={`${a.used} of ${a.sold} tickets`} icon={<Users size={16} />} />
+        <Stat label="Checked in" value={pct(a.checkinRate)} sub={`${a.used} of ${a.sold} tickets sold`} icon={<Users size={16} />} />
         <Stat
           label="No-show"
           value={pct(a.noShowRate)}

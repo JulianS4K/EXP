@@ -1,7 +1,7 @@
 // PromoterCommissionPanel — one promoter's commission terms, per-event
 // overrides and the "record payout" flow (mig 20260926020000). Mounted per row
-// in OrgPromoters. The RPCs enforce roles (owner / manager write, finance
-// reads); canWrite only hides controls.
+// in OrgPromoters. The RPCs enforce roles (owner / manager set terms; owner /
+// manager / finance record payouts); canWrite / canPayout only hide controls.
 //
 // A payout here records money the organizer already sent (Venmo, cash...).
 // Nothing moves through Exos yet.
@@ -31,6 +31,7 @@ export default function PromoterCommissionPanel({
   overrides,
   events,
   canWrite,
+  canPayout = canWrite,
   onChanged,
 }: {
   promoterId: string;
@@ -40,6 +41,8 @@ export default function PromoterCommissionPanel({
   overrides: PromoterEventTerms[];
   events: { id: string; title: string }[];
   canWrite: boolean;
+  /** Record payouts (owner / manager / finance); defaults to canWrite. */
+  canPayout?: boolean;
   onChanged: () => void | Promise<void>;
 }) {
   const { toast } = useToast();
@@ -174,7 +177,7 @@ export default function PromoterCommissionPanel({
         )}
       </div>
 
-      {canWrite && (
+      {canPayout && (
         <PayoutForm promoterId={promoterId} promoterName={promoterName} summaries={summaries} onDone={onChanged} />
       )}
     </div>

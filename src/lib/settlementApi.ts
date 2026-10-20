@@ -7,6 +7,7 @@ import { supabase } from './supabase';
 import { fetchAllPages } from './door/roster';
 import type {
   CommissionMoneyRow,
+  DisputeMoneyRow,
   MarketplaceMoneyRow,
   OrderMoneyRow,
   PayoutLineRow,
@@ -27,6 +28,8 @@ export interface EventMoneyData {
   orders: OrderMoneyRow[];
   marketplace: MarketplaceMoneyRow[];
   commissions: CommissionMoneyRow[];
+  /** Chargebacks on the event (mig 20261001101000); [] before it. */
+  disputes: DisputeMoneyRow[];
 }
 
 /** Read a range-paged table; `null` if the read fails (missing view, no access). */
@@ -55,7 +58,7 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
   );
   if (orders === null) return null;
 
-  const [quantities, marketplace, commissions] = await Promise.all([
+  const [quantities, marketplace, commissions, disputes] = await Promise.all([
     readAll<{ session_id: string; quantity: number | null }>(
       (from, to) => supabase.from('exos_checkout_sessions').select('session_id, quantity').eq('event_id', eventId).in('status', ['fulfilled', 'partially_refunded', 'refunded']).range(from, to),
       (r) => r.session_id,
@@ -68,6 +71,12 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
       (from, to) => supabase.from('exos_promoter_commissions').select('id, status, commission_cents, currency').eq('event_id', eventId).range(from, to),
       (r) => r.id,
     ),
+    readAll<DisputeMoneyRow & { id: string }>(
+      (from, to) => supabase.from('exos_disputes')
+        .select('id, session_id, status, amount_cents, fee_cents, recovery_status, recovery_candidate_cents, created_at')
+        .eq('event_id', eventId).range(from, to),
+      (r) => r.id,
+    ),
   ]);
 
   const qty = new Map((quantities ?? []).map((q) => [q.session_id, q.quantity]));
@@ -75,7 +84,48 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
     orders: orders.map((o) => ({ ...o, quantity: qty.has(o.session_id) ? qty.get(o.session_id) ?? null : null })),
     marketplace: marketplace ?? [],
     commissions: commissions ?? [],
+    disputes: disputes ?? [],
   };
+}
+
+/**
+ * The org's fee-free end date (exos_org_billing, owner / manager / finance by
+ * RLS). undefined = couldn't read it (other roles, older schema); null = no row.
+ */
+export async function getOrgFeeFreeUntil(orgId: string): Promise<string | null | undefined> {
+  try {
+    const { data, error } = await supabase.from('exos_org_billing').select('fee_free_until').eq('org_id', orgId).maybeSingle();
+    if (error) throw error;
+    return (data as { fee_free_until: string | null } | null)?.fee_free_until ?? null;
+  } catch (e) {
+    console.warn('fee terms unavailable (non-fatal):', (e as { message?: string })?.message ?? e);
+    return undefined;
+  }
+}
+
+export interface CheckoutReminderStats {
+  enabled: boolean;
+  sent: number;
+  recovered: number;
+  recoveredCents: number;
+}
+
+/** Abandoned-checkout reminders for one event (mig 20261021120000); null when unavailable. */
+export async function getCheckoutReminderStats(eventId: string): Promise<CheckoutReminderStats | null> {
+  try {
+    const { data, error } = await supabase.rpc('exos_event_checkout_reminder_stats', { p_event_id: eventId });
+    if (error) throw error;
+    const j = (data ?? {}) as Record<string, unknown>;
+    return {
+      enabled: j.enabled !== false,
+      sent: Number(j.sent) || 0,
+      recovered: Number(j.recovered) || 0,
+      recoveredCents: Number(j.recovered_cents) || 0,
+    };
+  } catch (e) {
+    console.warn('checkout reminder stats unavailable (non-fatal):', (e as { message?: string })?.message ?? e);
+    return null;
+  }
 }
 
 export interface OrgPayoutsData {

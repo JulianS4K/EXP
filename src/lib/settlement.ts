@@ -22,6 +22,15 @@
 //     net × (1 − refunded / gross).
 //   * Marketplace orders are paid by Exos: organizer_net = proceeds − exos_fee,
 //     through exos_org_payouts. Cancelled orders don't count.
+//   * A lost dispute (exos_disputes, mig 20261001101000) costs its amount plus
+//     Stripe's dispute fee. The platform's account pays it; whether it comes
+//     back off the organizer is exos_org_billing.recover_lost_disputes, shown
+//     on the row as recovery_status: 'recovery_pending' / 'recovered' come off
+//     the organizer's net (recovery_candidate_cents), 'not_recovered' is
+//     absorbed by Exos and doesn't.
+
+import { can } from './orgRoles';
+import { EXOS_FEE_BPS, FEE_FREE_MONTHS, STRIPE_CARD_FEE, exosFeeBpsAt } from '../../supabase/functions/_shared/platformFee.ts';
 
 // ── Rows as the views return them ────────────────────────────────────────
 
@@ -62,6 +71,17 @@ export interface CommissionMoneyRow {
   status: string;
   commission_cents: number | null;
   currency?: string | null;
+}
+
+/** The exos_disputes columns the money view needs. */
+export interface DisputeMoneyRow {
+  session_id: string | null;
+  status: string;
+  amount_cents: number | null;
+  fee_cents: number | null;
+  recovery_status: string;
+  recovery_candidate_cents: number | null;
+  created_at?: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -120,6 +140,17 @@ export function orderNetAfterRefunds(o: Pick<OrderMoneyRow, 'gross_cents' | 'org
 }
 
 const isPaid = (o: OrderMoneyRow) => (PAID_ORDER_STATUSES as readonly string[]).includes(o.status);
+
+/**
+ * What a dispute takes off the organizer's net, in cents: a lost one's amount
+ * + fee unless Exos absorbs it (recovery_status 'not_recovered'). 0 while open
+ * or once won.
+ */
+export function disputeChargeCents(d: DisputeMoneyRow): number {
+  if (d.status !== 'lost' || d.recovery_status === 'not_recovered') return 0;
+  if (d.recovery_candidate_cents !== null && d.recovery_candidate_cents !== undefined) return Math.max(int(d.recovery_candidate_cents), 0);
+  return Math.max(int(d.amount_cents), 0) + Math.max(int(d.fee_cents), 0);
+}
 const isCancelledMarketplace = (m: MarketplaceMoneyRow) =>
   (CANCELLED_MARKETPLACE_STATES as readonly string[]).includes(m.state ?? '');
 
@@ -163,7 +194,15 @@ export interface Settlement {
     accruedCents: number;
     paidCents: number;
   };
-  /** Exos net after refunds + marketplace net. */
+  disputes: {
+    open: number;
+    lost: number;
+    /** Lost disputes that come off the organizer (amount + fee). */
+    chargedCents: number;
+    /** Lost disputes Exos absorbs (not in the net). */
+    absorbed: number;
+  };
+  /** Exos net after refunds + marketplace net − lost disputes charged to the organizer. */
   organizerNetCents: number;
   /** The same, less promoter commissions (accrued and paid). */
   organizerNetAfterCommissionsCents: number;
@@ -173,6 +212,7 @@ export function summarizeSettlement(input: {
   orders: OrderMoneyRow[];
   marketplace?: MarketplaceMoneyRow[];
   commissions?: CommissionMoneyRow[];
+  disputes?: DisputeMoneyRow[];
   /** The event's currency; the fallback when there are no rows. */
   currency?: string;
 }): Settlement {
@@ -236,9 +276,20 @@ export function summarizeSettlement(input: {
     if (c.status === 'paid') cm.paidCents += int(c.commission_cents);
   }
 
+  const dp = { open: 0, lost: 0, chargedCents: 0, absorbed: 0 };
+  for (const d of input.disputes ?? []) {
+    if (d.status === 'lost') {
+      dp.lost++;
+      if (d.recovery_status === 'not_recovered') dp.absorbed++;
+      dp.chargedCents += disputeChargeCents(d);
+    } else if (d.status !== 'won' && d.status !== 'warning_closed') {
+      dp.open++;
+    }
+  }
+
   const counted = actual + estimate;
   const cardFeeBasis = counted === 0 ? 'none' : actual === counted ? 'actual' : estimate === counted ? 'estimate' : 'mixed';
-  const organizerNetCents = netAfter + mk.organizerNetCents;
+  const organizerNetCents = netAfter + mk.organizerNetCents - dp.chargedCents;
   const fallback = (input.currency || [...currencies][0] || 'USD').toUpperCase();
 
   return {
@@ -262,6 +313,7 @@ export function summarizeSettlement(input: {
     },
     marketplace: mk,
     commissions: cm,
+    disputes: dp,
     organizerNetCents,
     organizerNetAfterCommissionsCents: organizerNetCents - cm.accruedCents,
   };
@@ -274,18 +326,35 @@ export const SETTLEMENT_CSV_HEADER = [
   'gross', 'tax', 'refunded', 'exos_fee', 'card_fee', 'card_fee_basis',
   'organizer_net', 'organizer_net_after_refunds', 'stripe_payment_intent', 'stripe_transfer',
   'invoice_number',
+  'dispute_status', 'dispute_amount', 'dispute_fee', 'dispute_charged_to_you',
 ];
 
 /**
  * @param invoiceNumbers checkout session id → invoice number (mig
  *   20261001100000); free orders and marketplace orders have none.
+ * @param disputes the event's disputes; an order with several shows the
+ *   latest status and the summed amounts.
  */
 export function settlementCsvRows(
   orders: OrderMoneyRow[],
   marketplace: MarketplaceMoneyRow[] = [],
   invoiceNumbers: ReadonlyMap<string, string> = new Map(),
+  disputes: DisputeMoneyRow[] = [],
 ): (string | number | null)[][] {
   const rows: (string | number | null)[][] = [];
+  const bySession = new Map<string, { status: string; at: string; amount: number; fee: number; charged: number }>();
+  for (const d of disputes) {
+    if (!d.session_id) continue;
+    const cur = bySession.get(d.session_id);
+    const at = d.created_at ?? '';
+    bySession.set(d.session_id, {
+      status: !cur || at >= cur.at ? d.status : cur.status,
+      at: !cur || at >= cur.at ? at : cur.at,
+      amount: (cur?.amount ?? 0) + Math.max(int(d.amount_cents), 0),
+      fee: (cur?.fee ?? 0) + Math.max(int(d.fee_cents), 0),
+      charged: (cur?.charged ?? 0) + disputeChargeCents(d),
+    });
+  }
   const paid = [...orders].filter(isPaid).sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
   for (const o of paid) {
     const card = orderCardFee(o);
@@ -308,6 +377,7 @@ export function settlementCsvRows(
       o.payment_intent ?? '',
       o.transfer_id ?? '',
       invoiceNumbers.get(o.session_id) ?? '',
+      ...disputeCells(bySession.get(o.session_id)),
     ]);
   }
   for (const m of marketplace) {
@@ -329,9 +399,15 @@ export function settlementCsvRows(
       '',
       '',
       '',
+      '', '', '', '',
     ]);
   }
   return rows;
+}
+
+function disputeCells(d: { status: string; amount: number; fee: number; charged: number } | undefined): string[] {
+  if (!d) return ['', '', '', ''];
+  return [d.status, centsToDecimal(d.amount), centsToDecimal(d.fee), centsToDecimal(d.charged)];
 }
 
 // ── Org payouts ──────────────────────────────────────────────────────────
@@ -445,7 +521,41 @@ export function payoutsCsvRows(payouts: PayoutWithLines[]): (string | number | n
   return rows;
 }
 
-/** Org roles that see money (RLS enforces the same). */
+/** Org roles that see money (RLS enforces the same; ./orgRoles.ts viewMoney). */
 export function canSeeMoney(role: string | null | undefined, isAdmin = false): boolean {
-  return isAdmin || role === 'owner' || role === 'manager' || role === 'finance';
+  return can(role, 'viewMoney', isAdmin);
+}
+
+// ── Fee terms ────────────────────────────────────────────────────────────
+
+export interface FeeTerms {
+  /** "3%": the Exos rate after the free period. */
+  rate: string;
+  /** null when the billing row isn't readable (or has no date). */
+  feeFreeUntil: Date | null;
+  inFreePeriod: boolean;
+  /** One sentence for under Payments and next to the Money tiles. */
+  text: string;
+}
+
+const pctOf = (bps: number) => `${Number((bps / 100).toFixed(2))}%`;
+
+/**
+ * The org's fee terms in words, from exos_org_billing.fee_free_until (owner /
+ * manager / finance read it; pass null when it couldn't be read) and the
+ * platform rate (platformFee.ts, the same number as exos_platform_fee_bps()).
+ */
+export function feeTerms(feeFreeUntil: string | null | undefined, now: Date = new Date()): FeeTerms {
+  const until = feeFreeUntil ? new Date(feeFreeUntil) : null;
+  const valid = until && !Number.isNaN(until.getTime()) ? until : null;
+  const inFree = exosFeeBpsAt(valid ? valid.toISOString() : null, now) === 0;
+  const rate = pctOf(EXOS_FEE_BPS);
+  const card = `card processing (Stripe, ${pctOf(STRIPE_CARD_FEE.bps)} + ${STRIPE_CARD_FEE.fixedCents}¢ per order, estimated)`;
+  const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const text = valid && inFree
+    ? `No Exos fee until ${day(valid)}, then ${rate} of each order. ${card[0].toUpperCase()}${card.slice(1)} applies from the start. Buyers never pay an Exos fee.`
+    : valid
+      ? `Exos fee: ${rate} of each order (your fee-free period ended ${day(valid)}), plus ${card}. Buyers never pay an Exos fee.`
+      : `Exos fee: ${rate} of each order, plus ${card}; new orgs pay no Exos fee for their first ${FEE_FREE_MONTHS} months. Buyers never pay an Exos fee.`;
+  return { rate, feeFreeUntil: valid, inFreePeriod: !!valid && inFree, text };
 }
