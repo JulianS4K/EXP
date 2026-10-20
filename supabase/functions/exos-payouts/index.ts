@@ -6,13 +6,20 @@
 //      the order's payments (GET only) and record what TEvo reports as a
 //      remittance. Reported money isn't payable until someone confirms it
 //      arrived (exos_confirm_remittance).
-//   2. Plan payouts: exos_plan_org_payouts (organizer_net of payable orders,
-//      less clawbacks; one open payout per org).
+//   2. Plan payouts: exos_plan_org_payouts_report (organizer_net of payable
+//      orders, less clawbacks; one open payout per org; a failed payout's
+//      orders are re-planned). An org that errors is reported in
+//      plan_errors and doesn't stop the others (mig 20261020120000).
 //   3. Send planned payouts as Stripe Connect transfers from the platform
 //      balance to each org's connected account. DRY-RUN unless
 //      EXOS_PAYOUTS_LIVE=true: the run reports what it would send and moves
 //      no money. A payout whose order was cancelled since planning is
-//      cancelled (its orders are re-planned next run).
+//      cancelled (its orders are re-planned next run). A payout left in
+//      'sending' for STALE_SENDING_MINUTES (a run died mid-send) is claimed
+//      again and resent with the same idempotency key, after checking Stripe
+//      for a transfer already made in its transfer group. A transfer Stripe
+//      refused is marked failed; one that may have gone through (network,
+//      5xx) stays 'sending' for that resend.
 //
 // Secrets: CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 // STRIPE_SECRET_KEY (live only), TEVO_API_TOKEN / TEVO_API_SECRET / TEVO_ENV
@@ -24,7 +31,9 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { TevoClient } from "../_shared/marketplace/tevo/client.ts";
 import { normalizeTevoPayment } from "../_shared/marketplace/tevo/payments.ts";
-import { connectTransfer, payoutsMode, tevoRemittanceFor, type PlannedPayout } from "../_shared/payouts/payouts.ts";
+import {
+  connectTransfer, payoutsMode, staleSendingCutoff, tevoRemittanceFor, transferRefused, type PlannedPayout,
+} from "../_shared/payouts/payouts.ts";
 
 const env = (k: string) => Deno.env.get(k);
 
@@ -36,9 +45,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const summary: Record<string, unknown> = { mode };
   try {
     summary.tevo = await ingestTevo(sb);
-    const { data: planned, error: pErr } = await sb.rpc("exos_plan_org_payouts", { p_org: null });
+    const { data: plan, error: pErr } = await sb.rpc("exos_plan_org_payouts_report", { p_org: null });
     if (pErr) throw new Error(`plan payouts: ${pErr.message}`);
-    summary.planned = planned ?? [];
+    const report = (plan ?? {}) as { planned?: unknown[]; errors?: unknown[] };
+    summary.planned = report.planned ?? [];
+    summary.plan_errors = report.errors ?? [];
     summary.send = await sendPlanned(sb, mode);
     return json(summary);
   } catch (e) {
@@ -72,22 +83,24 @@ async function ingestTevo(sb: SupabaseClient) {
 }
 
 async function sendPlanned(sb: SupabaseClient, mode: "dry-run" | "live") {
-  const { data, error } = await sb.from("exos_org_payouts").select("id, org_id, currency, amount, idempotency_key")
-    .eq("status", "planned").limit(50);
+  const { data, error } = await sb.from("exos_org_payouts").select("id, org_id, currency, amount, idempotency_key, status")
+    .or(`status.eq.planned,and(status.eq.sending,updated_at.lt.${staleSendingCutoff(new Date())})`).limit(50);
   if (error) throw new Error(`planned payouts: ${error.message}`);
   const stripeKey = env("STRIPE_SECRET_KEY");
   const stripe = mode === "live" && stripeKey
     ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" })
     : null;
   const out: Array<Record<string, unknown>> = [];
-  for (const p of (data ?? []) as PlannedPayout[]) {
+  for (const p of (data ?? []) as Array<PlannedPayout & { status: string }>) {
+    const resend = p.status === "sending";
     // An order cancelled since planning: drop the payout; next run re-plans with a clawback or without it.
-    const { data: stale } = await sb.from("exos_org_payout_lines").select("order_id, exos_marketplace_orders!inner(status, sale_status)")
+    // (Not a stuck send: its transfer may have gone out; a clawback follows once it's sent.)
+    const { data: stale } = resend ? { data: [] } : await sb.from("exos_org_payout_lines").select("order_id, exos_marketplace_orders!inner(status, sale_status)")
       .eq("payout_id", p.id).eq("kind", "sale")
       .or("status.eq.cancelled,sale_status.eq.cancelled", { referencedTable: "exos_marketplace_orders" });
     if ((stale ?? []).length) {
-      await sb.rpc("exos_cancel_org_payout", { p_id: p.id });
-      out.push({ payout: p.id, action: "cancelled", reason: "an order was cancelled after planning" });
+      const { data: ok } = await sb.rpc("exos_cancel_org_payout", { p_id: p.id });
+      out.push({ payout: p.id, action: ok ? "cancelled" : "skipped", reason: "an order was cancelled after planning" });
       continue;
     }
     const { data: sec } = await sb.from("exos_org_secrets").select("payments").eq("org_id", p.org_id).maybeSingle();
@@ -101,18 +114,33 @@ async function sendPlanned(sb: SupabaseClient, mode: "dry-run" | "live") {
       continue;
     }
     if (mode !== "live" || !stripe) {
-      out.push({ payout: p.id, action: "would_send", amount_minor: transfer.params.amount, currency: transfer.params.currency });
+      out.push({ payout: p.id, action: resend ? "would_resend" : "would_send", amount_minor: transfer.params.amount, currency: transfer.params.currency });
       continue;
     }
-    await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "sending" });
+    // The claim: another run holding it (or a payout that moved on) means hands off.
+    const { error: claimErr } = await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "sending" });
+    if (claimErr) {
+      out.push({ payout: p.id, action: "skipped", reason: claimErr.message.slice(0, 200) });
+      continue;
+    }
     try {
-      const t = await stripe.transfers.create(transfer.params, { idempotencyKey: transfer.idempotencyKey });
-      await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "sent", p_transfer_id: t.id });
-      out.push({ payout: p.id, action: "sent", transfer: t.id });
+      // A stuck send may have reached Stripe (idempotency keys only last 24h): look before sending again.
+      const prior = resend
+        ? (await stripe.transfers.list({ transfer_group: transfer.params.transfer_group, limit: 1 })).data[0]
+        : undefined;
+      const t = prior ?? await stripe.transfers.create(transfer.params, { idempotencyKey: transfer.idempotencyKey });
+      const { error: sentErr } = await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "sent", p_transfer_id: t.id });
+      // Left 'sending': the next stale sweep finds this transfer by its group and marks it sent.
+      if (sentErr) console.error("exos-payouts: transfer made but not recorded", p.id, t.id, sentErr.message);
+      out.push({ payout: p.id, action: resend ? "resent" : "sent", transfer: t.id, ...(prior ? { found: true } : {}) });
     } catch (e) {
       const msg = redactError(e).slice(0, 300);
-      await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "failed", p_error: msg });
-      out.push({ payout: p.id, action: "failed", reason: msg });
+      if (transferRefused(e)) {
+        await sb.rpc("exos_mark_org_payout", { p_id: p.id, p_status: "failed", p_error: msg });
+        out.push({ payout: p.id, action: "failed", reason: msg });
+      } else {
+        out.push({ payout: p.id, action: "unknown", reason: msg, retry: "resent with the same key once the send is stale" });
+      }
     }
   }
   return out;
