@@ -120,8 +120,16 @@ describe('decideScan: online, the cache is only a hint', () => {
     expect(decideScan(input({ entry: undefined, verify: null })).action).toBe('ask-server');
   });
 
-  it('an expired or malformed code is refused locally (the server would too)', () => {
-    expect(decideScan(input({ verify: { ok: false, reason: 'bucket-expired' } }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+  it('a malformed code is refused locally (the server would too)', () => {
+    expect(decideScan(input({ verify: { ok: false, reason: 'malformed' } }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+    expect(decideScan(input({ verify: { ok: false, reason: 'bad-bucket' } }))).toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
+  });
+
+  it('a code from another time window goes to the server online (this phone\'s clock may be off)', () => {
+    expect(decideScan(input({ verify: { ok: false, reason: 'bucket-expired' } }))).toEqual({ action: 'ask-server', ticketId: T1 });
+    // Offline the saved list is all there is: refused.
+    expect(decideScan(input({ network: 'offline', verify: { ok: false, reason: 'bucket-expired' } })))
+      .toMatchObject({ action: 'reject', reason: 'invalid-barcode' });
   });
 
   it('doors and test window are left to the server online', () => {
@@ -189,8 +197,16 @@ describe('decideScan: duplicate reads', () => {
     expect(decideScan(input({ recent }))).toEqual({ action: 'ignore' });
   });
 
-  it('the same code after the window is decided again', () => {
-    expect(decideScan(input({ recent: { ...recent, at: NOW - DUPLICATE_READ_MS - 1 } })).action).toBe('ask-server');
+  it('the same code after the window is decided again (typed, or a new camera code)', () => {
+    const later = { ...recent, at: NOW - DUPLICATE_READ_MS - 1 };
+    expect(decideScan(input({ source: 'manual', recent: later })).action).toBe('ask-server');
+    expect(decideScan(input({ recent: { ...later, raw: `T-${T1}:owner-1:12346:next` } })).action).toBe('ask-server');
+  });
+
+  it('a refused code held to the camera is held like an admitted one (not re-logged every 2 s)', () => {
+    expect(decideScan(input({ recent: { ...recent, at: NOW - DUPLICATE_READ_MS - 1 } }))).toEqual({ action: 'ignore' });
+    expect(decideScan(input({ recent: { ...recent, at: NOW - SAME_TICKET_HOLD_MS + 1 } }))).toEqual({ action: 'ignore' });
+    expect(decideScan(input({ recent: { ...recent, at: NOW - SAME_TICKET_HOLD_MS - 1 } })).action).toBe('ask-server');
   });
 
   it('a camera re-read of the ticket just admitted is held (new rotating code, same ticket)', () => {

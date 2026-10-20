@@ -63,6 +63,29 @@ export async function fetchAllPages<T>(
   return [...seen.values()];
 }
 
+/** Fetch every page of a keyset-paged read (exos_event_door_roster_page, mig
+ *  20261021090000): each page asks for the rows after the last key seen, so
+ *  the server only builds that page. Pages are requested until one comes back
+ *  empty (a server row cap smaller than `pageSize` can't truncate the list),
+ *  and a page whose last key doesn't move forward ends the read. */
+export async function fetchKeysetPages<T>(
+  fetchPage: (after: string | null, limit: number) => Promise<T[]>,
+  keyOf: (row: T) => string,
+  pageSize: number = ROSTER_PAGE_SIZE,
+): Promise<T[]> {
+  const seen = new Map<string, T>();
+  let after: string | null = null;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const page = await fetchPage(after, pageSize);
+    if (!page || page.length === 0) break;
+    for (const row of page) seen.set(keyOf(row), row);
+    const last = keyOf(page[page.length - 1]);
+    if (after !== null && last <= after) break;
+    after = last;
+  }
+  return [...seen.values()];
+}
+
 export interface DoorRosterEntry {
   used: boolean;
   voided?: boolean;

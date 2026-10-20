@@ -9,6 +9,7 @@
 
 import { supabase } from './supabase';
 import {
+  dropFromQueue,
   mapGuestEntry,
   mapGuestListMeta,
   type GuestEntry,
@@ -18,6 +19,7 @@ import {
 import { mapDoorTable, type DoorTable } from './tables';
 import { normalizeNeeds, type AccessNeed } from './accessibility';
 import { hasAccessColumns } from './accessibilityApi';
+import { isServerAnswer, withDeadline } from './door/net';
 
 export interface GuestList {
   id: string;
@@ -204,14 +206,79 @@ export interface GuestCheckInResult {
   elsewhere?: unknown;
 }
 
+/** `scannedAt` (ms): when an offline arrival happened, sent with its replay
+ *  (mig 20261021090000; a database without it is called as before). */
 export async function guestCheckIn(
   eventId: string, entryId: string, count: number, clientRef: string, source: 'online' | 'offline-sync' = 'online',
+  scannedAt?: number,
 ): Promise<GuestCheckInResult> {
-  const { data, error } = await supabase.rpc('exos_guest_check_in', {
-    p_entry_id: entryId, p_count: count, p_event_id: eventId, p_client_ref: clientRef, p_source: source,
+  const args = { p_entry_id: entryId, p_count: count, p_event_id: eventId, p_client_ref: clientRef, p_source: source };
+  let { data, error } = await supabase.rpc('exos_guest_check_in', {
+    ...args, ...(scannedAt != null ? { p_scanned_at: new Date(scannedAt).toISOString() } : {}),
   });
+  if (error && scannedAt != null && (error.code === 'PGRST202' || error.code === '42883')) {
+    ({ data, error } = await supabase.rpc('exos_guest_check_in', args));
+  }
   if (error) throw error;
   return (data ?? { ok: false, reason: 'unknown' }) as GuestCheckInResult;
+}
+
+export interface ArrivalReplay {
+  /** Answered by the server (and dropped from the queue). */
+  done: number;
+  /** Reasons of the answered ones the server refused. */
+  refused: string[];
+  /** The server says this account may not upload them (not assigned, or no
+   *  longer door staff): kept, not retried until asked. */
+  blocked: boolean;
+  /** Why, when blocked. */
+  problem?: 'not-assigned' | 'not-staff';
+}
+
+const replaying = new Set<string>();
+/** Upload the guest arrivals this account queued offline for an event, in
+ *  order, each with its ref and scan time (a ref the server has seen counts
+ *  once). Arrivals another account queued on this device wait for it. Stops
+ *  at the first network failure (the rest wait for the next try). Run from
+ *  the door page whatever tab is open (OrganizerCheckIn). */
+export async function replayPendingArrivals(
+  eventId: string,
+  uid: string,
+  call: (p: PendingArrival) => Promise<GuestCheckInResult> = (p) =>
+    withDeadline(() => guestCheckIn(eventId, p.entryId, p.count, p.ref, 'offline-sync', p.at), 10_000),
+): Promise<ArrivalReplay> {
+  const out: ArrivalReplay = { done: 0, refused: [], blocked: false };
+  if (replaying.has(eventId)) return out;
+  replaying.add(eventId);
+  const answered: string[] = [];
+  try {
+    for (const p of loadPendingArrivals(eventId)) {
+      if (p.uid && p.uid !== uid) continue;
+      try {
+        const r = await call(p);
+        if (!r.ok && r.reason === 'not-assigned') {
+          out.blocked = true;
+          out.problem = 'not-assigned';
+          break;
+        }
+        answered.push(p.ref);
+        if (!r.ok) out.refused.push(r.reason);
+      } catch (err) {
+        if (!isServerAnswer(err)) break; // not reached: retry later
+        if ((err as { code?: string }).code === '42501') {
+          out.blocked = true;
+          out.problem = /not assigned/i.test(String((err as { message?: unknown }).message ?? '')) ? 'not-assigned' : 'not-staff';
+          break;
+        }
+        // Any other server error: keep it for the next try.
+      }
+    }
+  } finally {
+    replaying.delete(eventId);
+    if (answered.length > 0) savePendingArrivals(eventId, dropFromQueue(loadPendingArrivals(eventId), answered));
+    out.done = answered.length;
+  }
+  return out;
 }
 
 // Offline cache, same 7-day TTL as the ticket registry.

@@ -91,6 +91,13 @@ export interface SyncHealthInput {
   lastSyncAt: number | null;
   /** Server minus device (ms), null when not measured. */
   clockOffsetMs: number | null;
+  /** Set when that offset is the device's saved copy (not measured since this
+   *  page opened): how old it is. */
+  clockSavedAgeMs?: number | null;
+  /** Guest-list arrivals waiting to upload (they count as waiting too). */
+  guestPending?: number;
+  /** Queued by another account on this device: paused until it signs in. */
+  otherAccount?: number;
   conflicts: number;
   /** Uploads stopped: the server refused this account (42501). */
   authBlocked: boolean;
@@ -131,25 +138,40 @@ export function syncHealth(i: SyncHealthInput): SyncHealth {
     level: rosterAge == null ? 'bad' : rosterAge > ROSTER_STALE_MS || i.plaintextRoster ? 'warn' : 'ok',
   });
   const oldest = i.pending.reduce<number | null>((m, p) => (m == null || p.scannedAt < m ? p.scannedAt : m), null);
+  const guests = i.guestPending ?? 0;
+  const other = i.otherAccount ?? 0;
+  const waiting = [
+    i.pending.length > 0 ? `${i.pending.length} scan${i.pending.length === 1 ? '' : 's'}` : null,
+    guests > 0 ? `${guests} guest arrival${guests === 1 ? '' : 's'}` : null,
+  ].filter(Boolean).join(' + ');
   lines.push({
     label: 'Waiting to upload',
     value:
-      i.pending.length === 0
+      !waiting
         ? 'nothing'
-        : `${i.pending.length} scan${i.pending.length === 1 ? '' : 's'}${oldest != null ? ` · oldest ${formatAge(i.now - oldest)}` : ''}${
+        : `${waiting}${oldest != null ? ` · oldest ${formatAge(i.now - oldest)}` : ''}${
             i.authBlocked ? ' · not authorized to upload' : ''
-          }`,
-    level: i.authBlocked ? 'bad' : i.pending.length === 0 ? 'ok' : oldest != null && i.now - oldest > PENDING_STALE_MS ? 'warn' : 'ok',
+          }${other > 0 ? ` · ${other} from another account (paused)` : ''}`,
+    level: i.authBlocked
+      ? 'bad'
+      : !waiting ? 'ok'
+      : other > 0 || (oldest != null && i.now - oldest > PENDING_STALE_MS) ? 'warn' : 'ok',
   });
   lines.push({
     label: 'Last upload',
     value: i.lastSyncAt == null ? 'none this session' : `${formatAge(i.now - i.lastSyncAt)} ago`,
     level: 'ok',
   });
+  // Not measured: codes are checked on this phone's own clock, which may be
+  // off (a fast clock calls every code expired).
+  const saved = i.clockOffsetMs != null && i.clockSavedAgeMs != null;
   lines.push({
     label: 'Clock vs server',
-    value: formatOffset(i.clockOffsetMs),
-    level: i.clockOffsetMs != null && Math.abs(i.clockOffsetMs) > CLOCK_WARN_MS ? 'warn' : 'ok',
+    value:
+      i.clockOffsetMs == null
+        ? "not measured · using this phone's clock"
+        : `${formatOffset(i.clockOffsetMs)}${saved ? ` · saved ${formatAge(i.clockSavedAgeMs as number)} ago` : ''}`,
+    level: i.clockOffsetMs == null || Math.abs(i.clockOffsetMs) > CLOCK_WARN_MS ? 'warn' : 'ok',
   });
   lines.push({
     label: 'Conflicts',
@@ -160,7 +182,8 @@ export function syncHealth(i: SyncHealthInput): SyncHealth {
   return { level: !i.online && worst === 'ok' ? 'warn' : worst, lines };
 }
 
-/** The sign-out warning, or null when nothing is waiting. */
+/** The sign-out warning, or null when nothing is waiting (ticket scans and
+ *  guest-list arrivals together). */
 export function signOutWarning(pending: number): string | null {
   if (pending <= 0) return null;
   return `${pending} door check-in${pending === 1 ? " hasn't" : "s haven't"} uploaded yet. They stay on this device and upload the next time door staff for the event sign in here and open the scanner. Sign out anyway?`;

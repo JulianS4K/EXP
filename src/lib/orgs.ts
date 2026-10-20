@@ -346,6 +346,19 @@ export async function listScannerEvents(orgId: string): Promise<Record<string, s
   return out;
 }
 
+/** The events this member is limited to in the org (their own
+ *  exos_event_staff rows, RLS); empty = every event. Door home lists only
+ *  these for a scoped scanner. */
+export async function listMyScannerEvents(orgId: string, uid: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('exos_event_staff')
+    .select('event_id')
+    .eq('org_id', orgId)
+    .eq('user_id', uid);
+  if (error) throw error;
+  return ((data ?? []) as Array<{ event_id: string }>).map((r) => r.event_id);
+}
+
 /** Limit a scanner to these events (empty = every event). Owner / manager. */
 export async function setScannerEvents(orgId: string, uid: string, eventIds: string[]): Promise<void> {
   const { error } = await supabase.rpc('exos_set_scanner_events', {
