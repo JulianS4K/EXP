@@ -28,7 +28,8 @@ export default function ChannelChoicePicker({ orgId, value, onChange }: {
         <h3 className="disp text-lg uppercase tracking-wide text-white">Ticketing</h3>
         <p className="type text-xs text-white/50 mt-1">
           Sell on Exos, and on other platforms too. Exos creates the event there with the same details, ticket types and
-          prices, keeps them in step, and shares one count so nothing oversells.
+          prices, keeps them in step, and shares one count: each platform only gets what is left, less one order's worth
+          held back for the minutes between syncs.
         </p>
       </div>
 

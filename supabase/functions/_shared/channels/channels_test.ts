@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { contentHash, makeIo, mirrorEvent, type StepRecord, textToHtml, utc, writesLive } from "./model.ts";
 import { EB_WRITES, ebClassBody, ebStandIn, syncEventbrite } from "./eventbrite.ts";
+import { assertCapacityOnly, planCapacity } from "../eventbrite/writer.ts";
 import { capacityUpdate, LUMA_WRITES, lumaStandIn, lumaTicketCounts, lumaTicketNames, syncLuma } from "./luma.ts";
 
 const PAYLOAD = {
@@ -82,7 +83,8 @@ Deno.test("eventbrite: creates venue, event, classes and publishes; classes Exos
   assertEquals(r.state, "synced");
   assertEquals(r.external_id, "777");
   assertEquals(r.external_meta, { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, published: true });
-  assertEquals(r.tickets, [{ tier_id: "t1", external_ticket_id: "5001", name: "General Admission" }, { tier_id: "t2", external_ticket_id: "5002", name: "Guest list" }]);
+  assertEquals(r.tickets, [{ tier_id: "t1", external_ticket_id: "5001", name: "General Admission", created: true },
+                           { tier_id: "t2", external_ticket_id: "5002", name: "Guest list", created: true }]);
   const ga = calls.find((c) => c.body?.ticket_class?.name === "General Admission")!.body.ticket_class;
   assertEquals(ga, { name: "General Admission", hidden: false, free: false, quantity_total: 96, cost: "USD,2500" });
   const gl = calls.find((c) => c.body?.ticket_class?.name === "Guest list")!.body.ticket_class;
@@ -184,4 +186,58 @@ Deno.test("luma: cancel only closes registration; counts approved tickets; capac
   ] as any);
   assertEquals([...names.values()].map((n) => n.length <= 30), [true, true]);
   assertEquals(names.get("a") === names.get("b"), false);
+});
+
+Deno.test("eventbrite: a reused class is not marked created; one it adds is", async () => {
+  const calls: any[] = [];
+  const f = fakeFetch({
+    "GET /v3/users/me/organizations/": () => ({ organizations: [{ id: "42" }] }),
+    "POST /v3/organizations/42/venues/": () => ({ id: "99" }),
+    "POST /v3/events/888/": () => ({}),
+    "GET /v3/events/888/ticket_classes/": () => ({ ticket_classes: [{ id: "6001", name: "General Admission" }] }),
+    "POST /v3/events/888/ticket_classes/6001/": () => ({}),
+    "POST /v3/events/888/ticket_classes/": () => ({ id: "6002" }),
+    "POST /v3/events/888/publish/": () => ({}),
+  }, calls);
+  const ev = mirrorEvent(PAYLOAD)!;
+  const linked = { ...PAYLOAD, mirror: { mode: "link", external_id: "888", external_meta: {}, last_hash: null } };
+  const steps: StepRecord[] = [];
+  const io = makeIo({ fetch: f, base: "https://www.eventbriteapi.com/v3", headers: {}, live: true, allowed: EB_WRITES, steps, standIn: ebStandIn });
+  const r = await syncEventbrite(io, ev, linked, steps, "h2");
+  assertEquals(r.tickets, [{ tier_id: "t1", external_ticket_id: "6001", name: "General Admission" },
+                           { tier_id: "t2", external_ticket_id: "6002", name: "Guest list", created: true }]);
+});
+
+Deno.test("eventbrite writer: a 0 count hides a class Exos created, shows it again later; others are left alone", () => {
+  // Not Exos's class (or no state): 0 is never sent.
+  assertEquals(planCapacity("555", "101", 292, 0), null);
+  assertEquals(planCapacity("555", "101", 292, 0, { exosCreated: false }), null);
+  // Exos's: hidden instead of a refused 0.
+  const hide = planCapacity("555", "101", 292, 0, { exosCreated: true })!;
+  assertEquals(hide.body, { ticket_class: { hidden: true } });
+  assertEquals([hide.path, hide.to], ["/events/555/ticket_classes/101/", 0]);
+  assertCapacityOnly(hide);
+  // Already hidden: nothing to send.
+  assertEquals(planCapacity("555", "101", 292, 0, { exosCreated: true, hiddenByCount: true }), null);
+  // Seats again: the capacity, shown (even if the capacity didn't change).
+  const show = planCapacity("555", "101", 12, 12, { exosCreated: true, hiddenByCount: true })!;
+  assertEquals(show.body, { ticket_class: { capacity: 12, hidden: false } });
+  assertCapacityOnly(show);
+  // ...unless the organizer hid the Exos ticket type: capacity only.
+  assertEquals(planCapacity("555", "101", 10, 12, { exosCreated: true, hiddenByCount: true, tierPublic: false })!.body,
+               { ticket_class: { capacity: 12 } });
+  assertEquals(planCapacity("555", "101", 12, 12, { exosCreated: true, hiddenByCount: true, tierPublic: false }), null);
+  // A plain change as before.
+  assertEquals(planCapacity("555", "101", 50, 96, { exosCreated: true })!.body, { ticket_class: { capacity: 96 } });
+  // The guard: only those three shapes.
+  const bad = [{ hidden: false }, { capacity: 0 }, { capacity: 5, hidden: true }, { hidden: true, name: "x" }, { capacity: 0, hidden: false }];
+  for (const b of bad) {
+    let threw = false;
+    try {
+      assertCapacityOnly({ ...hide, body: { ticket_class: b as any } });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true, JSON.stringify(b));
+  }
 });
