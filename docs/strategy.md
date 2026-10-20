@@ -101,7 +101,8 @@ deploying `exos-checkout`, `stripe-webhook` and `exos-reconcile-checkouts`, and 
 - **Pixels.** Pixels are scoped to the org whose page is showing: never fire another org's events,
   and no pixels on `/checkin`.
 - **Redirects.** `success_url` / `cancel_url` / `return_url` are checked against an allowlist.
-- **Add-on oversell.** Reserve add-ons at hold time rather than read-then-charge.
+- **Add-on oversell.** Reserve add-ons at hold time rather than read-then-charge (done: mig
+  20261021130000 holds them on the cart hold; a bypass-voucher order still has no hold).
 - **Check-in hardening.** The event scope is always enforced, HMAC is required, cancelled events
   are rejected, and `verification` is set by the server.
 - **Webhook drain.** Claim rows before delivery and sign the timestamp.

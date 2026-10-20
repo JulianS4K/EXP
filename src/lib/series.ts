@@ -1,7 +1,8 @@
 // Recurring / timed-entry series (D4-OPS-27) — RPC wrappers.
 //
 // `exos_create_event_series` (mig 20260911133000) clones a template event
-// (+ tiers, + discount codes) once per occurrence and links them via
+// (+ tiers, tax rules, quotas, add-ons, check-in lists, codes; their times
+// moved by each date's delta, mig 20261021130000) once per occurrence and links them via
 // exos_events.series_id. Owner / manager / admin, enforced server-side. The
 // pure occurrence generator lives in ./seriesModel.ts.
 

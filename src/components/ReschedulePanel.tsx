@@ -10,6 +10,10 @@
 // "Offer refunds to ticket holders?" (checked by default) with a deadline
 // (mig 20260929150000); buyers then refund themselves from the email or My
 // Tickets. What they did shows in RescheduleRefundsPanel.
+//
+// Doors and end follow the start until they're edited (mig 20261021130000:
+// the RPC moves them the same way and refuses doors after the start or an end
+// before it).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, ArrowRight } from 'lucide-react';
@@ -29,6 +33,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import RefundOfferFields from './RefundOfferFields';
 import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
+import { shiftWithStart, timingProblem } from '../lib/rescheduleTiming';
 
 // Timestamp | ISO string | Date | undefined → Date | null.
 function toDate(v: any): Date | null {
@@ -56,6 +61,8 @@ export default function ReschedulePanel({
   const [start, setStart] = useState(() => (startDate ? utcToZonedWallClock(startDate, tz) : ''));
   const [doors, setDoors] = useState(() => (doorsDate ? utcToZonedWallClock(doorsDate, tz) : ''));
   const [end, setEnd] = useState(() => (endDate ? utcToZonedWallClock(endDate, tz) : ''));
+  const [doorsTouched, setDoorsTouched] = useState(false);
+  const [endTouched, setEndTouched] = useState(false);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<Reschedule[]>([]);
@@ -86,10 +93,26 @@ export default function ReschedulePanel({
 
   if (!canManage) return null;
 
+  // A new start carries doors and end along until they're edited.
+  const onStart = (v: string) => {
+    setStart(v);
+    const ns = v ? zonedWallClockToUtc(v, tz) : null;
+    if (!ns) return;
+    if (!doorsTouched && doorsDate) setDoors(utcToZonedWallClock(shiftWithStart(doorsDate, startDate, ns), tz));
+    if (!endTouched && endDate) setEnd(utcToZonedWallClock(shiftWithStart(endDate, startDate, ns), tz));
+  };
+
   const submit = async () => {
     const startUtc = zonedWallClockToUtc(start, tz);
     if (!startUtc) {
       toast({ kind: 'warn', message: 'Pick a new start date and time first.' });
+      return;
+    }
+    const doorsUtc = doors ? zonedWallClockToUtc(doors, tz) : null;
+    const endUtc = end ? zonedWallClockToUtc(end, tz) : null;
+    const timing = timingProblem(startUtc, doorsUtc, endUtc);
+    if (timing) {
+      toast({ kind: 'warn', message: timing });
       return;
     }
     const offering = asksRefunds && offer;
@@ -105,8 +128,6 @@ export default function ReschedulePanel({
       )
     )
       return;
-    const doorsUtc = doors ? zonedWallClockToUtc(doors, tz) : null;
-    const endUtc = end ? zonedWallClockToUtc(end, tz) : null;
     setSaving(true);
     try {
       const { recipientCount, refundsOffered } = await rescheduleEvent({
@@ -128,6 +149,8 @@ export default function ReschedulePanel({
       });
       setReason('');
       setDeadlineTouched(false);
+      setDoorsTouched(false);
+      setEndTouched(false);
       await load();
     } catch (err: any) {
       console.error('reschedule failed:', err);
@@ -159,14 +182,15 @@ export default function ReschedulePanel({
         <h3 className="text-sm font-bold text-slate-700">Reschedule event</h3>
       </div>
       <p className="text-xs text-slate-400 mb-4">
-        Move the event to a new date. Holders keep their tickets and are emailed the new time.
+        Move the event to a new date. Holders keep their tickets and are emailed the new time. Doors and end move
+        with the start unless you change them, and so do sales windows still ahead and check-in list times.
         Times are in the event's timezone (<span className="font-bold text-slate-500">{tz}</span>).
       </p>
 
       <div className="flex flex-wrap gap-3 mb-3">
-        {field('New start', start, setStart, true)}
-        {field('New doors', doors, setDoors)}
-        {field('New end', end, setEnd)}
+        {field('New start', start, onStart, true)}
+        {field('New doors', doors, (v) => { setDoors(v); setDoorsTouched(true); })}
+        {field('New end', end, (v) => { setEnd(v); setEndTouched(true); })}
       </div>
       <textarea
         value={reason}

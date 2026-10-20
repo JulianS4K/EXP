@@ -45,6 +45,7 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
+import { holdAddons } from "../_shared/addonHold.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -250,7 +251,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Validate + price add-ons server-side (never trust the client's prices). Each
   // must belong to this event, be public, and have stock. Build the priced
   // snapshot stored on the session (fulfillment reads it to record the purchase).
-  type AddonRow = { addon_id: string; quantity: number; unit_price_cents: number; name: string };
+  // unit_all_in_cents: what the buyer pays per add-on (tax included), so
+  // fulfillment can leave it out of the tickets' price_paid (mig 20261021130000).
+  type AddonRow = { addon_id: string; quantity: number; unit_price_cents: number; unit_all_in_cents: number; name: string };
   const addonsForSession: AddonRow[] = [];
   const addonLines: { id: string; name: string; quantity: number; unit_face: number; unit_all_in: number; unit_tax: number; line_tax: number; tax_included: boolean }[] = [];
   let addonTotal = 0;
@@ -316,7 +319,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const addonRule = (a as unknown as { exos_tax_rules?: { rate_percent?: number; price_includes_tax?: boolean } }).exos_tax_rules;
         const taxBefore = recordedTax;
         const allIn = allInUnit(unitCents, qty, addonRule);
-        addonsForSession.push({ addon_id: a.id, quantity: qty, unit_price_cents: unitCents, name: a.name });
+        addonsForSession.push({ addon_id: a.id, quantity: qty, unit_price_cents: unitCents, unit_all_in_cents: allIn, name: a.name });
         addonLines.push({
           id: a.id, name: a.name, quantity: qty, unit_face: unitCents, unit_all_in: allIn, unit_tax: allIn - unitCents,
           line_tax: recordedTax - taxBefore, tax_included: addonRule?.price_includes_tax === true,
@@ -444,6 +447,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: holdErr.message || "not enough tickets available" }, 409);
     }
     holdId = hid as string;
+    // The add-ons are held on the same hold (mig 20261021130000): the last
+    // locker can't be sold twice, and a sold-out add-on stops the order here,
+    // before the buyer pays. A bypass voucher has no hold; fulfillment still
+    // re-checks the stock.
+    const addonErr = await holdAddons(sb, holdId, addonsForSession);
+    if (addonErr) {
+      await releaseHold(sb, holdId);
+      return json({ error: addonErr }, 409);
+    }
   }
 
   // A guest's free tickets: no Stripe. Record the order and fulfil it now;

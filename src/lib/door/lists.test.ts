@@ -8,6 +8,7 @@ import {
   loadDirection,
   loadListChoice,
   mapCheckinListRow,
+  multiDayListWarning,
   parseListState,
   pickList,
   saveDirection,
@@ -112,5 +113,32 @@ describe('checkinListInputError', () => {
   it('checks the window', () => {
     expect(checkinListInputError({ ...ok, validFrom: '2026-09-29T22:00:00Z', validUntil: '2026-09-29T21:00:00Z' })).toMatch(/end after/);
     expect(checkinListInputError({ ...ok, validFrom: 'nope' })).toMatch(/start/);
+  });
+});
+
+// The festival run (2026-10-19): a weekend pass on per-day lists without
+// re-entry was refused on day 2 ("used" is per ticket).
+describe('multiDayListWarning', () => {
+  const day = (id: string, name: string, from: string, until: string, over: Partial<DoorCheckinList> = {}) =>
+    list({ id, name, validFrom: from, validUntil: until, ...over });
+  const fri = day('d1', 'Friday', '2026-11-06T22:00:00Z', '2026-11-07T07:00:00Z');
+  const sat = day('d2', 'Saturday', '2026-11-07T22:00:00Z', '2026-11-08T07:00:00Z');
+  it('warns about per-day lists without re-entry', () => {
+    expect(multiDayListWarning([fri, sat])).toMatch(/Friday.*Saturday.*re-entry/);
+  });
+  it('per-day lists with re-entry are the supported setup', () => {
+    expect(multiDayListWarning([{ ...fri, allowReentry: true }, { ...sat, allowReentry: true }])).toBeNull();
+  });
+  it('gates open at the same time are fine', () => {
+    expect(multiDayListWarning([fri, { ...fri, id: 'g2', name: 'VIP gate' }])).toBeNull();
+    expect(multiDayListWarning([list(), list({ id: 'l2', name: 'Side' })])).toBeNull();
+  });
+  it('different ticket types on different days are fine', () => {
+    expect(multiDayListWarning([{ ...fri, tierIds: ['fri-pass'] }, { ...sat, tierIds: ['sat-pass'] }])).toBeNull();
+    expect(multiDayListWarning([{ ...fri, tierIds: ['weekend'] }, { ...sat, tierIds: ['weekend', 'sat-pass'] }])).toMatch(/re-entry/);
+  });
+  it('an open-ended list that ends before another starts counts', () => {
+    expect(multiDayListWarning([day('a', 'Early', '', '2026-11-07T07:00:00Z'), day('b', 'Late', '2026-11-07T22:00:00Z', '')]))
+      .toMatch(/Early/);
   });
 });
