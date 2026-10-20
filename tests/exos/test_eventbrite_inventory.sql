@@ -154,6 +154,8 @@ BEGIN
   UPDATE public.exos_events SET status = 'cancelled' WHERE id = pg_temp.u('e1');
   PERFORM public.exos_eventbrite_inventory_apply(pg_temp.u('e1'), pg_temp.cls(14));
   ASSERT (pg_temp.row('9001')).target_capacity = 14, 'I6: target = sold';
+  -- Back on sale for the next cases (cancelled is final otherwise, mig 20261021110000).
+  PERFORM set_config('exos.uncancel_ok', pg_temp.u('e1')::text, true);
   UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('e1');
   RAISE NOTICE 'I6 ok';
 END $$;
@@ -281,6 +283,7 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1')), 'I15: cancelled and closed on Eventbrite: done';
   UPDATE public.exos_eventbrite_ticket_links SET eb_capacity = eb_sold + 10 WHERE event_id = pg_temp.u('e1') AND eb_ticket_class_id = '9001';
   ASSERT EXISTS (SELECT 1 FROM public.exos_eventbrite_inventory_due() d WHERE d.event_id = pg_temp.u('e1')), 'I15: cancelled, still selling: due';
+  PERFORM set_config('exos.uncancel_ok', pg_temp.u('e1')::text, true);
   UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('e1');
   RAISE NOTICE 'I15 ok';
 END $$;

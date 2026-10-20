@@ -15,7 +15,11 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { Event } from '../types';
 import { ArrowLeft, Save, MapPin, Calendar as CalendarIcon, Type, Palette, Globe, XCircle, ListOrdered, Plus, Upload, ShieldCheck, AlertOctagon, Send } from 'lucide-react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { errMessage, handleFirestoreError, OperationType } from '../lib/utils';
+import { timingProblem } from '../lib/eventTiming';
+import { paidNeedsConnect } from '../lib/payments';
+import { useOrgPaymentsReady } from '../hooks/useOrgPaymentsReady';
+import ConnectPaymentsNotice, { PUBLISH_WITHOUT_PAYMENTS } from '../components/ConnectPaymentsNotice';
 import { useToast } from '../context/ToastContext';
 import { EVENT_CATEGORIES, genresFor } from '../lib/eventTaxonomy';
 import { normalizeArtistLinks } from '../lib/artistLinks';
@@ -56,6 +60,16 @@ function timestampToLocalInput(
   const date = ts.toDate();
   if (Number.isNaN(date.getTime())) return '';
   return utcToZonedWallClock(date, tz);
+}
+/**
+ * The event's start, or null when it has none (a draft saved without a time:
+ * the mapper then sets `date` to the epoch, which must not be saved back).
+ */
+function startOf(ed: Partial<Event>): Timestamp | null {
+  const set = (t: Timestamp | undefined) => !!t && typeof t.toMillis === 'function' && t.toMillis() > 0;
+  if (set(ed.timing?.startTime)) return ed.timing!.startTime;
+  const d = ed.date as Timestamp | undefined;
+  return set(d) ? d! : null;
 }
 function localInputToTimestamp(
   wallClock: string,
@@ -185,6 +199,8 @@ export default function EditEvent() {
   // Table packages (mig 20260926050000), keyed by tier id (client id for new tiers).
   const [tableCfg, setTableCfg] = useState<Record<string, TableTierDraft>>({});
   const [originalTableCfg, setOriginalTableCfg] = useState<Record<string, TableTierDraft>>({});
+  // Stripe Connect state of the event's org (null = unknown / payments off).
+  const paymentsReady = useOrgPaymentsReady(eventData.orgId);
   const [promoUsesState, setPromoUsesState] = useState<
     Record<string, { usedCount: number; usageLimit: number | null; expiresAt: Timestamp | null }>
   >({});
@@ -303,6 +319,23 @@ export default function EditEvent() {
     }
     if ((eventData.subgenres || []).some((s) => s.length > SUBGENRE_MAX_LEN)) {
       return `Each subgenre must be ${SUBGENRE_MAX_LEN} characters or fewer.`;
+    }
+
+    // Same timing rules as Create Event; an event whose start has already
+    // passed still saves as long as the start isn't changed.
+    // A draft saved without a time can stay without one until it's published.
+    const msOf = (ts: any): number | null =>
+      ts && typeof ts.toMillis === 'function' ? ts.toMillis() : null;
+    const startMs = msOf(startOf(eventData));
+    if (startMs != null || eventData.status === 'published') {
+      const savedDateMs = originalNotifiable.dateMs && originalNotifiable.dateMs > 0 ? originalNotifiable.dateMs : null;
+      const timingErr = timingProblem({
+        startMs,
+        doorsMs: msOf(eventData.timing?.doorsOpen),
+        endMs: msOf(eventData.timing?.endTime),
+        savedStartMs: originalNotifiable.startMs ?? savedDateMs,
+      });
+      if (timingErr) return timingErr;
     }
 
     const price = Number(eventData.price);
@@ -495,7 +528,7 @@ export default function EditEvent() {
       setShowCancelModal(false);
       navigate('/dashboard');
     } catch (err) {
-      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Cancel failed' });
+      toast({ kind: 'error', message: errMessage(err, 'Could not cancel the event. Try again.') });
     } finally {
       setCancelling(false);
     }
@@ -538,6 +571,16 @@ export default function EditEvent() {
     const err = validate();
     if (err) {
       toast({ kind: 'error', title: 'Check your details', message: err });
+      return;
+    }
+
+    // Publishing paid tiers before the org's Stripe account can take payments.
+    const publishing = eventData.status === 'published' && originalNotifiable.status !== 'published';
+    if (
+      publishing &&
+      paidNeedsConnect([eventData.price, ...(eventData.ticketTiers || []).map((t) => t.price)], paymentsReady) &&
+      !window.confirm(PUBLISH_WITHOUT_PAYMENTS)
+    ) {
       return;
     }
 
@@ -631,7 +674,7 @@ export default function EditEvent() {
       const tz = ed.timezone || getBrowserTimezone();
       const tsToIso = (ts: any): string | null =>
         ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : null;
-      const startTs = ed.timing?.startTime ?? ed.date;
+      const startTs = startOf(ed);
 
       // 1. Update the event fields via the seam.
       await updateEvent(eventId, {
@@ -861,20 +904,25 @@ export default function EditEvent() {
               ? 'CANCELLED'
               : 'PUBLISHED — listed publicly.';
         const next = status === 'published' ? 'draft' : 'published';
+        // Cancelled is final (holders were told; the server refuses it too,
+        // mig 20261021110000): no way back to draft or published.
+        const saved = originalNotifiable.status;
         return (
           <div
             className={`flex items-center justify-between p-4 border mb-8 ${tone}`}
           >
             <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
-            <button
-              type="button"
-              onClick={() =>
-                setEventData({ ...eventData, status: next as Event['status'] })
-              }
-              className="text-[10px] font-black uppercase tracking-widest underline-offset-2 hover:underline"
-            >
-              {status === 'published' ? 'Move to draft' : 'Mark as published'}
-            </button>
+            {status !== 'cancelled' && saved !== 'cancelled' && (
+              <button
+                type="button"
+                onClick={() =>
+                  setEventData({ ...eventData, status: next as Event['status'] })
+                }
+                className="text-[10px] font-black uppercase tracking-widest underline-offset-2 hover:underline"
+              >
+                {status === 'published' ? 'Move to draft' : 'Mark as published'}
+              </button>
+            )}
           </div>
         );
       })()}
@@ -1027,40 +1075,20 @@ export default function EditEvent() {
               <h2 className="disp text-lg uppercase tracking-wide text-white leading-none">Venue &amp; seating</h2>
            </div>
 
-           {/* Timing controls — Date / Doors / Show Start / Show End.
+           {/* Timing controls — Doors / Show Start / Show End.
                Matches CreateEvent's set so an organizer who needs to
                correct a date typo or push back doors after a soundcheck
                delay doesn't have to delete + recreate the event.
                showPicker on click forces the native calendar+time popover
                (some browsers only pop it from the icon edge, which our
-               overlay icon hides). All four inputs are interpreted in
+               overlay icon hides). All three inputs are interpreted in
                eventData.timezone — changing the zone here doesn't
                re-interpret the times entered above; it changes how
-               they're displayed downstream. Show Start mirrors
-               event.date for backwards-compat with renders that still
-               read the top-level field. */}
+               they're displayed downstream. Show Start is the event's
+               date (it also sets event.date, which older renders read);
+               there's no separate "Event Date" field (the save never
+               read one). */}
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Date</label>
-                <div className="relative">
-                  <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
-                  <input
-                    type="datetime-local"
-                    className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
-                    value={timestampToLocalInput(eventData.date as Timestamp | undefined, eventData.timezone)}
-                    onClick={(e) => {
-                      const el = e.currentTarget as HTMLInputElement;
-                      if (typeof el.showPicker === 'function') {
-                        try { el.showPicker(); } catch { /* user-gesture errors are non-fatal */ }
-                      }
-                    }}
-                    onChange={(e) => {
-                      const ts = localInputToTimestamp(e.target.value, eventData.timezone);
-                      if (ts) setEventData({ ...eventData, date: ts });
-                    }}
-                  />
-                </div>
-              </div>
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Doors Open</label>
                 <div className="relative">
@@ -1342,6 +1370,11 @@ export default function EditEvent() {
               </button>
            </div>
            <PaymentsOffNotice prices={[eventData.price, ...(eventData.ticketTiers || []).map((t) => t.price)]} />
+           <ConnectPaymentsNotice
+             orgId={eventData.orgId}
+             prices={[eventData.price, ...(eventData.ticketTiers || []).map((t) => t.price)]}
+             ready={paymentsReady}
+           />
            
            <div className="space-y-6">
               {(eventData.ticketTiers || []).map((tier, index) => (
@@ -1390,12 +1423,12 @@ export default function EditEvent() {
                          />
                       </div>
                       <div className="space-y-2 md:col-span-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Benefits & Access Rights</label>
+                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Benefits & Access Rights (optional)</label>
+                         {/* Optional, as on Create Event: a blank one there must not block the save here. */}
                          <textarea
-                           required
                            placeholder="Describe the exclusivity of this tier..."
                            className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
-                           value={tier.description}
+                           value={tier.description ?? ''}
                            onChange={(e) => updateTier(tier.id, 'description', e.target.value)}
                          />
                       </div>

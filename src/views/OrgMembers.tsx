@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus } from 'lucide-react';
+import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus, Copy, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
@@ -26,7 +26,11 @@ import {
 import { listOrgEvents } from '../lib/events';
 import ScannerEventScope, { type ScopeEvent } from '../components/ScannerEventScope';
 import { queueEmail } from '../lib/mail';
+import { errMessage, publicUrl } from '../lib/utils';
 import { OrgMembership, OrgRole } from '../types';
+
+/** The accept link for an invite (same as createOrgInvite's inviteUrl). */
+const inviteLink = (token: string) => publicUrl(`invite/${token}`);
 
 const ROLE_OPTIONS: OrgRole[] = ['manager', 'finance', 'content', 'scanner'];
 
@@ -83,6 +87,9 @@ export default function OrgMembers() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<OrgRole>('manager');
   const [inviting, setInviting] = useState(false);
+  // Invite whose email didn't queue: its link is shown to copy by hand.
+  const [unsentInvite, setUnsentInvite] = useState<{ email: string; url: string } | null>(null);
+  const [resending, setResending] = useState<string | null>(null);
 
   const canManage = isAdmin || activeRole === 'owner';
 
@@ -107,8 +114,7 @@ export default function OrgMembers() {
           .map((inv) => ({ token: inv.token, email: inv.email, role: inv.role, status: inv.status })),
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Load failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not load the team.') });
     } finally {
       setLoading(false);
     }
@@ -145,18 +151,22 @@ export default function OrgMembers() {
         role: inviteRole,
         createdBy: user.uid,
       });
-      // Best-effort enqueue of the invite email. Recipient + body are
-      // server-derived by the exos_queue_mail RPC (mig 20260520160000).
-      // exos_org_invites PK is `token`; pass it as refId so the RPC can
-      // look up the invite row. If the migration isn't applied yet the
-      // call fails silently — the owner can copy inviteUrl manually.
-      await queueEmail({ template: 'org-invite', refId: inviteToken });
-      toast({ kind: 'success', message: `Invite sent to ${email}.` });
+      // Enqueue the invite email. Recipient + body are server-derived by the
+      // exos_queue_mail RPC (mig 20260520160000); exos_org_invites PK is
+      // `token`, passed as refId. "Sent" only when it really queued:
+      // otherwise the invite exists and its link is shown to copy.
+      const queued = await queueEmail({ template: 'org-invite', refId: inviteToken });
+      if (queued) {
+        setUnsentInvite(null);
+        toast({ kind: 'success', message: `Invite sent to ${email}.` });
+      } else {
+        setUnsentInvite({ email, url: inviteUrl });
+        toast({ kind: 'warn', message: `Invite created, but the email to ${email} didn't go out. Copy the link and send it yourself.` });
+      }
       setInviteEmail('');
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Invite failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not create the invite.') });
     } finally {
       setInviting(false);
     }
@@ -169,8 +179,31 @@ export default function OrgMembers() {
       toast({ kind: 'success', message: 'Invite cancelled.' });
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Cancel failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not cancel the invite.') });
+    }
+  }
+
+  async function handleCopyInvite(token: string) {
+    try {
+      await navigator.clipboard.writeText(inviteLink(token));
+      toast({ kind: 'success', message: 'Invite link copied.' });
+    } catch {
+      toast({ kind: 'error', message: `Copy failed. The link is ${inviteLink(token)}` });
+    }
+  }
+
+  // Queue the invite email again (the RPC sends it only for the person who
+  // created the invite, and a repeat within 10 minutes is the same mail).
+  async function handleResendInvite(token: string, email: string) {
+    if (!canManage || resending) return;
+    setResending(token);
+    try {
+      const queued = await queueEmail({ template: 'org-invite', refId: token });
+      toast(queued
+        ? { kind: 'success', message: `Invite email sent to ${email}.` }
+        : { kind: 'warn', message: "The email didn't go out (only whoever sent the invite can resend it). Copy the link and send it yourself." });
+    } finally {
+      setResending(null);
     }
   }
 
@@ -181,8 +214,7 @@ export default function OrgMembers() {
       toast({ kind: 'success', message: 'Role updated.' });
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Update failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not change the role.') });
     }
   }
 
@@ -198,8 +230,7 @@ export default function OrgMembers() {
       }
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Update failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not update the member.') });
     }
   }
 
@@ -282,6 +313,18 @@ export default function OrgMembers() {
             <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
               We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
             </p>
+            {unsentInvite && (
+              <div role="alert" className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <p className="font-bold mb-2">The email to {unsentInvite.email} didn't go out. Send them this link:</p>
+                <input
+                  readOnly
+                  value={unsentInvite.url}
+                  aria-label="Invite link"
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full bg-white border border-amber-200 rounded px-3 py-2 font-mono text-[11px] text-slate-700"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -323,17 +366,34 @@ export default function OrgMembers() {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">◔ Invite sent</span>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">◔ Pending</span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         {canManage ? (
-                          <button
-                            onClick={() => handleCancelInvite(inv.token)}
-                            title="Cancel invite"
-                            className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
-                          >
-                            <X size={13} strokeWidth={2.5} /> Cancel
-                          </button>
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              onClick={() => handleCopyInvite(inv.token)}
+                              title="Copy invite link"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-tm-blue text-[10px] font-black uppercase tracking-widest transition-colors"
+                            >
+                              <Copy size={13} strokeWidth={2.5} /> Copy link
+                            </button>
+                            <button
+                              onClick={() => handleResendInvite(inv.token, inv.email)}
+                              disabled={resending === inv.token}
+                              title="Email the invite again"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-tm-blue text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-50"
+                            >
+                              <Send size={13} strokeWidth={2.5} /> {resending === inv.token ? 'Sending…' : 'Resend'}
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvite(inv.token)}
+                              title="Cancel invite"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
+                            >
+                              <X size={13} strokeWidth={2.5} /> Cancel
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">—</span>
                         )}

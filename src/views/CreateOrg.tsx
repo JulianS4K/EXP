@@ -6,13 +6,15 @@
 // and routes to /dashboard so the user can immediately create an event.
 
 import { FormEvent, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { createOrganization, isValidOrgSlug, slugify } from '../lib/orgs';
+import { errMessage, isOrgHandleTaken } from '../lib/utils';
+import { useHandleAvailability } from '../hooks/useHandleAvailability';
 
 const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5';
 const INP =
@@ -23,11 +25,16 @@ export default function CreateOrg() {
   const { refresh, setActiveOrg } = useOrganization();
   const { toast } = useToast();
   const navigate = useNavigate();
+  // ?next=/create-event: Create Event sends a user with no org here first.
+  const [searchParams] = useSearchParams();
+  const next = searchParams.get('next');
+  const afterCreate = next === '/create-event' ? next : '/dashboard';
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const handleState = useHandleAvailability(slug);
 
   // Auto-derive slug from name unless the user has typed something
   // custom in the slug field.
@@ -57,7 +64,8 @@ export default function CreateOrg() {
   const slugError = slug.length > 0 && !isValidOrgSlug(slug)
     ? 'Slug must be lowercase letters, numbers, and dashes (max 80 chars).'
     : null;
-  const slugAvailable = slug.length > 0 && isValidOrgSlug(slug);
+  const slugAvailable = slug.length > 0 && isValidOrgSlug(slug) && handleState === 'available';
+  const slugTaken = isValidOrgSlug(slug) && handleState === 'taken';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -80,21 +88,14 @@ export default function CreateOrg() {
       await refresh();
       setActiveOrg(orgId);
       toast({ kind: 'success', message: `Created ${name}.` });
-      navigate('/dashboard');
+      navigate(afterCreate);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create org';
-      // Slug collision is the most common failure here — the
-      // slugs/{slug} doc rule is `allow update: if false`, so a second
-      // creator gets a permission-denied which Firebase surfaces as a
-      // generic write error. Detect on message shape.
-      if (/permission|denied|already/i.test(msg)) {
-        toast({
-          kind: 'error',
-          message: `Slug "${slug}" is taken. Try a different one.`,
-        });
-      } else {
-        toast({ kind: 'error', message: msg });
-      }
+      // A taken handle is a 23505 on exos_orgs.slug; org limits and the rest
+      // come back as the RPC's own message (errMessage).
+      toast({
+        kind: 'error',
+        message: isOrgHandleTaken(err) ? `The handle "${slug}" is taken. Try a different one.` : errMessage(err, 'Could not create the org. Try again.'),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -179,6 +180,10 @@ export default function CreateOrg() {
               </div>
               {slugError ? (
                 <p className="text-[11px] text-rose-500 mt-1.5 font-semibold">{slugError}</p>
+              ) : slugTaken ? (
+                <p className="text-[11px] text-rose-500 mt-1.5 font-semibold">That handle is taken. Try a different one.</p>
+              ) : handleState === 'checking' ? (
+                <p className="text-[11px] text-slate-400 mt-1.5">Checking…</p>
               ) : slugAvailable ? (
                 <p className="text-[11px] text-emerald-600 mt-1.5 font-semibold flex items-center gap-1">
                   <Check size={13} strokeWidth={3} /> Available
@@ -194,7 +199,7 @@ export default function CreateOrg() {
           <div className="flex items-center gap-3 mt-6">
             <button
               type="submit"
-              disabled={submitting || !name.trim() || !isValidOrgSlug(slug)}
+              disabled={submitting || !name.trim() || !isValidOrgSlug(slug) || slugTaken}
               className="bg-tm-blue text-white px-7 py-3 rounded font-bold text-sm hover:bg-[#015bbd] shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? 'Creating…' : 'Create organization'}

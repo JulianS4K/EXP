@@ -115,7 +115,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261020090000_exos_deletion_privacy \
          20261020100000_exos_parked_ticket_guard \
          20261020110000_exos_channel_shared_count \
-         20261020120000_exos_payout_failure_recovery; do
+         20261020120000_exos_payout_failure_recovery \
+         20261021110000_exos_organizer_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
@@ -254,7 +255,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261020090000_exos_deletion_privacy \
          20261020100000_exos_parked_ticket_guard \
          20261020110000_exos_channel_shared_count \
-         20261020120000_exos_payout_failure_recovery; do
+         20261020120000_exos_payout_failure_recovery \
+         20261021110000_exos_organizer_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -294,3 +296,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_payout_fa
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_deletion_privacy.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_parked_ticket_guard.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_shared_count.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_organizer_p1.sql"

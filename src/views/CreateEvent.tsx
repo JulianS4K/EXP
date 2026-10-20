@@ -21,6 +21,10 @@ import { applyChoice, type ChannelChoice } from '../lib/channels';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Calendar as CalendarIcon, MapPin, Tag, ListOrdered, Upload, ShieldCheck, Loader2, X } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
+import { timingProblem } from '../lib/eventTiming';
+import { paidNeedsConnect } from '../lib/payments';
+import { useOrgPaymentsReady } from '../hooks/useOrgPaymentsReady';
+import ConnectPaymentsNotice, { PUBLISH_WITHOUT_PAYMENTS } from '../components/ConnectPaymentsNotice';
 import { useToast } from '../context/ToastContext';
 import {
   COMMON_TIMEZONES,
@@ -96,11 +100,11 @@ export default function CreateEvent() {
   const storeOk = useStoreColumns();
   const onlineOk = useOnlineColumns();
   const { user } = useAuth();
-  // Bridge multi-tenant: every new event must belong to the active org.
-  // Falls back to legacy uid-only path if the user has no orgs yet so
-  // existing flows keep working pre-migration.
+  // Every new event belongs to the active org (exos_events.org_id is NOT
+  // NULL); a user with no org is sent to create one first (below).
   const { activeOrg, orgs, loading: orgLoading } = useOrganization();
   const navigate = useNavigate();
+  const paymentsReady = useOrgPaymentsReady(activeOrg?.id);
   const [searchParams] = useSearchParams();
   const cloneFromId = searchParams.get('clone');
   const { toast } = useToast();
@@ -220,6 +224,14 @@ export default function CreateEvent() {
   // when no draft was found), so the clone condition always bailed early.
   const draftCheckDoneRef = useRef(false);
   const draftAppliedRef = useRef(false);
+
+  // No organization yet: nothing here could be saved, so go and create one
+  // first (and come back here after) instead of filling the whole form in.
+  useEffect(() => {
+    if (!user || orgLoading || orgs.length > 0) return;
+    toast({ kind: 'info', message: 'Create your organization first: events belong to one.' });
+    navigate('/orgs/new?next=/create-event', { replace: true });
+  }, [user, orgLoading, orgs.length, navigate, toast]);
 
   // Restore-or-discard prompt on first paint.
   useEffect(() => {
@@ -507,10 +519,13 @@ export default function CreateEvent() {
    * lousy way to tell a user "your title is too long" — much better to fail
    * fast in the UI with a real explanation.
    */
-  const validate = (): string | null => {
+  const validate = (publish = true): string | null => {
     const t = formData.title.trim();
     if (!t) return 'Please enter an event title.';
     if (t.length > TITLE_MAX) return `Title must be ${TITLE_MAX} characters or fewer.`;
+    // A draft needs only a title (and an org, checked on submit): the rest is
+    // finished later in Edit event, and checked again when it's published.
+    if (!publish) return null;
 
     if (formData.description.length > DESCRIPTION_MAX) {
       return `Description must be ${DESCRIPTION_MAX} characters or fewer.`;
@@ -565,19 +580,17 @@ export default function CreateEvent() {
     if (!startTimeStr) return 'Please set the show start time.';
     const startUtcDate = zonedWallClockToUtc(startTimeStr, tz);
     if (!startUtcDate) return 'Show start time is invalid.';
-    const startMs = startUtcDate.getTime();
-    if (startMs < Date.now()) return 'Show start time must be in the future.';
-
-    if (formData.timing.doorsOpen) {
-      const doorsUtcDate = zonedWallClockToUtc(formData.timing.doorsOpen, tz);
-      if (!doorsUtcDate) return 'Doors-open time is invalid.';
-      if (doorsUtcDate.getTime() > startMs) return 'Doors must open before the show starts.';
-    }
-    if (formData.timing.endTime) {
-      const endUtcDate = zonedWallClockToUtc(formData.timing.endTime, tz);
-      if (!endUtcDate) return 'Show end time is invalid.';
-      if (endUtcDate.getTime() <= startMs) return 'Show end must be after the show start.';
-    }
+    const doorsUtcDate = formData.timing.doorsOpen ? zonedWallClockToUtc(formData.timing.doorsOpen, tz) : null;
+    if (formData.timing.doorsOpen && !doorsUtcDate) return 'Doors-open time is invalid.';
+    const endUtcDate = formData.timing.endTime ? zonedWallClockToUtc(formData.timing.endTime, tz) : null;
+    if (formData.timing.endTime && !endUtcDate) return 'Show end time is invalid.';
+    // Ordering + future start: shared with Edit event (lib/eventTiming).
+    const timingErr = timingProblem({
+      startMs: startUtcDate.getTime(),
+      doorsMs: doorsUtcDate?.getTime() ?? null,
+      endMs: endUtcDate?.getTime() ?? null,
+    });
+    if (timingErr) return timingErr;
 
     // Tier validations.
     if (ticketTiers.length === 0) return 'Please define at least one tier.';
@@ -641,9 +654,25 @@ export default function CreateEvent() {
       return;
     }
 
-    const err = validate();
+    const err = validate(publish);
     if (err) {
       toast({ kind: 'error', title: 'Check your details', message: err });
+      return;
+    }
+    // Events belong to an org (exos_events.org_id is NOT NULL).
+    if (!activeOrg) {
+      toast({
+        kind: 'error',
+        title: 'No organization',
+        message: orgs.length ? 'Pick an organization first (Switch, above).' : 'Create an organization first — events belong to an org.',
+      });
+      return;
+    }
+    if (
+      publish &&
+      paidNeedsConnect(ticketTiers.map((t) => t.price), paymentsReady) &&
+      !window.confirm(PUBLISH_WITHOUT_PAYMENTS)
+    ) {
       return;
     }
 
@@ -661,11 +690,10 @@ export default function CreateEvent() {
       // anyway: the previous fallback (`?? new Date(input)`) silently
       // produced browser-local-interpreted UTC which would corrupt the
       // event's stored time if anything ever changed upstream.
-      const startUtc = zonedWallClockToUtc(
-        formData.timing.startTime || formData.date,
-        tz,
-      );
-      if (!startUtc) {
+      const startStr = formData.timing.startTime || formData.date;
+      // A draft may have no (or a half-typed) time yet: saved without one.
+      const startUtc = startStr ? zonedWallClockToUtc(startStr, tz) : null;
+      if (!startUtc && publish) {
         toast({
           kind: 'error',
           title: 'Invalid start time',
@@ -676,7 +704,7 @@ export default function CreateEvent() {
       const doorsUtc = formData.timing.doorsOpen
         ? zonedWallClockToUtc(formData.timing.doorsOpen, tz)
         : null;
-      if (formData.timing.doorsOpen && !doorsUtc) {
+      if (formData.timing.doorsOpen && !doorsUtc && publish) {
         toast({
           kind: 'error',
           title: 'Invalid doors-open time',
@@ -687,7 +715,7 @@ export default function CreateEvent() {
       const endUtc = formData.timing.endTime
         ? zonedWallClockToUtc(formData.timing.endTime, tz)
         : null;
-      if (formData.timing.endTime && !endUtc) {
+      if (formData.timing.endTime && !endUtc && publish) {
         toast({
           kind: 'error',
           title: 'Invalid end time',
@@ -696,19 +724,25 @@ export default function CreateEvent() {
         return;
       }
 
+      // A draft keeps only the ticket types that have a name, with blank
+      // numbers as 0 (publish validated all of them above).
+      const savedTiers = publish ? ticketTiers : ticketTiers.filter((t) => t.name.trim());
+      const num = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback);
       // Blank total = people across all ticket types (a table counts its party size).
-      const tierCapacity = ticketTiers.reduce(
+      const tierCapacity = savedTiers.reduce(
         (sum, t) => sum + admissionsForTier(parseInt(t.capacity as string, 10) || 0, t.table), 0);
-      const totalTickets = formData.totalTickets.trim() ? parseInt(formData.totalTickets, 10) : tierCapacity;
+      const totalTickets = formData.totalTickets.trim()
+        ? num(parseInt(formData.totalTickets, 10), tierCapacity)
+        : tierCapacity;
       // TierInput[] for the events seam (ISO strings; DB generates tier ids).
-      const tiers = ticketTiers.map((t) => {
+      const tiers = savedTiers.map((t) => {
         const salesStartUtc = t.salesStart ? zonedWallClockToUtc(t.salesStart, tz) : null;
         const salesEndUtc = t.salesEnd ? zonedWallClockToUtc(t.salesEnd, tz) : null;
         return {
           name: t.name.trim(),
           description: t.description?.trim() || '',
-          price: parseFloat(t.price as string),
-          capacity: parseInt(t.capacity as string, 10),
+          price: num(parseFloat(t.price as string), 0),
+          capacity: num(parseInt(t.capacity as string, 10), 0),
           ticketType: t.ticketType,
           visibility: t.visibility,
           salesStart: salesStartUtc ? salesStartUtc.toISOString() : null,
@@ -723,17 +757,6 @@ export default function CreateEvent() {
       // /e/<slug> instead of a uuid. A taken auto slug gets a short suffix.
       const autoSlug = customSlug ? '' : slugify(formData.title).slice(0, SLUG_MAX - 5);
       let slug = customSlug || autoSlug;
-
-      // Events belong to an org (exos_events.org_id is NOT NULL). Require an
-      // active org — the dashboard nudges org creation when the user has none.
-      if (!activeOrg) {
-        toast({
-          kind: 'error',
-          title: 'No organization',
-          message: 'Create an organization first — events belong to an org.',
-        });
-        return;
-      }
 
       const addr = Object.values(formData.address).some((v) => String(v || '').trim())
         ? {
@@ -753,7 +776,7 @@ export default function CreateEvent() {
           description: formData.description.trim(),
           status: publish ? 'published' : 'draft',
           slug: slugValue || null,
-          startsAt: startUtc.toISOString(),
+          startsAt: startUtc ? startUtc.toISOString() : null,
           doorsAt: doorsUtc ? doorsUtc.toISOString() : null,
           endsAt: endUtc ? endUtc.toISOString() : null,
           timezone: tz,
@@ -810,7 +833,7 @@ export default function CreateEvent() {
         try {
           await applyTableConfigsBySortOrder(
             created.eventId,
-            ticketTiers.map((t, i) => ({ sortOrder: i, draft: t.table ?? BLANK_TABLE_DRAFT })),
+            savedTiers.map((t, i) => ({ sortOrder: i, draft: t.table ?? BLANK_TABLE_DRAFT })),
           );
         } catch (tableErr) {
           console.error('table tier setup failed:', tableErr);
@@ -922,26 +945,16 @@ export default function CreateEvent() {
       </div>
 
       {/*
-        Active-org banner. We surface the active org so multi-org users
-        know which one this event is being filed under, and we offer a
-        path to create one if they have none yet. We don't HARD-block
-        creating an event without an org because legacy single-tenant
-        flows keep working under the rule's backwards-compat path —
-        but we make it obvious that org-less events won't show on a
-        white-label storefront once Sprint 2 lands.
+        Active-org banner: which org this event is filed under (multi-org
+        users), or a prompt to pick one. A user with no org at all was
+        sent to /orgs/new on arrival.
       */}
-      {!orgLoading && (
+      {!orgLoading && orgs.length > 0 && (
         <div className="mb-8">
           {activeOrg ? (
             <div className="bg-brand-primary/10 border border-brand-primary/30 px-4 py-3 text-xs font-bold uppercase tracking-widest text-brand-primary flex items-center justify-between gap-3">
               <span>Filing under: {activeOrg.name}</span>
               <Link to="/orgs" className="underline hover:no-underline">Switch</Link>
-            </div>
-          ) : orgs.length === 0 ? (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 px-4 py-3 text-xs font-bold uppercase tracking-widest text-yellow-400">
-              No organization yet —{' '}
-              <Link to="/orgs/new" className="underline hover:no-underline">create one</Link>{' '}
-              to enable white-label and distribution. Or proceed without one (legacy path).
             </div>
           ) : (
             <div className="bg-yellow-500/10 border border-yellow-500/30 px-4 py-3 text-xs font-bold uppercase tracking-widest text-yellow-400">
@@ -1393,6 +1406,7 @@ export default function CreateEvent() {
               </button>
            </div>
            <PaymentsOffNotice prices={ticketTiers.map((t) => t.price)} />
+           <ConnectPaymentsNotice orgId={activeOrg?.id} prices={ticketTiers.map((t) => t.price)} ready={paymentsReady} />
            
            <div className="space-y-6">
               {ticketTiers.map((tier, index) => (
