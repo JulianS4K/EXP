@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./supabase', () => ({ supabase: {} }));
-import { cleanConfig, configError, parseBackend, parseBackendStatus, parseIntegration, providerInfo, refFromLink } from './integrations';
+import { cleanConfig, configError, parseBackend, parseBackendStatus, parseIntegration, providerInfo, refFromLink, staleBackendLink } from './integrations';
 
 describe('integrations', () => {
   const pretix = providerInfo('pretix')!;
@@ -54,5 +54,12 @@ describe('integrations', () => {
       link: { provider: 'hievents', synced_count: '12', last_ok_at: '2026-10-16T09:00:00Z' } });
     expect(s).toMatchObject({ ticketBackend: 'hievents', canManage: true, connected: ['hievents'] });
     expect(s.link?.syncedCount).toBe(12);
+  });
+
+  it('flags a door sync left from a platform the event no longer sells on', () => {
+    expect(staleBackendLink(parseBackendStatus({ ticket_backend: 'hievents', link: { provider: 'pretix' } }))?.provider).toBe('pretix');
+    expect(staleBackendLink(parseBackendStatus({ ticket_backend: 'exos', link: { provider: 'luma' } }))?.provider).toBe('luma');
+    expect(staleBackendLink(parseBackendStatus({ ticket_backend: 'pretix', link: { provider: 'pretix' } }))).toBeNull();
+    expect(staleBackendLink(parseBackendStatus({ ticket_backend: 'exos' }))).toBeNull();
   });
 });

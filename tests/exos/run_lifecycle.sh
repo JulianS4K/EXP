@@ -32,3 +32,7 @@ for m in \
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_lifecycle.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_staff_scope.sql"
+# Org lifecycle (mig 20261021150000) under the real phase-1 RLS. Applied after
+# the tests above: its mint patches read columns this chain doesn't have.
+$PSQL -f "$MIG/20261021150000_exos_org_lifecycle_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_lifecycle_p1_rls.sql"

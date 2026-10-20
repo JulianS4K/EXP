@@ -141,11 +141,11 @@ export default function OrgSettings() {
     );
   }
 
-  // Gate: only the org's owner (or platform admin) can mutate. Read
-  // path is permissive in the rules so the page renders for anyone
-  // who can already see the org — but the form is only enabled for
-  // owners.
-  const canEdit = isAdmin || activeRole === 'owner';
+  // Gate: only the org's owner can mutate. Read path is permissive in the
+  // rules so the page renders for anyone who can already see the org — but
+  // the form is only enabled for owners. Not platform admins: RLS and the
+  // integration RPCs give them no write path, so their saves changed nothing.
+  const canEdit = activeRole === 'owner';
   // Paid ticketing is gated on the Stripe publishable key — the Connect
   // onboarding backend (exos-connect-onboard) is built but dormant until set.
   const stripeEnabled = paymentsEnabled();
@@ -543,7 +543,7 @@ export default function OrgSettings() {
             </div>
 
             {/* Server-side ad conversions (docs/marketing-conversions.md). Owner / manager. */}
-            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+            {(activeRole === 'owner' || activeRole === 'manager') && (
               <AdConversionsSettings orgId={org.id} canEdit />
             )}
 
@@ -594,12 +594,12 @@ export default function OrgSettings() {
             {/* Website: storefront sections, custom domain, widgets (mig 20261016130000). */}
             {org.slug && (
               <WebsitePanel orgId={org.id} orgName={org.name} orgSlug={org.slug} site={org.site}
-                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+                canEdit={activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
             {/* Bring-your-own accounts: ticket backends, SMS, marketplaces (mig 20261016090000). */}
-            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
-              <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            {(activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <IntegrationsPanel orgId={org.id} canEdit={activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
