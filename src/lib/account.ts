@@ -1,6 +1,8 @@
 // "Delete my account": exos_delete_my_account (mig 20260926010000) closes and
 // anonymises the signed-in user's account. Order records stay for organizers
-// without personal data; the login can't be used again.
+// without personal data; the login can't be used again. Mig 20261020090000
+// also clears email-matched guest orders, SMS subscriptions and outbound
+// queues, and keeps the email's hash on the marketing suppression list.
 import { supabase } from './supabase';
 
 /** Server refusal text, without the function-name prefix. */
