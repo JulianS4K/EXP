@@ -46,11 +46,6 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
 
   if (!canView || !data || !s) return null;
   const money = (cents: number) => formatCents(cents, s.currency);
-  const cardLabel =
-    s.exos.cardFeeBasis === 'actual' ? 'Card fees (actual)'
-      : s.exos.cardFeeBasis === 'estimate' ? 'Card fees (estimate)'
-      : s.exos.cardFeeBasis === 'mixed' ? 'Card fees (actual + estimate)'
-      : 'Card fees';
   const hasMarketplace = s.marketplace.orders + s.marketplace.cancelledOrders > 0;
 
   const exportCsv = () => {
@@ -97,10 +92,9 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
         {stat('Tax (included)', money(s.exos.taxCents))}
         {stat('Refunds', money(s.exos.refundedCents))}
         {stat('Exos fee', money(s.exos.exosFeeCents), s.exos.feeFreeOrders > 0 ? `${s.exos.feeFreeOrders} in the fee-free period` : undefined)}
-        {stat(cardLabel, money(s.exos.cardFeeCents),
-          s.exos.cardFeeBasis === 'mixed' ? `${s.exos.cardFeeActualOrders} actual, ${s.exos.cardFeeEstimateOrders} estimated` : undefined)}
-        {stat('Your net', money(s.exos.organizerNetCents), 'gross − application fee (Exos fee + card-fee estimate)')}
-        {stat('Your net after refunds', money(s.exos.organizerNetAfterRefundsCents), 'fees come back in proportion')}
+        {stat('Card fees', money(s.exos.cardFeeCents), 'card processing, set at checkout')}
+        {stat('Your net', money(s.exos.organizerNetCents), 'gross − Exos fee − card fees')}
+        {stat('Your net after refunds', money(s.exos.organizerNetAfterRefundsCents), 'fees come back in proportion, unless a refund kept them')}
       </div>
 
       {hasMarketplace && (

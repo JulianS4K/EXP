@@ -95,6 +95,9 @@ export const schema = {
   exos_order_money: cols(`session_id org_id event_id status currency created_at fulfilled_at gross_cents tax_cents
     application_fee_cents exos_fee_cents card_fee_est_cents card_fee_actual_cents fee_bps fee_free organizer_net_cents
     platform_net_cents refunded_cents payment_intent transfer_id balance_txn_id`),
+  // View, 20261021160000.
+  exos_order_fee_details: cols(`session_id org_id event_id card_fee_charged_cents stripe_fee_currency exchange_rate
+    refunded_fee_kept_cents`),
   // View, 20260929070000.
   exos_marketplace_order_money: cols(`order_id org_id event_id channel external_order_id quantity currency proceeds exos_fee
     organizer_net received reported paid_amount payout_status clawback_amount state`),

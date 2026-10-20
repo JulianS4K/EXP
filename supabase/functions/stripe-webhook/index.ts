@@ -10,7 +10,8 @@
 //        settled payment can't be fulfilled (sold out / quota / limit / voucher
 //        exhausted at fulfillment), the buyer has already been charged, so we
 //        AUTO-REFUND via Stripe (idempotency-keyed) and record it — no silent
-//        stranded charge. (Was: "operator refunds — TODO".)
+//        stranded charge. (Was: "operator refunds — TODO".) A session Exos
+//        has no row for isn't ours: logged and answered 200.
 //   checkout.session.async_payment_failed -> mark the pending session failed.
 //   checkout.session.expired              -> mark the pending session expired.
 //   charge.refunded, charge.refund.updated, refund.updated, refund.failed
@@ -71,6 +72,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
+import { hasExosMetadata } from "../_shared/checkoutSession.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -321,6 +323,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       case "checkout.session.async_payment_succeeded": {
         const session = event.data.object as Stripe.Checkout.Session;
         if (session.payment_status === "paid" || session.payment_status === "no_payment_required") {
+          // Not an Exos checkout (a payment link, another product on this
+          // Stripe account): acknowledge it. A 500 would have Stripe retry it
+          // for days and, in the end, disable the endpoint.
+          const { data: known, error: knownErr } = await sb.from("exos_checkout_sessions")
+            .select("session_id").eq("session_id", session.id).maybeSingle();
+          if (knownErr) {
+            console.error(`stripe-webhook: session lookup failed for ${session.id}`, knownErr);
+            return new Response("session lookup error", { status: 500 });
+          }
+          if (!known) {
+            if (hasExosMetadata(session.metadata)) {
+              // Exos created it but never recorded it (exos-checkout's insert
+              // failed after Stripe answered): a retry can't fix that.
+              console.error(`stripe-webhook: paid session ${session.id} has Exos metadata but no row; refund it in Stripe`);
+            } else {
+              console.error(`stripe-webhook: ${event.type} for ${session.id} is not an Exos checkout; ignored`);
+            }
+            return new Response(JSON.stringify({ received: true, ignored: "unknown checkout session" }), {
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           try {
             await fulfillSettledSession(sb, session);
           } catch (e) {

@@ -7,6 +7,7 @@ import {
   groupPayouts,
   orderCardFee,
   orderNetAfterRefunds,
+  orderStripeFee,
   payoutsCsvRows,
   payoutTotals,
   PAYOUTS_CSV_HEADER,
@@ -65,10 +66,18 @@ describe('helpers', () => {
     expect(centsToDecimal(-1250)).toBe('-12.50');
     expect(centsToDecimal(null)).toBe('');
   });
-  it('orderCardFee prefers the actual fee, else the estimate', () => {
-    expect(orderCardFee({ card_fee_actual_cents: 150, card_fee_est_cents: 146 })).toEqual({ cents: 150, basis: 'actual' });
-    expect(orderCardFee({ card_fee_actual_cents: null, card_fee_est_cents: 146 })).toEqual({ cents: 146, basis: 'estimate' });
-    expect(orderCardFee({ card_fee_actual_cents: null, card_fee_est_cents: null })).toEqual({ cents: 0, basis: 'none' });
+  it('orderCardFee is what the organizer was charged: application fee - Exos fee', () => {
+    expect(orderCardFee({ application_fee_cents: 266, exos_fee_cents: 120, card_fee_est_cents: 146 })).toEqual({ cents: 146, basis: 'charged' });
+    // Capped order: the split covers the card fee first.
+    expect(orderCardFee({ application_fee_cents: 50, exos_fee_cents: 0, card_fee_est_cents: 50 })).toEqual({ cents: 50, basis: 'charged' });
+    expect(orderCardFee({ application_fee_cents: null, exos_fee_cents: null, card_fee_est_cents: 146 })).toEqual({ cents: 146, basis: 'charged' });
+    expect(orderCardFee({ application_fee_cents: null, exos_fee_cents: null, card_fee_est_cents: null })).toEqual({ cents: 0, basis: 'none' });
+  });
+  it('orderStripeFee (platform side): the actual fee, only in the order currency', () => {
+    expect(orderStripeFee({ card_fee_actual_cents: 150, currency: 'usd' })).toBe(150);
+    expect(orderStripeFee({ card_fee_actual_cents: 150, currency: 'usd', stripe_fee_currency: 'usd' })).toBe(150);
+    expect(orderStripeFee({ card_fee_actual_cents: 95, currency: 'eur', stripe_fee_currency: 'usd' })).toBeNull();
+    expect(orderStripeFee({ card_fee_actual_cents: null, currency: 'usd' })).toBeNull();
   });
   it('orderNetAfterRefunds shrinks the net in proportion to the refund', () => {
     expect(orderNetAfterRefunds(order())).toBe(3734);
@@ -77,6 +86,14 @@ describe('helpers', () => {
     // Never more than the gross back.
     expect(orderNetAfterRefunds(order({ refunded_cents: 9999 }))).toBe(0);
     expect(orderNetAfterRefunds(order({ organizer_net_cents: null }))).toBeNull();
+  });
+  it('orderNetAfterRefunds: a refund that kept the application fee comes out in full', () => {
+    // EXOS_REFUND_KEEP_PLATFORM_FEE: 20.00 refunded, fee kept -> 37.34 - 20.00.
+    expect(orderNetAfterRefunds(order({ refunded_cents: 2000, refunded_fee_kept_cents: 2000 }))).toBe(1734);
+    // One 10.00 refund with the fee returned, one 10.00 that kept it.
+    expect(orderNetAfterRefunds(order({ refunded_cents: 2000, refunded_fee_kept_cents: 1000 }))).toBe(3734 - 934 - 1000);
+    // The whole order refunded keeping the fee: the organizer is out the fee.
+    expect(orderNetAfterRefunds(order({ refunded_cents: 4000, refunded_fee_kept_cents: 4000 }))).toBe(-266);
   });
   it('canSeeMoney: owner / manager / finance / admin', () => {
     expect(['owner', 'manager', 'finance'].every((r) => canSeeMoney(r))).toBe(true);
@@ -93,7 +110,7 @@ describe('summarizeSettlement', () => {
     expect(s.exos.orders).toBe(0);
     expect(s.exos.tickets).toBeNull();
     expect(s.exos.grossCents).toBe(0);
-    expect(s.exos.cardFeeBasis).toBe('none');
+    expect(s.exos.stripeFeeActualOrders).toBe(0);
     expect(s.marketplace.orders).toBe(0);
     expect(s.organizerNetCents).toBe(0);
     expect(s.organizerNetAfterCommissionsCents).toBe(0);
@@ -116,7 +133,6 @@ describe('summarizeSettlement', () => {
     expect(s.exos.taxCents).toBe(160);
     expect(s.exos.exosFeeCents).toBe(180);
     expect(s.exos.cardFeeCents).toBe(234);
-    expect(s.exos.cardFeeBasis).toBe('estimate');
     expect(s.exos.organizerNetCents).toBe(5586);
     expect(s.exos.organizerNetAfterRefundsCents).toBe(5586);
     expect(s.currency).toBe('USD');
@@ -136,16 +152,29 @@ describe('summarizeSettlement', () => {
     expect(s.exos.organizerNetAfterRefundsCents).toBe(1867);
   });
 
-  it('card fees: actual when recorded, else the estimate, and says which', () => {
-    const mixed = summarizeSettlement({
+  it('card fees: what the organizer was charged, so gross - Exos fee - card fee = net', () => {
+    const s = summarizeSettlement({
       orders: [order({ card_fee_actual_cents: 150 }), order({ session_id: 'cs_2' })],
     });
-    expect(mixed.exos.cardFeeCents).toBe(296);
-    expect(mixed.exos.cardFeeBasis).toBe('mixed');
-    expect(mixed.exos.cardFeeActualOrders).toBe(1);
-    expect(mixed.exos.cardFeeEstimateOrders).toBe(1);
-    const actual = summarizeSettlement({ orders: [order({ card_fee_actual_cents: 150 })] });
-    expect(actual.exos.cardFeeBasis).toBe('actual');
+    expect(s.exos.cardFeeCents).toBe(292);
+    expect(s.exos.grossCents - s.exos.exosFeeCents - s.exos.cardFeeCents).toBe(s.exos.organizerNetCents);
+    // Stripe's actual fee is kept apart (platform side).
+    expect(s.exos.stripeFeeActualCents).toBe(150);
+    expect(s.exos.stripeFeeActualOrders).toBe(1);
+  });
+
+  it('an EUR order on a USD platform: the money adds up, the USD fee stays out of it', () => {
+    // The simulation's S1 order (scratchpad sim/ledger s10): 49.98 EUR, Stripe's fee 0.95 USD.
+    const s = summarizeSettlement({
+      currency: 'EUR',
+      orders: [order({
+        currency: 'eur', gross_cents: 4998, application_fee_cents: 325, exos_fee_cents: 150, card_fee_est_cents: 175,
+        card_fee_actual_cents: 95, stripe_fee_currency: 'usd', organizer_net_cents: 4998 - 325,
+      })],
+    });
+    expect(s.exos.cardFeeCents).toBe(175);
+    expect(s.exos.grossCents - s.exos.exosFeeCents - s.exos.cardFeeCents - s.exos.organizerNetCents).toBe(0);
+    expect(s.exos.stripeFeeActualOrders).toBe(0);
   });
 
   it('orders without a fee record count in gross but not in fees or net', () => {
@@ -223,8 +252,9 @@ describe('settlementCsvRows', () => {
     expect(rows.map((r) => r[1])).toEqual(['a', 'b', 'old', '19196777', 'mo_2']);
     for (const r of rows) expect(r).toHaveLength(SETTLEMENT_CSV_HEADER.length);
     const [a, b, old, m1, m2] = rows;
-    expect(a.slice(6, 14)).toEqual(['40.00', '0.00', '10.00', '1.20', '1.46', 'estimate', '37.34', '28.00']);
-    expect(b.slice(10, 12)).toEqual(['1.50', 'actual']);
+    expect(a.slice(6, 14)).toEqual(['40.00', '0.00', '10.00', '1.20', '1.46', 'charged', '37.34', '28.00']);
+    // The organizer's CSV has the card fee charged, not Stripe's actual.
+    expect(b.slice(10, 12)).toEqual(['1.46', 'charged']);
     expect(b[15]).toBe('tr_1');
     expect(old.slice(9, 14)).toEqual(['', '', 'none', '', '']);
     expect(m1[0]).toBe('evo');

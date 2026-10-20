@@ -46,7 +46,18 @@ export function organizerNetCents(amountCents: number, bps: number = EXOS_FEE_BP
   return Math.round(amountCents) - exosFeeCents(amountCents, bps);
 }
 
-/** Stripe's standard US card pricing: 2.9% + 30c per successful charge. */
+/**
+ * Stripe's standard US card pricing: 2.9% + 30c per successful charge.
+ *
+ * Used for EVERY currency: the platform account is a US one, and the fixed
+ * part is applied as 30 minor units (30 euro cents on an EUR order). It's an
+ * estimate the organizer is charged at checkout (the card-fee part of the
+ * application fee), not what Stripe bills the platform: an international card
+ * or a converted currency (an EUR order on a USD platform: + currency
+ * conversion) costs the platform more. The Money tab shows the amount charged
+ * (application fee - Exos fee); Stripe's actual fee is platform-side only
+ * (exos_order_payments.stripe_fee_cents, in stripe_fee_currency).
+ */
 export const STRIPE_CARD_FEE = { bps: 290, fixedCents: 30 } as const;
 
 export interface CardFee {

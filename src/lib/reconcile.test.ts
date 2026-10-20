@@ -1,7 +1,7 @@
 // Daily Stripe reconciliation diff (supabase/functions/_shared/reconcile.ts, mig 20261001101000).
 import { describe, it, expect } from 'vitest';
 import {
-  reconcile, reconcileWindow, txnRow, isDisputeTxn,
+  reconcile, reconcileWindow, sameAmount, txnRow, isDisputeTxn,
   type ExosPaymentRow, type ExosRefundRow, type StripeTxnRow,
 } from '../../supabase/functions/_shared/reconcile.ts';
 
@@ -11,7 +11,8 @@ const MID = '2026-09-28T12:00:00.000Z';
 
 const txn = (over: Partial<StripeTxnRow>): StripeTxnRow => ({
   id: 'txn_x', type: 'charge', reporting_category: 'charge', amount_cents: 5000, fee_cents: 175, net_cents: 4825,
-  currency: 'usd', source_id: 'ch_1', payment_intent: 'pi_1', status: 'available', created: MID, available_on: null, ...over,
+  currency: 'usd', source_id: 'ch_1', payment_intent: 'pi_1', status: 'available', created: MID, available_on: null,
+  exchange_rate: null, ...over,
 });
 const pay = (over: Partial<ExosPaymentRow>): ExosPaymentRow => ({
   session_id: 'cs_1', org_id: 'org1', payment_intent: 'pi_1', charge_id: 'ch_1', balance_txn_id: 'txn_c1',
@@ -24,6 +25,35 @@ const ref = (over: Partial<ExosRefundRow>): ExosRefundRow => ({
 const run = (txns: StripeTxnRow[], payments: ExosPaymentRow[] = [], refunds: ExosRefundRow[] = [], disputes = [] as { dispute_id: string; session_id: string | null; org_id: string | null }[]) =>
   reconcile({ txns, payments, refunds, disputes, from: FROM, to: TO });
 
+describe('settlement currency (EUR charge on a USD platform)', () => {
+  // The simulation's S6: a 49.98 EUR order lands as 53.98 USD (rate 1.08), fee 0.95 USD.
+  const eurTxn = txn({ id: 'txn_e1', source_id: 'ch_e1', payment_intent: 'pi_e1', amount_cents: 5398, fee_cents: 95, net_cents: 5303, exchange_rate: 1.08 });
+  const eurPay = pay({ session_id: 'cs_e1', payment_intent: 'pi_e1', charge_id: 'ch_e1', balance_txn_id: 'txn_e1', amount_cents: 4998, currency: 'eur', stripe_fee_cents: 95, stripe_fee_currency: 'usd' });
+  it('a correctly recorded EUR order raises no issue', () => {
+    expect(run([eurTxn], [eurPay]).issues).toEqual([]);
+  });
+  it('compares to the cent at the rate', () => {
+    expect(sameAmount(4998, 'eur', { amount_cents: 5398, currency: 'usd', exchange_rate: 1.08 })).toBe(true);
+    expect(sameAmount(4998, 'eur', { amount_cents: 5399, currency: 'usd', exchange_rate: 1.08 })).toBe(true);
+    expect(sameAmount(4998, 'eur', { amount_cents: 5400, currency: 'usd', exchange_rate: 1.08 })).toBe(false);
+    expect(sameAmount(4998, 'eur', { amount_cents: 5398, currency: 'usd', exchange_rate: null })).toBe(false);
+    expect(sameAmount(5000, 'USD', { amount_cents: 5000, currency: 'usd', exchange_rate: null })).toBe(true);
+  });
+  it('still flags a wrong EUR amount, and a wrong fee in the settlement currency', () => {
+    expect(run([eurTxn], [{ ...eurPay, amount_cents: 4000 }]).issues.map((i) => i.kind)).toEqual(['amount_mismatch']);
+    expect(run([eurTxn], [{ ...eurPay, stripe_fee_cents: 90 }]).issues.map((i) => i.kind)).toEqual(['fee_mismatch']);
+  });
+  it('an older row without a fee currency: the converted fee is not compared', () => {
+    expect(run([eurTxn], [{ ...eurPay, stripe_fee_cents: 175, stripe_fee_currency: null }]).issues).toEqual([]);
+  });
+  it('a converted EUR refund matches at its rate', () => {
+    const rt = txn({ id: 'txn_er', type: 'refund', reporting_category: 'refund', source_id: 're_e1', payment_intent: 'pi_e1', amount_cents: -1084, fee_cents: 0, net_cents: -1084, exchange_rate: 1.084 });
+    const out = run([eurTxn, rt], [eurPay], [ref({ session_id: 'cs_e1', refund_id: 're_e1', amount_cents: 1000, currency: 'eur' })]);
+    expect(out.issues).toEqual([]);
+    expect(out.stats.matched_refunds).toBe(1);
+  });
+});
+
 describe('txnRow', () => {
   it('maps a balance transaction with an expanded source', () => {
     const r = txnRow({
@@ -35,7 +65,10 @@ describe('txnRow', () => {
       id: 'txn_1', type: 'charge', reporting_category: 'charge', amount_cents: 5000, fee_cents: 175, net_cents: 4825,
       currency: 'usd', source_id: 'ch_1', payment_intent: 'pi_1', status: 'available',
       created: new Date(1790000000 * 1000).toISOString(), available_on: new Date(1790100000 * 1000).toISOString(),
+      exchange_rate: null,
     });
+    expect(txnRow({ id: 'txn_4', type: 'charge', amount: 5398, currency: 'usd', exchange_rate: 1.08, created: 1790000000 })?.exchange_rate)
+      .toBe(1.08);
   });
   it('keeps an unexpanded source id and drops unusable rows', () => {
     expect(txnRow({ id: 'txn_2', type: 'refund', amount: -100, created: 1790000000, source: 're_1' })?.source_id).toBe('re_1');
@@ -81,7 +114,7 @@ describe('reconcile', () => {
     expect(issues.map((i) => i.kind)).toEqual(['amount_mismatch', 'fee_mismatch', 'payment_status_mismatch']);
     const amount = issues.find((i) => i.kind === 'amount_mismatch')!;
     expect(amount).toMatchObject({ key: 'ch_1', session_id: 'cs_1', org_id: 'org1' });
-    expect(amount.detail).toEqual({ txn: 'txn_c1', stripe_amount_cents: 5100, stripe_currency: 'usd', exos_amount_cents: 5000, exos_currency: 'usd' });
+    expect(amount.detail).toEqual({ txn: 'txn_c1', stripe_amount_cents: 5100, stripe_currency: 'usd', exos_amount_cents: 5000, exos_currency: 'usd', exchange_rate: null });
     expect(run([txn({ id: 'txn_c1', currency: 'eur' })], [pay({})]).issues.map((i) => i.kind)).toEqual(['amount_mismatch']);
   });
 

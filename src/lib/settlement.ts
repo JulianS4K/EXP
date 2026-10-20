@@ -16,10 +16,17 @@
 //     gets gross − application fee, and the application fee is the Exos fee
 //     plus the card-fee estimate. Stripe pays that out to the organizer; Exos
 //     never holds it.
+//   * The card fee the organizer pays is the card-fee part of the application
+//     fee, fixed at checkout (application fee − Exos fee), so gross − Exos fee
+//     − card fee = net. Stripe's actual fee is what the PLATFORM paid (it can
+//     differ, and on a converted currency it's in another one): platform-side
+//     views only (orderStripeFee, stripeFeeActualCents).
 //   * A refund pulls the refunded share back from the organizer and, by
 //     default, Exos returns its application fee in the same proportion
 //     (refund_application_fee), so the organizer's net after refunds is
-//     net × (1 − refunded / gross).
+//     net × (1 − refunded / gross). A refund made under
+//     EXOS_REFUND_KEEP_PLATFORM_FEE kept the fee: the organizer covered all
+//     of it (refunded_fee_kept_cents, mig 20261021160000).
 //   * Marketplace orders are paid by Exos: organizer_net = proceeds − exos_fee,
 //     through exos_org_payouts. Cancelled orders don't count.
 
@@ -36,10 +43,16 @@ export interface OrderMoneyRow {
   application_fee_cents: number | null;
   exos_fee_cents: number | null;
   card_fee_est_cents: number | null;
+  /** Stripe's actual fee: what the platform paid, in stripe_fee_currency. */
   card_fee_actual_cents: number | null;
+  /** application fee − Exos fee (mig 20261021160000; computed here when absent). */
+  card_fee_charged_cents?: number | null;
+  stripe_fee_currency?: string | null;
   fee_free?: boolean | null;
   organizer_net_cents: number | null;
   refunded_cents: number | null;
+  /** The part of refunded_cents whose refund kept the application fee (mig 20261021160000). */
+  refunded_fee_kept_cents?: number | null;
   payment_intent?: string | null;
   transfer_id?: string | null;
   /** Tickets in the order (exos_checkout_sessions.quantity), when readable. */
@@ -92,31 +105,55 @@ export function centsToDecimal(cents: number | null | undefined): string {
   return `${neg ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
 }
 
-export type CardFeeBasis = 'actual' | 'estimate' | 'none';
+export type CardFeeBasis = 'charged' | 'none';
 
-/** One order's card fee: Stripe's actual fee once recorded, else the estimate. */
-export function orderCardFee(o: Pick<OrderMoneyRow, 'card_fee_actual_cents' | 'card_fee_est_cents'>): { cents: number; basis: CardFeeBasis } {
-  if (o.card_fee_actual_cents !== null && o.card_fee_actual_cents !== undefined) {
-    return { cents: int(o.card_fee_actual_cents), basis: 'actual' };
+const has = (v: number | null | undefined): v is number => v !== null && v !== undefined;
+
+/**
+ * One order's card fee as the organizer paid it: the card-fee part of the
+ * application fee, set at checkout (application fee − Exos fee). Not Stripe's
+ * actual fee, which the platform paid (orderStripeFee).
+ */
+export function orderCardFee(
+  o: Pick<OrderMoneyRow, 'application_fee_cents' | 'exos_fee_cents' | 'card_fee_est_cents'> & { card_fee_charged_cents?: number | null },
+): { cents: number; basis: CardFeeBasis } {
+  if (has(o.application_fee_cents) && has(o.exos_fee_cents)) {
+    return { cents: Math.max(int(o.application_fee_cents) - int(o.exos_fee_cents), 0), basis: 'charged' };
   }
-  if (o.card_fee_est_cents !== null && o.card_fee_est_cents !== undefined) {
-    return { cents: int(o.card_fee_est_cents), basis: 'estimate' };
-  }
+  if (has(o.card_fee_charged_cents)) return { cents: int(o.card_fee_charged_cents), basis: 'charged' };
+  if (has(o.card_fee_est_cents)) return { cents: int(o.card_fee_est_cents), basis: 'charged' };
   return { cents: 0, basis: 'none' };
+}
+
+/**
+ * Platform side: Stripe's actual fee on the order, when recorded in the
+ * order's own currency (a converted charge's fee is in the settlement
+ * currency, so it isn't comparable here). null otherwise.
+ */
+export function orderStripeFee(o: Pick<OrderMoneyRow, 'card_fee_actual_cents' | 'currency'> & { stripe_fee_currency?: string | null }): number | null {
+  if (!has(o.card_fee_actual_cents)) return null;
+  const feeCur = (o.stripe_fee_currency ?? '').toLowerCase();
+  if (feeCur && feeCur !== (o.currency ?? '').toLowerCase()) return null;
+  return int(o.card_fee_actual_cents);
 }
 
 /**
  * The organizer's net on one order after refunds: the application fee comes
  * back in proportion to the refund, so the net shrinks in the same proportion.
- * null when the order has no fee record (checkouts before mig 20260929131000).
+ * A refund that kept the application fee (EXOS_REFUND_KEEP_PLATFORM_FEE)
+ * comes out of the net in full. null when the order has no fee record
+ * (checkouts before mig 20260929131000).
  */
-export function orderNetAfterRefunds(o: Pick<OrderMoneyRow, 'gross_cents' | 'organizer_net_cents' | 'refunded_cents'>): number | null {
+export function orderNetAfterRefunds(
+  o: Pick<OrderMoneyRow, 'gross_cents' | 'organizer_net_cents' | 'refunded_cents'> & { refunded_fee_kept_cents?: number | null },
+): number | null {
   if (o.organizer_net_cents === null || o.organizer_net_cents === undefined) return null;
   const net = int(o.organizer_net_cents);
   const gross = int(o.gross_cents);
   const refunded = Math.min(Math.max(int(o.refunded_cents), 0), Math.max(gross, 0));
   if (gross <= 0 || refunded === 0) return net;
-  return net - Math.round((net * refunded) / gross);
+  const kept = Math.min(Math.max(int(o.refunded_fee_kept_cents), 0), refunded);
+  return net - Math.round((net * (refunded - kept)) / gross) - kept;
 }
 
 const isPaid = (o: OrderMoneyRow) => (PAID_ORDER_STATUSES as readonly string[]).includes(o.status);
@@ -137,10 +174,11 @@ export interface Settlement {
     taxCents: number;
     refundedCents: number;
     exosFeeCents: number;
+    /** Card fees as charged to the organizer (gross − Exos fee − card fee = net). */
     cardFeeCents: number;
-    cardFeeBasis: 'actual' | 'estimate' | 'mixed' | 'none';
-    cardFeeActualOrders: number;
-    cardFeeEstimateOrders: number;
+    /** Platform side: Stripe's actual fees, on the orders that have one in their own currency. */
+    stripeFeeActualCents: number;
+    stripeFeeActualOrders: number;
     /** Orders without a fee record: not in the fee or net totals. */
     ordersWithoutFees: number;
     organizerNetCents: number;
@@ -187,7 +225,7 @@ export function summarizeSettlement(input: {
 
   let tickets: number | null = null;
   let gross = 0, tax = 0, refunded = 0, exosFee = 0, cardFee = 0, net = 0, netAfter = 0;
-  let actual = 0, estimate = 0, withoutFees = 0, feeFree = 0;
+  let stripeFee = 0, stripeFeeOrders = 0, withoutFees = 0, feeFree = 0;
   for (const o of orders) {
     addCur(o.currency);
     if (o.quantity !== null && o.quantity !== undefined) tickets = (tickets ?? 0) + int(o.quantity);
@@ -201,10 +239,12 @@ export function summarizeSettlement(input: {
       continue;
     }
     exosFee += int(o.exos_fee_cents);
-    const card = orderCardFee(o);
-    cardFee += card.cents;
-    if (card.basis === 'actual') actual++;
-    else if (card.basis === 'estimate') estimate++;
+    cardFee += orderCardFee(o).cents;
+    const sf = orderStripeFee(o);
+    if (sf !== null) {
+      stripeFee += sf;
+      stripeFeeOrders++;
+    }
     net += int(o.organizer_net_cents);
     netAfter += after;
   }
@@ -236,8 +276,6 @@ export function summarizeSettlement(input: {
     if (c.status === 'paid') cm.paidCents += int(c.commission_cents);
   }
 
-  const counted = actual + estimate;
-  const cardFeeBasis = counted === 0 ? 'none' : actual === counted ? 'actual' : estimate === counted ? 'estimate' : 'mixed';
   const organizerNetCents = netAfter + mk.organizerNetCents;
   const fallback = (input.currency || [...currencies][0] || 'USD').toUpperCase();
 
@@ -252,9 +290,8 @@ export function summarizeSettlement(input: {
       refundedCents: refunded,
       exosFeeCents: exosFee,
       cardFeeCents: cardFee,
-      cardFeeBasis,
-      cardFeeActualOrders: actual,
-      cardFeeEstimateOrders: estimate,
+      stripeFeeActualCents: stripeFee,
+      stripeFeeActualOrders: stripeFeeOrders,
       ordersWithoutFees: withoutFees,
       organizerNetCents: net,
       organizerNetAfterRefundsCents: netAfter,

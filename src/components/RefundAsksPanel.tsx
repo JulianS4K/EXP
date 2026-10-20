@@ -29,7 +29,22 @@ export default function RefundAsksPanel({ eventId, canAct, onRefunded }: { event
   const open = asks.filter((a) => a.status === 'open');
   const closed = asks.filter((a) => a.status !== 'open');
 
-  const refund = async (a: EventRefundAsk) => {
+  const refund = async (shown: EventRefundAsk) => {
+    // Re-read first: another refund on the order since this list loaded
+    // (an order-level partial) lowers what refunding the ask would return.
+    let a = shown;
+    try {
+      const fresh = await fetchEventRefundAsks(eventId);
+      setAsks(fresh);
+      const cur = fresh.find((x) => x.askId === shown.askId);
+      if (!cur || cur.status !== 'open' || cur.amountCents <= 0) {
+        toast({ kind: 'error', message: 'This request is no longer open, or nothing is left to refund on the order.' });
+        return;
+      }
+      a = cur;
+    } catch {
+      // Keep the shown amount; exos-refund caps the refund at what's left.
+    }
     if (!window.confirm(`Refund ${formatCents(a.amountCents, a.currency)} to ${a.buyerEmail || 'the buyer'}? The ticket stops working.`)) return;
     setBusy(a.askId);
     try {

@@ -465,9 +465,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await releaseHold(sb, holdId);
       return json({ error: "could not record the order" }, 500);
     }
-    if (holdId) {
-      const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
-      if (linkErr) console.error("exos-checkout: free hold link failed (non-fatal)", linkErr.message);
+    if (holdId && !(await linkHold(sb, holdId, sessionId))) {
+      // As for a paid order below: fulfilment wouldn't consume the hold.
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions")
+        .update({ status: "failed", failure_reason: "seat hold could not be linked" })
+        .eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: "could not reserve the tickets; please try again" }, 500);
     }
     const { data: ids, error: fulErr } = await sb.rpc("exos_fulfill_checkout", { p_session_id: sessionId });
     if (fulErr) {
@@ -542,10 +546,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Link the hold to the now-existing session so fulfillment consumes it (and it
   // stops counting against availability once the sale lands). Insert-then-link
   // ordering matters: exos_cart_holds.checkout_session_id FKs the session row.
-  if (holdId) {
-    const { error: linkErr } = await sb.from("exos_cart_holds")
-      .update({ checkout_session_id: session.id }).eq("id", holdId);
-    if (linkErr) console.error("exos-checkout: hold link failed (non-fatal)", linkErr);
+  // Fatal when it fails: an unlinked hold isn't consumed at fulfilment, so the
+  // seats would count twice until it expires, and the buyer would pay for
+  // seats the hold doesn't vouch for. Close the Stripe session (nobody can pay
+  // it), release the hold, retire the row, and say so.
+  if (holdId && !(await linkHold(sb, holdId, session.id))) {
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (e) {
+      console.error(`exos-checkout: expiring ${session.id} after a failed hold link failed`, e);
+    }
+    await releaseHold(sb, holdId);
+    await sb.from("exos_checkout_sessions")
+      .update({ status: "expired", failure_reason: "seat hold could not be linked" })
+      .eq("session_id", session.id).eq("status", "pending");
+    return json({ error: "could not reserve the tickets; please try again" }, 500);
   }
 
   // Price-disclosure record (mig 20260926070000): what the buyer is shown on
@@ -603,6 +618,28 @@ async function insertSessionRow(sb: SupabaseClient<any, any, any>, row: Record<s
     ({ error } = await sb.from("exos_checkout_sessions").insert(row));
   }
   return error;
+}
+
+// Point the hold at its checkout session (fulfilment consumes it through this
+// link). True only when the still-active hold was updated.
+// deno-lint-ignore no-explicit-any
+async function linkHold(sb: SupabaseClient<any, any, any>, holdId: string, sessionId: string): Promise<boolean> {
+  try {
+    const { data, error } = await sb.from("exos_cart_holds")
+      .update({ checkout_session_id: sessionId }).eq("id", holdId).eq("status", "active").select("id");
+    if (error) {
+      console.error(`exos-checkout: hold link failed for ${sessionId}`, error);
+      return false;
+    }
+    if (!Array.isArray(data) || data.length === 0) {
+      console.error(`exos-checkout: hold ${holdId} no longer active; not linked to ${sessionId}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`exos-checkout: hold link failed for ${sessionId}`, e);
+    return false;
+  }
 }
 
 // Best-effort release of a reservation when checkout can't complete (Stripe

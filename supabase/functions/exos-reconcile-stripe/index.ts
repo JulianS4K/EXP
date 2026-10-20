@@ -17,7 +17,9 @@
 //      window, plus any the Stripe rows point at; disputes by id) and diffs
 //      them (_shared/reconcile.ts): Stripe charges / refunds / dispute
 //      movements missing in Exos, Exos payments / refunds missing in Stripe,
-//      amount, currency, fee and status mismatches.
+//      amount, currency, fee and status mismatches. Amounts are compared in
+//      the settlement currency (a converted EUR charge at its exchange_rate;
+//      needs mig 20261021160000's stripe_fee_currency / exchange_rate).
 //   4. Records the findings with exos_reconcile_stripe_record: issues are
 //      upserted per (kind, key), open issues inside the checked window that
 //      weren't found are resolved, and the day's run row is written. Running
@@ -58,7 +60,8 @@ const IN_CHUNK = 100;
 const MARGIN_MS = 60 * 60 * 1000;
 
 const PAYMENT_COLS =
-  "session_id, org_id, payment_intent, charge_id, balance_txn_id, amount_cents, currency, status, stripe_fee_cents, created_at";
+  "session_id, org_id, payment_intent, charge_id, balance_txn_id, amount_cents, currency, status, stripe_fee_cents, " +
+  "stripe_fee_currency, created_at";
 const REFUND_COLS = "session_id, org_id, refund_id, amount_cents, currency, status, created_at";
 
 function json(body: unknown, status = 200): Response {
