@@ -41,8 +41,13 @@ export default function DeleteAccountPanel() {
   return (
     <div className="border border-red-500/40 bg-red-500/10 p-4 space-y-3" role="dialog" aria-label="Delete my account">
       <p className="text-xs text-white/80 leading-relaxed">
-        This permanently deletes your Exos account: your profile, follows, saved events, waitlist spots and the
-        email and name on your past tickets. Organizers keep an anonymous record of past orders. You can't undo this.
+        This permanently deletes your Exos account: your profile, follows, saved events, waitlist spots, team
+        memberships, queued emails and text-message subscriptions, and the email and name on your past orders,
+        tickets and invoices, including guest checkouts made with the same email. You're taken off every organizer's
+        marketing and ad lists for good; to keep it that way we keep only a one-way scrambled copy (hash) of your
+        email, never the address. Organizers keep an anonymous record of past orders and invoices (amounts, no
+        contact details). Guest-list entries an organizer typed in themselves stay with that organizer. You can't
+        undo this.
       </p>
       <p className="text-xs text-white/60 leading-relaxed">
         You can't delete while you hold tickets for an upcoming event, have a transfer pending, or own an organization.
