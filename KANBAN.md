@@ -36,6 +36,70 @@
 8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, decide the training-crawler policy (allow all today).
 9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table.
 
+## Discovery + distribution status 2026-10-20 (review against prod state above)
+
+How fans find events (social and word of mouth create demand; search, feeds and marketplaces capture it), and
+where each Exos channel stands. Status goes by "Prod state" above where a doc's own status line is older.
+
+**Live**
+- Fan shares, story posters, fan referral codes; promoter records, portal, kits, leaderboard, link in bio, buy-now
+  links; Instagram / Facebook / TikTok in-app checkout handling; org pixels + consent; Sources report; `/o/:slug`
+  storefront and `/e/:slug`; Door app (CSV import, offline); Eventbrite read sync.
+
+**Built, switched off** (needs a secret, a flag or an operator call)
+- Payments, refunds (Stripe secrets) and payouts (`EXOS_PAYOUTS_LIVE`). Everything that sells waits on these.
+- Mail (`RESEND_API_KEY`, `EXOS_MAIL_FROM`, `EXOS_APP_URL`).
+- Google events feed: deployed; Google's events ticketing program not applied for (Google reviews live inventory,
+  so after payments).
+- AI discovery (`EXOS_AI_DISCOVERY`), catalog feeds + audience export, server-side conversions
+  (`EXOS_CONVERSIONS_LIVE`), SMS from the org's own Twilio / Telnyx (`EXOS_SMS_LIVE`).
+- S4K feed (cron live per prod state; open: id mapping, then payments + payouts).
+- Marketplace adapters (`exos-distribute`): written, held undeployed until each partner's write scope is signed off.
+- Eventbrite capacity writes (`EXOS_EVENTBRITE_WRITES`), Luma (off), wallet passes (no Apple / Google certificates).
+
+**Not built**
+- Neighborhood pages ("this week in Bushwick", Phase 1 item 7c) and follower lists + "new event" email (Phase 1 CRM).
+- Bandsintown (researched 2026-09-28, not started; it fans out to Spotify, Apple Music, Google, YouTube, Shazam).
+- Spotify ticketing partner: no plan yet. Spotify imports concerts only from its listed ticketing partners, which
+  include small ones (Posh, Shotgun, Tixr, Humanitix).
+- StubHub Open Distribution: not in `docs/`. StubHub's free, non-exclusive connection for primary ticketers lists
+  tickets as new from the organizer; the adapters above use seller APIs, so listings read as resale.
+- TikTok event links (partner deal), RA / DICE / Posh / Partiful listings (manual only), native app (Stories
+  hand-off), Instagram / Facebook Shops, Google feed uploader.
+
+**Doc drift**
+- `docs/marketplace/s4k-feed.md` says "built, not applied or deployed"; prod state says applied and running.
+- `docs/social.md` "Missing" says no SMS provider; the open-source build added the org's own Twilio / Telnyx.
+
+### TODO from this review
+
+Operator switches (in order):
+- [ ] Stripe test mode end to end (`docs/payments-go-live.md`), then live keys; `EXOS_PAYOUTS_LIVE` after the
+      11 test cases pass.
+- [ ] Mail secrets; apply `20261019100000` + `20261019110000`.
+- [ ] Pick the name (Openstub / Everystub / Doors) and domain before any partner application.
+- [ ] At launch: `EXOS_AI_DISCOVERY=on` and the training-crawler policy.
+
+Partner applications (business, no code):
+- [ ] Google events ticketing program (after payments are live).
+- [ ] Bandsintown `app_id` + ticketing-partner status and feed spec.
+- [ ] Spotify ticketing partner inquiry.
+- [ ] StubHub Open Distribution inquiry (primary listings, not seller API).
+- [ ] Apple Pass Type ID certificate + Google Wallet issuer account.
+
+Build:
+- [ ] S4K feed id mapping, then one live S4K-route sale on a 250+ event: listed, sold, claimed, scanned, paid out.
+- [ ] Neighborhood pages (7c) and follower lists + "new event" email.
+- [ ] Bandsintown feed in their partner format once the spec arrives (read-only rule: they pull, we never write).
+- [ ] Fix the doc drift above.
+
+Go to market:
+- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if 250+).
+- [ ] Submit every Exos event to NYC listings: Hidden City, GUNK, Queer on the Street, coolstuff.nyc, Eddie's List,
+      RA (if it takes outside ticket links).
+- [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).
+- [ ] Decide on the 18 paused partner-outreach drafts in Gmail.
+
 ## Next to build (2026-10-13, pick order)
 
 0. **Apps suite** (operator direction 2026-10-13, `docs/strategy.md` "Apps"): one suite of single-purpose apps,
