@@ -319,7 +319,8 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   (every 2 minutes, or **Sync now** under Edit event → Also sell on). Edit in Exos, not on Eventbrite: a change made
   directly there is replaced by the next change in Exos.
 - **One count**: Eventbrite's sales come off the Exos ticket types, and Eventbrite's capacity is kept at what Exos
-  has free (less one order's worth, the buffer for the sync's lag). Its buyers are on the door list with their QR codes.
+  has free (less one order's worth, the buffer for the sync's lag). With Luma on too, the two split what is free, each
+  less its own order's worth. Its buyers are on the door list with their QR codes.
 - Already have the event on Eventbrite? Under **Also sell on**, paste its link instead: Exos takes it over and adds
   any ticket types it is missing.
 - Cancelling in Exos cancels it on Eventbrite (Eventbrite refuses once it has orders: cancel and refund there).

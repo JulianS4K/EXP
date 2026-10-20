@@ -56,7 +56,8 @@ export interface SyncResult {
   hash?: string;
   plan?: { steps: StepRecord[] };
   error?: string;
-  tickets?: { tier_id: string; external_ticket_id: string; name: string }[];
+  /** created: Exos added this class / ticket type on this pass. */
+  tickets?: { tier_id: string; external_ticket_id: string; name: string; created?: boolean }[];
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");

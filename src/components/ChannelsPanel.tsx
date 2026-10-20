@@ -52,7 +52,8 @@ export default function ChannelsPanel({ eventId, orgId }: { eventId: string; org
       </div>
       <p className="type text-xs text-white/50">
         Exos creates the event there and keeps its details, ticket types and prices in step with this page. Sales on
-        every platform come off one count, so nothing oversells. Edit here, not there: an edit made on the other
+        every platform come off one count, and the platforms split what is left, less one order's worth each held back
+        for the minutes between syncs. Edit here, not there: an edit made on the other
         platform is replaced by the next change in Exos.
       </p>
 

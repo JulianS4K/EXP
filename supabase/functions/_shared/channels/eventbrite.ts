@@ -125,7 +125,7 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
 
   // Ticket classes: one per mirrored Exos ticket type.
   const maps = new Map<string, string>((payload?.maps ?? []).map((m: any) => [String(m.tier_id), String(m.external_ticket_id)]));
-  const tickets: { tier_id: string; external_ticket_id: string; name: string }[] = [];
+  const tickets: NonNullable<SyncResult["tickets"]> = [];
   const todo = ev.tiers.filter((t) => !t.skip);
   let existing: any[] | null = null;
   for (const t of todo) {
@@ -139,15 +139,17 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
       const same = (existing ?? []).find((c: any) => typeof c?.name === "string" && c.name.trim() === t.name.slice(0, 50) && typeof c.id === "string");
       if (same) classId = same.id;
     }
+    let created = false;
     if (!classId) {
       const r = await io.req("POST", `/events/${eventId}/ticket_classes/`, ebClassBody(t, ev, true));
       if (!r.ok || typeof r.body?.id !== "string") return fail(steps, `couldn't add the ticket "${t.name}"`, r.error);
       classId = r.body.id;
+      created = true;   // Exos's class: the inventory sync may hide it at 0 (mig 20261020110000)
     } else if (changed) {
       const r = await io.req("POST", `/events/${eventId}/ticket_classes/${classId}/`, ebClassBody(t, ev, false));
       if (!r.ok) return fail(steps, `couldn't update the ticket "${t.name}"`, r.error);
     }
-    tickets.push({ tier_id: t.id, external_ticket_id: classId as string, name: t.name });
+    tickets.push({ tier_id: t.id, external_ticket_id: classId as string, name: t.name, ...(created ? { created } : {}) });
   }
 
   if (ev.status === "published" && !meta.published) {
