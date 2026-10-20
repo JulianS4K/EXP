@@ -122,6 +122,24 @@ export function pendingScanCount(storage: Pick<Storage, 'length' | 'key' | 'getI
   return n;
 }
 
+/** Keys sign-out wipes from localStorage: ticket rosters + pass copies
+ *  (registry_*) and door guest lists (doorextras_*: names, notes, access
+ *  needs, imported barcodes). Upload queues (pending_updates_*,
+ *  guest_pending_*) stay so unsynced check-ins replay after sign-in. */
+export function signOutWipeKeys(storage: Pick<Storage, 'length' | 'key'> | null): string[] {
+  const out: string[] = [];
+  if (!storage) return out;
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && (k.startsWith('registry_') || k.startsWith('doorextras_'))) out.push(k);
+    }
+  } catch {
+    /* storage blocked */
+  }
+  return out;
+}
+
 /** Add a scan (a ref already queued is not added twice). */
 export function enqueueScan(queue: QueuedScan[], scan: QueuedScan): QueuedScan[] {
   if (queue.some((q) => q.ref === scan.ref)) return queue;

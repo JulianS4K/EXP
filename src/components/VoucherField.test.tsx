@@ -54,6 +54,34 @@ describe('VoucherField: codes need an account', () => {
     expect((screen.getByLabelText(/promo or access code/i) as HTMLInputElement).value).toBe('LINK20');
   });
 
+  it('shows the waiting link code visibly and reports it up for Buy', () => {
+    const onWaitingChange = vi.fn();
+    render(<VoucherField eventId="e1" onApplied={vi.fn()} initialCode="LINK20" onWaitingChange={onWaitingChange} />);
+    const note = screen.getByRole('status');
+    expect(note.textContent).toMatch(/sign in to use the code LINK20/i);
+    expect(note.className).not.toMatch(/sr-only/);
+    expect(onWaitingChange).toHaveBeenLastCalledWith('LINK20');
+  });
+
+  it('reports a typed code, and null once it is cleared', () => {
+    const onWaitingChange = vi.fn();
+    render(<VoucherField eventId="e1" onApplied={vi.fn()} onWaitingChange={onWaitingChange} />);
+    expect(onWaitingChange).toHaveBeenLastCalledWith(null);
+    fireEvent.change(screen.getByLabelText(/promo or access code/i), { target: { value: ' early20 ' } });
+    expect(onWaitingChange).toHaveBeenLastCalledWith('early20');
+    fireEvent.change(screen.getByLabelText(/promo or access code/i), { target: { value: '' } });
+    expect(onWaitingChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('applies a typed (not yet applied) code once the buyer signs in', async () => {
+    const onApplied = vi.fn();
+    const { rerender } = render(<VoucherField eventId="e1" onApplied={onApplied} />);
+    fireEvent.change(screen.getByLabelText(/promo or access code/i), { target: { value: 'early20' } });
+    h.user = { uid: 'u1', email: 'fan@x.com' };
+    rerender(<VoucherField eventId="e1" email="fan@x.com" onApplied={onApplied} />);
+    await waitFor(() => expect(h.checkVoucher).toHaveBeenCalledWith('e1', 'early20', 'fan@x.com'));
+  });
+
   it('checks a link code straight away when signed in', async () => {
     h.user = { uid: 'u1', email: 'fan@x.com' };
     render(<VoucherField eventId="e1" email="fan@x.com" onApplied={vi.fn()} initialCode="LINK20" />);

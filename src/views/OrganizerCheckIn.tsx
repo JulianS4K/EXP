@@ -185,7 +185,7 @@ type ScanRow = { key: string; ticketId: string; name: string; time: Date; status
 export default function OrganizerCheckIn() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, loading: authLoading, openAuthModal } = useAuth();
   const { orgs } = useOrganization();
   const { toast } = useToast();
   const [event, setEvent] = useState<DoorEvent | null>(null);
@@ -427,6 +427,9 @@ export default function OrganizerCheckIn() {
   }, [event, liveRole]);
 
   useEffect(() => {
+    // Signed out (or the session is still loading): nothing is loaded, and a
+    // sign-in loads it all again.
+    if (!user) return undefined;
     // The saved role is a fallback until the live org list loads.
     if (eventId) setCachedRole(loadDoorEvent(safeLocalStorage(), eventId, Date.now())?.role ?? null);
     void loadEventHeader();
@@ -477,7 +480,35 @@ export default function OrganizerCheckIn() {
       void stopScanner();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId]);
+  }, [eventId, user?.uid]);
+
+  // Signed out with the scanner open: drop the roster, the guest lists and the
+  // last verdict from memory (the saved copies were wiped by the sign-out).
+  // Queued scans stay so they upload after the next sign-in.
+  useEffect(() => {
+    if (user) return;
+    void stopScanner();
+    setScanning(false);
+    setOfflineRegistry({});
+    offlineRegistryRef.current = {};
+    rosterSavedAtRef.current = null;
+    setRosterSavedAt(null);
+    rosterSyncRef.current = null;
+    marksRef.current = {};
+    setDoorExtras(null);
+    setGuestCode(null);
+    setRecentScans([]);
+    setSearchId('');
+    setStatus('idle');
+    setFoundTicket(null);
+    setBuyerName('');
+    setUsedInfo(null);
+    setOverrideFor(null);
+    setNameFor(null);
+    setUndoKey(null);
+    setInvalidReason('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!effectiveOffline && !authBlocked && pendingUpdates.length > 0) {
@@ -516,7 +547,7 @@ export default function OrganizerCheckIn() {
 
   const syncingRef = useRef(false);
   const syncPendingUpdates = async (opts: { manual?: boolean } = {}) => {
-    if (pendingUpdates.length === 0 || syncingRef.current || !eventId) return;
+    if (pendingUpdates.length === 0 || syncingRef.current || !eventId || !user) return;
     // Uploads stopped on "not authorized": only a manual retry tries again.
     if (authBlocked && !opts.manual) return;
     syncingRef.current = true;
@@ -812,7 +843,7 @@ export default function OrganizerCheckIn() {
   // and mark those tickets used locally, so a near-simultaneous scan here is
   // refused. Authoritative + RLS-gated (org staff only) via postgres_changes.
   useEffect(() => {
-    if (!eventId) return undefined;
+    if (!eventId || !user) return undefined;
     let recount: ReturnType<typeof setTimeout> | null = null;
     const ch = joinCheckinChannel(eventId, (row: RemoteCheckin) => {
       // An exit on a re-entry list re-opens the ticket on that list only.
@@ -835,17 +866,18 @@ export default function OrganizerCheckIn() {
       ch.leave();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId]);
+  }, [eventId, user?.uid]);
 
   // Seed "inside venue" on mount (the realtime channel keeps it live after).
   useEffect(() => {
-    if (!eventId) return undefined;
+    if (!eventId || !user) return undefined;
     let cancelled = false;
     countEventCheckins(eventId)
       .then((n) => { if (!cancelled) setInsideVenue(n); })
       .catch(() => {/* non-fatal */});
     return () => { cancelled = true; };
-  }, [eventId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, user?.uid]);
 
   // Pull the roster once on open (silently) so name search works without a
   // manual download; the saved copy covers offline opens.
@@ -1225,7 +1257,8 @@ export default function OrganizerCheckIn() {
   ) => {
     if (e) e.preventDefault();
     const raw = (manualValue || searchId).trim();
-    if (!raw || !eventId || inFlightRef.current) return;
+    // Never admit from a signed-out scanner (the roster is gone with the session).
+    if (!raw || !eventId || !user || inFlightRef.current) return;
     // Imported from another platform (Exos Door): not an Exos code, but on a
     // guest list. Check it in there.
     if (!isExosCode(raw) && doorExtras && matchImported(raw, codeIndex(doorExtras.guests))) {
@@ -1515,6 +1548,32 @@ export default function OrganizerCheckIn() {
       setEnablingTest(false);
     }
   };
+
+  if (!user) {
+    return (
+      <div className="bg-[#f2f4f7] min-h-screen">
+        <div className="max-w-xl mx-auto px-4 py-16 text-center">
+          {authLoading ? (
+            <Loader2 className="w-8 h-8 text-slate-400 animate-spin mx-auto" aria-label="Loading" />
+          ) : (
+            <>
+              <h1 className="text-xl font-bold text-slate-900 mb-2">Sign in to check people in</h1>
+              <p className="text-sm text-slate-500 mb-6">
+                The door list is only kept while door staff are signed in. Sign in again to load it.
+              </p>
+              <button
+                type="button"
+                onClick={openAuthModal}
+                className="px-4 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest"
+              >
+                Sign in
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!event) {
     return (
