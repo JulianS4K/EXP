@@ -53,7 +53,8 @@
 //   between steps 2 and 3 still reconciles.
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
-// SUPABASE_SERVICE_ROLE_KEY. Optional: EXOS_REFUND_KEEP_PLATFORM_FEE=true.
+// SUPABASE_SERVICE_ROLE_KEY. Optional: EXOS_REFUND_KEEP_PLATFORM_FEE=true
+// (each request records which it was: exos_refund_requests.application_fee_refunded).
 // Payments off (no STRIPE_SECRET_KEY) -> 503.
 // Deploy with JWT verification ON (the default). Payment functions stay
 // undeployed until the operator turns payments on (docs/payments-go-live.md).
@@ -295,6 +296,13 @@ async function refundClaim(sb: SupabaseClient<any, any, any>, stripe: Stripe, c:
   if (c.existing && c.status !== "claimed") {
     return { ...base, status: c.status, voided: 0, stripe_refund_id: c.stripe_refund_id };
   }
+
+  // Whether this refund returns the application fee, for the Money tab's net
+  // after refunds (mig 20261021160000). Non-fatal: without the column the
+  // tab assumes the default (returned).
+  const { error: feeErr } = await sb.from("exos_refund_requests")
+    .update({ application_fee_refunded: !keepFee }).eq("id", c.request_id);
+  if (feeErr) console.error(`exos-refund: fee flag for ${c.request_id} not recorded (non-fatal)`, feeErr.message);
 
   let refund: Stripe.Refund | null = null;
   try {

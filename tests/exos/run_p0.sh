@@ -122,7 +122,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261021120000_exos_roles_money_p1 \
          20261021130000_exos_festival_p1 \
          20261021140000_exos_growth_p1 \
-         20261021150000_exos_org_lifecycle_p1; do
+         20261021150000_exos_org_lifecycle_p1 \
+         20261021160000_exos_ledger_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
@@ -268,7 +269,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261021120000_exos_roles_money_p1 \
          20261021130000_exos_festival_p1 \
          20261021140000_exos_growth_p1 \
-         20261021150000_exos_org_lifecycle_p1; do
+         20261021150000_exos_org_lifecycle_p1 \
+         20261021160000_exos_ledger_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -315,3 +317,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_organizer
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_festival_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_roles_money_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ledger_p1.sql"

@@ -9,26 +9,43 @@
 // taken from the platform (balance_transaction.fee), and the organizer's
 // share goes out as a transfer of amount - application_fee. So what Exos
 // keeps on an order is application_fee - stripe_fee: that is net_cents.
+//
+// Currencies: the balance transaction is in the platform's settlement
+// currency. An EUR charge on a USD platform lands converted (exchange_rate
+// set) and its fee is in USD, so the fee is stored with its own currency
+// (stripe_fee_currency) and the rate, and net_cents is in that currency (the
+// application fee converted at the rate). mig 20261021160000.
 
 type Id = string | { id?: string | null } | null | undefined;
 
 export interface ChargeLike {
   id?: string | null;
   amount?: number | null;
+  currency?: string | null;
   application_fee?: Id;
   application_fee_amount?: number | null;
   transfer?: Id;
-  balance_transaction?: string | { id?: string | null; fee?: number | null; net?: number | null } | null;
+  balance_transaction?: string | {
+    id?: string | null;
+    fee?: number | null;
+    net?: number | null;
+    currency?: string | null;
+    exchange_rate?: number | null;
+  } | null;
 }
 
 export interface FeeActuals {
   charge_id: string | null;
   balance_txn_id: string | null;
   stripe_fee_cents: number | null;
+  /** The fee's currency (the balance transaction's), lower case; null if unknown. */
+  stripe_fee_currency: string | null;
+  /** Stripe's rate from the charge currency to stripe_fee_currency (null when none). */
+  exchange_rate: number | null;
   application_fee_id: string | null;
   application_fee_cents: number | null;
   transfer_id: string | null;
-  /** What the platform keeps: application fee - Stripe's fee (null if either is unknown). */
+  /** What the platform keeps: application fee - Stripe's fee, in stripe_fee_currency (null if unknown). */
   net_cents: number | null;
 }
 
@@ -39,6 +56,10 @@ function idOf(v: Id): string | null {
 
 function cents(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) ? v : null;
+}
+
+function currencyOf(v: unknown): string | null {
+  return typeof v === "string" && /^[A-Za-z]{3}$/.test(v) ? v.toLowerCase() : null;
 }
 
 /**
@@ -54,14 +75,26 @@ export function feeActualsFromCharge(
   const btObj = bt && typeof bt === "object" ? bt : null;
   const stripeFee = cents(btObj?.fee);
   const appFee = cents(charge?.application_fee_amount) ?? cents(fallbackApplicationFeeCents);
+  const feeCur = currencyOf(btObj?.currency);
+  const chargeCur = currencyOf(charge?.currency);
+  const rate = typeof btObj?.exchange_rate === "number" && Number.isFinite(btObj.exchange_rate) && btObj.exchange_rate > 0
+    ? btObj.exchange_rate
+    : null;
+  // The application fee is in the charge currency, Stripe's fee in the
+  // settlement currency. Same currency: subtract. Converted: the application
+  // fee at Stripe's rate first. Converted with no rate: unknown.
+  const converted = feeCur !== null && chargeCur !== null && feeCur !== chargeCur;
+  const appFeeInFeeCur = appFee == null ? null : !converted ? appFee : rate != null ? Math.round(appFee * rate) : null;
   return {
     charge_id: typeof charge?.id === "string" && charge.id ? charge.id : null,
     balance_txn_id: idOf(bt as Id),
     stripe_fee_cents: stripeFee,
+    stripe_fee_currency: stripeFee != null ? feeCur : null,
+    exchange_rate: rate,
     application_fee_id: idOf(charge?.application_fee),
     application_fee_cents: appFee,
     transfer_id: idOf(charge?.transfer),
-    net_cents: appFee != null && stripeFee != null ? appFee - stripeFee : null,
+    net_cents: appFeeInFeeCur != null && stripeFee != null ? appFeeInFeeCur - stripeFee : null,
   };
 }
 
@@ -147,6 +180,16 @@ export async function recordFeeActuals(
     if (error) {
       log(`fee actuals: record failed for ${sessionId}`, error);
       return "error";
+    }
+    // The fee's currency + rate (mig 20261021160000). Without that migration
+    // the function isn't there: the fee is recorded, just without them.
+    if (a.stripe_fee_currency !== null || a.exchange_rate !== null) {
+      const { error: curErr } = await sb.rpc("exos_record_payment_fee_currency", {
+        p_payment_intent: paymentIntent,
+        p_stripe_fee_currency: a.stripe_fee_currency,
+        p_exchange_rate: a.exchange_rate,
+      });
+      if (curErr) log(`fee actuals: fee currency not recorded for ${sessionId}`, curErr);
     }
     return "recorded";
   } catch (e) {

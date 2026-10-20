@@ -20,6 +20,8 @@ const ORDER_MONEY_COLS =
   'session_id, status, currency, created_at, fulfilled_at, gross_cents, tax_cents, application_fee_cents, ' +
   'exos_fee_cents, card_fee_est_cents, card_fee_actual_cents, fee_free, organizer_net_cents, refunded_cents, ' +
   'payment_intent, transfer_id';
+// exos_order_fee_details (mig 20261021160000), beside exos_order_money.
+const ORDER_FEE_COLS = 'session_id, card_fee_charged_cents, stripe_fee_currency, refunded_fee_kept_cents';
 
 const MARKETPLACE_MONEY_COLS =
   'order_id, channel, external_order_id, quantity, currency, proceeds, exos_fee, organizer_net, state';
@@ -58,7 +60,8 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
   );
   if (orders === null) return null;
 
-  const [quantities, marketplace, commissions, disputes] = await Promise.all([
+  type FeeRow = Pick<OrderMoneyRow, 'session_id' | 'card_fee_charged_cents' | 'stripe_fee_currency' | 'refunded_fee_kept_cents'>;
+  const [quantities, marketplace, commissions, disputes, fees] = await Promise.all([
     readAll<{ session_id: string; quantity: number | null }>(
       (from, to) => supabase.from('exos_checkout_sessions').select('session_id, quantity').eq('event_id', eventId).in('status', ['fulfilled', 'partially_refunded', 'refunded']).range(from, to),
       (r) => r.session_id,
@@ -77,11 +80,26 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
         .eq('event_id', eventId).range(from, to),
       (r) => r.id,
     ),
+    // Optional (an older schema has no such view): the card fee is then
+    // application fee - Exos fee from the order row, and refunds are taken
+    // as having returned the fee (the default).
+    readAll<FeeRow>(
+      (from, to) => supabase.from('exos_order_fee_details').select(ORDER_FEE_COLS).eq('event_id', eventId).range(from, to),
+      (r) => r.session_id,
+    ),
   ]);
 
   const qty = new Map((quantities ?? []).map((q) => [q.session_id, q.quantity]));
+  const fee = new Map((fees ?? []).map((f) => [f.session_id, f]));
   return {
-    orders: orders.map((o) => ({ ...o, quantity: qty.has(o.session_id) ? qty.get(o.session_id) ?? null : null })),
+    orders: orders.map((o) => {
+      const f = fee.get(o.session_id);
+      return {
+        ...o,
+        quantity: qty.has(o.session_id) ? qty.get(o.session_id) ?? null : null,
+        ...(f ? { card_fee_charged_cents: f.card_fee_charged_cents, stripe_fee_currency: f.stripe_fee_currency, refunded_fee_kept_cents: f.refunded_fee_kept_cents } : {}),
+      };
+    }),
     marketplace: marketplace ?? [],
     commissions: commissions ?? [],
     disputes: disputes ?? [],

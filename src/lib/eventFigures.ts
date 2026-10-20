@@ -36,7 +36,7 @@ export const FIGURES: Record<FigureKey, { label: string; hint: string }> = {
   },
   yourNet: {
     label: 'Your net',
-    hint: 'Gross − application fee (Exos fee + card-fee estimate), before refunds.',
+    hint: 'Gross − Exos fee − card fees, before refunds.',
   },
   organizerNet: {
     label: 'Organizer net',

@@ -14,6 +14,12 @@
 // Everything else on the balance (transfers to organizers, payouts to the
 // bank, Stripe fees billed separately) isn't an order movement and is only
 // counted.
+//
+// Currencies (mig 20261021160000): balance transactions are in the
+// platform's settlement currency. A charge or refund in another currency (an
+// EUR order on a USD platform) is compared in the settlement currency: the
+// Exos amount at the transaction's exchange_rate, to the cent. The fee is
+// compared only when Exos knows it in the same currency.
 
 type Id = string | { id?: string | null } | null | undefined;
 
@@ -31,6 +37,8 @@ export interface StripeTxnRow {
   status: string | null;
   created: string;
   available_on: string | null;
+  /** Stripe's rate from the source currency to `currency` (null when none). */
+  exchange_rate: number | null;
 }
 
 export interface ExosPaymentRow {
@@ -43,6 +51,8 @@ export interface ExosPaymentRow {
   currency: string;
   status: string;
   stripe_fee_cents: number | null;
+  /** The fee's currency (mig 20261021160000); null on older rows = the payment's currency. */
+  stripe_fee_currency?: string | null;
   created_at: string;
 }
 
@@ -125,6 +135,7 @@ export interface BalanceTxnLike {
   status?: string | null;
   created?: number | null;
   available_on?: number | null;
+  exchange_rate?: number | null;
   // With expand[]=data.source: the Charge / Refund / Dispute object.
   source?: string | { id?: string | null; object?: string | null; payment_intent?: Id } | null;
 }
@@ -149,7 +160,26 @@ export function txnRow(bt: BalanceTxnLike): StripeTxnRow | null {
     status: typeof bt.status === "string" ? bt.status : null,
     created,
     available_on: iso(bt.available_on),
+    exchange_rate: typeof bt.exchange_rate === "number" && Number.isFinite(bt.exchange_rate) && bt.exchange_rate > 0
+      ? bt.exchange_rate
+      : null,
   };
+}
+
+/**
+ * Does an Exos amount in `exosCurrency` match a balance transaction's amount?
+ * Same currency: exactly. Converted by Stripe: the Exos amount at the
+ * transaction's rate, within a cent (Stripe rounds the converted amount).
+ */
+export function sameAmount(
+  exosCents: number,
+  exosCurrency: string,
+  t: Pick<StripeTxnRow, "amount_cents" | "currency" | "exchange_rate">,
+): boolean {
+  const stripeCents = Math.abs(t.amount_cents);
+  if (exosCurrency.toLowerCase() === t.currency) return exosCents === stripeCents;
+  if (t.exchange_rate == null) return false;
+  return Math.abs(Math.round(exosCents * t.exchange_rate) - stripeCents) <= 1;
 }
 
 export function isDisputeTxn(t: StripeTxnRow): boolean {
@@ -220,13 +250,19 @@ export function reconcile(input: ReconcileInput): { issues: ReconcileIssue[]; st
       if (p.status !== "succeeded") {
         add({ kind: "payment_status_mismatch", key: stripeId, ...base, detail: { txn: t.id, exos_status: p.status } });
       }
-      if (p.amount_cents !== t.amount_cents || p.currency.toLowerCase() !== t.currency) {
+      if (t.amount_cents < 0 || !sameAmount(p.amount_cents, p.currency, t)) {
         add({
           kind: "amount_mismatch", key: stripeId, ...base,
-          detail: { txn: t.id, stripe_amount_cents: t.amount_cents, stripe_currency: t.currency, exos_amount_cents: p.amount_cents, exos_currency: p.currency.toLowerCase() },
+          detail: {
+            txn: t.id, stripe_amount_cents: t.amount_cents, stripe_currency: t.currency, exos_amount_cents: p.amount_cents,
+            exos_currency: p.currency.toLowerCase(), exchange_rate: t.exchange_rate,
+          },
         });
       }
-      if (p.stripe_fee_cents != null && p.stripe_fee_cents !== t.fee_cents) {
+      // Exos's fee is in stripe_fee_currency; an older row (none recorded) is
+      // only comparable when nothing was converted.
+      const feeCur = (p.stripe_fee_currency ?? p.currency).toLowerCase();
+      if (p.stripe_fee_cents != null && feeCur === t.currency && p.stripe_fee_cents !== t.fee_cents) {
         add({
           kind: "fee_mismatch", key: stripeId, ...base,
           detail: { txn: t.id, stripe_fee_cents: t.fee_cents, exos_fee_cents: p.stripe_fee_cents },
@@ -247,11 +283,14 @@ export function reconcile(input: ReconcileInput): { issues: ReconcileIssue[]; st
       }
       stats.matched_refunds++;
       seenRefunds.add(r.refund_id!);
-      if (r.amount_cents !== Math.abs(t.amount_cents) || r.currency.toLowerCase() !== t.currency) {
+      if (!sameAmount(r.amount_cents, r.currency, t)) {
         add({
           kind: "refund_amount_mismatch", key: stripeId, stripe_id: stripeId, session_id: r.session_id, org_id: r.org_id,
           occurred_at: t.created,
-          detail: { txn: t.id, stripe_amount_cents: Math.abs(t.amount_cents), stripe_currency: t.currency, exos_amount_cents: r.amount_cents, exos_currency: r.currency.toLowerCase() },
+          detail: {
+            txn: t.id, stripe_amount_cents: Math.abs(t.amount_cents), stripe_currency: t.currency, exos_amount_cents: r.amount_cents,
+            exos_currency: r.currency.toLowerCase(), exchange_rate: t.exchange_rate,
+          },
         });
       }
     } else if (isDisputeTxn(t)) {
