@@ -850,7 +850,12 @@ export async function claimFreeTickets(input: {
   promoterId?: string | null;
   channel?: string | null;
   orderRef?: string | null;
+  /** The code that unlocked a hidden free tier (checked + used up server-side,
+   *  mig 20261021100000). Sent only when there is one, so the call still
+   *  works against a database without the argument. */
+  voucherCode?: string | null;
 }): Promise<string[]> {
+  const code = input.voucherCode?.trim();
   const { data, error } = await supabase.rpc('exos_claim_free_tickets', {
     p_event_id: input.eventId,
     p_tier_id: input.tierId,
@@ -858,6 +863,7 @@ export async function claimFreeTickets(input: {
     p_promoter_id: input.promoterId ?? null,
     p_channel: input.channel ?? null,
     p_order_ref: input.orderRef ?? null,
+    ...(code ? { p_voucher_code: code } : {}),
   });
   if (error) throw error;
   return (data ?? []) as string[];

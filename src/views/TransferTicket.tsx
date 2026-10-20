@@ -233,7 +233,7 @@ export default function TransferTicket() {
 
             <div className="p-6 bg-black border border-white/5 flex items-start gap-4">
                <ShieldAlert className="w-6 h-6 text-brand-accent shrink-0" />
-               <p className="type text-[12px] text-white/45 leading-relaxed">Warning: Sending this ticket permanently removes it from your account. The recipient receives it instantly once you authorize. This cannot be undone.</p>
+               <p className="type text-[12px] text-white/45 leading-relaxed">We email the recipient a link to claim it. Until they do, the ticket stays in your account but can't be scanned, and you can cancel the transfer from My Tickets. Once they claim it, it's theirs and can't be taken back.</p>
             </div>
 
             <button

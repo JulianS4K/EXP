@@ -9,7 +9,9 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
-import { claimFreeAsGuest, startCheckout } from '../lib/checkout';
+import { claimFreeAsGuest, isSignInRequired, startCheckout } from '../lib/checkout';
+import { fanError } from '../lib/fanErrors';
+import { backFallback, hasInAppHistory } from '../lib/backNav';
 import { guestCheckoutAllowed, signedOutBuyRoute } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
@@ -351,6 +353,8 @@ export default function EventDetails() {
         successUrl: publicUrl('my-tickets'),
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
+        // Free extras ride on the guest order (exos-checkout records them).
+        addons: addonSel.items,
         attribution,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
@@ -364,7 +368,8 @@ export default function EventDetails() {
       });
     } catch (err: any) {
       console.error('Guest free claim failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
+      if (isSignInRequired(err)) { setGuestOpen(false); void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not send your tickets.') });
     } finally {
       setPurchasing(false);
     }
@@ -413,8 +418,10 @@ export default function EventDetails() {
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
       console.error('Checkout failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
       setPurchasing(false);
+      // Session expired mid-visit: sign in again; the purchase resumes after.
+      if (isSignInRequired(err)) { setGuestOpen(false); void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not start checkout.') });
     }
   };
 
@@ -489,6 +496,8 @@ export default function EventDetails() {
         // Idempotency key for this claim attempt — a network retry returns the
         // same tickets instead of minting twice (button is disabled meanwhile).
         orderRef,
+        // A hidden free tier is claimed with the code that unlocked it.
+        voucherCode: voucher?.code,
       });
       // Credit the friend whose link brought this buyer (paid orders are
       // credited at fulfillment from the checkout attribution).
@@ -544,7 +553,8 @@ export default function EventDetails() {
       navigate(`/my-tickets?claimed=${ids.length}`);
     } catch (err: any) {
       console.error('Free claim failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not reserve tickets. Please try again.' });
+      if (/not authenticated|jwt expired|invalid jwt/i.test(err?.message ?? '')) { void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not reserve tickets. Please try again.') });
     } finally {
       setPurchasing(false);
     }
@@ -760,7 +770,8 @@ export default function EventDetails() {
         .grain::before{ content:""; position:fixed; inset:0; z-index:1; pointer-events:none; opacity:.055; mix-blend-mode:overlay; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
       `}</style>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-        <button onClick={() => navigate(-1)} className="type inline-flex items-center gap-2 text-white/50 hover:text-white mb-10 transition-colors text-[12px] uppercase tracking-widest">
+        {/* Opened from a link (story, text, email): no in-app page to go back to. */}
+        <button onClick={() => (hasInAppHistory() ? navigate(-1) : navigate(backFallback(org?.slug)))} className="type inline-flex items-center gap-2 text-white/50 hover:text-white mb-10 transition-colors text-[12px] uppercase tracking-widest">
           <ArrowLeft className="w-4 h-4 text-brand-primary" />
           back to events
         </button>
@@ -777,10 +788,9 @@ export default function EventDetails() {
               </p>
             )}
             <p className="type text-xs text-red-100/60 leading-relaxed">
-              If you bought directly through this site, your refund will be issued
-              automatically within 5 business days. If you bought via a partner site
-              (StubHub, Vivid Seats, etc.) please contact that channel for refund
-              processing.
+              Sales are closed. Bought your ticket here? The organizer handles refunds:
+              if yours hasn't arrived, open the ticket and ask for one. Bought it on a
+              partner site (StubHub, Vivid Seats, etc.)? Ask that site.
             </p>
           </div>
         )}
@@ -796,13 +806,6 @@ export default function EventDetails() {
             >
               Edit →
             </Link>
-          </div>
-        )}
-        {eventStatus === 'cancelled' && (
-          <div className="mb-8 p-4 border border-brand-accent/40 bg-brand-accent/10">
-            <p className="type text-[11px] uppercase tracking-widest text-brand-accent">
-              CANCELLED — sales are closed.
-            </p>
           </div>
         )}
 
@@ -1120,7 +1123,9 @@ export default function EventDetails() {
                 {/* Who is going — optional per-ticket names. FREE claim path only:
                     the paid path hands off to Stripe and never sees these (the
                     checkout metadata route is a later add). */}
-                {priceToDisplay === 0 && addonSel.totalCents === 0 && (
+                {/* Signed in only: a guest's tickets are parked for their claim link,
+                    and names are set by whoever claims them. */}
+                {!!user && priceToDisplay === 0 && addonSel.totalCents === 0 && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/60">{t('event.optional')}</span></p>
                    <div className="space-y-2">
