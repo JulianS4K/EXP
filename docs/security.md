@@ -129,7 +129,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_notify_waitlist`, `exos_waitlist_offer_next`, `exos_waitlist_summary` | OK | Org role |
 | `exos_pos_open_tab`, `exos_pos_close_tab`, `exos_pos_close_drawer`, `exos_pos_record_settlement`, `exos_pos_set_86`, `exos_pos_settlement_summary` | OK | Door / POS role on the event's org |
 | `exos_create_hold`, `exos_release_hold`, `exos_claim_free_tickets`, `exos_claim_free_addons` | OK | Self (confirmed email for holds), published events and public tiers only, per-buyer limits and capacity enforced |
-| `exos_create_transfer`, `exos_cancel_transfer`, `exos_claim_transfer(uuid)`, `exos_claim_transfer(uuid, text)` | OK | Owner / sender checks; claiming needs the 128-bit claim key (compared as SHA-256 digests) or the addressed, verified account |
+| `exos_create_transfer`, `exos_cancel_transfer`, `exos_claim_transfer(uuid)`, `exos_claim_transfer(uuid, text)` | OK | Owner / sender checks; a parked ticket (held on staff for a claim) is cancelled or re-sent only by a current owner / manager of its org, never by the parker as such (mig 20261020100000); claiming needs the 128-bit claim key (compared as SHA-256 digests) or the addressed, verified account |
 | `exos_claim_invite` | OK | UUIDv4 invite token, expiry, verified email; never demotes an owner |
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
