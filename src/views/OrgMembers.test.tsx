@@ -15,6 +15,7 @@ vi.mock('../context/OrganizationContext', () => ({ useOrganization: () => ({
   activeRole: 'owner',
   orgs: [{ org: { id: 'o1' }, membership: { role: 'owner' } }],
   refresh: vi.fn().mockResolvedValue(undefined),
+  roleIn: () => 'owner',
 }) }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 vi.mock('../lib/mail', () => ({ queueEmail: h.queueEmail }));

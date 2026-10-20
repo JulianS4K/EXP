@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { disputeFields, disputeFeeCents, isDisputeId, stripeDisputeUrl } from '../../supabase/functions/_shared/disputes.ts';
 import {
-  disputeDueLabel, disputeReasonLabel, disputeStatusLabel, isOpenDispute, stripeDisputeLink, summarizeDisputes, type DisputeRow,
+  disputeContactHref, disputeDueLabel, disputeOrderLabel, disputeReasonLabel, disputeStatusLabel, isOpenDispute, stripeDisputeLink,
+  summarizeDisputes, type DisputeRow,
 } from './disputesView';
 
 const DISPUTE = {
@@ -108,5 +109,23 @@ describe('disputes view', () => {
     expect(summarizeDisputes([row({}), row({ status: 'lost', amount_cents: 2500 }), row({ status: 'won', fee_cents: null })])).toEqual({
       open: 1, openCents: 5000, lost: 1, lostCents: 2500, feesCents: 3000, won: 1,
     });
+  });
+  it('a contact path: a mail to support naming the dispute, the event, the order and the buyer', () => {
+    const href = disputeContactHref(row({ evidence_due_by: '2026-10-15T23:59:59Z' }),
+      { supportEmail: 'support@exos.example', eventName: 'Fall Party', buyerEmail: 'fan@x.com' });
+    expect(href.startsWith('mailto:support@exos.example?subject=')).toBe(true);
+    const u = new URL(href);
+    expect(u.searchParams.get('subject')).toBe('Dispute du_1 · Fall Party');
+    const body = u.searchParams.get('body')!;
+    expect(body).toContain('Dispute: du_1 (50.00 USD)');
+    expect(body).toContain('Order: cs_1');
+    expect(body).toContain('Buyer: fan@x.com');
+    expect(body).toContain('Evidence due: 2026-10-15');
+    expect(disputeContactHref(row({ session_id: null }), { supportEmail: 's@x.com' })).not.toContain('Order');
+  });
+  it('rows name the buyer, not a cs_ id', () => {
+    expect(disputeOrderLabel(row({}), 'fan@x.com')).toBe('fan@x.com');
+    expect(disputeOrderLabel(row({ session_id: 'cs_test_a1B2c3D4e5F6' }), null)).toBe('order …c3D4e5F6');
+    expect(disputeOrderLabel(row({ session_id: null }))).toBe('—');
   });
 });

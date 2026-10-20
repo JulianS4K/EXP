@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   newRefundNonce,
+  pageRefundOrders,
+  type RefundOrder,
   parseAmount,
   parseAmountToCents,
   planOrderAmount,
@@ -129,5 +131,27 @@ describe('newRefundNonce', () => {
     const a = newRefundNonce();
     expect(a).toMatch(/^[A-Za-z0-9:_.-]{8,200}$/);
     expect(newRefundNonce()).not.toBe(a);
+  });
+});
+
+describe('pageRefundOrders (fallback before the page RPC)', () => {
+  const o = (n: number, email: string | null = `buyer${n}@x.com`): RefundOrder => ({
+    sessionId: `cs_${n}`, buyerEmail: email, createdAt: new Date(2026, 9, n), status: 'fulfilled',
+    amountCents: 2000, refundedCents: 0, refundableCents: n === 3 ? 0 : 2000, tickets: 1, activeTickets: 1,
+    openRequests: 0, currency: 'USD',
+  });
+  const all = Array.from({ length: 120 }, (_, i) => o(i + 1));
+  it('totals cover every order; a page is a slice', () => {
+    const p = pageRefundOrders(all, '', 100);
+    expect(p.totalOrders).toBe(120);
+    expect(p.totalRefundableCents).toBe(119 * 2000);
+    expect(p.matches).toBe(120);
+    expect(p.orders.map((x) => x.sessionId)).toEqual(all.slice(100).map((x) => x.sessionId));
+  });
+  it('searches email or order id, case-insensitive', () => {
+    expect(pageRefundOrders(all, ' BUYER7@X.COM ', 0).orders.map((x) => x.sessionId)).toEqual(['cs_7']);
+    expect(pageRefundOrders(all, 'cs_11', 0).matches).toBe(11); // cs_11, cs_110..119
+    expect(pageRefundOrders([o(1, null)], 'cs_1', 0).matches).toBe(1);
+    expect(pageRefundOrders(all, 'nobody', 0).orders).toEqual([]);
   });
 });

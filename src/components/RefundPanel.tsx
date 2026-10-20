@@ -9,7 +9,7 @@
 // the caller's role; nothing here is trusted. With payments off the panel is
 // shown disabled.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
 import { Event } from '../types';
 import { paymentsEnabled } from '../lib/payments';
@@ -20,12 +20,13 @@ import {
   parseAmount,
   planOrderAmount,
   planTicketRefund,
+  REFUND_PAGE_SIZE,
   type PlanResult,
-  type RefundOrder,
+  type RefundOrderPage,
   type RefundPreview,
   type TicketSelection,
 } from '../lib/refunds';
-import { getRefundPreview, listRefundOrders, refundEventBatch, refundOrder, retryRefund } from '../lib/refundsApi';
+import { getRefundPreview, listRefundOrdersPage, refundEventBatch, refundOrder, retryRefund } from '../lib/refundsApi';
 import { useToast } from '../context/ToastContext';
 
 const CONFIRM_WORD = 'REFUND ALL';
@@ -46,23 +47,36 @@ export default function RefundPanel({
 }) {
   const enabled = paymentsEnabled();
   const { toast } = useToast();
-  const [orders, setOrders] = useState<RefundOrder[]>([]);
+  // Search and paging run on the server over every paid order (mig
+  // 20261021120000), so a big show's oldest orders are reachable too.
+  const [page, setPage] = useState<RefundOrderPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [offset, setOffset] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Debounce typing into the server search; a new search starts at page 1.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(query.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
   const load = useCallback(async () => {
     if (!enabled || !canRefund) return;
     setLoading(true);
     try {
-      setOrders(await listRefundOrders(event.id));
+      setPage(await listRefundOrdersPage(event.id, { search, offset, limit: REFUND_PAGE_SIZE }));
     } catch (err: any) {
       console.error('refund orders load failed:', err);
       toast({ kind: 'error', message: err?.message || 'Could not load orders.' });
     } finally {
       setLoading(false);
     }
-  }, [enabled, canRefund, event.id, toast]);
+  }, [enabled, canRefund, event.id, search, offset, toast]);
 
   useEffect(() => {
     load();
@@ -73,13 +87,9 @@ export default function RefundPanel({
     onChanged?.();
   }, [load, onChanged]);
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = q
-      ? orders.filter((o) => (o.buyerEmail ?? '').toLowerCase().includes(q) || o.sessionId.toLowerCase().includes(q))
-      : orders;
-    return list.slice(0, 50);
-  }, [orders, query]);
+  const shown = page?.orders ?? [];
+  const totalOrders = page?.totalOrders ?? 0;
+  const matches = page?.matches ?? 0;
 
   if (!canRefund) return null;
 
@@ -107,8 +117,8 @@ export default function RefundPanel({
     );
   }
 
-  const totalRefundable = orders.reduce((s, o) => s + o.refundableCents, 0);
-  const currency = orders[0]?.currency || event.currency || 'USD';
+  const totalRefundable = page?.totalRefundableCents ?? 0;
+  const currency = shown[0]?.currency || event.currency || 'USD';
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
@@ -123,14 +133,14 @@ export default function RefundPanel({
           className="flex-1 min-w-[200px] border-2 border-slate-200 focus:border-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-1.5 text-sm rounded-lg"
         />
         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-          {orders.length} paid order{orders.length === 1 ? '' : 's'} · {formatCents(totalRefundable, currency)} refundable
+          {totalOrders} paid order{totalOrders === 1 ? '' : 's'} · {formatCents(totalRefundable, currency)} refundable
         </span>
       </div>
 
-      {loading && orders.length === 0 ? (
+      {loading && !page ? (
         <p className="text-xs text-slate-400">Loading orders…</p>
       ) : shown.length === 0 ? (
-        <p className="text-xs text-slate-400">{orders.length === 0 ? 'No paid orders yet.' : 'No orders match.'}</p>
+        <p className="text-xs text-slate-400">{totalOrders === 0 ? 'No paid orders yet.' : 'No orders match.'}</p>
       ) : (
         <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl mb-2">
           {shown.map((o) => (
@@ -161,8 +171,28 @@ export default function RefundPanel({
           ))}
         </ul>
       )}
-      {orders.length > shown.length && !query && (
-        <p className="text-[10px] text-slate-400 mb-2">Showing the newest 50. Search to find others.</p>
+      {matches > shown.length && (
+        <div className="flex items-center gap-3 mb-2 text-[10px] text-slate-400">
+          <span>
+            {offset + 1}–{offset + shown.length} of {matches}{search ? ' matching' : ''}, newest first
+          </span>
+          <button
+            type="button"
+            onClick={() => setOffset((o) => Math.max(0, o - REFUND_PAGE_SIZE))}
+            disabled={offset === 0 || loading}
+            className="font-black uppercase tracking-widest text-slate-500 hover:text-slate-800 disabled:opacity-40"
+          >
+            Newer
+          </button>
+          <button
+            type="button"
+            onClick={() => setOffset((o) => o + REFUND_PAGE_SIZE)}
+            disabled={offset + shown.length >= matches || loading}
+            className="font-black uppercase tracking-widest text-slate-500 hover:text-slate-800 disabled:opacity-40"
+          >
+            Older
+          </button>
+        </div>
       )}
 
       <RefundEveryone event={event} canCancel={canCancel} refundableCents={totalRefundable} currency={currency} onDone={changed} />

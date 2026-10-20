@@ -11,8 +11,11 @@ import {
   payoutTotals,
   PAYOUTS_CSV_HEADER,
   SETTLEMENT_CSV_HEADER,
+  disputeChargeCents,
+  feeTerms,
   settlementCsvRows,
   summarizeSettlement,
+  type DisputeMoneyRow,
   type MarketplaceMoneyRow,
   type OrderMoneyRow,
 } from './settlement';
@@ -36,6 +39,18 @@ const order = (o: Partial<OrderMoneyRow> = {}): OrderMoneyRow => ({
   transfer_id: null,
   quantity: 2,
   ...o,
+});
+
+// A $40 chargeback with Stripe's $15 fee.
+const dispute = (d: Partial<DisputeMoneyRow> = {}): DisputeMoneyRow => ({
+  session_id: 'cs_1',
+  status: 'needs_response',
+  amount_cents: 4000,
+  fee_cents: 1500,
+  recovery_status: 'none',
+  recovery_candidate_cents: null,
+  created_at: '2026-09-24T00:00:00Z',
+  ...d,
 });
 
 const mkt = (m: Partial<MarketplaceMoneyRow> = {}): MarketplaceMoneyRow => ({
@@ -238,12 +253,72 @@ describe('settlementCsvRows', () => {
       new Map([['a', 'INV-000007']]),
     );
     const col = SETTLEMENT_CSV_HEADER.indexOf('invoice_number');
-    expect(col).toBe(SETTLEMENT_CSV_HEADER.length - 1);
+    expect(col).toBe(16);
     expect(rows.map((r) => r[col])).toEqual(['INV-000007', '', '']);
+  });
+  it('adds dispute columns per order: latest status, summed amounts, what it costs you', () => {
+    const rows = settlementCsvRows(
+      [order({ session_id: 'a' }), order({ session_id: 'b', created_at: '2026-09-21T00:00:00Z' }), order({ session_id: 'c', created_at: '2026-09-22T00:00:00Z' })],
+      [mkt()],
+      new Map(),
+      [
+        dispute({ session_id: 'a', status: 'lost', recovery_status: 'recovery_pending', recovery_candidate_cents: 5500, created_at: '2026-09-25T00:00:00Z' }),
+        dispute({ session_id: 'a', status: 'warning_closed', amount_cents: 0, fee_cents: 0, created_at: '2026-09-24T00:00:00Z' }),
+        dispute({ session_id: 'b', status: 'lost', recovery_status: 'not_recovered' }),
+      ],
+    );
+    expect(SETTLEMENT_CSV_HEADER.slice(-4)).toEqual(['dispute_status', 'dispute_amount', 'dispute_fee', 'dispute_charged_to_you']);
+    for (const r of rows) expect(r).toHaveLength(SETTLEMENT_CSV_HEADER.length);
+    expect(rows[0].slice(-4)).toEqual(['lost', '40.00', '15.00', '55.00']);
+    expect(rows[1].slice(-4)).toEqual(['lost', '40.00', '15.00', '0.00']);
+    expect(rows[2].slice(-4)).toEqual(['', '', '', '']);
+    expect(rows[3].slice(-4)).toEqual(['', '', '', '']);
   });
   it('zero orders: no rows, and the CSV is just the header', () => {
     expect(settlementCsvRows([])).toEqual([]);
     expect(toCsv(SETTLEMENT_CSV_HEADER, [])).toBe(SETTLEMENT_CSV_HEADER.join(','));
+  });
+});
+
+describe('lost disputes in the organizer net', () => {
+  it('a lost dispute Exos recovers comes off the net (amount + fee); an absorbed one does not', () => {
+    const base = summarizeSettlement({ orders: [order(), order({ session_id: 'cs_2' })] });
+    const s = summarizeSettlement({
+      orders: [order(), order({ session_id: 'cs_2' })],
+      disputes: [
+        dispute({ status: 'lost', recovery_status: 'recovery_pending', recovery_candidate_cents: 5500 }),
+        dispute({ session_id: 'cs_2', status: 'lost', recovery_status: 'not_recovered' }),
+        dispute({ session_id: 'cs_2', status: 'needs_response' }),
+        dispute({ session_id: 'cs_2', status: 'won' }),
+      ],
+    });
+    expect(s.disputes).toEqual({ open: 1, lost: 2, chargedCents: 5500, absorbed: 1 });
+    expect(s.organizerNetCents).toBe(base.organizerNetCents - 5500);
+    expect(s.organizerNetAfterCommissionsCents).toBe(base.organizerNetAfterCommissionsCents - 5500);
+    // the Exos-checkout tiles are unchanged
+    expect(s.exos.organizerNetAfterRefundsCents).toBe(base.exos.organizerNetAfterRefundsCents);
+  });
+  it('without a recovery figure, uses amount + fee; recovered counts too', () => {
+    expect(disputeChargeCents(dispute({ status: 'lost', recovery_status: 'recovered' }))).toBe(5500);
+    expect(disputeChargeCents(dispute({ status: 'lost', recovery_status: 'none' }))).toBe(5500);
+    expect(disputeChargeCents(dispute({ status: 'needs_response' }))).toBe(0);
+  });
+});
+
+describe('feeTerms', () => {
+  const now = new Date('2026-10-20T12:00:00Z');
+  it('inside the free period: the end date, then the rate', () => {
+    const t = feeTerms('2027-03-28T00:00:00Z', now);
+    expect(t.inFreePeriod).toBe(true);
+    expect(t.rate).toBe('3%');
+    expect(t.text).toContain('No Exos fee until Mar 28, 2027, then 3% of each order');
+    expect(t.text).toContain('2.9% + 30¢');
+  });
+  it('after it, or unreadable: the rate', () => {
+    expect(feeTerms('2026-09-01T00:00:00Z', now).text).toMatch(/^Exos fee: 3% of each order \(your fee-free period ended Sep 1, 2026\)/);
+    const u = feeTerms(undefined, now);
+    expect(u.inFreePeriod).toBe(false);
+    expect(u.text).toMatch(/^Exos fee: 3% of each order.*first 6 months/);
   });
 });
 

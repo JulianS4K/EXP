@@ -111,10 +111,12 @@ Stripe takes the amount plus its dispute fee from the platform balance, not from
   `dispute-opened` (amount, reason, evidence deadline, the event's Money section, the dispute in the Stripe
   dashboard), `dispute-won`, `dispute-lost` (`docs/email.md`). A mail problem is logged and never fails the webhook.
 - **See it.** A Disputes block under the event's Money section and on the org's Payouts page (owner / manager /
-  finance; RLS on `exos_disputes`): status, reason, amount and fee, evidence due date, the order, a link to Stripe.
-- **Evidence** is submitted from the platform's Stripe dashboard (organizers can't see the platform account), so the
-  mail and the block ask the organizer to send the Exos team what they have before the deadline. Evidence tooling
-  in Exos isn't built.
+  finance; RLS on `exos_disputes`): status, reason, amount and fee, evidence due date, the buyer's email
+  (`exos_dispute_buyers`), a link to Stripe for platform admins only. A lost dispute Exos recovers comes off
+  "Organizer net" and the Orders CSV has dispute columns.
+- **Evidence** is submitted from the platform's Stripe dashboard (organizers can't see the platform account), so each
+  open row has "Send evidence": a mail to the support address (`src/lib/legal.ts`) naming the dispute, event, order
+  and buyer. Evidence tooling in Exos isn't built.
 
 ## Recovery policy for lost disputes
 

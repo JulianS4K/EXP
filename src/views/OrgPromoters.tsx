@@ -11,7 +11,9 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, ChevronUp, Copy, Pause, Play, RefreshCw, Trophy, UserPlus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { getOrganization, getUserRoleInOrg } from '../lib/orgs';
+import { useOrganization } from '../context/OrganizationContext';
+import { getOrganization } from '../lib/orgs';
+import { can, cannotReason, rolesPhrase, ROLE_CAPABILITIES } from '../lib/orgRoles';
 import { listOrgEvents } from '../lib/events';
 import PromoterCommissionPanel from '../components/PromoterCommissionPanel';
 import { typedCode } from '../lib/shareLinks';
@@ -25,7 +27,8 @@ import {
 
 export default function OrgPromoters() {
   const { orgId } = useParams();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const { roleIn, loading: orgsLoading } = useOrganization();
   const { toast } = useToast();
   const [promoters, setPromoters] = useState<Promoter[]>([]);
   const [stats, setStats] = useState<Map<string, PromoterStat>>(new Map());
@@ -41,15 +44,19 @@ export default function OrgPromoters() {
   const [commissions, setCommissions] = useState<PromoterCommissionSummary[]>([]);
   const [overrides, setOverrides] = useState<PromoterEventTerms[]>([]);
   const [events, setEvents] = useState<{ id: string; title: string }[]>([]);
-  const [canWrite, setCanWrite] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Same roles as the RPCs (src/lib/orgRoles.ts): owner / manager add, pause
+  // and set terms; finance also records payouts; scanner / content can't read
+  // promoters at all (RLS exos_promoters_staff_read), so they get a note, not
+  // an empty leaderboard.
+  const role = roleIn(orgId);
+  const canWrite = can(role, 'promoters', isAdmin);
+  const canPayout = can(role, 'promoterPayouts', isAdmin);
+  const canRead = can(role, 'viewMoney', isAdmin);
   useEffect(() => {
     if (orgId) getOrganization(orgId).then((o) => setOrgSlug(o?.slug ?? null)).catch(() => {});
     if (orgId) listOrgEvents(orgId).then((es) => setEvents(es.map((e) => ({ id: e.id, title: e.title })))).catch(() => {});
-    if (orgId && user?.uid) {
-      getUserRoleInOrg(orgId, user.uid).then((r) => setCanWrite(r === 'owner' || r === 'manager')).catch(() => setCanWrite(false));
-    }
-  }, [orgId, user?.uid]);
+  }, [orgId]);
 
   const load = async () => {
     if (!orgId) return;
@@ -132,6 +139,13 @@ export default function OrgPromoters() {
         and their kit shows their own sales. Fans who share after buying pass the credit along.
       </p>
 
+      {!orgsLoading && !canRead && (
+        <p role="note" className="bg-[#111] border border-white/10 p-6 mb-8 text-sm text-white/60">
+          Promoters and their sales are visible to {rolesPhrase(ROLE_CAPABILITIES.viewMoney.roles)}. Ask an owner if you need access.
+        </p>
+      )}
+
+      {canWrite && (
       <form onSubmit={add} className="bg-[#111] border border-white/10 p-6 mb-8 grid gap-2 sm:grid-cols-4">
         <input className={`${field} sm:col-span-2`} placeholder="Name (e.g. DJ Kay)" aria-label="Promoter name" value={name}
           onChange={(e) => { setName(e.target.value); if (!codeTouched) setCode(codeFromName(e.target.value)); }} />
@@ -148,6 +162,12 @@ export default function OrgPromoters() {
           With a handle, fans' shares tag the promoter; they can turn that off from their kit page.
         </p>
       </form>
+      )}
+      {canRead && !canWrite && (
+        <p className="text-[11px] text-white/40 mb-6">{cannotReason('promoters')}</p>
+      )}
+
+      {(orgsLoading || canRead) && (<>
 
       <h2 className="disp text-lg uppercase tracking-wide text-white mb-3 flex items-center gap-2"><Trophy className="w-4 h-4 text-brand-primary" /> Leaderboard</h2>
       {loading ? (
@@ -192,12 +212,16 @@ export default function OrgPromoters() {
                     <Copy className="w-3 h-3" /> Bio link
                   </button>
                 )}
-                <button onClick={() => toggle(p)} className="p-2 text-white/40 hover:text-white" aria-label={p.status === 'active' ? `Pause ${p.name}` : `Reactivate ${p.name}`}>
-                  {p.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </button>
-                <button onClick={() => toggle(p, true)} className="p-2 text-white/40 hover:text-white" aria-label={`New kit link for ${p.name}`} title="Make a new kit link (the old one stops working)">
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                {canWrite && (
+                  <>
+                    <button onClick={() => toggle(p)} className="p-2 text-white/40 hover:text-white" aria-label={p.status === 'active' ? `Pause ${p.name}` : `Reactivate ${p.name}`}>
+                      {p.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                    </button>
+                    <button onClick={() => toggle(p, true)} className="p-2 text-white/40 hover:text-white" aria-label={`New kit link for ${p.name}`} title="Make a new kit link (the old one stops working)">
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
               </div>
               {open && (
                 <PromoterCommissionPanel
@@ -208,6 +232,7 @@ export default function OrgPromoters() {
                   overrides={overrides.filter((o) => o.promoterId === p.id)}
                   events={events}
                   canWrite={canWrite}
+                  canPayout={canPayout}
                   onChanged={load}
                 />
               )}
@@ -216,6 +241,7 @@ export default function OrgPromoters() {
           })}
         </div>
       )}
+      </>)}
     </div>
   );
 }

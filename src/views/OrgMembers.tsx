@@ -30,6 +30,7 @@ import ScannerEventScope, { type ScopeEvent } from '../components/ScannerEventSc
 import { queueEmail } from '../lib/mail';
 import { errMessage, publicUrl } from '../lib/utils';
 import { OrgMembership, OrgRole } from '../types';
+import { MATRIX_CAPABILITIES, MATRIX_ROLES, ROLE_CAPABILITIES, can } from '../lib/orgRoles';
 
 /** The accept link for an invite (same as createOrgInvite's inviteUrl). */
 const inviteLink = (token: string) => publicUrl(`invite/${token}`);
@@ -46,35 +47,27 @@ const ROLE_CHIP: Record<string, string> = {
 };
 const roleChip = (r: string) => ROLE_CHIP[r] ?? 'bg-slate-100 text-slate-600 border border-slate-200';
 
-// Static roles/permissions reference — mirrors the descriptive copy the
-// view has always shown, presented as the RolePermissions matrix. Purely
-// informational (no persistence layer exists for per-role toggles).
+// Roles reference + the permissions matrix. The matrix is built from the one
+// role table (src/lib/orgRoles.ts), which a test checks against the RLS
+// policies and RPCs, so it can't promise what the server refuses.
 const ROLE_REF: Array<{ name: string; chip: string; desc: string }> = [
-  { name: 'Owner', chip: ROLE_CHIP.owner, desc: 'Full control. Billing, members, delete.' },
-  { name: 'Manager', chip: ROLE_CHIP.manager, desc: 'Run events end-to-end. No billing.' },
-  { name: 'Finance', chip: ROLE_CHIP.finance, desc: 'Money: reports, refunds, payouts.' },
+  { name: 'Owner', chip: ROLE_CHIP.owner, desc: 'Full control. Members, org settings, Stripe.' },
+  { name: 'Manager', chip: ROLE_CHIP.manager, desc: 'Run events end-to-end, money included. No members or org settings.' },
+  { name: 'Finance', chip: ROLE_CHIP.finance, desc: 'Money: reports, refunds, voids, payouts.' },
   { name: 'Scanner', chip: ROLE_CHIP.scanner, desc: 'Door only. Scan + admit.' },
-  { name: 'Content', chip: ROLE_CHIP.content, desc: 'Edit listings, storefront, promo.' },
+  { name: 'Content', chip: ROLE_CHIP.content, desc: 'Sees events and the team; read-only for now.' },
 ];
-// [owner, manager, finance, scanner, content]
-const PERM_MATRIX: Array<[string, number[]]> = [
-  ['Create & edit events', [1, 1, 0, 0, 1]],
-  ['Publish / cancel events', [1, 1, 0, 0, 0]],
-  ['View sales & financials', [1, 1, 1, 0, 0]],
-  ['Refund / void tickets', [1, 1, 1, 0, 0]],
-  ['Scan at the door (scanners: all or chosen events)', [1, 1, 0, 1, 0]],
-  ['Door override / undo a check-in', [1, 1, 0, 0, 0]],
-  ['Send announcements', [1, 1, 0, 0, 1]],
-  ['Promo codes & promote', [1, 1, 0, 0, 1]],
-  ['Edit storefront & branding', [1, 1, 0, 0, 1]],
-  ['Manage members', [1, 0, 0, 0, 0]],
-  ['Billing & payouts', [1, 0, 1, 0, 0]],
-];
+const PERM_MATRIX: Array<[string, boolean[]]> = MATRIX_CAPABILITIES.map((cap) => [
+  ROLE_CAPABILITIES[cap].label,
+  MATRIX_ROLES.map((r) => can(r, cap)),
+]);
 
 export default function OrgMembers() {
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
-  const { orgs, refresh: refreshOrgs } = useOrganization();
+  const { orgs, refresh: refreshOrgs, roleIn } = useOrganization();
+  // The role in the org on this page (the URL's), not the switcher's.
+  const activeRole = roleIn(orgId);
   const { toast } = useToast();
   const navigate = useNavigate();
 

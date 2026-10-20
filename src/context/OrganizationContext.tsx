@@ -22,6 +22,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { useAuth } from './AuthContext';
 import { Organization, OrgMembership, OrgRole } from '../types';
 import { listOrgsForUser } from '../lib/orgs';
+import { roleInOrg } from '../lib/orgRoles';
 
 interface OrgEntry {
   org: Organization;
@@ -38,6 +39,10 @@ interface OrganizationContextType {
   // here — admins use the existing `isAdmin` from AuthContext to bypass
   // org gating).
   activeRole: OrgRole | null;
+  // The role the current user holds in ANY of their orgs (null when not a
+  // member). Pages about one event or org (event report, org settings,
+  // members) gate on the org they show, not on whichever org is active.
+  roleIn: (orgId: string | null | undefined) => OrgRole | null;
   loading: boolean;
   // Switch to an org by id. Persists to localStorage so the choice
   // survives reloads.
@@ -126,10 +131,16 @@ export function OrganizationProvider({ children }: { children: React.ReactNode }
     ? orgs.find((e) => e.org.id === activeOrgId) ?? null
     : null;
 
+  const roleIn = useCallback(
+    (orgId: string | null | undefined) => roleInOrg(orgs, orgId),
+    [orgs],
+  );
+
   const value: OrganizationContextType = {
     orgs,
     activeOrg: activeEntry?.org ?? null,
     activeRole: activeEntry?.membership.role ?? null,
+    roleIn,
     loading,
     setActiveOrg,
     refresh: loadOrgs,

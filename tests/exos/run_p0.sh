@@ -119,6 +119,7 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261021090000_exos_door_p1 \
          20261021100000_exos_buyer_p1 \
          20261021110000_exos_organizer_p1 \
+         20261021120000_exos_roles_money_p1 \
          20261021130000_exos_festival_p1 \
          20261021140000_exos_growth_p1 \
          20261021150000_exos_org_lifecycle_p1; do
@@ -264,6 +265,7 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261021090000_exos_door_p1 \
          20261021100000_exos_buyer_p1 \
          20261021110000_exos_organizer_p1 \
+         20261021120000_exos_roles_money_p1 \
          20261021130000_exos_festival_p1 \
          20261021140000_exos_growth_p1 \
          20261021150000_exos_org_lifecycle_p1; do
@@ -312,3 +314,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_lifec
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_organizer_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_festival_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_roles_money_p1.sql"

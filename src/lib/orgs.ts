@@ -14,6 +14,7 @@ import { supabase } from './supabase';
 import { Organization, OrgMembership, OrgRole } from '../types';
 import { publicUrl } from './utils';
 import { parseSite } from './site';
+import { can } from './orgRoles';
 
 // --- Slug helpers (pure) ---------------------------------------------------
 
@@ -78,6 +79,7 @@ function mapOrg(row: any, secrets?: any): Organization {
     currency: row.currency ?? undefined,
     compBudget: row.comp_budget ?? null,
     s4kNetwork: row.s4k_network === true,
+    checkoutRemindersEnabled: row.checkout_reminders_enabled !== false,
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
     site: parseSite(row.site),
@@ -407,6 +409,20 @@ export async function updateOrganization(orgId: string, patch: OrgUpdatePatch): 
   }
 }
 
+/** Abandoned-checkout reminders on / off (owner; RLS exos_orgs_upd). Returns the saved value. */
+export async function setCheckoutReminders(orgId: string, on: boolean): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('exos_orgs')
+    .update({ checkout_reminders_enabled: on })
+    .eq('id', orgId)
+    .select('checkout_reminders_enabled')
+    .maybeSingle();
+  if (error) throw error;
+  // RLS filters the row out for a non-owner: nothing was saved.
+  if (!data) throw new Error('Only the org owner can change this.');
+  return (data as { checkout_reminders_enabled: boolean }).checkout_reminders_enabled !== false;
+}
+
 function stripUndefined<T extends Record<string, unknown> | undefined>(obj: T): T {
   if (!obj) return obj;
   const out: Record<string, unknown> = {};
@@ -444,21 +460,23 @@ export function roleAtLeast(holder: OrgRole | null | undefined, min: OrgRole): b
   return ROLE_RANK[holder] >= ROLE_RANK[min];
 }
 
+// Gates come from the one role table (./orgRoles.ts, checked against the
+// migrations). roleAtLeast is a rank, not a permission: finance outranks
+// content but neither can edit events.
 export function canEditEvents(role: OrgRole | null | undefined): boolean {
-  return roleAtLeast(role, 'content');
+  return can(role, 'editEvents');
 }
 
 export function canManageEvents(role: OrgRole | null | undefined): boolean {
-  return roleAtLeast(role, 'manager');
+  return can(role, 'publishEvents');
 }
 
 export function canRunCheckIn(role: OrgRole | null | undefined): boolean {
-  if (!role) return false;
-  return role === 'scanner' || role === 'manager' || role === 'owner';
+  return can(role, 'scan');
 }
 
 export function canManageOrg(role: OrgRole | null | undefined): boolean {
-  return role === 'owner';
+  return can(role, 'members');
 }
 
 // --- Email-based invites ---------------------------------------------------

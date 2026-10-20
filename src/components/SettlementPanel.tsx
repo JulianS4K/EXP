@@ -8,7 +8,10 @@
 // src/lib/settlementApi.ts. Renders nothing for other roles or when the money
 // views aren't on this database yet (mig 20260929131000). Per-order invoice
 // numbers (links to the printable receipt) and the CSV's invoice_number come
-// from exos_invoice_totals (mig 20261001100000) when it's there.
+// from exos_invoice_totals (mig 20261001100000) when it's there. Lost disputes
+// come off the organizer net and are in the CSV; the org's fee terms and the
+// abandoned-checkout reminder results (mig 20261021120000) sit under the tiles.
+// Labels and hints are the shared ones in src/lib/eventFigures.ts.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,14 +19,19 @@ import { Download, Landmark } from 'lucide-react';
 import { Event } from '../types';
 import { formatCents } from '../lib/refunds';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
-import { getEventMoney, type EventMoneyData } from '../lib/settlementApi';
-import { SETTLEMENT_CSV_HEADER, settlementCsvRows, summarizeSettlement } from '../lib/settlement';
+import {
+  getCheckoutReminderStats, getEventMoney, getOrgFeeFreeUntil, type CheckoutReminderStats, type EventMoneyData,
+} from '../lib/settlementApi';
+import { SETTLEMENT_CSV_HEADER, feeTerms, settlementCsvRows, summarizeSettlement } from '../lib/settlement';
+import { FIGURES } from '../lib/eventFigures';
 import { formatDocNumber, invoicePath, invoicesBySession, type EventInvoiceRow } from '../lib/invoices';
 import { listEventInvoices } from '../lib/invoicesApi';
 
 export default function SettlementPanel({ event, canView }: { event: Event; canView: boolean }) {
   const [data, setData] = useState<EventMoneyData | null>(null);
   const [invoices, setInvoices] = useState<EventInvoiceRow[]>([]);
+  const [feeFreeUntil, setFeeFreeUntil] = useState<string | null | undefined>(undefined);
+  const [reminders, setReminders] = useState<CheckoutReminderStats | null>(null);
 
   useEffect(() => {
     if (!canView) return undefined;
@@ -34,10 +42,18 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
     void listEventInvoices(event.id).then((rows) => {
       if (!cancelled) setInvoices(rows);
     });
+    if (event.orgId) {
+      void getOrgFeeFreeUntil(event.orgId).then((d) => {
+        if (!cancelled) setFeeFreeUntil(d);
+      });
+    }
+    void getCheckoutReminderStats(event.id).then((r) => {
+      if (!cancelled) setReminders(r);
+    });
     return () => {
       cancelled = true;
     };
-  }, [event.id, canView]);
+  }, [event.id, event.orgId, canView]);
 
   const s = useMemo(
     () => (data ? summarizeSettlement({ ...data, currency: event.currency || 'USD' }) : null),
@@ -57,7 +73,7 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
     downloadCsv(
       csvFileName(['settlement', event.title]),
       toCsv(SETTLEMENT_CSV_HEADER, settlementCsvRows(data.orders, data.marketplace,
-        new Map([...invoicesBySession(invoices)].map(([sid, i]) => [sid, i.number])))),
+        new Map([...invoicesBySession(invoices)].map(([sid, i]) => [sid, i.number])), data.disputes)),
     );
   };
 
@@ -92,14 +108,14 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
 
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Exos checkout</p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        {stat('Tickets sold', s.exos.tickets === null ? '—' : String(s.exos.tickets), `${s.exos.orders} order${s.exos.orders === 1 ? '' : 's'}`)}
-        {stat('Gross', money(s.exos.grossCents))}
+        {stat(FIGURES.paidTickets.label, s.exos.tickets === null ? '—' : String(s.exos.tickets), `${s.exos.orders} order${s.exos.orders === 1 ? '' : 's'} · ${FIGURES.paidTickets.hint}`)}
+        {stat(FIGURES.gross.label, money(s.exos.grossCents), FIGURES.gross.hint)}
         {stat('Tax (included)', money(s.exos.taxCents))}
         {stat('Refunds', money(s.exos.refundedCents))}
         {stat('Exos fee', money(s.exos.exosFeeCents), s.exos.feeFreeOrders > 0 ? `${s.exos.feeFreeOrders} in the fee-free period` : undefined)}
         {stat(cardLabel, money(s.exos.cardFeeCents),
           s.exos.cardFeeBasis === 'mixed' ? `${s.exos.cardFeeActualOrders} actual, ${s.exos.cardFeeEstimateOrders} estimated` : undefined)}
-        {stat('Your net', money(s.exos.organizerNetCents), 'gross − application fee (Exos fee + card-fee estimate)')}
+        {stat(FIGURES.yourNet.label, money(s.exos.organizerNetCents), FIGURES.yourNet.hint)}
         {stat('Your net after refunds', money(s.exos.organizerNetAfterRefundsCents), 'fees come back in proportion')}
       </div>
 
@@ -117,9 +133,22 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         {stat('Promoter commissions', money(s.commissions.accruedCents), s.commissions.tickets ? `${money(s.commissions.paidCents)} paid` : undefined)}
-        {stat('Organizer net', money(s.organizerNetCents), 'after refunds, all channels')}
+        {(s.disputes.lost > 0 || s.disputes.open > 0) && stat('Lost disputes', money(s.disputes.chargedCents),
+          `${s.disputes.lost} lost (amount + fee)${s.disputes.absorbed ? `, ${s.disputes.absorbed} absorbed by Exos` : ''}${s.disputes.open ? ` · ${s.disputes.open} open` : ''}`)}
+        {stat(FIGURES.organizerNet.label, money(s.organizerNetCents), FIGURES.organizerNet.hint)}
         {stat('After commissions', money(s.organizerNetAfterCommissionsCents))}
       </div>
+
+      <p className="text-[11px] text-slate-500 mb-1" data-testid="fee-terms">
+        {feeTerms(feeFreeUntil).text}
+      </p>
+      {reminders && (
+        <p className="text-[11px] text-slate-500 mb-1" data-testid="checkout-reminders">
+          Abandoned-checkout reminders: {reminders.sent} sent · {reminders.recovered} recovered
+          {reminders.recovered > 0 ? ` (${money(reminders.recoveredCents)})` : ''}, buyers who came back and paid
+          {!reminders.enabled && ' · now off for your org (Org settings)'}
+        </p>
+      )}
 
       {invoices.length > 0 && (
         <details className="mt-4">

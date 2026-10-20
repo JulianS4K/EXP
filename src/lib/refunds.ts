@@ -19,6 +19,37 @@ export interface RefundOrder {
   currency: string;
 }
 
+/** One page of an event's paid orders (exos_event_refund_orders_page, mig 20261021120000). */
+export interface RefundOrderPage {
+  orders: RefundOrder[];
+  /** Orders matching the search (all of them with no search). */
+  matches: number;
+  /** Every paid order of the event, and what's still refundable across them. */
+  totalOrders: number;
+  totalRefundableCents: number;
+}
+
+export const REFUND_PAGE_SIZE = 50;
+
+/**
+ * The same page cut client-side, for a database without the page RPC (the
+ * old read returns the newest 500). Substring match on email or order id,
+ * case-insensitive, like the server.
+ */
+export function pageRefundOrders(all: RefundOrder[], search: string, offset: number, limit = REFUND_PAGE_SIZE): RefundOrderPage {
+  const q = search.trim().toLowerCase();
+  const matched = q
+    ? all.filter((o) => (o.buyerEmail ?? '').toLowerCase().includes(q) || o.sessionId.toLowerCase().includes(q))
+    : all;
+  const from = Math.max(0, Math.trunc(offset) || 0);
+  return {
+    orders: matched.slice(from, from + limit),
+    matches: matched.length,
+    totalOrders: all.length,
+    totalRefundableCents: all.reduce((s, o) => s + o.refundableCents, 0),
+  };
+}
+
 export interface RefundTicket {
   ticketId: string;
   status: string;

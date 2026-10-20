@@ -11,12 +11,17 @@ import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
 import { canSeeMoney } from '../lib/settlement';
+import { can, cannotReason } from '../lib/orgRoles';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
 export default function OrganizerDashboard() {
   const { user, isAdmin } = useAuth();
-  const { orgs, activeOrg, activeRole } = useOrganization();
+  const { orgs, activeOrg, activeRole, roleIn } = useOrganization();
+  // Create files under the active org; edit / clone / series follow the
+  // event's own org (owner / manager only: RLS exos_events_ins / _upd).
+  const canCreate = can(activeRole, 'editEvents', isAdmin);
+  const canEditEvent = (ev: Event) => can(roleIn(ev.orgId), 'editEvents', isAdmin);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   // Search + filter state. Both apply client-side over the loaded
@@ -156,13 +161,24 @@ export default function OrganizerDashboard() {
                 <span>Promote</span>
               </Link>
             )}
-            <Link
-              to="/create-event"
-              className="bg-[#026cdf] text-white px-6 py-3 rounded flex items-center space-x-2 font-bold hover:bg-[#015bbd] shadow-sm transition-all text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Event</span>
-            </Link>
+            {canCreate ? (
+              <Link
+                to="/create-event"
+                className="bg-[#026cdf] text-white px-6 py-3 rounded flex items-center space-x-2 font-bold hover:bg-[#015bbd] shadow-sm transition-all text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Event</span>
+              </Link>
+            ) : (
+              <span
+                aria-disabled="true"
+                title={cannotReason('editEvents')}
+                className="bg-slate-200 text-slate-500 px-6 py-3 rounded flex items-center space-x-2 font-bold text-sm cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Event</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -309,7 +325,11 @@ export default function OrganizerDashboard() {
                   <div className="grid grid-cols-4 gap-2 mt-3">
                     <Link to={`/checkin/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Door</Link>
                     <Link to={`/dashboard/event/${event.id}/promote`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Share</Link>
-                    <Link to={`/edit-event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Edit</Link>
+                    {canEditEvent(event) ? (
+                      <Link to={`/edit-event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Edit</Link>
+                    ) : (
+                      <span aria-disabled="true" title={cannotReason('editEvents')} className="py-2 rounded border border-slate-100 text-center text-[11px] font-bold text-slate-300">Edit</span>
+                    )}
                     <Link to={`/event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">View</Link>
                   </div>
                 </li>
@@ -371,9 +391,15 @@ export default function OrganizerDashboard() {
                         <div className="flex items-center justify-end space-x-2">
                            <Link to={`/dashboard/event/${event.id}/promote`} aria-label="Promote event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Megaphone className="w-4 h-4" /></Link>
                            <Link to={`/dashboard/event/${event.id}`} aria-label="Sales report" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><BarChart3 className="w-4 h-4" /></Link>
-                           <Link to={`/edit-event/${event.id}`} aria-label="Edit event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Settings className="w-4 h-4" /></Link>
-                           <Link to={`/dashboard/event/${event.id}/series`} aria-label={event.seriesId ? 'Add dates to this series' : 'Make this event recurring'} className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Repeat className="w-4 h-4" /></Link>
-                           <Link to={`/create-event?clone=${event.id}`} aria-label="Duplicate event as a new draft" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors text-[10px] font-black uppercase tracking-widest">CLONE</Link>
+                           {canEditEvent(event) ? (
+                             <>
+                               <Link to={`/edit-event/${event.id}`} aria-label="Edit event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Settings className="w-4 h-4" /></Link>
+                               <Link to={`/dashboard/event/${event.id}/series`} aria-label={event.seriesId ? 'Add dates to this series' : 'Make this event recurring'} className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Repeat className="w-4 h-4" /></Link>
+                               <Link to={`/create-event?clone=${event.id}`} aria-label="Duplicate event as a new draft" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors text-[10px] font-black uppercase tracking-widest">CLONE</Link>
+                             </>
+                           ) : (
+                             <span aria-disabled="true" title={cannotReason('editEvents')} className="p-2 text-slate-300 text-[10px] font-black uppercase tracking-widest cursor-not-allowed">Edit · Clone</span>
+                           )}
                            <Link to={`/checkin/${event.id}`} aria-label="Open check-in view" className="p-2 text-slate-400 hover:text-green-600 transition-colors"><CheckCircle2 className="w-4 h-4" /></Link>
                            <Link to={`/event/${event.id}`} aria-label="View public event page" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><ChevronRight className="w-4 h-4" /></Link>
                         </div>

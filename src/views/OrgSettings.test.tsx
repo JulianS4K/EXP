@@ -10,7 +10,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('../context/ToastContext', () => ({ useToast: () => ({ toast: h.toast }) }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'u1' }, isAdmin: false }) }));
-vi.mock('../context/OrganizationContext', () => ({ useOrganization: () => ({ activeRole: 'owner' }) }));
+vi.mock('../context/OrganizationContext', () => ({ useOrganization: () => ({ activeRole: 'owner', roleIn: () => 'owner' }) }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 vi.mock('../lib/comps', () => ({ getOrgCompUsage: vi.fn().mockResolvedValue(0), setOrgCompBudget: vi.fn() }));
 vi.mock('../lib/marketplace/s4kNetwork', () => ({ setS4kNetwork: vi.fn() }));

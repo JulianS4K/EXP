@@ -19,7 +19,9 @@ import { buildEmbedSnippet } from '../lib/embed';
 import { useToast } from '../context/ToastContext';
 import { getOrgCompUsage, setOrgCompBudget } from '../lib/comps';
 import { setS4kNetwork } from '../lib/marketplace/s4kNetwork';
-import { getOrganization, isHexColor, updateOrganization } from '../lib/orgs';
+import { getOrganization, isHexColor, setCheckoutReminders, updateOrganization } from '../lib/orgs';
+import { getOrgFeeFreeUntil } from '../lib/settlementApi';
+import { can, cannotReason } from '../lib/orgRoles';
 import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
@@ -28,7 +30,7 @@ import IntegrationsPanel from '../components/IntegrationsPanel';
 import DeveloperSettings from '../components/DeveloperSettings';
 import PixelIdsEditor, { pixelIdsSavable } from '../components/PixelIdsEditor';
 import { paymentsEnabled } from '../lib/payments';
-import { canSeeMoney } from '../lib/settlement';
+import { canSeeMoney, feeTerms } from '../lib/settlement';
 import CatalogFeedPanel from '../components/CatalogFeedPanel';
 import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
@@ -76,7 +78,9 @@ const CURRENCIES: readonly [string, string][] = [
 export default function OrgSettings() {
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
-  const { activeRole } = useOrganization();
+  const { roleIn } = useOrganization();
+  // The role in the org on this page (the URL's), not the switcher's.
+  const activeRole = roleIn(orgId);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -92,6 +96,19 @@ export default function OrgSettings() {
   const [saving, setSaving] = useState(false);
   const [paymentsBusy, setPaymentsBusy] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  // Fee-free end date: exos_org_billing, readable by owner / manager / finance.
+  const [feeFreeUntil, setFeeFreeUntil] = useState<string | null | undefined>(undefined);
+  const canSeeTerms = can(activeRole, 'viewPayouts', isAdmin);
+  useEffect(() => {
+    if (!orgId || !canSeeTerms) return undefined;
+    let cancelled = false;
+    void getOrgFeeFreeUntil(orgId).then((d) => {
+      if (!cancelled) setFeeFreeUntil(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, canSeeTerms]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // What was last loaded / saved; '' until the org loads.
   const [savedSnap, setSavedSnap] = useState('');
@@ -297,9 +314,12 @@ export default function OrgSettings() {
   const paymentsCard = (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
       <h2 className={`${SECTION} mb-3`}>Payments</h2>
-      <p className="text-xs text-slate-400 mb-4">
+      <p className="text-xs text-slate-400 mb-3">
         Connect Stripe to sell paid tickets — payouts go to your account and the
         platform takes a fee. Free events need nothing here.
+      </p>
+      <p className="text-xs text-slate-600 mb-4" data-testid="fee-terms">
+        {feeTerms(canSeeTerms ? feeFreeUntil : undefined).text}
       </p>
       {stripeEnabled ? (() => {
         // Where Stripe Connect is: not started, details still owed,
@@ -688,6 +708,11 @@ export default function OrgSettings() {
             {/* Payments (on a phone it leads the main column instead). */}
             <div className="hidden lg:block">{paymentsCard}</div>
 
+            {/* Abandoned-checkout reminders (owner; on by default). Results per
+                event are under Money in the event report. */}
+            <CheckoutRemindersCard orgId={org.id} initial={org.checkoutRemindersEnabled !== false}
+              canEdit={can(activeRole, 'orgSettings', isAdmin)} />
+
             {/* Comp budget (owner) — cap on free comps issued via the guest-list
                 batch / box-office paths. Enforced server-side per batch. */}
             <CompBudgetCard orgId={org.id} initial={org.compBudget ?? null} canEdit={canEdit} />
@@ -777,6 +802,50 @@ function S4kNetworkCard({ orgId, initial, canEdit }: { orgId: string; initial: b
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function CheckoutRemindersCard({ orgId, initial, canEdit }: { orgId: string; initial: boolean; canEdit: boolean }) {
+  const { toast } = useToast();
+  const [on, setOn] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setOn(initial), [orgId, initial]);
+
+  const flip = async () => {
+    setSaving(true);
+    try {
+      const next = await setCheckoutReminders(orgId, !on);
+      setOn(next);
+      toast({ kind: 'success', message: next ? 'Checkout reminders are on.' : 'Checkout reminders are off. No more "finish your order" mails.' });
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Not saved.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <h2 className={`${SECTION} mb-3`}>Checkout reminders</h2>
+      <p className="text-xs text-slate-400 mb-4">
+        A buyer who starts checkout and leaves gets one "finish your order" email (1 to 24 hours later, once per event,
+        only while tickets are left, with an unsubscribe link). Each event's report shows how many were sent and how many
+        buyers came back, under Money.
+      </p>
+      <label className="flex items-center gap-3 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={() => void flip()}
+          disabled={!canEdit || saving}
+          aria-describedby={canEdit ? undefined : 'checkout-reminders-why'}
+        />
+        {on ? 'On' : 'Off'}{saving ? ' · saving…' : ''}
+      </label>
+      {!canEdit && (
+        <p id="checkout-reminders-why" className="text-[11px] text-slate-400 mt-2">{cannotReason('orgSettings')}</p>
+      )}
     </div>
   );
 }
