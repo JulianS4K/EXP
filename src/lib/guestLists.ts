@@ -218,7 +218,26 @@ export interface PendingArrival {
   ref: string; // client_ref (uuid) — makes the replay idempotent server-side
   entryId: string;
   count: number;
+  /** When the door let them in (ms, server-corrected clock): replayed as the
+   *  scan time (p_scanned_at, mig 20261021090000). */
   at: number;
+  /** The account that checked them in; only it uploads the arrival. */
+  uid?: string;
+}
+
+/** The door's times for an arrival decided offline (the server applies the
+ *  same rules online): cancelled, before doors (a test in the test window,
+ *  never queued), or open. `gate` is lib/door/roster doorGate. */
+export type GuestGateAnswer = 'ok' | 'test' | 'doors-not-open' | 'event-cancelled';
+export function guestGate(
+  gate: { opensAt: number | null; testUntil: number | null; cancelled?: boolean },
+  now: number,
+): GuestGateAnswer {
+  if (gate.cancelled) return 'event-cancelled';
+  if (gate.opensAt != null && now < gate.opensAt) {
+    return gate.testUntil != null && now < gate.testUntil ? 'test' : 'doors-not-open';
+  }
+  return 'ok';
 }
 
 export function enqueueArrival(queue: PendingArrival[], p: PendingArrival): PendingArrival[] {
@@ -275,6 +294,8 @@ export function arrivalReasonText(reason: string, remaining?: number): string {
       return 'Guest not found. Sync and try again.';
     case 'not-assigned':
       return "You're not assigned to scan this event.";
+    case 'bad-scan-time':
+      return 'This offline check-in is too old to upload.';
     case 'voided':
       return 'Not valid: this ticket was refunded or cancelled.';
     case 'checked-in-elsewhere':

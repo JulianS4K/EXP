@@ -510,7 +510,7 @@ await run('door: a code from another platform checks the imported guest in', asy
 }, { signedIn: true, mock: ownerMock({ rpcs: {
   exos_event_door_extras: () => DOOR_GUESTS,
   exos_guest_check_in: () => ({ ok: true, reason: 'checked-in', arrived: 1, party: 1 }),
-  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [], exos_event_door_roster_page: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
@@ -566,7 +566,7 @@ await run('door: a ticket refunded on Eventbrite is refused at the door', async 
   exos_event_door_extras: () => ({ ...DOOR_GUESTS, guests: [...DOOR_GUESTS.guests,
     { id: 'g2', list_id: 'gl1', guest_name: 'Bo Diddley', plus_ones: 0, arrived: 0, arrived_at: null, note: null,
       code: '87654321', ticket: 'VIP', source: 'Eventbrite', voided: true, void_reason: 'refunded' }] }),
-  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [], exos_event_door_roster_page: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
 

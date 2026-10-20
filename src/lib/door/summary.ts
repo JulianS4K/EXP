@@ -42,6 +42,22 @@ export interface DoorSummary {
   refused: Count[];
   /** Inside right now (only when the event has a re-entry list). */
   insideNow: number | null;
+  /** Guest-list, imported and Eventbrite arrivals (mig 20261021090000), in
+   *  heads; null when the event has no guest lists (or the database doesn't
+   *  report them yet). */
+  guests: GuestArrivals | null;
+}
+
+export interface GuestArrivals {
+  entries: number;
+  expected: number;
+  arrived: number;
+  /** Checked in on Eventbrite's own app only (counted in `arrived`). */
+  eventbriteApp: number;
+  /** Heads checked in offline (uploaded later). */
+  offline: number;
+  /** 'Guest list', an import's platform (e.g. 'DICE'), or 'Eventbrite'. */
+  bySource: { source: string; expected: number; arrived: number }[];
 }
 
 const num = (v: unknown): number => {
@@ -95,6 +111,22 @@ export function parseDoorSummary(raw: unknown): DoorSummary | null {
     refusedTotal: num(refused.total),
     refused: counts(refused.by_reason, 'reason'),
     insideNow: r.inside_now == null ? null : num(r.inside_now),
+    guests: parseGuests(r.guests),
+  };
+}
+
+function parseGuests(v: unknown): GuestArrivals | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const g = v as Record<string, unknown>;
+  return {
+    entries: num(g.entries),
+    expected: num(g.expected),
+    arrived: num(g.arrived),
+    eventbriteApp: num(g.eventbrite_app),
+    offline: num(g.offline),
+    bySource: arr(g.by_source)
+      .map((x) => ({ source: str(x.source), expected: num(x.expected), arrived: num(x.arrived) }))
+      .filter((x) => x.source),
   };
 }
 
@@ -162,6 +194,11 @@ export function summaryText(s: DoorSummary): string {
     lines.push('By ticket type:');
     for (const t of s.byTier) lines.push(`  ${t.tier}: ${t.checkedIn} / ${t.sold}`);
   }
+  if (s.guests) {
+    lines.push('');
+    lines.push(`Guests: ${s.guests.arrived} of ${s.guests.expected} in${s.guests.offline ? ` (${s.guests.offline} offline)` : ''}`);
+    for (const g of s.guests.bySource) lines.push(`  ${g.source}: ${g.arrived} / ${g.expected}`);
+  }
   if (s.byStaff.length) {
     lines.push('');
     lines.push('By staff:');
@@ -201,6 +238,12 @@ export function summaryCsvRows(s: DoorSummary): (string | number)[][] {
   for (const h of s.byHour) rows.push(['hour', h.hour, h.entries, '']);
   for (const t of s.byTier) rows.push(['ticket_type', t.tier, t.checkedIn, t.sold]);
   for (const l of s.byList) rows.push(['list', l.list, l.entries, l.exits]);
+  if (s.guests) {
+    rows.push(['guests', 'arrived', s.guests.arrived, s.guests.expected]);
+    rows.push(['guests', 'offline', s.guests.offline, '']);
+    if (s.guests.eventbriteApp) rows.push(['guests', 'eventbrite_app', s.guests.eventbriteApp, '']);
+    for (const g of s.guests.bySource) rows.push(['guest_source', g.source, g.arrived, g.expected]);
+  }
   for (const t of s.byStaff) rows.push(['staff', t.staff, t.entries, t.refused]);
   for (const o of s.overrides) rows.push(['override', o.key, o.count, '']);
   for (const c of s.conflicts) rows.push(['offline_conflict', c.key, c.count, '']);

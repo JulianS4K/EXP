@@ -8,6 +8,10 @@
 //
 // Pure module state + helpers (no network here — see syncServerClock in
 // lib/tickets.ts), so it is unit-tested directly.
+//
+// The last measurement is saved on the device (with when it was taken), so a
+// door that opens on bad Wi-Fi starts from it instead of the raw device clock;
+// a live measurement replaces it as soon as the server answers.
 
 const BUCKET_MS = 30_000;
 // A round trip slower than this says little about the clock; ignore it.
@@ -19,6 +23,15 @@ let offsetMs = 0;
 /** The last measured offset, before small ones are rounded to zero (the
  *  door's sync-health panel shows it). null until a measurement succeeds. */
 let measuredMs: number | null = null;
+/** When that offset was measured (device ms), and whether it was measured in
+ *  this page load (false = restored from the device's saved copy). */
+let measuredAt: number | null = null;
+let measuredLive = false;
+
+/** Where the last measurement is saved (localStorage). */
+export const CLOCK_SAVE_KEY = 'exos:clock-offset';
+/** A saved measurement older than this is not used. */
+export const SAVED_OFFSET_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Offset (server minus device) from one request: sent at t0, answered with
  *  the server's time, received at t1 (device ms). null when the round trip
@@ -30,16 +43,59 @@ export function estimateOffset(t0: number, serverMs: number, t1: number): number
   return Math.round(serverMs - (t0 + rtt / 2));
 }
 
-/** Record a measured offset (small ones are treated as zero). */
-export function setClockOffset(ms: number | null): void {
+/** Record a measured offset (small ones are treated as zero). `live` =
+ *  measured now against the server (false: restored from the saved copy). */
+export function setClockOffset(ms: number | null, at: number = Date.now(), live = true): void {
   if (ms == null || !Number.isFinite(ms)) return;
   measuredMs = ms;
+  measuredAt = at;
+  measuredLive = live;
   offsetMs = Math.abs(ms) < MIN_OFFSET_MS ? 0 : ms;
 }
 
 /** Server minus device as last measured (ms), or null when never measured. */
 export function getMeasuredOffset(): number | null {
   return measuredMs;
+}
+
+/** The offset in use, when it was measured and whether it is from this page
+ *  load; null when there is none. */
+export function getOffsetInfo(): { ms: number; at: number; live: boolean } | null {
+  return measuredMs == null || measuredAt == null ? null : { ms: measuredMs, at: measuredAt, live: measuredLive };
+}
+
+type KV = Pick<Storage, 'getItem' | 'setItem'>;
+
+/** Save a live measurement on the device. Best-effort. */
+export function saveClockOffset(storage: KV | null, ms: number, at: number): void {
+  try {
+    storage?.setItem(CLOCK_SAVE_KEY, JSON.stringify({ ms, at }));
+  } catch {
+    /* storage full / blocked */
+  }
+}
+
+/** The saved measurement, or null when there is none or it is too old. */
+export function loadSavedOffset(storage: KV | null, now: number = Date.now()): { ms: number; at: number } | null {
+  try {
+    const p = JSON.parse(storage?.getItem(CLOCK_SAVE_KEY) ?? 'null') as { ms?: unknown; at?: unknown } | null;
+    if (!p || typeof p.ms !== 'number' || typeof p.at !== 'number' || !Number.isFinite(p.ms) || !Number.isFinite(p.at)) return null;
+    // A copy from "the future" means the device clock was moved back since.
+    if (p.at > now + 60_000 || now - p.at > SAVED_OFFSET_MAX_AGE_MS) return null;
+    return { ms: p.ms, at: p.at };
+  } catch {
+    return null;
+  }
+}
+
+/** Use the saved measurement until a live one comes in. True when one was
+ *  restored (never replaces a live measurement). */
+export function restoreSavedOffset(storage: KV | null, now: number = Date.now()): boolean {
+  if (measuredLive) return false;
+  const saved = loadSavedOffset(storage, now);
+  if (!saved) return false;
+  setClockOffset(saved.ms, saved.at, false);
+  return true;
 }
 
 export function getClockOffset(): number {
@@ -78,4 +134,7 @@ export function describeSkew(codeBucket: number, now: number): string {
 /** Test hook. */
 export function resetClockOffset(): void {
   offsetMs = 0;
+  measuredMs = null;
+  measuredAt = null;
+  measuredLive = false;
 }

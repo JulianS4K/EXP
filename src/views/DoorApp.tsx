@@ -16,6 +16,8 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { createEvent, listOrgEvents } from '../lib/events';
 import type { Event } from '../types';
+import { listMyScannerEvents } from '../lib/orgs';
+import { assignedDoorEvents } from '../lib/door/scope';
 import DoorImport from '../components/DoorImport';
 import EventbriteSync from '../components/EventbriteSync';
 
@@ -81,11 +83,17 @@ export default function DoorApp() {
     if (!orgId) return undefined;
     let alive = true;
     setLoadError(false);
-    listOrgEvents(orgId)
-      .then((list) => {
+    // A scanner limited to some events (exos_event_staff) sees only those.
+    const scoped = activeRole === 'scanner' && user ? listMyScannerEvents(orgId, user.uid) : Promise.resolve(null);
+    Promise.all([listOrgEvents(orgId), scoped])
+      .then(([list, assigned]) => {
         if (!alive) return;
         const soon = Date.now() - 2 * 86_400_000;
-        setEvents(list.filter((e) => e.status !== 'cancelled' && (startMs(e) === 0 || startMs(e) >= soon)));
+        setEvents(
+          assignedDoorEvents(list, activeRole, assigned).filter(
+            (e) => e.status !== 'cancelled' && (startMs(e) === 0 || startMs(e) >= soon),
+          ),
+        );
       })
       .catch((err) => {
         console.warn('door events unavailable', err);
@@ -94,7 +102,7 @@ export default function DoorApp() {
     return () => {
       alive = false;
     };
-  }, [orgId, tick]);
+  }, [orgId, tick, activeRole, user?.uid]);
   // A refresh after creating an event keeps the list on screen.
 
   const create = async () => {
