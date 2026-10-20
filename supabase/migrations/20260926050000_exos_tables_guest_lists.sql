@@ -337,7 +337,9 @@ SELECT pg_temp.tg_patch('public.exos_claim_free_tickets(uuid, uuid, integer, tex
         E'PERFORM set_config(''exos.table_mint'', v_tref, true);\n  FOR i IN 1..p_quantity * public.exos_tier_party_size(p_tier_id) LOOP',
         E'CASE WHEN public.exos_tier_is_table(p_tier_id) THEN v_tref\n           ELSE coalesce(nullif(p_order_ref, ''''), ''free_'' || gen_random_uuid()::text) END,',
         E'  -- A table claim: one booking per table (mig 20260926050000).\n  PERFORM public._exos_book_tables(p_tier_id, v_tref, v_uid, v_ids, p_quantity);\n\n  RETURN v_ids;\nEND'],
-  ARRAY[1, 2, 1, 1, 1]);
+  ARRAY[1, 2, 1, 1, 1])
+  -- Replay-safe: mig 20261021100000 replaced this form with a 7-argument one.
+  WHERE to_regprocedure('public.exos_claim_free_tickets(uuid, uuid, integer, text, text, text)') IS NOT NULL;
 
 -- A5. Give tables back correctly ---------------------------------------------
 
