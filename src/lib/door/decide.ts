@@ -243,7 +243,7 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
     // local copy says why (clock skew, screenshot).
-    if (entry && v && !v.ok && v.reason !== 'signature-mismatch') {
+    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key') {
       return { action: 'reject', ticketId, reason: 'invalid-barcode' };
     }
     return { action: 'ask-server', ticketId };
@@ -252,6 +252,8 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
   // Offline or unreachable: the cached list is the only authority.
   if (gate.cancelled) return { action: 'reject', ticketId, reason: 'event-cancelled' };
   if (!entry) return { action: 'reject', ticketId, reason: 'unknown-offline' };
+  // A code the saved list can't check (no key: 'no-key') is refused too, never
+  // admitted unchecked: anyone can write a W- / T- code with a real ticket id.
   if (v && !v.ok) return { action: 'reject', ticketId, reason: 'invalid-barcode' };
   return decideOnSavedList(input, ticketId, entry, false);
 }

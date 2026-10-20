@@ -971,6 +971,8 @@ export default function OrganizerCheckIn() {
         "Signature didn't match this ticket — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded (re-download it).",
       'legacy-no-secret':
         'This is an old-format ticket. Ask the attendee to open the app and refresh their ticket, then rescan.',
+      'no-key':
+        "This phone can't check this code offline (the saved list has no key for it). Reconnect or re-download the list, or a manager can check them in by name.",
     };
     return reasonText[v.reason || ''] || 'Code rejected.';
   };
@@ -1275,9 +1277,10 @@ export default function OrganizerCheckIn() {
     let admittedId: string | null = null;
     try {
       // Local signature check against the downloaded list's door keys, on the
-      // server-corrected clock. No key for the code's day = not checked.
-      const checked = cached?.doorKeys && !code.bare ? await verifyBarcode(raw, cached.doorKeys, { now }) : null;
-      const verify = checked?.reason === 'no-key' ? null : checked;
+      // server-corrected clock. No key for the code (another day, or a wallet
+      // pass issued after the download) is 'no-key': online the server checks
+      // it, offline it is refused (decideScan), never admitted unchecked.
+      const verify = cached && !code.bare ? await verifyBarcode(raw, cached.doorKeys ?? null, { now }) : null;
       const name = cached?.name || '';
       const ctx = { raw, src, reason, note: opts.note, name, tier: cached?.tier, verify };
       const d = decideScan({ ...base, recent: null, verify, network });
