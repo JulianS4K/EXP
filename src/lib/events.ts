@@ -251,9 +251,27 @@ export function eventSharePath(ev: { id: string; slug?: string | null }): string
   return ev.slug ? `e/${encodeURIComponent(ev.slug)}` : `event/${ev.id}`;
 }
 
-/** Face value sold: each tier's price times its sold count (tables count once). */
+/** Face value sold at CURRENT prices: each tier's price times its sold count
+ *  (tables count once). Not money taken: it ignores price schedules, promo
+ *  codes and refunds; the event report's Money panel (exos_order_money) has the
+ *  real figures. Label it as face value wherever it's shown. */
 export function eventGrossSales(ev: Pick<Event, 'ticketTiers'>): number {
   return (ev.ticketTiers ?? []).reduce((sum, t) => sum + (Number(t.price) || 0) * (Number(t.sold) || 0), 0);
+}
+
+/** eventGrossSales summed per currency (never added across currencies),
+ *  largest first; events without a currency count as USD. */
+export function faceValueByCurrency(
+  events: Array<Pick<Event, 'ticketTiers' | 'currency'>>,
+): Array<{ currency: string; amount: number }> {
+  const by = new Map<string, number>();
+  for (const ev of events) {
+    const code = (ev.currency || 'USD').toUpperCase();
+    by.set(code, (by.get(code) ?? 0) + eventGrossSales(ev));
+  }
+  return [...by.entries()]
+    .map(([currency, amount]) => ({ currency, amount }))
+    .sort((a, b) => b.amount - a.amount || a.currency.localeCompare(b.currency));
 }
 
 export async function getEventForEdit(eventId: string): Promise<Event | null> {

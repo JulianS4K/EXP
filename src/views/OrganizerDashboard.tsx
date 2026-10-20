@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Event } from '../types';
-import { eventGrossSales, listOrgEvents } from '../lib/events';
+import { eventGrossSales, faceValueByCurrency, listOrgEvents } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
@@ -62,7 +62,10 @@ export default function OrganizerDashboard() {
     fetchEvents();
   }, [user, orgs]);
 
-  const totalEarnings = events.reduce((acc, event) => acc + eventGrossSales(event), 0);
+  // Face value at current tier prices, one total per currency (never summed
+  // across currencies). Real money taken (schedules, promo codes, refunds) is
+  // in each event report's Money panel; it isn't loaded here.
+  const faceValue = faceValueByCurrency(events);
   const liveCount = events.filter((e) => (e.status ?? 'published') === 'published').length;
   const totalTicketsSold = events.reduce((acc, event) => acc + event.ticketsSold, 0);
 
@@ -165,7 +168,15 @@ export default function OrganizerDashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: 'GROSS SALES', value: formatCurrency(totalEarnings), icon: BarChart3, color: 'text-slate-900' },
+            {
+              label: 'FACE VALUE SOLD',
+              value: faceValue.length <= 1
+                ? formatCurrency(faceValue[0]?.amount ?? 0, faceValue[0]?.currency)
+                : faceValue.map((f) => <span key={f.currency} className="block text-2xl">{formatCurrency(f.amount, f.currency)}</span>),
+              note: 'At current ticket prices, before promo codes and refunds. Money actually taken is in each event report, under Money.',
+              icon: BarChart3,
+              color: 'text-slate-900',
+            },
             { label: 'TICKETS SOLD', value: totalTicketsSold, icon: Users, color: 'text-slate-900' },
             { label: 'ACTIVE EVENTS', value: events.length, icon: Music, color: 'text-slate-900' },
             // Removed RELIABILITY SCORE — it was a hardcoded 98/100 from
@@ -186,6 +197,7 @@ export default function OrganizerDashboard() {
                 <stat.icon className={`w-4 h-4 text-slate-400`} />
               </div>
               <p className={`disp text-4xl ${stat.color} tracking-tight`} style={{ transform: 'skewX(-3deg)' }}>{stat.value}</p>
+              {'note' in stat && stat.note ? <p className="text-[11px] text-slate-400 mt-2">{stat.note}</p> : null}
             </motion.div>
           ))}
         </div>
@@ -289,7 +301,7 @@ export default function OrganizerDashboard() {
                       <p className="text-[11px] text-slate-500 truncate">{formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric' })} · {event.location}</p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <EventStatusPill status={event.status} />
-                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event))}</span>
+                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event), event.currency)} face value</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
@@ -310,7 +322,7 @@ export default function OrganizerDashboard() {
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Event</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ticket Sales</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Revenue</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest" title="Tier price × sold, at current prices; before promo codes and refunds">Face value sold</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
                   </tr>
                 </thead>
@@ -352,7 +364,8 @@ export default function OrganizerDashboard() {
                         <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold}{event.totalTickets > 0 ? ` / ${event.totalTickets}` : ''} SOLD</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event))}</p>
+                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event), event.currency)}</p>
+                        <p className="text-[10px] text-slate-400">at current prices</p>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end space-x-2">

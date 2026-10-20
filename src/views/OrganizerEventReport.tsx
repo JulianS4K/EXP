@@ -32,6 +32,8 @@ import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
+import { listRefundedTicketIds } from '../lib/refundsApi';
+import { ticketBadge, type TicketBadge } from '../lib/refunds';
 import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
@@ -57,6 +59,14 @@ const REPORT_TABS: { key: ReportTab; label: string }[] = [
   { key: 'marketing', label: 'Marketing' },
   { key: 'settings', label: 'Settings' },
 ];
+
+const BADGE_CLS: Record<TicketBadge, string> = {
+  active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  used: 'bg-slate-100 text-slate-500 border-slate-200',
+  released: 'bg-amber-50 text-amber-700 border-amber-200',
+  refunded: 'bg-rose-50 text-rose-600 border-rose-200',
+  voided: 'bg-slate-100 text-slate-600 border-slate-300',
+};
 
 export default function OrganizerEventReport() {
   const { eventId } = useParams<{ eventId: string }>();
@@ -104,6 +114,20 @@ export default function OrganizerEventReport() {
     };
   }, [eventId]);
 
+  // Which voided tickets actually got money back (a succeeded refund line).
+  // Re-read whenever analyticsKey bumps, i.e. after a refund or void here.
+  const [refundedIds, setRefundedIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!eventId) return undefined;
+    let cancelled = false;
+    listRefundedTicketIds(eventId)
+      .then((ids) => { if (!cancelled) setRefundedIds(ids); })
+      .catch((err) => console.warn('listRefundedTicketIds failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, analyticsKey]);
+
   if (!user) {
     return (
       <div className="max-w-3xl mx-auto p-12 text-center text-slate-500">
@@ -138,20 +162,19 @@ export default function OrganizerEventReport() {
     );
   }
 
-  // Refund + void a single ticket. In Exos a voided ticket IS a
-  // refunded ticket — this is the per-ticket refund control (the
-  // event-level cancellation flow already exists for whole-event
-  // refunds). Optimistic local update so the UI reflects the change
-  // without re-fetching.
+  // Void a single ticket. Optimistic local update so the UI reflects the
+  // change without re-fetching.
   //
-  // Note: this flow does NOT issue a Stripe refund. Money refunds go
-  // through RefundPanel (exos-refund) below. The void is sticky
-  // regardless: the ticket is unscannable even if a refund hasn't
-  // cleared yet, which is the important property for the door.
+  // This does NOT issue a refund, and organizers can't refund from their own
+  // Stripe dashboard (Exos takes the payment as a platform charge). Money goes
+  // back only through RefundPanel (exos-refund) below; the badge reads
+  // "refunded" only once a refund for the ticket has succeeded. The void is
+  // sticky regardless: the ticket is unscannable, which is what the door needs.
   const handleVoidTicket = async (ticket: Ticket) => {
     if (!user || !ticket || ticket.status !== 'active') return;
     const reason = window.prompt(
-      `Refund / void ticket ${ticket.id.slice(0, 8)}? Provide a short reason (audit log).`,
+      `Void ticket ${ticket.id.slice(0, 8)}? It stops scanning. This does NOT refund the buyer: ` +
+        'to send money back, use Refunds further down this page.\n\nShort reason (audit log):',
       '',
     );
     if (reason === null) return;
@@ -170,8 +193,7 @@ export default function OrganizerEventReport() {
       setAnalyticsKey((k) => k + 1);
       toast({
         kind: 'success',
-        message:
-          'Ticket voided. Issue the buyer a refund through your Stripe dashboard — the ticket is already unscannable.',
+        message: 'Ticket voided: it no longer scans. No money was returned; to refund the buyer, use Refunds below on this page.',
       });
     } catch (err) {
       console.error('Void failed:', err);
@@ -350,7 +372,15 @@ export default function OrganizerEventReport() {
         <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
           <h3 className="text-sm font-bold text-slate-700 mb-1">Attendees</h3>
           <p className="text-xs text-slate-400 mb-4">
-            "Void" cancels a ticket so it no longer scans. To send money back, use Refunds below.
+            "Void" cancels a ticket so it no longer scans; it doesn't return any money. To send money back, use{' '}
+            <button
+              type="button"
+              onClick={() => document.getElementById('refunds')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="underline font-bold text-slate-500 hover:text-slate-700"
+            >
+              Refunds
+            </button>{' '}
+            below.
           </p>
           {tickets.length === 0 ? (
             <p className="text-xs text-slate-400">No tickets sold yet.</p>
@@ -368,15 +398,9 @@ export default function OrganizerEventReport() {
                 <tbody>
                   {tickets.map((t) => {
                     const isVoided = t.status === 'voided';
-                    const isUsed = t.status === 'used';
                     const isReleased = isVoided && !!t.releasedAt;
-                    const statusBadge = isReleased
-                      ? { text: 'released', cls: 'bg-amber-50 text-amber-700 border-amber-200' }
-                      : isVoided
-                      ? { text: 'refunded', cls: 'bg-rose-50 text-rose-600 border-rose-200' }
-                      : isUsed
-                      ? { text: 'used', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
-                      : { text: 'active', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+                    const badge = ticketBadge(t, refundedIds.has(t.id));
+                    const statusBadge = { text: badge, cls: BADGE_CLS[badge] };
                     return (
                       <tr
                         key={t.id}
@@ -440,13 +464,16 @@ export default function OrganizerEventReport() {
           onRefunded={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
         />
 
-        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
-        <RefundPanel
-          event={event}
-          canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
-          canCancel={canAct}
-          onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
-        />
+        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks).
+            The void prompt, toast and the attendee note point here. */}
+        <div id="refunds" className="scroll-mt-4">
+          <RefundPanel
+            event={event}
+            canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+            canCancel={canAct}
+            onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+          />
+        </div>
 
         {/* Date changes: the refund offer and what buyers did with it (mig 20260929150000). */}
         <RescheduleRefundsPanel
