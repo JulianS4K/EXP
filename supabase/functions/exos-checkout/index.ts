@@ -185,7 +185,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ({ data: vUses } = await sb.from("exos_vouchers")
         .select("max_uses, used_count").eq("id", v.voucher_id).maybeSingle<VoucherUses>());
     }
-    const remainingUses = vUses ? vUses.max_uses - vUses.used_count : 0;
+    // Uses other buyers are holding count too (mig 20261021140000: live holds
+    // and open checkouts with the code); before it, only used_count.
+    let remainingUses = vUses ? vUses.max_uses - vUses.used_count : 0;
+    const { data: left, error: leftErr } = await sb.rpc("exos_voucher_uses_left", {
+      p_voucher_id: v.voucher_id, p_buyer_uid: buyerUid, p_email: buyerEmail || null,
+    });
+    if (!leftErr && typeof left === "number") remainingUses = Math.min(remainingUses, left);
     if (quantity > remainingUses) {
       return json({ error: `voucher covers ${Math.max(remainingUses, 0)} more ticket(s)` }, 409);
     }
@@ -426,19 +432,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // else swept by the exos_expire_holds cron.
   let holdId: string | null = null;
   if (!bypassCapacity) {
-    // A hidden tier's hold re-checks the voucher (mig 20260925003000). Only
-    // sent when needed, so public tiers work before that migration is applied.
-    // A guest hold is also where the guest rate limits and the organizer's
-    // guestCheckout switch are enforced (guests never bypass, see above).
+    // The hold gets the code whenever there is one: a hidden tier's hold
+    // re-checks it (mig 20260925003000), and the hold reserves one of the
+    // code's uses (mig 20261021140000), so a 2-use link can't be paid for 3
+    // times. A guest hold is also where the guest rate limits and the
+    // organizer's guestCheckout switch are enforced (guests never bypass, see above).
     const { data: hid, error: holdErr } = buyerUid
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
-        ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
+        ...(voucherId ? { p_voucher_code: voucherCode } : {}),
       })
       : await sb.rpc("exos_create_guest_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
         p_ip_hash: ipHash,
-        p_voucher_code: voucherUnlocksTier ? voucherCode : null,
+        p_voucher_code: voucherId ? voucherCode : null,
       });
     if (holdErr) {
       return json({ error: holdErr.message || "not enough tickets available" }, 409);

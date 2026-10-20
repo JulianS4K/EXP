@@ -2,8 +2,8 @@
 // TikTok Events API, GA4 Measurement Protocol, Reddit, Snap, Google Ads via
 // the Data Manager API) from exos_marketing_conversions (mig 20260930100000).
 //
-// Cron-invoked (requireCronSecret), e.g. every 5 minutes; not scheduled yet
-// (docs/marketing-conversions.md has the cron.schedule call for the operator).
+// Cron-invoked (requireCronSecret) every 5 minutes: exos-conversions-drain-5min,
+// scheduled by mig 20261021140000 (docs/marketing-conversions.md).
 // CLAIMS due rows via exos_conversions_claim_batch (FOR UPDATE SKIP LOCKED +
 // a lease: status 'sending', attempts+1, a claim_token), so overlapping runs
 // never send the same row twice; a run that dies leaves a lease that is

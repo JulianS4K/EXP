@@ -131,6 +131,12 @@ BEGIN
 END $$;
 
 -- S4 drain ----------------------------------------------------------------
+-- The claim re-checks quiet hours where the recipient is (mig 20261021140000):
+-- put the event in a zone where it's midday now, whatever time the run is.
+UPDATE public.exos_events
+   SET timezone = (SELECT 'Etc/GMT' || CASE WHEN o > 0 THEN '-' || o WHEN o < 0 THEN '+' || (-o) ELSE '' END
+                     FROM (SELECT ((12 - extract(hour FROM now() AT TIME ZONE 'UTC')::int + 36) % 24) - 12 AS o) x)
+ WHERE id = pg_temp.u('0000000000e1');
 DO $$
 DECLARE r record; n int := 0; v_c2 uuid := (current_setting('sm.c2')::jsonb->>'campaign_id')::uuid;
 BEGIN

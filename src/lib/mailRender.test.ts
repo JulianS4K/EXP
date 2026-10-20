@@ -1,6 +1,6 @@
 // exos-mail-drain's last-mile render (supabase/functions/_shared/mail-render.ts).
 import { describe, it, expect } from 'vitest';
-import { normalizeAppUrl, renderMail } from '../../supabase/functions/_shared/mail-render.ts';
+import { normalizeAppUrl, oneClickUnsubscribeUrl, renderMail } from '../../supabase/functions/_shared/mail-render.ts';
 
 describe('normalizeAppUrl', () => {
   it('accepts https (and http on localhost) and drops trailing slashes', () => {
@@ -37,6 +37,20 @@ describe('renderMail', () => {
 
   it('passes ordinary mail through untouched, with no headers', () => {
     expect(renderMail('<p>Your ticket</p>', null, null)).toEqual({ ok: true, html: '<p>Your ticket</p>', headers: {} });
+  });
+
+  it('points List-Unsubscribe at the one-click endpoint, with List-Unsubscribe-Post (RFC 8058)', () => {
+    const t = 'f'.repeat(64);
+    const one = oneClickUnsubscribeUrl('https://proj.supabase.co');
+    expect(one).toBe('https://proj.supabase.co/functions/v1/exos-mail-unsubscribe');
+    const r = renderMail('<p>x</p>', `{{app_url}}/unsubscribe?t=${t}`, 'https://exos.example', one);
+    expect(r.ok && r.headers).toEqual({
+      'List-Unsubscribe': `<https://proj.supabase.co/functions/v1/exos-mail-unsubscribe?t=${t}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    });
+    // Not an app unsubscribe link, or no endpoint: plain header, no one-click claim.
+    expect(renderMail('<p>x</p>', 'https://other.example/u', null, one)).toMatchObject({ headers: { 'List-Unsubscribe': '<https://other.example/u>' } });
+    expect(oneClickUnsubscribeUrl('http://proj.supabase.co')).toBeNull();
   });
 
   it('never emits a List-Unsubscribe header that is not an absolute URL', () => {

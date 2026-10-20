@@ -140,9 +140,9 @@ Env for the function:
 | `EXOS_APP_BASE_URL` | `https://…` of the SPA, for `event_source_url` / `page.url` (optional) |
 | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | the Exos Google OAuth client; without them Google Ads stays planned only (optional) |
 
-### Schedule (operator, not done)
+### Schedule
 
-Every 5 minutes, through the same helper the other Exos crons use (it reads `CRON_SECRET` from
+Mig `20261021140000_exos_growth_p1.sql` schedules it (applied by the operator). Every 5 minutes, through the same helper the other Exos crons use (it reads `CRON_SECRET` from
 Vault; see `20260702144637_exos_reconcile_checkouts_cron.sql` for the exact call shape):
 
 ```sql

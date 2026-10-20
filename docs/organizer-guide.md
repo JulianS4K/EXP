@@ -230,8 +230,8 @@ Fans opt in from their ticket ("Get texts about … next events"), with the cons
    send now or schedule.
 
 Exos adds your org's name and "Reply STOP to opt out" to every text, sends only 9:00 to 20:00 (event time), at most
-8 texts per person per month, and never to someone who replied STOP. On a fresh install sending stays off (dry run)
-until the operator switches it on.
+8 texts per person per month (dry-run tests don't count), and never to someone who replied STOP. On a fresh install
+sending stays off (dry run) until the operator switches it on.
 
 ## 5. At the door (`/checkin/:eventId`)
 
