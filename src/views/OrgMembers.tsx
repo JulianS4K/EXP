@@ -1,15 +1,12 @@
-// OrgMembers — owner-only member roster + role/disable management.
-//
-// Sprint 1 cut: list members (uid + role + disabled flag), let the
-// owner change a member's role and soft-disable them, plus a stub
-// "invite" flow that requires the invitee's uid (the email-based
-// invite needs Cloud Functions to look up uids by email — deferred to
-// when the mail queue is rate-limited).
+// OrgMembers — the team: name / email, role, status. The owner invites,
+// changes roles, disables, removes, and hands the org over ("Make owner");
+// anyone else can leave (mig 20261021150000). A platform admin who isn't the
+// owner sees the team read-only and can only hand the org over.
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus } from 'lucide-react';
+import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus, Crown, LogOut, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
@@ -18,9 +15,14 @@ import {
   createOrgInvite,
   disableOrgMember,
   enableOrgMember,
+  leaveOrg,
   listOrgInvites,
   listOrgMembers,
   listScannerEvents,
+  memberActions,
+  memberLabel,
+  removeOrgMember,
+  transferOrgOwnership,
   updateOrgMemberRole,
 } from '../lib/orgs';
 import { listOrgEvents } from '../lib/events';
@@ -68,7 +70,7 @@ const PERM_MATRIX: Array<[string, number[]]> = [
 export default function OrgMembers() {
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
-  const { activeRole } = useOrganization();
+  const { orgs, refresh: refreshOrgs } = useOrganization();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -84,7 +86,10 @@ export default function OrgMembers() {
   const [inviteRole, setInviteRole] = useState<OrgRole>('manager');
   const [inviting, setInviting] = useState(false);
 
-  const canManage = isAdmin || activeRole === 'owner';
+  // This page's org (not necessarily the dashboard's active one).
+  const myRole = orgs.find((o) => o.org.id === orgId)?.membership.role ?? null;
+  // Member edits are owner-only server-side (RLS / RPCs), admins included.
+  const canManage = myRole === 'owner';
 
   async function refresh() {
     if (!orgId) return;
@@ -186,6 +191,44 @@ export default function OrgMembers() {
     }
   }
 
+  async function handleMakeOwner(m: OrgMembership) {
+    if (!orgId) return;
+    if (!window.confirm(`Make ${memberLabel(m)} the owner? They get full control, billing and members; ${canManage ? 'you stay on as a manager' : 'the current owner stays on as a manager'}.`)) return;
+    try {
+      await transferOrgOwnership(orgId, m.uid);
+      toast({ kind: 'success', message: `${memberLabel(m)} now owns the organization.` });
+      await refreshOrgs();
+      await refresh();
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Transfer failed' });
+    }
+  }
+
+  async function handleRemove(m: OrgMembership) {
+    if (!orgId || !canManage) return;
+    if (!window.confirm(`Remove ${memberLabel(m)} from the team?`)) return;
+    try {
+      await removeOrgMember(orgId, m.uid);
+      toast({ kind: 'success', message: 'Member removed.' });
+      await refresh();
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Remove failed' });
+    }
+  }
+
+  async function handleLeave() {
+    if (!orgId) return;
+    if (!window.confirm('Leave this organization? You lose access to its events and tools.')) return;
+    try {
+      await leaveOrg(orgId);
+      toast({ kind: 'success', message: 'You left the organization.' });
+      await refreshOrgs();
+      navigate('/orgs');
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Leave failed' });
+    }
+  }
+
   async function handleDisable(uid: string, currentlyDisabled: boolean) {
     if (!orgId || !canManage) return;
     try {
@@ -245,7 +288,7 @@ export default function OrgMembers() {
 
         {!canManage && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-amber-700 text-xs font-bold uppercase tracking-widest">
-            Read-only — only org owners can change membership.
+            Read-only — only the org owner can change membership.
           </div>
         )}
 
@@ -280,7 +323,7 @@ export default function OrgMembers() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
-              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
+              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. To hand the organization over, use Make owner on an active member.
             </p>
           </div>
         )}
@@ -352,20 +395,23 @@ export default function OrgMembers() {
                   ) : (
                     members.map((m) => {
                       const isYou = m.uid === user.uid;
-                      const isOwner = m.role === 'owner';
+                      const act = memberActions({ uid: user.uid, role: myRole, isAdmin }, m);
+                      const label = memberLabel(m);
                       return (
                         <tr key={m.id} className={`hover:bg-slate-50/50 ${m.disabled ? 'opacity-60' : ''}`}>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-black text-slate-500 uppercase">
-                                {m.uid.charAt(0)}
+                                {label.charAt(0)}
                               </div>
                               <div className="min-w-0">
-                                <p className="font-bold text-sm text-slate-900 font-mono truncate">
-                                  {m.uid}
+                                <p className="font-bold text-sm text-slate-900 truncate">
+                                  {label}
                                   {isYou && <span className="ml-2 text-[10px] text-tm-blue font-black uppercase tracking-widest">(you)</span>}
                                 </p>
-                                <p className="text-[11px] text-slate-400 capitalize">{m.role}</p>
+                                <p className="text-[11px] text-slate-400 truncate">
+                                  {m.displayName && m.email ? m.email : <span className="capitalize">{m.role}</span>}
+                                </p>
                                 {canManage && m.role === 'scanner' && orgId ? (
                                   <ScannerEventScope
                                     orgId={orgId}
@@ -391,8 +437,9 @@ export default function OrgMembers() {
                             )}
                           </td>
                           <td className="px-6 py-4">
-                            {canManage && !isOwner ? (
+                            {act.editRole || act.remove || act.makeOwner || act.leave ? (
                               <div className="flex items-center justify-end gap-2">
+                                {act.editRole && (
                                 <select
                                   value={m.role}
                                   onChange={(e) => handleRoleChange(m.uid, e.target.value as OrgRole)}
@@ -402,6 +449,8 @@ export default function OrgMembers() {
                                     <option key={r} value={r}>{r}</option>
                                   ))}
                                 </select>
+                                )}
+                                {act.editRole && (
                                 <button
                                   onClick={() => handleDisable(m.uid, m.disabled === true)}
                                   title={m.disabled ? 'Re-enable' : 'Disable'}
@@ -409,6 +458,33 @@ export default function OrgMembers() {
                                 >
                                   {m.disabled ? <UserCheck size={14} /> : <UserX size={14} />}
                                 </button>
+                                )}
+                                {act.makeOwner && (
+                                  <button
+                                    onClick={() => handleMakeOwner(m)}
+                                    title="Make owner"
+                                    className="p-2 rounded border border-slate-200 text-slate-400 hover:border-tm-blue hover:text-tm-blue transition-colors"
+                                  >
+                                    <Crown size={14} />
+                                  </button>
+                                )}
+                                {act.remove && (
+                                  <button
+                                    onClick={() => handleRemove(m)}
+                                    title="Remove from team"
+                                    className="p-2 rounded border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500 transition-colors"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                                {act.leave && (
+                                  <button
+                                    onClick={() => handleLeave()}
+                                    className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
+                                  >
+                                    <LogOut size={13} /> Leave
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               <div className="text-right">

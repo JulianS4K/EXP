@@ -126,6 +126,10 @@ export interface OrgMembership {
   // Soft-disable without revoking the doc. A disabled membership is
   // ignored by the rule helper but kept for audit history.
   disabled?: boolean;
+  // From exos_org_members (mig 20261021150000): owner / manager / admin see
+  // everyone's; other members only their own.
+  email?: string;
+  displayName?: string;
 }
 
 /**

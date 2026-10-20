@@ -50,7 +50,8 @@ export default function DeleteAccountPanel() {
         undo this.
       </p>
       <p className="text-xs text-white/60 leading-relaxed">
-        You can't delete while you hold tickets for an upcoming event, have a transfer pending, or own an organization.
+        You can't delete while you hold tickets for an upcoming event, have a transfer pending, or own an organization
+        (make a teammate the owner on its Members page first).
       </p>
       <label className="block text-[10px] uppercase tracking-widest text-white/50" htmlFor="delete-confirm">
         Type DELETE to confirm
