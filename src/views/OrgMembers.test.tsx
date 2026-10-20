@@ -11,7 +11,11 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('../context/ToastContext', () => ({ useToast: () => ({ toast: h.toast }) }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'u-owner' }, isAdmin: false }) }));
-vi.mock('../context/OrganizationContext', () => ({ useOrganization: () => ({ activeRole: 'owner' }) }));
+vi.mock('../context/OrganizationContext', () => ({ useOrganization: () => ({
+  activeRole: 'owner',
+  orgs: [{ org: { id: 'o1' }, membership: { role: 'owner' } }],
+  refresh: vi.fn().mockResolvedValue(undefined),
+}) }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 vi.mock('../lib/mail', () => ({ queueEmail: h.queueEmail }));
 vi.mock('../lib/events', () => ({ listOrgEvents: vi.fn().mockResolvedValue([]) }));
