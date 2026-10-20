@@ -204,6 +204,8 @@ BEGIN
   SELECT * INTO r FROM pg_temp.oe_access('0e000000-0000-0000-0000-0000000000a2', '0e000000-0000-0000-0000-0000000000e1')
     AS (state text, join_url text, join_note text, available_at timestamptz);
   ASSERT r.state = 'cancelled' AND r.join_url IS NULL, 'O4: cancelled event gives no link';
+  -- Back on sale for O5 (cancelled is final otherwise, mig 20261021110000).
+  PERFORM set_config('exos.uncancel_ok', '0e000000-0000-0000-0000-0000000000e1', true);
   UPDATE public.exos_events SET status = 'published' WHERE id = '0e000000-0000-0000-0000-0000000000e1';
   RAISE NOTICE 'OK  O4 reveal window, in-person and cancelled';
 END $$;

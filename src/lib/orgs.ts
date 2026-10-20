@@ -36,6 +36,29 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+// --- Theme helpers (pure) --------------------------------------------------
+
+const HEX_COLOR_RE = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+
+/** #rgb or #rrggbb — the shape ThemeContext accepts. */
+export function isHexColor(v: string): boolean {
+  return typeof v === 'string' && HEX_COLOR_RE.test(v);
+}
+
+/**
+ * The org theme with `patch` applied on top: keys the patch leaves out (a
+ * logo uploaded a moment ago) survive, since updateOrganization writes the
+ * whole theme column.
+ */
+export function mergeOrgTheme(
+  prev: Organization['theme'] | undefined,
+  patch: NonNullable<Organization['theme']>,
+): NonNullable<Organization['theme']> {
+  const out: Record<string, unknown> = { ...(prev ?? {}) };
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) out[k] = v;
+  return out as NonNullable<Organization['theme']>;
+}
+
 // --- Row → type mappers ----------------------------------------------------
 
 const toTs = (iso: string | null | undefined): Timestamp =>
@@ -138,6 +161,18 @@ export async function getPublicOrg(orgId: string): Promise<Organization | null> 
   const { data, error } = await supabase.from('exos_public_orgs').select('*').eq('id', orgId).maybeSingle();
   if (error) throw error;
   return data ? mapPublicOrg(data) : null;
+}
+
+/**
+ * Live handle check for the create-org forms: exos_public_orgs lists every
+ * org's slug to anyone. null when the check itself failed (don't block on it;
+ * the UNIQUE index still refuses a taken handle on create).
+ */
+export async function isOrgHandleAvailable(slug: string): Promise<boolean | null> {
+  if (!isValidOrgSlug(slug)) return false;
+  const { data, error } = await supabase.from('exos_public_orgs').select('id').eq('slug', slug).limit(1);
+  if (error) return null;
+  return (data ?? []).length === 0;
 }
 
 export async function getPublicOrgBySlug(slug: string): Promise<Organization | null> {

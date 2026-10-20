@@ -26,7 +26,9 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { publicUrl } from '../lib/utils';
-import { paymentsEnabled } from '../lib/payments';
+import { paidNeedsConnect, paymentsEnabled } from '../lib/payments';
+import { useOrgPaymentsReady } from '../hooks/useOrgPaymentsReady';
+import ConnectPaymentsNotice from '../components/ConnectPaymentsNotice';
 import { buildEmbedSnippet } from '../lib/embed';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
@@ -63,6 +65,9 @@ export default function PromoteEvent() {
   const [shareOpen, setShareOpen] = useState(false);
   const [campaignName, setCampaignName] = useState('');
   const qrWrapRef = useRef<HTMLDivElement | null>(null);
+  // Paid tiers can't sell until the org's Stripe account can take payments.
+  const paymentsReady = useOrgPaymentsReady(event?.orgId);
+  const tierPrices = (event?.ticketTiers ?? []).map((t) => t.price);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,13 +183,13 @@ export default function PromoteEvent() {
               // Paid tickets can't sell until payments are on: don't say "on sale".
               const paid = (event.ticketTiers ?? []).some((t) => Number(t.price) > 0);
               const free = (event.ticketTiers ?? []).some((t) => !(Number(t.price) > 0));
-              const waiting = paid && !paymentsEnabled();
+              const waiting = paid && (!paymentsEnabled() || paidNeedsConnect(tierPrices, paymentsReady));
               return (
                 <>
                   <p className="disp text-3xl tracking-wide text-brand-primary leading-none mb-2">{waiting ? 'Published ✦' : "You're live ✦"}</p>
                   <p className="type text-white/70 text-sm">
                     {waiting
-                      ? `${event.title} is up${free ? ' and free tickets can be claimed now' : ''}. Paid tickets go on sale once payments are switched on. You can share the link already.`
+                      ? `${event.title} is up${free ? ' and free tickets can be claimed now' : ''}. Paid tickets go on sale once payments are ${paymentsEnabled() ? 'set up for your organization' : 'switched on'}. You can share the link already.`
                       : `${event.title} is on sale. Copy the link below and post it, or share the QR code at the venue.`}
                   </p>
                 </>
@@ -200,6 +205,11 @@ export default function PromoteEvent() {
         </div>
         <p className="type text-white/50 text-xs uppercase tracking-widest mb-2">{event.title}{dateLabel ? ` · ${dateLabel}` : ''}</p>
 
+        {published && (
+          <div className="mb-6">
+            <ConnectPaymentsNotice orgId={event.orgId} prices={tierPrices} ready={paymentsReady} />
+          </div>
+        )}
         {!published && (
           <div className="mb-8 p-4 border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-bold">
             This event is a {event.status || 'draft'}. The public link below won't work until you publish it

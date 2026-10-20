@@ -5,8 +5,9 @@
 //   1. Welcome — what Exos is, what an org gets.
 //   2. Create org — name + slug. Atomic batch via lib/orgs.
 //   3. Brand — logo + primary/accent. Optional, can defer.
-//   4. First event — explanatory copy + CTA into /create-event.
-//   5. Done — links to dashboard, /o/:slug storefront, embed snippet.
+//   4. Payments — Stripe Connect, so paid tiers can sell. Optional for free events.
+//   5. First event — explanatory copy + CTA into /create-event.
+//   6. Done — links to dashboard, /o/:slug storefront, embed snippet.
 //
 // Step state is held in the URL hash (#step=N) so a refresh resumes
 // where the user was. Completed-state persisted to localStorage so
@@ -15,12 +16,13 @@
 // signups.
 
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   Calendar,
   Check,
   ChevronRight,
+  CreditCard,
   Globe,
   Image as ImageIcon,
   Sparkles,
@@ -30,19 +32,28 @@ import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import {
   createOrganization,
+  isHexColor,
   isValidOrgSlug,
+  mergeOrgTheme,
   slugify,
   updateOrganization,
 } from '../lib/orgs';
 import { uploadOrgLogo } from '../lib/orgLogo';
+import { errMessage, isOrgHandleTaken, publicUrl } from '../lib/utils';
+import { paymentsEnabled } from '../lib/payments';
+import { startStripeOnboarding } from '../lib/checkout';
+import { useHandleAvailability } from '../hooks/useHandleAvailability';
+import { useOrgPaymentsReady } from '../hooks/useOrgPaymentsReady';
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
+const LAST_STEP = 6;
 const STEPS: { n: Step; title: string; subtitle: string }[] = [
   { n: 1, title: 'Welcome', subtitle: 'What Exos does for your venue' },
   { n: 2, title: 'Org', subtitle: 'Name your venue or promoter brand' },
   { n: 3, title: 'Brand', subtitle: 'Logo and colors for your storefront' },
-  { n: 4, title: 'Event', subtitle: 'Create your first listing' },
-  { n: 5, title: 'Done', subtitle: 'Where to go from here' },
+  { n: 4, title: 'Payments', subtitle: 'Connect Stripe to sell paid tickets' },
+  { n: 5, title: 'Event', subtitle: 'Create your first listing' },
+  { n: 6, title: 'Done', subtitle: 'Where to go from here' },
 ];
 
 const ONBOARDING_DONE_KEY = 'vibepass:onboarded';
@@ -57,7 +68,7 @@ export default function OrganizerOnboarding() {
   const [step, setStep] = useState<Step>(() => {
     const m = /step=(\d)/.exec(window.location.hash);
     const n = m ? parseInt(m[1], 10) : 1;
-    return (n >= 1 && n <= 5 ? n : 1) as Step;
+    return (n >= 1 && n <= LAST_STEP ? n : 1) as Step;
   });
 
   // Step 2 state (org create)
@@ -65,11 +76,20 @@ export default function OrganizerOnboarding() {
   const [orgSlug, setOrgSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [creatingOrg, setCreatingOrg] = useState(false);
+  const handleState = useHandleAvailability(orgSlug);
 
   // Step 3 state (theme)
   const [primary, setPrimary] = useState('#FFE714');
   const [accent, setAccent] = useState('#0A0A0A');
   const [savingTheme, setSavingTheme] = useState(false);
+  // The logo uploaded on this step: the org in context isn't refreshed after
+  // the upload, so "Save & Continue" must not write a theme without it.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const colorsValid = isHexColor(primary) && isHexColor(accent);
+
+  // Step 4 state (Stripe Connect)
+  const paymentsReady = useOrgPaymentsReady(activeOrg?.id);
+  const [openingStripe, setOpeningStripe] = useState(false);
 
   useEffect(() => {
     if (!slugManuallyEdited) setOrgSlug(slugify(orgName));
@@ -110,7 +130,7 @@ export default function OrganizerOnboarding() {
   }
 
   function goNext() {
-    if (step < 5) setStep((step + 1) as Step);
+    if (step < LAST_STEP) setStep((step + 1) as Step);
   }
   function goPrev() {
     if (step > 1) setStep((step - 1) as Step);
@@ -148,29 +168,36 @@ export default function OrganizerOnboarding() {
       toast({ kind: 'success', message: 'Org created.' });
       goNext();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create org';
-      if (/permission|denied|already/i.test(msg)) {
-        toast({ kind: 'error', message: `Slug "${orgSlug}" is taken.` });
-      } else {
-        toast({ kind: 'error', message: msg });
-      }
+      toast({
+        kind: 'error',
+        message: isOrgHandleTaken(err) ? `The handle "${orgSlug}" is taken. Try a different one.` : errMessage(err, 'Could not create the org. Try again.'),
+      });
     } finally {
       setCreatingOrg(false);
     }
   }
 
+  // Merged onto the org's theme (and this step's logo): updateOrganization
+  // writes the whole theme column.
+  function themeWith(patch: { logoUrl?: string; primaryColor?: string; accentColor?: string }) {
+    return mergeOrgTheme(activeOrg?.theme, { ...(logoUrl ? { logoUrl } : {}), ...patch });
+  }
+
   async function handleSaveTheme() {
     if (!activeOrg) return;
+    if (!colorsValid) {
+      toast({ kind: 'error', message: 'Colors must be hex values like #FFE714.' });
+      return;
+    }
     setSavingTheme(true);
     try {
       await updateOrganization(activeOrg.id, {
-        theme: { primaryColor: primary, accentColor: accent },
+        theme: themeWith({ primaryColor: primary, accentColor: accent }),
       });
       toast({ kind: 'success', message: 'Theme saved.' });
       goNext();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Save failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not save the theme.') });
     } finally {
       setSavingTheme(false);
     }
@@ -182,13 +209,35 @@ export default function OrganizerOnboarding() {
     if (!file) return;
     try {
       const url = await uploadOrgLogo(activeOrg.id, file);
+      // Colors only when valid; an invalid one is caught on Save & Continue.
       await updateOrganization(activeOrg.id, {
-        theme: { logoUrl: url, primaryColor: primary, accentColor: accent },
+        theme: themeWith({
+          logoUrl: url,
+          ...(isHexColor(primary) ? { primaryColor: primary } : {}),
+          ...(isHexColor(accent) ? { accentColor: accent } : {}),
+        }),
       });
+      setLogoUrl(url);
       toast({ kind: 'success', message: 'Logo uploaded.' });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not upload the logo.') });
+    }
+  }
+
+  async function handleConnectStripe() {
+    if (!activeOrg) return;
+    setOpeningStripe(true);
+    try {
+      // Back to the next step (first event) once Stripe is done.
+      const url = await startStripeOnboarding({
+        orgId: activeOrg.id,
+        returnUrl: publicUrl('onboarding#step=5'),
+        refreshUrl: publicUrl('onboarding#step=4'),
+      });
+      window.location.href = url;
+    } catch (err) {
+      toast({ kind: 'error', message: errMessage(err, "Couldn't open Stripe. Try again in a minute, or set it up later in Org Settings.") });
+      setOpeningStripe(false);
     }
   }
 
@@ -318,9 +367,15 @@ export default function OrganizerOnboarding() {
                   className="flex-1 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                 />
               </div>
-              <p className="text-slate-400 text-xs mt-1">
-                Your storefront URL — share this once you're set up.
-              </p>
+              {isValidOrgSlug(orgSlug) && handleState === 'taken' ? (
+                <p className="text-rose-500 text-xs mt-1 font-semibold">That handle is taken. Try a different one.</p>
+              ) : isValidOrgSlug(orgSlug) && handleState === 'available' ? (
+                <p className="text-emerald-600 text-xs mt-1 font-semibold">Available</p>
+              ) : (
+                <p className="text-slate-400 text-xs mt-1">
+                  Your storefront URL — share this once you're set up.
+                </p>
+              )}
             </div>
             <div className="flex justify-between pt-4">
               <button
@@ -342,7 +397,7 @@ export default function OrganizerOnboarding() {
                 )}
                 <button
                   type="submit"
-                  disabled={creatingOrg || !isValidOrgSlug(orgSlug)}
+                  disabled={creatingOrg || !isValidOrgSlug(orgSlug) || handleState === 'taken'}
                   className="px-8 py-3 bg-tm-blue text-white font-bold rounded hover:bg-[#015bbd] shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
                 >
                   {creatingOrg ? 'Creating…' : (
@@ -381,7 +436,9 @@ export default function OrganizerOnboarding() {
                     onChange={handleLogoUpload}
                     className="hidden"
                   />
-                  <p className="text-slate-400 text-xs mt-2">PNG, JPG, WebP, SVG. Max 2 MB. Skip for now if you don't have one ready.</p>
+                  <p className="text-slate-400 text-xs mt-2">
+                    {logoUrl ? 'Logo uploaded. ' : ''}PNG, JPG, WebP, SVG. Max 2 MB. Skip for now if you don't have one ready.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -397,8 +454,9 @@ export default function OrganizerOnboarding() {
                         maxLength={7}
                         className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
-                      <div className="w-10 h-10 rounded border border-slate-200" style={{ background: primary }} aria-hidden />
+                      <div className="w-10 h-10 rounded border border-slate-200" style={{ background: isHexColor(primary) ? primary : 'transparent' }} aria-hidden />
                     </div>
+                    {!isHexColor(primary) && <p className="text-rose-500 text-xs mt-1">Use a hex color like #FFE714.</p>}
                   </div>
                   <div>
                     <label htmlFor="ob-accent" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
@@ -413,8 +471,9 @@ export default function OrganizerOnboarding() {
                         maxLength={7}
                         className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:border-tm-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 transition-all"
                       />
-                      <div className="w-10 h-10 rounded border border-slate-200" style={{ background: accent }} aria-hidden />
+                      <div className="w-10 h-10 rounded border border-slate-200" style={{ background: isHexColor(accent) ? accent : 'transparent' }} aria-hidden />
                     </div>
+                    {!isHexColor(accent) && <p className="text-rose-500 text-xs mt-1">Use a hex color like #0A0A0A.</p>}
                   </div>
                 </div>
               </>
@@ -438,7 +497,7 @@ export default function OrganizerOnboarding() {
                 <button
                   type="button"
                   onClick={handleSaveTheme}
-                  disabled={savingTheme || !activeOrg}
+                  disabled={savingTheme || !activeOrg || !colorsValid}
                   className="px-8 py-3 bg-tm-blue text-white font-bold rounded hover:bg-[#015bbd] shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
                 >
                   {savingTheme ? 'Saving…' : (
@@ -453,6 +512,66 @@ export default function OrganizerOnboarding() {
         )}
 
         {step === 4 && (
+          <div className="space-y-5 text-slate-600">
+            {!paymentsEnabled() ? (
+              <p>
+                Paid ticketing isn't switched on yet. Free events, RSVPs and comps work now; you can
+                connect Stripe later in Org Settings → Payments.
+              </p>
+            ) : !activeOrg ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs text-yellow-700 font-bold uppercase tracking-widest">
+                No active org. Go back and create one first.
+              </div>
+            ) : paymentsReady ? (
+              <p className="text-emerald-700 font-semibold">Stripe is connected: you can sell paid tickets.</p>
+            ) : (
+              <>
+                <p>
+                  To sell paid tickets, connect a Stripe account. Ticket money goes to it, and Exos
+                  takes its fee. Stripe asks for your business and bank details; it takes a few minutes.
+                </p>
+                <p className="text-slate-500 text-sm">
+                  Only selling free tickets? Skip this. Until Stripe is connected, buyers can't pay for
+                  priced tiers. You can finish it any time in Org Settings → Payments.
+                </p>
+              </>
+            )}
+            <div className="flex justify-between pt-4">
+              <button
+                type="button"
+                onClick={goPrev}
+                className="px-6 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded hover:bg-slate-50 transition-all"
+              >
+                Back
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className="px-6 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded hover:bg-slate-50 transition-all"
+                >
+                  {paymentsReady || !paymentsEnabled() ? 'Continue' : 'Skip'}
+                </button>
+                {paymentsEnabled() && activeOrg && !paymentsReady && (
+                  <button
+                    type="button"
+                    onClick={handleConnectStripe}
+                    disabled={openingStripe}
+                    className="px-8 py-3 bg-tm-blue text-white font-bold rounded hover:bg-[#015bbd] shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {openingStripe ? 'Opening Stripe…' : (
+                      <>
+                        <CreditCard size={16} /> Connect Stripe
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 5 && (
           <div className="space-y-5 text-slate-600">
             <p>
               Your storefront is live. Now create your first event.
@@ -492,7 +611,7 @@ export default function OrganizerOnboarding() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="space-y-5 text-slate-600">
             <p>
               You're set up. Here's where to go from here.
@@ -572,13 +691,14 @@ function Tile({
     </>
   );
   if (href) {
+    // A router Link, so the /bridge base path is kept.
     return (
-      <a
-        href={href}
+      <Link
+        to={href}
         className="block bg-white rounded-xl border border-slate-200 hover:border-tm-blue p-4 transition-all"
       >
         {inner}
-      </a>
+      </Link>
     );
   }
   return <div className="bg-white rounded-xl border border-slate-200 p-4">{inner}</div>;

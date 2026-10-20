@@ -55,7 +55,7 @@ export function handleFirestoreError(
   toast?: ToastFn,
 ): void {
   const info: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: rawMessage(error) || String(error),
     authInfo: {
       // Intentionally narrowed — no email, displayName, etc. Sourced from the
       // Supabase current-user holder (lib/auth), the app's auth provider.
@@ -78,15 +78,49 @@ export function handleFirestoreError(
 }
 
 function friendlyMessage(error: unknown): string {
-  const msg = error instanceof Error ? error.message : String(error);
-  // Surface a couple of common Firestore failure modes in plain English.
-  if (/permission|insufficient/i.test(msg)) {
+  const msg = rawMessage(error);
+  // Surface a couple of common failure modes in plain English.
+  if (/permission|insufficient|row-level security/i.test(msg)) {
     return "You don't have permission to do that. Try signing in again.";
   }
-  if (/unavailable|network|offline/i.test(msg)) {
+  if (/unavailable|network|offline|Failed to fetch/i.test(msg)) {
     return 'Connection problem. Please check your internet and try again.';
   }
-  return 'Could not complete the request. Please try again.';
+  return errMessage(error, 'Could not complete the request. Please try again.');
+}
+
+// Supabase / PostgREST errors are plain objects ({ message, code, details }),
+// not `Error`s, so `err instanceof Error ? err.message : …` dropped every
+// server reason (slug taken, org limits, invite refusals).
+function rawMessage(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return '';
+}
+
+/** A unique violation on the org handle (exos_orgs.slug). */
+export function isOrgHandleTaken(e: unknown): boolean {
+  const x = (e && typeof e === 'object' ? e : {}) as { code?: string; message?: string; details?: string };
+  const text = `${x.message ?? ''} ${x.details ?? ''}`;
+  return x.code === '23505' && /exos_orgs_slug|\(slug\)/i.test(text) && !/exos_events/i.test(text);
+}
+
+/**
+ * The message to show for a failed call: the server's own reason (RPC prefix
+ * like "exos_create_org: " dropped), a few codes in plain words, else `fallback`.
+ */
+export function errMessage(e: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (isOrgHandleTaken(e)) return 'That handle is taken. Try a different one.';
+  const code = e && typeof e === 'object' ? (e as { code?: string }).code : undefined;
+  if (code === '42501') return "You don't have permission to do that.";
+  const msg = rawMessage(e).trim().replace(/^exos_[a-z0-9_]+:\s*/i, '');
+  if (!msg || /^\[object /.test(msg)) return fallback;
+  if (/non-2xx|FunctionsHttpError/i.test(msg)) return fallback;
+  if (/Failed to fetch|NetworkError/i.test(msg)) return 'Connection problem. Please check your internet and try again.';
+  if (code === '23505') return 'That is already in use. Try a different one.';
+  return msg.charAt(0).toUpperCase() + msg.slice(1);
 }
 
 /**

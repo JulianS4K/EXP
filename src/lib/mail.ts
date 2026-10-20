@@ -33,20 +33,25 @@ interface QueueOptions {
 
 /**
  * Best-effort enqueue of a transactional email via the exos_queue_mail RPC.
- * Never throws — the caller shouldn't wrap this in try/catch.
+ * Never throws — the caller shouldn't wrap this in try/catch. Resolves true
+ * only when the RPC queued (or already had) the mail, so a caller can tell
+ * the user whether it really went out.
  */
-export async function queueEmail(opts: QueueOptions): Promise<void> {
+export async function queueEmail(opts: QueueOptions): Promise<boolean> {
   try {
-    const { error } = await supabase.rpc('exos_queue_mail', {
+    const { data, error } = await supabase.rpc('exos_queue_mail', {
       p_template: opts.template,
       p_ref_id:   opts.refId ?? null,
     });
     if (error) {
       // Non-fatal: migration may not be applied yet, or ref lookup failed.
       console.warn('queueEmail failed (non-fatal):', error.message);
+      return false;
     }
+    return data != null;
   } catch (err) {
     console.warn('queueEmail failed (non-fatal):', err);
+    return false;
   }
 }
 

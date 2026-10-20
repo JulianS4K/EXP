@@ -14,12 +14,12 @@ import { motion } from 'motion/react';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
-import { publicUrl } from '../lib/utils';
+import { errMessage, publicUrl } from '../lib/utils';
 import { buildEmbedSnippet } from '../lib/embed';
 import { useToast } from '../context/ToastContext';
 import { getOrgCompUsage, setOrgCompBudget } from '../lib/comps';
 import { setS4kNetwork } from '../lib/marketplace/s4kNetwork';
-import { getOrganization, updateOrganization } from '../lib/orgs';
+import { getOrganization, isHexColor, updateOrganization } from '../lib/orgs';
 import { startStripeOnboarding } from '../lib/checkout';
 import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
@@ -34,10 +34,17 @@ import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
 
-// Hex-color validator — same shape as the ThemeContext sanitizer.
-// Mirrored here so we can give the user a fast field-level error
-// instead of a rule-rejection at save time.
-const HEX_COLOR = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+// Hex-color validator — same shape as the ThemeContext sanitizer, so the
+// user gets a fast field-level error instead of a rejection at save time.
+const HEX_COLOR = { test: isHexColor };
+
+// The fields "Save changes" writes, serialized to spot unsaved edits.
+type SavedFields = {
+  name: string; country: string; currency: string; primaryColor: string; accentColor: string;
+  marketing: NonNullable<Organization['marketing']>;
+};
+const snapshot = (f: SavedFields) => JSON.stringify(f);
+const UNSAVED_PROMPT = 'You have unsaved changes in org settings. Leave without saving?';
 
 // Light "TM" form vocabulary (matches the OrgSettings mockup).
 const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2';
@@ -86,6 +93,10 @@ export default function OrgSettings() {
   const [paymentsBusy, setPaymentsBusy] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // What was last loaded / saved; '' until the org loads.
+  const [savedSnap, setSavedSnap] = useState('');
+  const formSnap = snapshot({ name, country, currency, primaryColor, accentColor, marketing });
+  const dirty = savedSnap !== '' && formSnap !== savedSnap;
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +114,11 @@ export default function OrgSettings() {
         setAccentColor(o?.theme?.accentColor ?? '');
         setLogoUrl(o?.theme?.logoUrl ?? null);
         setMarketing(o?.marketing ?? {});
+        setSavedSnap(snapshot({
+          name: o?.name ?? '', country: o?.country ?? 'US', currency: o?.currency ?? 'USD',
+          primaryColor: o?.theme?.primaryColor ?? '', accentColor: o?.theme?.accentColor ?? '',
+          marketing: o?.marketing ?? {},
+        }));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -112,6 +128,17 @@ export default function OrgSettings() {
       cancelled = true;
     };
   }, [orgId]);
+
+  // Closing or reloading the tab with unsaved edits: the browser asks first.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
 
   if (!user) {
     return (
@@ -146,6 +173,11 @@ export default function OrgSettings() {
   // the form is only enabled for owners. Not platform admins: RLS and the
   // integration RPCs give them no write path, so their saves changed nothing.
   const canEdit = activeRole === 'owner';
+  // Tabs and "All organizations" leave the page: ask before dropping edits.
+  const leave = (path: string) => {
+    if (dirty && canEdit && !window.confirm(UNSAVED_PROMPT)) return;
+    navigate(path);
+  };
   // Paid ticketing is gated on the Stripe publishable key — the Connect
   // onboarding backend (exos-connect-onboard) is built but dormant until set.
   const stripeEnabled = paymentsEnabled();
@@ -163,12 +195,9 @@ export default function OrgSettings() {
     } catch (err: unknown) {
       console.error('Stripe onboarding failed:', err);
       // The edge function's raw "non-2xx" message means nothing to an organizer.
-      const raw = err instanceof Error ? err.message : '';
       toast({
         kind: 'error',
-        message: !raw || /non-2xx|Failed to fetch|FunctionsHttpError/i.test(raw)
-          ? "Couldn't open Stripe. Try again in a minute; if it keeps failing, contact support."
-          : raw,
+        message: errMessage(err, "Couldn't open Stripe. Try again in a minute; if it keeps failing, contact support."),
       });
     } finally {
       setPaymentsBusy(false);
@@ -198,10 +227,12 @@ export default function OrgSettings() {
     }
     setSaving(true);
     try {
-      // Build the theme block conditionally — Firestore rejects undefined
-      // values on update. We send the full theme object so cleared
-      // fields are removed from the doc, not just left stale.
-      const theme: NonNullable<Organization['theme']> = {};
+      // The full theme object is written, so cleared colors are removed, not
+      // left stale; keys this form doesn't edit (customDomain) are kept.
+      const theme: NonNullable<Organization['theme']> = { ...(org.theme ?? {}) };
+      delete theme.primaryColor;
+      delete theme.accentColor;
+      delete theme.logoUrl;
       if (primaryColor) theme.primaryColor = primaryColor;
       if (accentColor) theme.accentColor = accentColor;
       if (logoUrl) theme.logoUrl = logoUrl;
@@ -212,10 +243,11 @@ export default function OrgSettings() {
         theme,
         marketing,
       });
+      setOrg({ ...org, name: name.trim(), country, currency, theme, marketing });
+      setSavedSnap(formSnap);
       toast({ kind: 'success', message: 'Saved.' });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Save failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not save. Try again.') });
     } finally {
       setSaving(false);
     }
@@ -236,14 +268,13 @@ export default function OrgSettings() {
       // any field. Empty-string colors mean "use the default" so we just
       // omit the key entirely, which lets the theme inherit from prior
       // saves (or fall through to platform defaults).
-      const theme: NonNullable<Organization['theme']> = { logoUrl: url };
-      if (primaryColor) theme.primaryColor = primaryColor;
-      if (accentColor) theme.accentColor = accentColor;
+      // The saved colors (not unsaved edits) ride along, as do other keys.
+      const theme: NonNullable<Organization['theme']> = { ...(org.theme ?? {}), logoUrl: url };
       await updateOrganization(org.id, { theme });
+      setOrg({ ...org, theme });
       toast({ kind: 'success', message: 'Logo uploaded.' });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not upload the logo.') });
     } finally {
       setUploadingLogo(false);
       // Reset the input so re-selecting the same file fires onChange.
@@ -261,15 +292,59 @@ export default function OrgSettings() {
 
   const previewColor = HEX_COLOR.test(primaryColor) ? primaryColor : '#00FF00';
 
+  // Payments sits in the sidebar on desktop; on a phone the sidebar comes
+  // after every other card, so the same card also leads the page there.
+  const paymentsCard = (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <h2 className={`${SECTION} mb-3`}>Payments</h2>
+      <p className="text-xs text-slate-400 mb-4">
+        Connect Stripe to sell paid tickets — payouts go to your account and the
+        platform takes a fee. Free events need nothing here.
+      </p>
+      {stripeEnabled ? (() => {
+        // Where Stripe Connect is: not started, details still owed,
+        // taking payments, payouts on (stripe-webhook keeps these).
+        const p = org.payments ?? {};
+        const state = !p.connectedAccountId ? 'none' : !p.chargesEnabled ? 'pending' : !p.payoutsEnabled ? 'charges' : 'live';
+        const label = { none: 'Set up payments', pending: 'Finish Stripe setup', charges: 'Update Stripe details', live: 'Update Stripe details' }[state];
+        const note = {
+          none: null,
+          pending: 'Stripe still needs some details before you can take payments.',
+          charges: 'Taking payments. Payouts start once Stripe has verified your bank details.',
+          live: 'Taking payments and paying out to your bank.',
+        }[state];
+        return (
+          <>
+            {note && (
+              <p className={`text-xs mb-3 ${state === 'pending' ? 'text-amber-600' : 'text-emerald-600'}`}>{note}</p>
+            )}
+            <button
+              type="button"
+              onClick={handleSetupPayments}
+              disabled={!canEdit || paymentsBusy}
+              className="w-full border border-slate-200 rounded py-2.5 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:border-tm-blue hover:text-tm-blue transition-colors disabled:opacity-50"
+            >
+              {paymentsBusy ? 'Opening Stripe…' : label}
+            </button>
+          </>
+        );
+      })() : (
+        <p className="text-[10px] text-slate-400 uppercase tracking-widest">
+          Paid ticketing isn't enabled yet — coming soon.
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-tm-gray text-slate-900"
     >
-      <div className="max-w-5xl mx-auto px-4 py-10">
+      <div className={`max-w-5xl mx-auto px-4 py-10 ${dirty && canEdit ? 'pb-28' : ''}`}>
         <button
-          onClick={() => navigate('/orgs')}
+          onClick={() => leave('/orgs')}
           className="flex items-center gap-1.5 text-slate-500 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-6 transition-colors"
         >
           <ArrowLeft size={14} strokeWidth={2.5} /> All organizations
@@ -299,20 +374,20 @@ export default function OrgSettings() {
         <div className="flex flex-wrap gap-x-4 md:gap-x-6 border-b border-slate-200 mb-8 whitespace-nowrap">
           <button className="pb-3 text-sm font-bold text-slate-900 border-b-2 border-tm-blue -mb-px">General</button>
           <button
-            onClick={() => navigate(`/orgs/${org.id}/members`)}
+            onClick={() => leave(`/orgs/${org.id}/members`)}
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >
             Members
           </button>
           <button
-            onClick={() => navigate(`/orgs/${org.id}/flags`)}
+            onClick={() => leave(`/orgs/${org.id}/flags`)}
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >
             Limit flags
           </button>
           {canSeeMoney(activeRole, isAdmin) && (
             <button
-              onClick={() => navigate(`/orgs/${org.id}/payouts`)}
+              onClick={() => leave(`/orgs/${org.id}/payouts`)}
               className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
             >
               Payouts
@@ -328,6 +403,8 @@ export default function OrgSettings() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
+            <div className="lg:hidden">{paymentsCard}</div>
+
             {/* Profile */}
             <div className={CARD}>
               <h2 className={`${SECTION} mb-6`}>Profile</h2>
@@ -608,46 +685,8 @@ export default function OrgSettings() {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Payments */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-              <h2 className={`${SECTION} mb-3`}>Payments</h2>
-              <p className="text-xs text-slate-400 mb-4">
-                Connect Stripe to sell paid tickets — payouts go to your account and the
-                platform takes a fee. Free events need nothing here.
-              </p>
-              {stripeEnabled ? (() => {
-                // Where Stripe Connect is: not started, details still owed,
-                // taking payments, payouts on (stripe-webhook keeps these).
-                const p = org.payments ?? {};
-                const state = !p.connectedAccountId ? 'none' : !p.chargesEnabled ? 'pending' : !p.payoutsEnabled ? 'charges' : 'live';
-                const label = { none: 'Set up payments', pending: 'Finish Stripe setup', charges: 'Update Stripe details', live: 'Update Stripe details' }[state];
-                const note = {
-                  none: null,
-                  pending: 'Stripe still needs some details before you can take payments.',
-                  charges: 'Taking payments. Payouts start once Stripe has verified your bank details.',
-                  live: 'Taking payments and paying out to your bank.',
-                }[state];
-                return (
-                  <>
-                    {note && (
-                      <p className={`text-xs mb-3 ${state === 'pending' ? 'text-amber-600' : 'text-emerald-600'}`}>{note}</p>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleSetupPayments}
-                      disabled={!canEdit || paymentsBusy}
-                      className="w-full border border-slate-200 rounded py-2.5 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:border-tm-blue hover:text-tm-blue transition-colors disabled:opacity-50"
-                    >
-                      {paymentsBusy ? 'Opening Stripe…' : label}
-                    </button>
-                  </>
-                );
-              })() : (
-                <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-                  Paid ticketing isn't enabled yet — coming soon.
-                </p>
-              )}
-            </div>
+            {/* Payments (on a phone it leads the main column instead). */}
+            <div className="hidden lg:block">{paymentsCard}</div>
 
             {/* Comp budget (owner) — cap on free comps issued via the guest-list
                 batch / box-office paths. Enforced server-side per batch. */}
@@ -671,6 +710,24 @@ export default function OrgSettings() {
           </div>
         </div>
       </div>
+
+      {/* Unsaved edits to the cards "Save changes" covers (profile, theme,
+          marketing): a bar that stays on screen while scrolling. The other
+          cards save on their own buttons. */}
+      {dirty && canEdit && (
+        <div role="status" className="fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
+          <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+            <p className="text-xs font-bold text-slate-700">Unsaved changes (profile, theme, marketing)</p>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-tm-blue text-white px-6 py-2.5 rounded font-bold text-sm hover:bg-[#015bbd] shadow-sm transition-colors disabled:opacity-50 shrink-0"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -691,7 +748,7 @@ function S4kNetworkCard({ orgId, initial, canEdit }: { orgId: string; initial: b
       setOn(next);
       toast({ kind: 'success', message: next ? 'Joined the S4K network. Pick S4K per event under Marketplaces.' : 'Left the S4K network. Your events are back to listing directly.' });
     } catch (err) {
-      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Not saved.' });
+      toast({ kind: 'error', message: errMessage(err, 'Not saved.') });
     } finally {
       setSaving(false);
     }
@@ -765,7 +822,7 @@ function CompBudgetCard({ orgId, initial, canEdit }: { orgId: string; initial: n
       await setOrgCompBudget(orgId, value);
       toast({ kind: 'success', message: value === null ? 'Comp budget cleared (unlimited).' : `Comp budget set to ${value}.` });
     } catch (err) {
-      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not save the comp budget.' });
+      toast({ kind: 'error', message: errMessage(err, 'Could not save the comp budget.') });
     } finally {
       setSaving(false);
     }

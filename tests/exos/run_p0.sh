@@ -117,6 +117,7 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261020110000_exos_channel_shared_count \
          20261020120000_exos_payout_failure_recovery \
          20261021100000_exos_buyer_p1 \
+         20261021110000_exos_organizer_p1 \
          20261021140000_exos_growth_p1 \
          20261021150000_exos_org_lifecycle_p1; do
   $PSQL -f "$MIG/$m.sql"
@@ -259,6 +260,7 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261020110000_exos_channel_shared_count \
          20261020120000_exos_payout_failure_recovery \
          20261021100000_exos_buyer_p1 \
+         20261021110000_exos_organizer_p1 \
          20261021140000_exos_growth_p1 \
          20261021150000_exos_org_lifecycle_p1; do
   $PSQL -f "$MIG/$m.sql"
@@ -303,3 +305,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_growth_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_lifecycle_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_organizer_p1.sql"
