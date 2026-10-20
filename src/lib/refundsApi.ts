@@ -4,6 +4,7 @@
 
 import { supabase } from './supabase';
 import type { RefundOrder, RefundPreview, TicketSelection } from './refunds';
+import { fetchAllPages } from './door/roster';
 
 // Server calls
 
@@ -138,4 +139,26 @@ export async function refundEventBatch(input: {
     nextAfter: out?.next_after ?? null,
     done: out?.done !== false,
   };
+}
+
+/** Tickets on this event with a succeeded Stripe refund line (the event report
+ *  badges a void "refunded" only then). Staff RLS: owner / manager / finance
+ *  see rows; anyone else gets an empty set, so voids read "voided". */
+export async function listRefundedTicketIds(eventId: string): Promise<Set<string>> {
+  const rows = await fetchAllPages<{ request_id: string; ticket_id: string }>(
+    async (from, to) => {
+      const { data, error } = await supabase
+        .from('exos_refund_request_items')
+        .select('request_id, ticket_id, exos_refund_requests!inner(status, event_id)')
+        .eq('exos_refund_requests.event_id', eventId)
+        .eq('exos_refund_requests.status', 'succeeded')
+        .order('request_id', { ascending: true })
+        .order('ticket_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return (data as any[]) ?? [];
+    },
+    (r) => `${r.request_id}:${r.ticket_id}`,
+  );
+  return new Set(rows.map((r) => String(r.ticket_id)));
 }
