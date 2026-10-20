@@ -61,6 +61,9 @@ paid once (`UNIQUE (order_id, kind)`).
 
 Payout states: `planned` → `sending` → `sent` (with the Stripe transfer id) or `failed` → `planned` (retry).
 `exos_cancel_org_payout` cancels a planned or failed payout and frees its orders.
+The next plan folds a failed payout's orders (and clawbacks) into a new payout and cancels the failed one; each
+org is planned on its own, so one org's error is reported (`plan_errors`) without stopping the rest
+(`20261020120000`).
 
 `exos-payouts` (cron, `x-cron-secret`) does, each run:
 
@@ -72,7 +75,8 @@ Payout states: `planned` → `sending` → `sent` (with the Stripe transfer id) 
    of its orders was cancelled after planning.
 
 **Dry-run by default.** Money only moves when `EXOS_PAYOUTS_LIVE=true`; until then a run reports what it would send.
-A payout left in `sending` by a crash is safe to resend: Stripe dedupes on the idempotency key.
+A payout left in `sending` by a crash (or by a transfer whose outcome is unknown) is resent after 15 minutes with the
+same idempotency key, once Stripe shows no transfer in its transfer group. Only a transfer Stripe refused is `failed`.
 
 ## Operator setup
 
