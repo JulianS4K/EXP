@@ -283,12 +283,12 @@ await run('org settings: a bad Meta pixel id blocks save', async (page, log) => 
   const meta = page.getByLabel('Meta Pixel');
   await meta.fill('12ab');
   await expectText(page, 'Should look like 123456789012345');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).first().click();
   await expectText(page, 'Fix the pixel ids marked in red');
   assert(!log.some((l) => l.startsWith('PATCH exos_orgs')), 'nothing saved with a bad id');
   await meta.fill('123456789012345');
   assert(await page.getByText('Should look like 123456789012345').count() === 0, 'error clears');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).first().click();
   await expectText(page, 'Saved.');
   const patch = log.find((l) => l.startsWith('PATCH exos_orgs'));
   assert(patch && patch.includes('"meta":"123456789012345"'), 'saved the pixel: ' + patch);
