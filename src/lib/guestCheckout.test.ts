@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { clientIp, hashIp, normalizeGuestEmail } from '../../supabase/functions/_shared/guest.ts';
-import { guestCheckoutAllowed, isGuestEmail } from './guestCheckout';
+import { guestCheckoutAllowed, isGuestEmail, signedOutBuyRoute } from './guestCheckout';
 
 describe('normalizeGuestEmail', () => {
   it('trims and lower-cases', () => {
@@ -48,5 +48,28 @@ describe('SPA guest rules', () => {
     expect(guestCheckoutAllowed({ maxPerOrder: 4 } as { guestCheckout?: boolean })).toBe(true);
     expect(guestCheckoutAllowed({ guestCheckout: true })).toBe(true);
     expect(guestCheckoutAllowed({ guestCheckout: false })).toBe(false);
+  });
+});
+
+describe('signedOutBuyRoute', () => {
+  const base = { waitingCode: null, tierId: 't1', paid: true, stripeEnabled: true, guestAllowed: true };
+  it('a code waiting for sign-in asks the buyer, never a full-price guest checkout', () => {
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20' })).toBe('code-choice');
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20', paid: false })).toBe('code-choice');
+    // No guest checkout to fall back on: sign in, keeping the code.
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20', guestAllowed: false })).toBe('sign-in-code');
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20', stripeEnabled: false })).toBe('sign-in-code');
+  });
+  it('"continue without the code" goes on as a guest', () => {
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20', skipCode: true })).toBe('guest-paid');
+    expect(signedOutBuyRoute({ ...base, waitingCode: 'EARLY20', skipCode: true, paid: false })).toBe('guest-free');
+  });
+  it('no code: guest checkout when allowed, otherwise sign in', () => {
+    expect(signedOutBuyRoute(base)).toBe('guest-paid');
+    expect(signedOutBuyRoute({ ...base, paid: false })).toBe('guest-free');
+    expect(signedOutBuyRoute({ ...base, guestAllowed: false })).toBe('sign-in');
+    expect(signedOutBuyRoute({ ...base, stripeEnabled: false })).toBe('sign-in');
+    expect(signedOutBuyRoute({ ...base, stripeEnabled: false, paid: false })).toBe('guest-free');
+    expect(signedOutBuyRoute({ ...base, tierId: null })).toBe('sign-in');
   });
 });

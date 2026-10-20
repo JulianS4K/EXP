@@ -8,6 +8,9 @@
 // Apply, or arrives on a link carrying a code, is asked to sign in (the
 // emailed 6-digit code keeps them on this page) and the code is applied as
 // soon as they are. This keeps code guessing on the per-account throttle.
+// The code waiting for sign-in is reported up (onWaitingChange) so Buy can ask
+// "sign in to use it" or "continue without it" instead of a guest checkout at
+// full price.
 
 import { useEffect, useRef, useState } from 'react';
 import { Ticket, Check } from 'lucide-react';
@@ -33,9 +36,11 @@ interface Props {
   onApplied: (applied: AppliedVoucher | null) => void;
   /** A code from a checkout link; checked once on mount. */
   initialCode?: string;
+  /** Signed out: the code entered (typed or from a link) that needs sign-in, or null. */
+  onWaitingChange?: (code: string | null) => void;
 }
 
-export default function VoucherField({ eventId, email, onApplied, initialCode }: Props) {
+export default function VoucherField({ eventId, email, onApplied, initialCode, onWaitingChange }: Props) {
   const { toast } = useToast();
   const { user, openAuth } = useAuth();
   const [code, setCode] = useState(initialCode ?? '');
@@ -86,14 +91,22 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCode]);
 
+  // On sign-in: the waiting code, or one typed but not applied yet (Buy's
+  // "sign in to use code X" counts on it being applied).
   useEffect(() => {
-    if (!user || !pendingCode || appliedCode) return;
-    const c = pendingCode;
+    const c = pendingCode ?? (code.trim() || null);
+    if (!user || !c || appliedCode) return;
     setPendingCode(null);
     autoApplied.current = true;
     void apply(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  const waiting = !user && !appliedCode ? (pendingCode ?? code).trim() || null : null;
+  useEffect(() => {
+    onWaitingChange?.(waiting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting]);
 
   if (appliedCode) {
     return (
@@ -105,7 +118,8 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
   }
 
   return (
-    <div className="mb-4 flex items-center gap-2">
+    <div className="mb-4">
+    <div className="flex items-center gap-2">
       <div className="relative flex-1">
         <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
         <input
@@ -125,9 +139,10 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
       >
         {busy ? '…' : user ? 'Apply' : 'Sign in to apply'}
       </button>
-      {!user && pendingCode && (
-        <span className="sr-only" role="status">Sign in to use the code {pendingCode}.</span>
-      )}
+    </div>
+      <p role="status" className="mt-2 text-[11px] text-white/60 leading-relaxed empty:hidden">
+        {!user && pendingCode ? `Sign in to use the code ${pendingCode}. Without it you pay the full price.` : ''}
+      </p>
     </div>
   );
 }
