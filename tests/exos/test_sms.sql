@@ -136,6 +136,10 @@ DECLARE r record; n int := 0; v_c2 uuid := (current_setting('sm.c2')::jsonb->>'c
 BEGIN
   -- c1 is next week (not due); c2 and c3 are due now (for b1). A due row for b2,
   -- who opts out after it was queued, must be skipped at claim time.
+  -- c2 and c3 were created "now", which quiet hours push to 9:00 New York when the
+  -- suite runs at night; make them due so this block doesn't depend on the clock.
+  UPDATE public.exos_sms_outbox SET send_after = now()
+  WHERE campaign_id IN (v_c2, (current_setting('sm.c3')::jsonb->>'campaign_id')::uuid);
   INSERT INTO public.exos_sms_outbox(campaign_id, org_id, phone, body, send_after)
   VALUES ((current_setting('sm.c3')::jsonb->>'campaign_id')::uuid, pg_temp.u('000000000001'), '+12125550102', 'x Reply STOP', now());
   UPDATE public.exos_sms_subscribers SET opted_out_at = now() WHERE phone = '+12125550102';
