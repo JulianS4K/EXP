@@ -99,6 +99,11 @@ Go to market:
       RA (if it takes outside ticket links).
 - [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).
 - [ ] Decide on the 18 paused partner-outreach drafts in Gmail.
+- [ ] Public-sector RFPs as a parallel track (readiness list: "Public-sector RFP readiness" below;
+      `docs/gtm-nyc.md` "Public-sector RFPs"):
+  - [ ] Set up bid alerts before the next wave: fairs (Dec–Apr) and colleges (Jan–Mar), on 3–5 year terms.
+  - [ ] Shortlist 1–2 target bids and read their pass/fail lines; un-park only the readiness items those bids require.
+  - [ ] Finish the PCI operator steps (readiness item 2); every ticketing RFP asks for it.
 
 ## Next to build (2026-10-13, pick order)
 

@@ -38,6 +38,21 @@ sell to, what we say, and how we measure it.
 events (we only list events at venues that are licensed or permitted to host them); resale-only
 sellers.
 
+### Public-sector RFPs (a parallel track)
+
+Fairs, colleges, parks departments and public venues buy ticketing through RFPs on 3–5 year terms.
+Few are open at any time; the next wave is fairs (December to April) and colleges (January to March).
+One win is years of events, but the bids have pass/fail lines that indie promoters never ask for.
+
+- **Watch:** set bid alerts on state and city procurement portals and the bid aggregators for
+  "ticketing" and "event ticketing" before each wave opens.
+- **Pick, don't spray:** shortlist 1 or 2 bids a wave whose requirements we already meet or can meet
+  in time, and read each one's pass/fail lines before writing anything.
+- **Readiness:** PCI is done on the code side; the operator steps, insurance, a VPAT, a security
+  packet, reserved seating and SOC 2 are listed in `KANBAN.md` "Public-sector RFP readiness". Un-park
+  an item only when a target bid makes it pass/fail.
+- **Reference:** the NYC indie events count as references in a bid, so the indie wedge comes first.
+
 ## The pitch
 
 > Your buyers see one price, the one they pay. You keep your fans' data. Doors keep scanning when
