@@ -99,6 +99,57 @@ Go to market:
       RA (if it takes outside ticket links).
 - [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).
 - [ ] Decide on the 18 paused partner-outreach drafts in Gmail.
+- [ ] Public-sector RFPs as a parallel track (readiness list: "Public-sector RFP readiness" below;
+      `docs/gtm-nyc.md` "Public-sector RFPs"):
+  - [ ] Set up bid alerts before the next wave: fairs (Dec–Apr) and colleges (Jan–Mar), on 3–5 year terms.
+  - [ ] Shortlist 1–2 target bids and read their pass/fail lines; un-park only the readiness items those bids require.
+  - [ ] Finish the PCI operator steps (readiness item 2); every ticketing RFP asks for it.
+
+## Passes and memberships 2026-10-23 (scope; replaces the backlog line "Season packages / memberships")
+
+Why: bar revenue is falling, and venues are moving to revenue per fan. Memberships and season passes give them
+predictable income, and Opendate shipped Season Passes + Flex Packs in September. Exos sells one event at a time.
+
+Reference: pretix `src/pretix/base/models/memberships.py` (`MembershipType`, `Membership`) and the item fields in
+`models/items.py` (`require_membership`, `require_membership_types`, `require_membership_hidden`,
+`grant_membership_type`, `grant_membership_duration_*`). Usage is counted from order positions that used the
+membership. hi.events has no equivalent. Borrow the model, write our own code (AGPL).
+
+Naming: `exos_org_memberships` already means org staff roles, so these are **passes**: `exos_pass_types`,
+`exos_passes`, `exos_pass_uses`.
+
+**v1: passes bought once (no recurring billing)**
+1. `exos_pass_types` (org-scoped): name, price, kind (`season`: fixed dates or an `exos_event_series`; `flex`:
+   N entries; `membership`: N days from purchase), `max_uses` (null = unlimited), `transferable`,
+   `allow_parallel` (two events at the same start time), the perk (free entry, or % off), the eligible ticket
+   tiers or events, and a members-only presale window.
+2. `exos_passes`: holder (`exos_profiles`), type, `starts_at` / `ends_at`, `cancelled`, test mode, the order that
+   granted it. Sold through the existing checkout as a non-event product (Stripe `payment` mode, so SAQ A holds).
+3. Redeem at checkout: a holder picks an event; an eligible tier is priced at 0 (or the % off) and mints a normal
+   ticket through `exos_mint_tickets`, so quotas, holds, transfers, the Door app and the rotating barcode work
+   unchanged. `exos_pass_uses` links pass and ticket. Check uses left, validity on the event date and parallel use
+   inside the same transaction as the mint; a cancelled ticket gives the use back.
+4. Members-only tiers: a tier can require a pass type, and can be hidden unless the buyer holds one (pretix's
+   `require_membership_hidden`).
+5. Organizer screens: pass types editor, pass holders list (uses left, expiry), CSV export, revenue on the event
+   report and the Money summary.
+6. Fan side: the pass in the wallet with uses left; "use my pass" on eligible events.
+7. SQL harness: overuse, expiry, parallel use, cancel-returns-use, members-only tiers, a concurrent double redeem.
+
+**v2: recurring memberships**
+- Monthly / yearly billing with Stripe Billing on the org's connected account (Checkout `subscription` mode,
+  `application_fee_percent`), renewals extend `ends_at`, failed payments pause the pass, cancel from the fan side.
+- Member perks beyond entry: drink credit (needs the Phase 3 POS), guest passes, members' nights.
+- Member messaging through the existing mail / SMS audiences.
+
+**Decisions only the operator can make**
+- Exos fee on a pass sale (5% like tickets?) and on redemptions (0?).
+- Refunds: none after first use, or pro rata?
+- Sales tax on passes and memberships in NY (counsel; same opinion as admissions in `docs/gtm-nyc.md`).
+- Deferred revenue: a pass is earned as it's used, so it needs the Money journal (Next to build item 4).
+
+**Done when:** one venue sells a season pass or flex pack, holders redeem across 3+ events with no overuse, and the
+pass revenue reconciles to Stripe.
 
 ## Next to build (2026-10-13, pick order)
 
@@ -1175,7 +1226,7 @@ indie-primary + secondary-market positioning. `[ ]` = not started,
   slot; daily/recurring admissions. *(Most modern platforms.)* We're
   single-date only.
 - `[ ]` **Season packages / memberships / multi-event bundles.** *(TM,
-  AXS, SeatGeek.)* Single-event only today.
+  AXS, SeatGeek.)* Single-event only today. Scoped 2026-10-23: see "Passes and memberships" near the top.
 - `[ ]` **Box office / POS** — in-person sale, card reader, cash,
   physical ticket stock printing. *(OpenDate, AXS venues.)* Online-only.
 - `[ ]` **Booking + artist settlement** — holds/offers calendar, deal
