@@ -6,7 +6,7 @@ import { AppUser, toAppUser, isAdminUser, setCurrentAppUser } from '../lib/auth'
 import { doorKV, forgetDoorCipher } from '../lib/door/kv';
 import { wipeDoorRosters } from '../lib/door/roster';
 import { signOutWarning } from '../lib/door/health';
-import { pendingScanCount } from '../lib/offlineCheckins';
+import { pendingScanCount, signOutWipeKeys } from '../lib/offlineCheckins';
 import AuthModal, { type AuthView } from '../components/AuthModal';
 
 interface AuthContextType {
@@ -133,14 +133,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // The door scanner caches every ticket's barcode secret + attendee names
     // for offline use, and ticket pages keep their last copy (lib/passCache,
     // registry_pass_*); never leave that on a shared device after sign-out.
-    // pending_updates_* (ticket ids only) stays so unsynced check-ins replay.
+    // Guest lists (doorextras_*) go too. pending_updates_* / guest_pending_*
+    // (queued uploads) stay so unsynced check-ins replay.
     try {
-      const keys: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('registry_')) keys.push(k);
-      }
-      keys.forEach((k) => localStorage.removeItem(k));
+      signOutWipeKeys(localStorage).forEach((k) => localStorage.removeItem(k));
     } catch {
       /* storage unavailable */
     }

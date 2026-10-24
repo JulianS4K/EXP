@@ -164,7 +164,7 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 | `exos_wallet_passes` | holder: `SELECT` of own rows, without `auth_token_hash`; no client writes |
 | `exos_wallet_registrations` | service role only |
 | `exos_wallet_issue_pass`, `exos_wallet_reissue` | `authenticated`; the caller must own the ticket |
-| `exos_wallet_pass_payload`, `exos_wallet_fetch_pass`, `exos_wallet_register_device`, `exos_wallet_unregister_device`, `exos_wallet_updated_serials`, `exos_wallet_push_queue`, `exos_wallet_push_done`, `exos_wallet_drop_push_tokens` | service role only; the PassKit ones check the ApplePass token |
+| `exos_wallet_pass_payload`, `exos_wallet_fetch_pass`, `exos_wallet_register_device`, `exos_wallet_unregister_device`, `exos_wallet_updated_serials`, `exos_wallet_push_queue`, `exos_wallet_push_done`, `exos_wallet_google_done`, `exos_wallet_drop_push_tokens` | service role only; the PassKit ones check the ApplePass token |
 | `_exos_wallet_*` helpers | nobody (called from SECURITY DEFINER functions) |
 
 ## Routes (`exos-wallet`)

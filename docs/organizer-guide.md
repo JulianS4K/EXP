@@ -20,10 +20,12 @@ Needs a signed-in account. Buying or holding tickets also needs a **confirmed em
 | Role | Can |
 |---|---|
 | owner | everything, including payments and the comp budget |
-| manager | events, comps, waitlist, reminders, releases |
-| finance | analytics and money reports |
+| manager | events, comps, waitlist, reminders, releases, money reports and refunds |
+| finance | analytics, money reports, refunds, voids, recording promoter payouts |
 | scanner | door check-in and the offline roster |
-| content | copy and media |
+| content | read-only for now (can't create or edit events) |
+
+The full matrix on the Team page comes from `src/lib/orgRoles.ts`, which a test checks against the RLS policies and RPCs.
 
 ## 2. Get paid (`/orgs/:orgId/settings`)
 
@@ -230,8 +232,8 @@ Fans opt in from their ticket ("Get texts about … next events"), with the cons
    send now or schedule.
 
 Exos adds your org's name and "Reply STOP to opt out" to every text, sends only 9:00 to 20:00 (event time), at most
-8 texts per person per month, and never to someone who replied STOP. On a fresh install sending stays off (dry run)
-until the operator switches it on.
+8 texts per person per month (dry-run tests don't count), and never to someone who replied STOP. On a fresh install
+sending stays off (dry run) until the operator switches it on.
 
 ## 5. At the door (`/checkin/:eventId`)
 
@@ -319,7 +321,8 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   (every 2 minutes, or **Sync now** under Edit event → Also sell on). Edit in Exos, not on Eventbrite: a change made
   directly there is replaced by the next change in Exos.
 - **One count**: Eventbrite's sales come off the Exos ticket types, and Eventbrite's capacity is kept at what Exos
-  has free (less one order's worth, the buffer for the sync's lag). Its buyers are on the door list with their QR codes.
+  has free (less one order's worth, the buffer for the sync's lag). With Luma on too, the two split what is free, each
+  less its own order's worth. Its buyers are on the door list with their QR codes.
 - Already have the event on Eventbrite? Under **Also sell on**, paste its link instead: Exos takes it over and adds
   any ticket types it is missing.
 - Cancelling in Exos cancels it on Eventbrite (Eventbrite refuses once it has orders: cancel and refund there).

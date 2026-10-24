@@ -39,7 +39,8 @@
 //   apart from the attendee cadence) and after Sync now: read the ticket
 //   classes, count Eventbrite sales against Exos (exos_eventbrite_inventory_apply), then set
 //   each class's capacity to its target with _shared/eventbrite/writer.ts,
-//   the one write Exos makes there. Dry run (plan recorded only) unless the
+//   the one write Exos makes there (a class Exos created is hidden at 0,
+//   mig 20261020110000). Dry run (plan recorded only) unless the
 //   org's switch AND EXOS_EVENTBRITE_WRITES=on.
 //
 // The user routes take the Supabase JWT in Authorization and verify it here;
@@ -62,7 +63,7 @@ import {
   type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listTicketClasses,
   listUpcomingEvents, readEvent, type SyncOutcome, syncLink, unshareableReason, whoAmI,
 } from "../_shared/eventbrite/client.ts";
-import { planCapacity, planRecord, sendCapacity, writesLive } from "../_shared/eventbrite/writer.ts";
+import { type ClassState, planCapacity, planRecord, sendCapacity, writesLive } from "../_shared/eventbrite/writer.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Wall-clock budget for one cron run (the platform limit is higher). */
@@ -314,9 +315,8 @@ type InventoryOutcome = { classes: number; sent: number; planned: number; failed
 
 /** One inventory pass for a link: read classes, count sales, set capacities. Null: no mappings. */
 async function syncInventory(sb: SupabaseClient, link: InventoryLink): Promise<InventoryOutcome | null> {
-  const { count } = await sb.from("exos_eventbrite_ticket_links").select("tier_id", { count: "exact", head: true })
-    .eq("event_id", link.event_id).eq("eb_event_id", link.eb_event_id).eq("active", true);
-  if (!count) return null;
+  const maps = await classStates(sb, link);
+  if (!maps.size) return null;
   const readAt = new Date().toISOString();   // a later read wins; an older one is ignored
   const read = await listTicketClasses(fetch, link.token, link.eb_event_id);
   if (!read.ok || !read.body) {
@@ -336,7 +336,8 @@ async function syncInventory(sb: SupabaseClient, link: InventoryLink): Promise<I
       out.skipped++;
       continue;
     }
-    const plan = planCapacity(link.eb_event_id, row.eb_ticket_class_id, row.eb_capacity, row.target_capacity);
+    const plan = planCapacity(link.eb_event_id, row.eb_ticket_class_id, row.eb_capacity, row.target_capacity,
+                              maps.get(row.eb_ticket_class_id));
     if (!plan) continue;
     const live = writesLive(row.writes_enabled, flag);
     let error: string | null = null;
@@ -352,6 +353,23 @@ async function syncInventory(sb: SupabaseClient, link: InventoryLink): Promise<I
     if (!live) out.planned++;
     else if (error) out.failed++;
     else out.sent++;
+  }
+  return out;
+}
+
+/** The event's mapped classes: did Exos create each (a 0 count hides it), is it hidden for one, is its ticket type public. */
+async function classStates(sb: SupabaseClient, link: InventoryLink): Promise<Map<string, ClassState>> {
+  const q = (cols: string) => sb.from("exos_eventbrite_ticket_links").select(cols)
+    .eq("event_id", link.event_id).eq("eb_event_id", link.eb_event_id).eq("active", true);
+  let r = await q("eb_ticket_class_id, exos_created, hidden_by_count, exos_ticket_tiers(visibility)");
+  if (r.error) r = await q("eb_ticket_class_id");   // before mig 20261020110000: no hiding
+  const out = new Map<string, ClassState>();
+  for (const m of (r.data ?? []) as any[]) {
+    out.set(String(m.eb_ticket_class_id), {
+      exosCreated: m.exos_created === true,
+      hiddenByCount: m.hidden_by_count === true,
+      tierPublic: (m.exos_ticket_tiers?.visibility ?? "public") === "public",
+    });
   }
   return out;
 }

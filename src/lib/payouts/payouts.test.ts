@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { connectTransfer, payoutsMode, tevoRemittanceFor } from '../../../supabase/functions/_shared/payouts/payouts.ts';
+import { connectTransfer, payoutsMode, staleSendingCutoff, tevoRemittanceFor, transferRefused } from '../../../supabase/functions/_shared/payouts/payouts.ts';
 import { normalizeTevoPayment } from '../marketplace/tevo';
 
 const pay = (over: Record<string, unknown>) =>
@@ -51,5 +51,23 @@ describe('Connect transfer', () => {
     expect(() => connectTransfer(p, 'not-an-account')).toThrow(/connected Stripe account/);
     expect(() => connectTransfer({ ...p, amount: 0 }, 'acct_1ABC')).toThrow(/positive/);
     expect(() => connectTransfer({ ...p, currency: 'dollars' }, 'acct_1ABC')).toThrow(/currency/);
+  });
+});
+
+describe('failed and stuck sends', () => {
+  it('marks a transfer failed only when Stripe definitely refused it', () => {
+    expect(transferRefused({ type: 'StripeInvalidRequestError', statusCode: 400 })).toBe(true);
+    expect(transferRefused({ type: 'StripePermissionError', statusCode: 403 })).toBe(true);
+    // May have gone through: stays 'sending', resent later with the same key.
+    expect(transferRefused({ type: 'StripeConnectionError' })).toBe(false);
+    expect(transferRefused({ type: 'StripeAPIError', statusCode: 500 })).toBe(false);
+    expect(transferRefused({ type: 'StripeRateLimitError', statusCode: 429 })).toBe(false);
+    expect(transferRefused({ type: 'StripeIdempotencyError', statusCode: 400 })).toBe(false);
+    expect(transferRefused(new Error('boom'))).toBe(false);
+    expect(transferRefused(null)).toBe(false);
+  });
+
+  it('treats a send as stuck after 15 minutes', () => {
+    expect(staleSendingCutoff(new Date('2026-10-20T12:00:00Z'))).toBe('2026-10-20T11:45:00.000Z');
   });
 });

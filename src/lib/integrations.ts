@@ -245,6 +245,12 @@ export function parseBackendStatus(d: any): BackendStatus {
   };
 }
 
+/** A door sync from a platform the event no longer sells on (linked before
+ *  switching moved to unlinking, mig 20261021150000): shown so it can be unlinked. */
+export function staleBackendLink(st: BackendStatus): BackendStatus['link'] {
+  return st.link && st.link.provider !== st.ticketBackend ? st.link : null;
+}
+
 // ── Calls ───────────────────────────────────────────────────────────────
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};

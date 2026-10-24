@@ -34,6 +34,11 @@
 //   * The same read twice within DUPLICATE_READ_MS is ignored (camera double
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
+//     A refused code held to the camera is held the same way (the same code,
+//     not re-decided and re-logged every DUPLICATE_READ_MS).
+//   * Online, a correctly signed code from the wrong 30-second window
+//     ('bucket-expired') goes to the server too: this phone's clock may be the
+//     one that is off (not measured yet), and the server checks on its own.
 
 import { extractTicketIdFromAny } from '../barcode';
 import {
@@ -181,6 +186,12 @@ export type ScanDecision =
   | { action: 'admit'; ticketId: string; test: boolean; queue: boolean; byName?: boolean; direction?: 'exit' }
   | { action: 'reject'; ticketId: string | null; reason: DoorRejectReason; opensAt?: number };
 
+/** Local signature results the server may judge differently online: the
+ *  ticket moved since the download ('signature-mismatch'), the saved list has
+ *  no key for the code ('no-key'), or the code's window doesn't match this
+ *  phone's clock ('bucket-expired'; the server uses its own). */
+export const SERVER_DECIDES: ReadonlySet<string> = new Set(['signature-mismatch', 'no-key', 'bucket-expired']);
+
 export function isDuplicateRead(
   input: Pick<ScanDecisionInput, 'code' | 'source' | 'reason' | 'byName' | 'now' | 'recent'>,
 ): boolean {
@@ -189,10 +200,10 @@ export function isDuplicateRead(
   const age = input.now - r.at;
   if (age < 0) return false;
   if (r.raw === input.code.raw && age < DUPLICATE_READ_MS) return true;
-  return (
-    input.source === 'camera' && r.source === 'camera' && r.admitted &&
-    !!input.code.ticketId && r.ticketId === input.code.ticketId && age < SAME_TICKET_HOLD_MS
-  );
+  if (input.source !== 'camera' || r.source !== 'camera' || age >= SAME_TICKET_HOLD_MS) return false;
+  // The same refused code still in front of the camera.
+  if (!r.admitted && r.raw === input.code.raw) return true;
+  return r.admitted && !!input.code.ticketId && r.ticketId === input.code.ticketId;
 }
 
 export function decideScan(input: ScanDecisionInput): ScanDecision {
@@ -243,7 +254,7 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
     // local copy says why (clock skew, screenshot).
-    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key') {
+    if (entry && v && !v.ok && !SERVER_DECIDES.has(v.reason ?? '')) {
       return { action: 'reject', ticketId, reason: 'invalid-barcode' };
     }
     return { action: 'ask-server', ticketId };

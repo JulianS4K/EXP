@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Event } from '../types';
-import { eventGrossSales, listOrgEvents } from '../lib/events';
+import { eventGrossSales, faceValueByCurrency, listOrgEvents } from '../lib/events';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
@@ -11,12 +11,17 @@ import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
 import { canSeeMoney } from '../lib/settlement';
+import { can, cannotReason } from '../lib/orgRoles';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
 export default function OrganizerDashboard() {
   const { user, isAdmin } = useAuth();
-  const { orgs, activeOrg, activeRole } = useOrganization();
+  const { orgs, activeOrg, activeRole, roleIn } = useOrganization();
+  // Create files under the active org; edit / clone / series follow the
+  // event's own org (owner / manager only: RLS exos_events_ins / _upd).
+  const canCreate = can(activeRole, 'editEvents', isAdmin);
+  const canEditEvent = (ev: Event) => can(roleIn(ev.orgId), 'editEvents', isAdmin);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   // Search + filter state. Both apply client-side over the loaded
@@ -62,7 +67,10 @@ export default function OrganizerDashboard() {
     fetchEvents();
   }, [user, orgs]);
 
-  const totalEarnings = events.reduce((acc, event) => acc + eventGrossSales(event), 0);
+  // Face value at current tier prices, one total per currency (never summed
+  // across currencies). Real money taken (schedules, promo codes, refunds) is
+  // in each event report's Money panel; it isn't loaded here.
+  const faceValue = faceValueByCurrency(events);
   const liveCount = events.filter((e) => (e.status ?? 'published') === 'published').length;
   const totalTicketsSold = events.reduce((acc, event) => acc + event.ticketsSold, 0);
 
@@ -153,19 +161,38 @@ export default function OrganizerDashboard() {
                 <span>Promote</span>
               </Link>
             )}
-            <Link
-              to="/create-event"
-              className="bg-[#026cdf] text-white px-6 py-3 rounded flex items-center space-x-2 font-bold hover:bg-[#015bbd] shadow-sm transition-all text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Event</span>
-            </Link>
+            {canCreate ? (
+              <Link
+                to="/create-event"
+                className="bg-[#026cdf] text-white px-6 py-3 rounded flex items-center space-x-2 font-bold hover:bg-[#015bbd] shadow-sm transition-all text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Event</span>
+              </Link>
+            ) : (
+              <span
+                aria-disabled="true"
+                title={cannotReason('editEvents')}
+                className="bg-slate-200 text-slate-500 px-6 py-3 rounded flex items-center space-x-2 font-bold text-sm cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Event</span>
+              </span>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
-            { label: 'GROSS SALES', value: formatCurrency(totalEarnings), icon: BarChart3, color: 'text-slate-900' },
+            {
+              label: 'FACE VALUE SOLD',
+              value: faceValue.length <= 1
+                ? formatCurrency(faceValue[0]?.amount ?? 0, faceValue[0]?.currency)
+                : faceValue.map((f) => <span key={f.currency} className="block text-2xl">{formatCurrency(f.amount, f.currency)}</span>),
+              note: 'At current ticket prices, before promo codes and refunds. Money actually taken is in each event report, under Money.',
+              icon: BarChart3,
+              color: 'text-slate-900',
+            },
             { label: 'TICKETS SOLD', value: totalTicketsSold, icon: Users, color: 'text-slate-900' },
             { label: 'ACTIVE EVENTS', value: events.length, icon: Music, color: 'text-slate-900' },
             // Removed RELIABILITY SCORE — it was a hardcoded 98/100 from
@@ -186,6 +213,7 @@ export default function OrganizerDashboard() {
                 <stat.icon className={`w-4 h-4 text-slate-400`} />
               </div>
               <p className={`disp text-4xl ${stat.color} tracking-tight`} style={{ transform: 'skewX(-3deg)' }}>{stat.value}</p>
+              {'note' in stat && stat.note ? <p className="text-[11px] text-slate-400 mt-2">{stat.note}</p> : null}
             </motion.div>
           ))}
         </div>
@@ -289,7 +317,7 @@ export default function OrganizerDashboard() {
                       <p className="text-[11px] text-slate-500 truncate">{formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric' })} · {event.location}</p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <EventStatusPill status={event.status} />
-                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event))}</span>
+                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event), event.currency)} face value</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
@@ -297,7 +325,11 @@ export default function OrganizerDashboard() {
                   <div className="grid grid-cols-4 gap-2 mt-3">
                     <Link to={`/checkin/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Door</Link>
                     <Link to={`/dashboard/event/${event.id}/promote`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Share</Link>
-                    <Link to={`/edit-event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Edit</Link>
+                    {canEditEvent(event) ? (
+                      <Link to={`/edit-event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">Edit</Link>
+                    ) : (
+                      <span aria-disabled="true" title={cannotReason('editEvents')} className="py-2 rounded border border-slate-100 text-center text-[11px] font-bold text-slate-300">Edit</span>
+                    )}
                     <Link to={`/event/${event.id}`} className="py-2 rounded border border-slate-200 text-center text-[11px] font-bold text-slate-700">View</Link>
                   </div>
                 </li>
@@ -310,7 +342,7 @@ export default function OrganizerDashboard() {
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Event</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ticket Sales</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Revenue</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest" title="Tier price × sold, at current prices; before promo codes and refunds">Face value sold</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
                   </tr>
                 </thead>
@@ -352,15 +384,22 @@ export default function OrganizerDashboard() {
                         <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold}{event.totalTickets > 0 ? ` / ${event.totalTickets}` : ''} SOLD</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event))}</p>
+                        <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event), event.currency)}</p>
+                        <p className="text-[10px] text-slate-400">at current prices</p>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end space-x-2">
                            <Link to={`/dashboard/event/${event.id}/promote`} aria-label="Promote event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Megaphone className="w-4 h-4" /></Link>
                            <Link to={`/dashboard/event/${event.id}`} aria-label="Sales report" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><BarChart3 className="w-4 h-4" /></Link>
-                           <Link to={`/edit-event/${event.id}`} aria-label="Edit event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Settings className="w-4 h-4" /></Link>
-                           <Link to={`/dashboard/event/${event.id}/series`} aria-label={event.seriesId ? 'Add dates to this series' : 'Make this event recurring'} className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Repeat className="w-4 h-4" /></Link>
-                           <Link to={`/create-event?clone=${event.id}`} aria-label="Duplicate event as a new draft" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors text-[10px] font-black uppercase tracking-widest">CLONE</Link>
+                           {canEditEvent(event) ? (
+                             <>
+                               <Link to={`/edit-event/${event.id}`} aria-label="Edit event" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Settings className="w-4 h-4" /></Link>
+                               <Link to={`/dashboard/event/${event.id}/series`} aria-label={event.seriesId ? 'Add dates to this series' : 'Make this event recurring'} className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><Repeat className="w-4 h-4" /></Link>
+                               <Link to={`/create-event?clone=${event.id}`} aria-label="Duplicate event as a new draft" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors text-[10px] font-black uppercase tracking-widest">CLONE</Link>
+                             </>
+                           ) : (
+                             <span aria-disabled="true" title={cannotReason('editEvents')} className="p-2 text-slate-300 text-[10px] font-black uppercase tracking-widest cursor-not-allowed">Edit · Clone</span>
+                           )}
                            <Link to={`/checkin/${event.id}`} aria-label="Open check-in view" className="p-2 text-slate-400 hover:text-green-600 transition-colors"><CheckCircle2 className="w-4 h-4" /></Link>
                            <Link to={`/event/${event.id}`} aria-label="View public event page" className="p-2 text-slate-400 hover:text-[#026cdf] transition-colors"><ChevronRight className="w-4 h-4" /></Link>
                         </div>

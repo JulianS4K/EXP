@@ -283,12 +283,12 @@ await run('org settings: a bad Meta pixel id blocks save', async (page, log) => 
   const meta = page.getByLabel('Meta Pixel');
   await meta.fill('12ab');
   await expectText(page, 'Should look like 123456789012345');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).first().click();
   await expectText(page, 'Fix the pixel ids marked in red');
   assert(!log.some((l) => l.startsWith('PATCH exos_orgs')), 'nothing saved with a bad id');
   await meta.fill('123456789012345');
   assert(await page.getByText('Should look like 123456789012345').count() === 0, 'error clears');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Save changes' }).first().click();
   await expectText(page, 'Saved.');
   const patch = log.find((l) => l.startsWith('PATCH exos_orgs'));
   assert(patch && patch.includes('"meta":"123456789012345"'), 'saved the pixel: ' + patch);
@@ -397,7 +397,11 @@ await run('event report: Money summary from the order money view', async (page, 
   assert(text.includes('$100.00'), 'gross $100: ' + text.replace(/\s+/g, ' '));
   assert(/Refunds\s*\$20\.00/i.test(text), 'refunds $20');
   assert(/Your net after refunds\s*\$73\.60/i.test(text), 'net after refunds (fees come back in proportion)');
-  assert(/Tickets sold\s*5\s*4 orders/i.test(text), 'tickets from checkout quantities: ' + text.replace(/\s+/g, ' '));
+  assert(/Tickets in paid orders\s*5\s*4 orders/i.test(text), 'tickets from checkout quantities: ' + text.replace(/\s+/g, ' '));
+  // The lost dispute Exos recovers (amount + fee, $35) comes off the organizer net: 73.60 - 35.00.
+  assert(/Lost disputes\s*\$35\.00/i.test(text), 'lost disputes tile: ' + text.replace(/\s+/g, ' '));
+  assert(/Organizer net\s*\$38\.60/i.test(text), 'organizer net after the lost dispute');
+  assert(text.includes('Exos fee: 3% of each order'), 'fee terms under the tiles');
   const read = log.find((l) => l.startsWith('GET exos_order_money'));
   assert(read && read.includes('organizer_net_cents') && read.includes('card_fee_actual_cents'), 'money columns: ' + read);
   const { text: csv } = await download(page, () => section.getByRole('button', { name: /Orders CSV/ }).click());
@@ -415,10 +419,27 @@ await run('event report: Disputes block with status, amount, due date and Stripe
   assert(/Due \w+ \d+ \(in 5 days\)/.test(text), 'evidence due date: ' + text);
   assert(/\bLOST\b/i.test(text) && text.includes('Product not received') && text.includes('$35.00 may be taken from a later payout'), 'lost row + recovery: ' + text);
   assert(/Open\s*1\s*\$40\.00 at stake/i.test(text), 'open summary: ' + text);
-  assert(await section.locator('a[href="https://dashboard.stripe.com/disputes/du_d1"]').count() === 1, 'Stripe link');
+  // The platform's Stripe dashboard is for Exos admins; organizers get a mail to support naming the dispute.
+  assert(await section.locator('a[href^="https://dashboard.stripe.com/"]').count() === 0, 'no Stripe link for an organizer');
+  const mail = await section.getByRole('link', { name: /Send evidence/ }).first().getAttribute('href');
+  assert(mail && mail.startsWith('mailto:') && mail.includes('du_d1'), 'send-evidence mail names the dispute: ' + mail);
   const read = log.find((l) => l.startsWith('GET exos_disputes'));
   assert(read && read.includes('event_id=eq.' + EV) && read.includes('evidence_due_by'), 'disputes read: ' + read);
 }, { signedIn: true, mock: reportMock });
+
+// Roles (src/lib/orgRoles.ts): content can't create or edit events (RLS
+// exos_events_ins / _upd are owner / manager), so the dashboard says so.
+await run('roles: a content member gets Create Event and Edit turned off, with the reason', async (page) => {
+  await page.goto(BASE + '/dashboard');
+  await page.getByText('Create Event').first().waitFor({ timeout: 8000 });
+  await expectText(page, 'Fall Party');
+  assert(await page.locator('a[href$="/create-event"]', { hasText: 'Create Event' }).count() === 0, 'no Create Event link');
+  assert(await page.locator('a[href*="/edit-event/"]').count() === 0, 'no Edit link');
+  assert(await page.locator('[aria-disabled="true"][title="Only owners and managers can create, edit or clone events."]').count() >= 2,
+    'disabled Create / Edit with the reason');
+}, { signedIn: true, mock: ownerMock({ tables: {
+  exos_org_memberships: [{ ...ownerTables.exos_org_memberships[0], role: 'content' }],
+} }) });
 
 const DOOR_SUMMARY = {
   event: { id: EV, name: 'Fall Party', status: 'published', timezone: 'America/New_York' },
@@ -510,7 +531,7 @@ await run('door: a code from another platform checks the imported guest in', asy
 }, { signedIn: true, mock: ownerMock({ rpcs: {
   exos_event_door_extras: () => DOOR_GUESTS,
   exos_guest_check_in: () => ({ ok: true, reason: 'checked-in', arrived: 1, party: 1 }),
-  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [], exos_event_door_roster_page: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
@@ -566,7 +587,7 @@ await run('door: a ticket refunded on Eventbrite is refused at the door', async 
   exos_event_door_extras: () => ({ ...DOOR_GUESTS, guests: [...DOOR_GUESTS.guests,
     { id: 'g2', list_id: 'gl1', guest_name: 'Bo Diddley', plus_ones: 0, arrived: 0, arrived_at: null, note: null,
       code: '87654321', ticket: 'VIP', source: 'Eventbrite', voided: true, void_reason: 'refunded' }] }),
-  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [], exos_event_door_roster_page: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
@@ -725,9 +746,10 @@ await run('event report: Money lists receipts and the CSV has invoice numbers', 
   assert(log.some((l) => l.startsWith('GET exos_invoice_totals') && l.includes('refunded_cents')), 'reads exos_invoice_totals');
   const { text } = await download(page, () => section.getByRole('button', { name: /Orders CSV/ }).click());
   const lines = firstLines(text);
-  assert(lines[0].endsWith(',invoice_number'), 'CSV header: ' + lines[0]);
-  assert(lines.some((l) => l.startsWith('exos,cs_1,') && l.endsWith(',INV-000001')), 'cs_1 has its invoice number');
-  assert(lines.some((l) => l.startsWith('exos,cs_2,') && l.endsWith(',INV-000002')), 'cs_2 has its invoice number');
+  assert(lines[0].endsWith(',invoice_number,dispute_status,dispute_amount,dispute_fee,dispute_charged_to_you'), 'CSV header: ' + lines[0]);
+  // cs_1's dispute is open (nothing charged yet); cs_2's was lost and Exos recovers amount + fee.
+  assert(lines.some((l) => l.startsWith('exos,cs_1,') && l.endsWith(',INV-000001,needs_response,40.00,15.00,0.00')), 'cs_1 has its invoice number: ' + lines.join(' | '));
+  assert(lines.some((l) => l.startsWith('exos,cs_2,') && l.endsWith(',INV-000002,lost,20.00,15.00,35.00')), 'cs_2 has its invoice number and lost dispute');
 }, { signedIn: true, mock: { ...reportMock, tables: { ...reportMock.tables, exos_invoice_totals: [
   { id: INV_ID, org_id: ORG, event_id: EV, number: 'INV-000001', session_id: 'cs_1', total_cents: 4000, currency: 'usd',
     issued_at: '2026-09-20T12:00:00Z', refunded_cents: 0 },

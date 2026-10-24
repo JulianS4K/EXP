@@ -164,3 +164,35 @@ export function describeList(l: DoorCheckinList, tierName: (id: string) => strin
   const tiers = l.tierIds ? l.tierIds.map(tierName).join(', ') : 'All ticket types';
   return `${tiers} · ${l.allowReentry ? 're-entry allowed' : 'no re-entry'}`;
 }
+
+// --- Multi-day passes ---------------------------------------------------------
+// "Used" is per ticket, not per list: a ticket in on a no-re-entry list is
+// refused on every other no-re-entry list. A pass for several days works with
+// one list per day (its own window) and re-entry ON: a re-entry list only
+// refuses a ticket that's inside on that list, so each day's list lets it in
+// once (unless staff scan it out and back in).
+
+const at = (iso: string | null, open: number) => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? t : open;
+};
+
+/** A hint for the editor when lists look like per-day lists without re-entry
+ *  (two no-re-entry lists for the same ticket types whose windows don't
+ *  overlap), or null. */
+export function multiDayListWarning(lists: DoorCheckinList[]): string | null {
+  const days = lists.filter((l) => !l.allowReentry && (l.validFrom || l.validUntil));
+  for (let i = 0; i < days.length; i++) {
+    for (let j = i + 1; j < days.length; j++) {
+      const a = days[i];
+      const b = days[j];
+      const overlap = at(a.validFrom, -Infinity) < at(b.validUntil, Infinity) && at(b.validFrom, -Infinity) < at(a.validUntil, Infinity);
+      const sameTiers = !a.tierIds || !b.tierIds || a.tierIds.some((t) => b.tierIds!.includes(t));
+      if (!overlap && sameTiers) {
+        return `"${a.name}" and "${b.name}" look like lists for different days, but a ticket checked in on one is refused on the other. ` +
+          "For a pass that gets in once a day, turn on re-entry for each day's list.";
+      }
+    }
+  }
+  return null;
+}

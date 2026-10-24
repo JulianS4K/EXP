@@ -71,6 +71,9 @@ export interface Organization {
   // In the S4K network (mig 20261014100000): S4K may list this org's events on
   // the marketplaces. Set via exos_set_s4k_network (owner).
   s4kNetwork?: boolean;
+  // One "finish your order" mail after an abandoned checkout (mig
+  // 20260926060000, default on). Owner-writable on exos_orgs.
+  checkoutRemindersEnabled?: boolean;
   // Phase 2 white-label. Filled in by Sprint 2.
   theme?: {
     logoUrl?: string;
@@ -126,6 +129,10 @@ export interface OrgMembership {
   // Soft-disable without revoking the doc. A disabled membership is
   // ignored by the rule helper but kept for audit history.
   disabled?: boolean;
+  // From exos_org_members (mig 20261021150000): owner / manager / admin see
+  // everyone's; other members only their own.
+  email?: string;
+  displayName?: string;
 }
 
 /**

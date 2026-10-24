@@ -63,6 +63,35 @@ export function disputeDueLabel(d: Pick<DisputeRow, 'status' | 'evidence_due_by'
   return `Due ${day} (${days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`})`;
 }
 
+/**
+ * The organizer's way to answer a dispute: a mail to Exos support naming the
+ * dispute, so whoever answers it from the platform's Stripe account knows
+ * which one. Evidence (receipts, check-in record, messages with the buyer)
+ * goes as attachments; Stripe takes it until the due date.
+ */
+export function disputeContactHref(
+  d: Pick<DisputeRow, 'dispute_id' | 'session_id' | 'amount_cents' | 'currency' | 'evidence_due_by'>,
+  ctx: { supportEmail: string; eventName?: string | null; buyerEmail?: string | null },
+): string {
+  const amount = d.amount_cents == null ? '' : ` (${(d.amount_cents / 100).toFixed(2)} ${(d.currency || '').toUpperCase()})`;
+  const subject = `Dispute ${d.dispute_id}${ctx.eventName ? ` · ${ctx.eventName}` : ''}`;
+  const details = [
+    `Dispute: ${d.dispute_id}${amount}`,
+    ctx.eventName ? `Event: ${ctx.eventName}` : '',
+    d.session_id ? `Order: ${d.session_id}` : '',
+    ctx.buyerEmail ? `Buyer: ${ctx.buyerEmail}` : '',
+    d.evidence_due_by ? `Evidence due: ${d.evidence_due_by.slice(0, 10)}` : '',
+  ].filter(Boolean);
+  const body = [...details, '', 'What happened, and the evidence attached (receipt, check-in record, messages with the buyer):', ''].join('\n');
+  return `mailto:${ctx.supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+/** "buyer@x.com", else the order id's tail, so a row never shows a bare cs_ id. */
+export function disputeOrderLabel(d: Pick<DisputeRow, 'session_id'>, buyerEmail?: string | null): string {
+  if (buyerEmail) return buyerEmail;
+  return d.session_id ? `order …${d.session_id.slice(-8)}` : '—';
+}
+
 /** Stripe's dashboard page for the dispute (the Exos platform account's). */
 export function stripeDisputeLink(d: Pick<DisputeRow, 'dispute_id' | 'livemode'>): string | null {
   if (!/^(dp|du)_[A-Za-z0-9]{1,200}$/.test(d.dispute_id)) return null;

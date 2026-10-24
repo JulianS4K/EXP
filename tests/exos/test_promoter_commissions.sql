@@ -141,7 +141,8 @@ BEGIN
   RAISE NOTICE 'OK  C7 refund reverses';
 END $$;
 
--- C8. Non-staff can't set terms or record payouts; finance reads only.
+-- C8. Non-staff can't set terms or record payouts; finance can't set terms
+-- (it may record payouts since mig 20261021120000: test_roles_money_p1.sql).
 DO $$
 DECLARE a uuid := current_setting('test.pa')::uuid; ok boolean; u text;
 BEGIN
@@ -151,6 +152,7 @@ BEGIN
     BEGIN PERFORM public.exos_set_promoter_terms(a, 9000, 0);
     EXCEPTION WHEN insufficient_privilege THEN ok := true; END;
     ASSERT ok, 'C8: ' || u || ' set terms';
+    CONTINUE WHEN u = '0c0c0000-0000-0000-0000-0000000000a3';
     ok := false;
     BEGIN PERFORM public.exos_record_promoter_payout(a, ARRAY(SELECT id FROM public.exos_promoter_commissions WHERE promoter_id=a AND status='accrued'), 400, 'Venmo');
     EXCEPTION WHEN insufficient_privilege THEN ok := true; END;

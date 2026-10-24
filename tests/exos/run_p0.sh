@@ -111,12 +111,27 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261020090000_exos_deletion_privacy \
+         20261020100000_exos_parked_ticket_guard \
+         20261020110000_exos_channel_shared_count \
+         20261020120000_exos_payout_failure_recovery \
+         20261021090000_exos_door_p1 \
+         20261021100000_exos_buyer_p1 \
+         20261021110000_exos_organizer_p1 \
+         20261021120000_exos_roles_money_p1 \
+         20261021130000_exos_festival_p1 \
+         20261021140000_exos_growth_p1 \
+         20261021150000_exos_org_lifecycle_p1 \
+         20261021160000_exos_ledger_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
 # fixtures (small events): off for them; test_resale_min_capacity.sql turns it on.
 $PSQL -c "INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_min_capacity', '0') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+# The same for the live-marketplace gate (mig 20261020110000): the fixtures'
+# marketplaces list; test_channel_shared_count.sql turns it off.
+$PSQL -c "INSERT INTO public.exos_platform_settings (key, value) VALUES ('marketplace_live_channels', '[\"stubhub\",\"seatgeek\",\"gametime\",\"vivid\",\"gotickets\",\"evo\"]') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_p0.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fulfill_all_or_nothing.sql"
@@ -243,7 +258,19 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261020090000_exos_deletion_privacy \
+         20261020100000_exos_parked_ticket_guard \
+         20261020110000_exos_channel_shared_count \
+         20261020120000_exos_payout_failure_recovery \
+         20261021090000_exos_door_p1 \
+         20261021100000_exos_buyer_p1 \
+         20261021110000_exos_organizer_p1 \
+         20261021120000_exos_roles_money_p1 \
+         20261021130000_exos_festival_p1 \
+         20261021140000_exos_growth_p1 \
+         20261021150000_exos_org_lifecycle_p1 \
+         20261021160000_exos_ledger_p1; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -279,3 +306,15 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_white_lab
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_mirrors.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_day_keys.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_online_event_followups.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_payout_failure_recovery.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_deletion_privacy.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_parked_ticket_guard.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_shared_count.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_growth_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_lifecycle_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_organizer_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_festival_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_roles_money_p1.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ledger_p1.sql"

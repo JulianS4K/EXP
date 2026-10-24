@@ -16,6 +16,7 @@
 //   GET /orders                      → the org's checkout sessions
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ATTENDEE_SELECT, isUuid } from "./routes.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
 
@@ -67,6 +68,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const seg = path.split("/").filter(Boolean); // e.g. ['events', ':id', 'attendees']
 
   try {
+    // A malformed id can't match an event (and would be a uuid cast error).
+    if (seg[0] === "events" && seg.length >= 2 && !isUuid(seg[1])) return json({ error: "event not found" }, 404);
+
     if (seg[0] === "events" && seg.length === 1) {
       const { data, error } = await sb
         .from("exos_events")
@@ -97,7 +101,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!ev) return json({ error: "event not found" }, 404);
       const { data, error } = await sb
         .from("exos_tickets")
-        .select("id, tier_name, owner_email, status, check_in_at, price_paid, channel_source, created_at")
+        .select(ATTENDEE_SELECT)
         .eq("event_id", seg[1]).eq("org_id", orgId)
         .order("created_at", { ascending: false });
       if (error) throw error;

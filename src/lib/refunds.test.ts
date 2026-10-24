@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   newRefundNonce,
+  pageRefundOrders,
+  type RefundOrder,
+  parseAmount,
   parseAmountToCents,
   planOrderAmount,
   planTicketRefund,
   ticketPoolCents,
+  ticketBadge,
   ticketShares,
 } from './refunds';
+
+describe('ticketBadge (event report)', () => {
+  it('reads "voided", not "refunded", until a refund for the ticket succeeded', () => {
+    expect(ticketBadge({ status: 'voided' }, false)).toBe('voided');
+    expect(ticketBadge({ status: 'voided' }, true)).toBe('refunded');
+    expect(ticketBadge({ status: 'voided', releasedAt: new Date() }, true)).toBe('released');
+    expect(ticketBadge({ status: 'used' }, false)).toBe('used');
+    expect(ticketBadge({ status: 'active' }, false)).toBe('active');
+  });
+});
 
 describe('ticketPoolCents / ticketShares (mirror exos_refund_ticket_state)', () => {
   it('takes the add-on lines out of the order total', () => {
@@ -37,6 +51,31 @@ describe('parseAmountToCents', () => {
   });
   it('rejects junk, zero and sub-cent amounts', () => {
     for (const s of ['', 'abc', '0', '0.00', '-5', '1.234', '1e3', '.5']) expect(parseAmountToCents(s)).toBeNull();
+  });
+  it('reads a decimal comma as a decimal, never as a thousands separator', () => {
+    // Regression: "12,50" used to become 1250.00 (commas were deleted).
+    expect(parseAmountToCents('12,50')).toBe(1250);
+    expect(parseAmountToCents('12.50')).toBe(1250);
+    expect(parseAmountToCents('12,5')).toBe(1250);
+    expect(parseAmountToCents('€12,50', 'EUR')).toBe(1250);
+    expect(parseAmountToCents('12,50 EUR', 'eur')).toBe(1250);
+    expect(parseAmountToCents('12,50 €')).toBe(1250);
+  });
+  it('reads either thousands style when both marks are present', () => {
+    expect(parseAmountToCents('1,234.56')).toBe(123456);
+    expect(parseAmountToCents('1.234,56')).toBe(123456);
+    expect(parseAmountToCents('1 234,56')).toBe(123456);
+    expect(parseAmountToCents("1'234.56")).toBe(123456);
+    expect(parseAmountToCents('1,234,567')).toBe(123456700);
+    expect(parseAmountToCents('1.234.567,8')).toBe(123456780);
+  });
+  it('refuses ambiguous or malformed grouping instead of guessing', () => {
+    const amb = parseAmount('1,234');
+    expect(amb.ok).toBe(false);
+    expect('error' in amb && amb.error).toMatch(/ambiguous/);
+    for (const s of ['1,234', '1.234', '1,23,4', '12,345.6.7', '1.234.56', '1,2345', '12 50', '1,234,56', '1.2,34', '12,50 USD']) {
+      expect(parseAmountToCents(s, 'EUR')).toBeNull();
+    }
   });
 });
 
@@ -78,6 +117,13 @@ describe('planOrderAmount', () => {
     expect(planOrderAmount(9001, null).ok).toBe(false);
     expect(planOrderAmount(0, 1).ok).toBe(false);
   });
+  it('quotes limits in the order currency', () => {
+    expect(planOrderAmount(500, 600, 'EUR')).toMatchObject({ ok: false, error: expect.stringContaining('€5.00') });
+    expect(planTicketRefund({ ...preview, currency: 'EUR' }, [{ ticketId: 't1', amountCents: 2002 }])).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('€20.01'),
+    });
+  });
 });
 
 describe('newRefundNonce', () => {
@@ -85,5 +131,27 @@ describe('newRefundNonce', () => {
     const a = newRefundNonce();
     expect(a).toMatch(/^[A-Za-z0-9:_.-]{8,200}$/);
     expect(newRefundNonce()).not.toBe(a);
+  });
+});
+
+describe('pageRefundOrders (fallback before the page RPC)', () => {
+  const o = (n: number, email: string | null = `buyer${n}@x.com`): RefundOrder => ({
+    sessionId: `cs_${n}`, buyerEmail: email, createdAt: new Date(2026, 9, n), status: 'fulfilled',
+    amountCents: 2000, refundedCents: 0, refundableCents: n === 3 ? 0 : 2000, tickets: 1, activeTickets: 1,
+    openRequests: 0, currency: 'USD',
+  });
+  const all = Array.from({ length: 120 }, (_, i) => o(i + 1));
+  it('totals cover every order; a page is a slice', () => {
+    const p = pageRefundOrders(all, '', 100);
+    expect(p.totalOrders).toBe(120);
+    expect(p.totalRefundableCents).toBe(119 * 2000);
+    expect(p.matches).toBe(120);
+    expect(p.orders.map((x) => x.sessionId)).toEqual(all.slice(100).map((x) => x.sessionId));
+  });
+  it('searches email or order id, case-insensitive', () => {
+    expect(pageRefundOrders(all, ' BUYER7@X.COM ', 0).orders.map((x) => x.sessionId)).toEqual(['cs_7']);
+    expect(pageRefundOrders(all, 'cs_11', 0).matches).toBe(11); // cs_11, cs_110..119
+    expect(pageRefundOrders([o(1, null)], 'cs_1', 0).matches).toBe(1);
+    expect(pageRefundOrders(all, 'nobody', 0).orders).toEqual([]);
   });
 });

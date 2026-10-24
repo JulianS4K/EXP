@@ -1,16 +1,50 @@
 // Organizer refunds: calls to the exos-refund edge function and the read RPCs
-// from mig 20260926040000 (exos_event_refund_orders, exos_refund_preview).
+// from mig 20260926040000 (exos_event_refund_orders, exos_refund_preview) and
+// 20261021120000 (exos_event_refund_orders_page).
 // Pure math and types live in refunds.ts.
 
 import { supabase } from './supabase';
-import type { RefundOrder, RefundPreview, TicketSelection } from './refunds';
+import { pageRefundOrders, REFUND_PAGE_SIZE, type RefundOrder, type RefundOrderPage, type RefundPreview, type TicketSelection } from './refunds';
+import { fetchAllPages } from './door/roster';
 
 // Server calls
+
+/**
+ * One page of the event's paid orders, searched server-side over all of them
+ * (mig 20261021120000). Before that migration, the newest 500 paged here.
+ */
+export async function listRefundOrdersPage(
+  eventId: string,
+  opts: { search?: string; offset?: number; limit?: number } = {},
+): Promise<RefundOrderPage> {
+  const limit = opts.limit ?? REFUND_PAGE_SIZE;
+  const { data, error } = await supabase.rpc('exos_event_refund_orders_page', {
+    p_event_id: eventId,
+    p_search: opts.search?.trim() || null,
+    p_offset: opts.offset ?? 0,
+    p_limit: limit,
+  });
+  if (error) {
+    if (error.code !== 'PGRST202' && error.code !== '42883') throw error;
+    return pageRefundOrders(await listRefundOrders(eventId), opts.search ?? '', opts.offset ?? 0, limit);
+  }
+  const p = (data ?? {}) as any;
+  return {
+    orders: ((p.orders as any[]) ?? []).map(mapRefundOrder),
+    matches: Number(p.matches) || 0,
+    totalOrders: Number(p.total_orders) || 0,
+    totalRefundableCents: Number(p.total_refundable_cents) || 0,
+  };
+}
 
 export async function listRefundOrders(eventId: string): Promise<RefundOrder[]> {
   const { data, error } = await supabase.rpc('exos_event_refund_orders', { p_event_id: eventId });
   if (error) throw error;
-  return ((data as any[]) ?? []).map((r) => ({
+  return ((data as any[]) ?? []).map(mapRefundOrder);
+}
+
+function mapRefundOrder(r: any): RefundOrder {
+  return {
     sessionId: r.session_id,
     buyerEmail: r.buyer_email ?? null,
     createdAt: r.created_at ? new Date(r.created_at) : new Date(0),
@@ -22,7 +56,7 @@ export async function listRefundOrders(eventId: string): Promise<RefundOrder[]> 
     activeTickets: Number(r.active_tickets) || 0,
     openRequests: Number(r.open_requests) || 0,
     currency: (r.currency || 'usd').toUpperCase(),
-  }));
+  };
 }
 
 export async function getRefundPreview(sessionId: string): Promise<RefundPreview> {
@@ -138,4 +172,26 @@ export async function refundEventBatch(input: {
     nextAfter: out?.next_after ?? null,
     done: out?.done !== false,
   };
+}
+
+/** Tickets on this event with a succeeded Stripe refund line (the event report
+ *  badges a void "refunded" only then). Staff RLS: owner / manager / finance
+ *  see rows; anyone else gets an empty set, so voids read "voided". */
+export async function listRefundedTicketIds(eventId: string): Promise<Set<string>> {
+  const rows = await fetchAllPages<{ request_id: string; ticket_id: string }>(
+    async (from, to) => {
+      const { data, error } = await supabase
+        .from('exos_refund_request_items')
+        .select('request_id, ticket_id, exos_refund_requests!inner(status, event_id)')
+        .eq('exos_refund_requests.event_id', eventId)
+        .eq('exos_refund_requests.status', 'succeeded')
+        .order('request_id', { ascending: true })
+        .order('ticket_id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return (data as any[]) ?? [];
+    },
+    (r) => `${r.request_id}:${r.ticket_id}`,
+  );
+  return new Set(rows.map((r) => String(r.ticket_id)));
 }

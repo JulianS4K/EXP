@@ -276,8 +276,12 @@ async function push(req: Request): Promise<Response> {
     await reportError(FN, error, { phase: "push-queue" });
     return json({ error: "queue read failed" }, 500);
   }
+  // Apple (passes with devices to push) and Google (objects behind) come in
+  // separate windows (mig 20261021090000): a pass waiting on a dry-run Apple
+  // push no longer holds up Google updates. `google` = its object is due.
   const passes: Queued[] = q?.passes ?? [];
   const done: string[] = [];
+  const googleDone: string[] = [];
   const gone: string[] = [];
   let planned = 0, sent = 0, failed = 0, googleUpdated = 0;
   let gToken: string | null = null;
@@ -305,6 +309,7 @@ async function push(req: Request): Promise<Response> {
           gToken ??= await googleAccessToken(g.signer, fetch);
           await upsertResource(fetch, gToken, "eventTicketObject", buildEventTicketObject(payload as WalletPayload, g.issuerId));
           googleUpdated++;
+          googleDone.push(p.serial);
         } catch (e) {
           delivered = false;
           await reportError(FN, e, { phase: "push-google" });
@@ -315,6 +320,12 @@ async function push(req: Request): Promise<Response> {
   }
   if (gone.length) await sb.rpc("exos_wallet_drop_push_tokens", { p_tokens: gone });
   if (done.length) await sb.rpc("exos_wallet_push_done", { p_serials: done, p_queued_at: q.queued_at });
+  // Google updated but the pass still waits on Apple: out of the Google window.
+  const googleOnly = googleDone.filter((s) => !done.includes(s));
+  if (googleOnly.length) {
+    const { error: gErr } = await sb.rpc("exos_wallet_google_done", { p_serials: googleOnly, p_queued_at: q.queued_at });
+    if (gErr) await reportError(FN, gErr, { phase: "google-done" });
+  }
   return json({
     passes: passes.length,
     apple: { live: !!a?.pusher.live, sent, failed, planned_not_sent: planned, unregistered: gone.length },

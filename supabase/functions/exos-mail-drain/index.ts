@@ -43,7 +43,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
-import { normalizeAppUrl, renderMail } from "../_shared/mail-render.ts";
+import { normalizeAppUrl, oneClickUnsubscribeUrl, renderMail } from "../_shared/mail-render.ts";
 import { renderTemplate } from "../_shared/mail-templates.ts";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -98,6 +98,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let sent = 0;
   let failed = 0;
   const appUrl = normalizeAppUrl(Deno.env.get("EXOS_APP_URL"));
+  // One-click unsubscribe endpoint (exos-mail-unsubscribe; RFC 8058).
+  const oneClickUrl = oneClickUnsubscribeUrl(Deno.env.get("SUPABASE_URL"));
 
   // Unsubscribe targets (mig 20260926060000). Not returned by the claim RPC, so
   // read them for this batch; best-effort (column may not exist yet).
@@ -124,7 +126,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       subject = t.subject;
       html = t.html;
     }
-    const rendered = renderMail(html, unsubById.get(row.id), appUrl);
+    const rendered = renderMail(html, unsubById.get(row.id), appUrl, oneClickUrl);
     // `in` narrows the union whatever the checker's strictness.
     if ("error" in rendered) {
       await sb.rpc("exos_mail_mark", {

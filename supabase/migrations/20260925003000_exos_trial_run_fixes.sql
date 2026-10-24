@@ -114,8 +114,9 @@ END $$;
 -- 3. free claims need a confirmed email ------------------------------------------
 DO $$
 DECLARE
-  v_def text := pg_get_functiondef(
-    'public.exos_claim_free_tickets(uuid, uuid, integer, text, text, text)'::regprocedure);
+  -- Replay-safe: mig 20261021100000 replaced this form with a 7-argument one.
+  v_fn  regprocedure := to_regprocedure('public.exos_claim_free_tickets(uuid, uuid, integer, text, text, text)');
+  v_def text := CASE WHEN v_fn IS NOT NULL THEN pg_get_functiondef(v_fn) END;
   v_old text := '    RAISE EXCEPTION ''exos_claim_free_tickets: not authenticated'' USING ERRCODE = ''42501'';
   END IF;';
   v_new text := '    RAISE EXCEPTION ''exos_claim_free_tickets: not authenticated'' USING ERRCODE = ''42501'';
@@ -124,6 +125,10 @@ DECLARE
     RAISE EXCEPTION ''exos_claim_free_tickets: confirm your email before claiming tickets'' USING ERRCODE = ''42501'';
   END IF;';
 BEGIN
+  IF v_fn IS NULL THEN
+    RAISE NOTICE 'exos_claim_free_tickets: replaced by mig 20261021100000, skipped';
+    RETURN;
+  END IF;
   IF position('confirm your email before claiming tickets' in v_def) > 0 THEN
     RAISE NOTICE 'exos_claim_free_tickets: email gate already applied';
     RETURN;

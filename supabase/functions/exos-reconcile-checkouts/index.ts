@@ -17,6 +17,10 @@
 //      20260925020000) so the sweep makes progress instead of re-reading the
 //      same newest rows.
 //
+//   Free orders (free_<uuid>, amount 0: exos-checkout's guest free claim)
+//   never were Stripe sessions: both sweeps leave them out (asking Stripe
+//   about one fails every run and re-queues it forever).
+//
 //   3. Fee actuals backfill (mig 20260929131000): settled payments whose
 //      Stripe fee / net / transfer weren't recorded (the webhook's best-effort
 //      read failed or timed out, or the order was fulfilled by step 1) ->
@@ -32,6 +36,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
+import { isFreeOrder } from "../_shared/checkoutSession.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -67,13 +72,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // 1. Pending-but-maybe-paid: ask Stripe the source of truth.
   const { data: pending } = await sb
     .from("exos_checkout_sessions")
-    .select("session_id")
+    .select("session_id, amount_cents")
     .eq("status", "pending")
+    .gt("amount_cents", 0)
     .lt("created_at", cutoff)
     .order("created_at", { ascending: false })
     .limit(BATCH);
 
   for (const row of pending ?? []) {
+    if (isFreeOrder(row)) continue;
     out.checked++;
     try {
       const cs = await stripe.checkout.sessions.retrieve(row.session_id);
@@ -122,8 +129,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   //    every batch.
   const { data: failed } = await sb
     .from("exos_checkout_sessions")
-    .select("session_id, failure_reason")
+    .select("session_id, failure_reason, amount_cents")
     .eq("status", "failed")
+    .gt("amount_cents", 0)
     .is("reconcile_done_at", null)
     .lt("created_at", cutoff)
     .or(`reconcile_next_at.is.null,reconcile_next_at.lte.${new Date().toISOString()}`)
@@ -137,6 +145,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   };
 
   for (const row of failed ?? []) {
+    if (isFreeOrder(row)) {
+      await mark(row.session_id, true, "free order: nothing was charged");
+      continue;
+    }
     out.swept++;
     try {
       const cs = await stripe.checkout.sessions.retrieve(row.session_id);

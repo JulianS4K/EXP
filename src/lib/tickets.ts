@@ -19,9 +19,9 @@ import { supabase } from './supabase';
 import { getCurrentAppUser } from './auth';
 import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
-import { estimateOffset, setClockOffset } from './serverClock';
+import { estimateOffset, saveClockOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
-import { fetchAllPages } from './door/roster';
+import { fetchAllPages, fetchKeysetPages } from './door/roster';
 import { parseListState, type ListState } from './door/lists';
 import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
 
@@ -364,12 +364,28 @@ async function fetchDoorRoster(eventId: string, since: string | null): Promise<R
     );
   let rows: any[];
   try {
-    rows = await run(page('exos_event_door_roster', { p_event_id: eventId, p_since: since }));
-  } catch (e) {
-    if (!missingFn(e as { code?: string })) throw e;
-    rows = await run(since
-      ? page('exos_event_checkin_roster_since', { p_event_id: eventId, p_since: since })
-      : page('exos_event_checkin_roster', { p_event_id: eventId }));
+    // Paged inside the function (mig 20261021090000): each page builds only
+    // its own rows' door keys.
+    rows = await fetchKeysetPages<any>(
+      async (after, limit) => {
+        const { data, error } = await supabase.rpc('exos_event_door_roster_page', {
+          p_event_id: eventId, p_since: since, p_after: after, p_limit: limit,
+        });
+        if (error) throw error;
+        return data ?? [];
+      },
+      (r) => String(r.ticket_id),
+    );
+  } catch (e0) {
+    if (!missingFn(e0 as { code?: string })) throw e0;
+    try {
+      rows = await run(page('exos_event_door_roster', { p_event_id: eventId, p_since: since }));
+    } catch (e) {
+      if (!missingFn(e as { code?: string })) throw e;
+      rows = await run(since
+        ? page('exos_event_checkin_roster_since', { p_event_id: eventId, p_since: since })
+        : page('exos_event_checkin_roster', { p_event_id: eventId }));
+    }
   }
   const now = Date.now();
   return Promise.all(rows.map((r) => mapRegistryRow(r, now)));
@@ -679,7 +695,9 @@ export async function undoCheckIn(ticketId: string, eventId: string, reason: str
 let clockSync: Promise<void> | null = null;
 /** Measure this device's clock against the server once per page load
  *  (exos_server_time), so the rotating code and the door's check use the
- *  server's 30-second window. Best-effort: on failure the device clock stands. */
+ *  server's 30-second window. Best-effort: on failure the saved measurement
+ *  (or the device clock) stands, and the next call tries again. A good
+ *  measurement is saved on the device for the next start (lib/serverClock). */
 export function syncServerClock(): Promise<void> {
   if (!clockSync) {
     clockSync = (async () => {
@@ -688,7 +706,14 @@ export function syncServerClock(): Promise<void> {
         const { data, error } = await supabase.rpc('exos_server_time');
         const t1 = Date.now();
         if (error || !data) throw error ?? new Error('no server time');
-        setClockOffset(estimateOffset(t0, new Date(data as string).getTime(), t1));
+        const ms = estimateOffset(t0, new Date(data as string).getTime(), t1);
+        if (ms == null) throw new Error('round trip too slow to measure the clock');
+        setClockOffset(ms, t1, true);
+        try {
+          saveClockOffset(localStorage, ms, t1);
+        } catch {
+          /* storage unavailable */
+        }
       } catch {
         clockSync = null; // try again next time
       }
@@ -850,7 +875,12 @@ export async function claimFreeTickets(input: {
   promoterId?: string | null;
   channel?: string | null;
   orderRef?: string | null;
+  /** The code that unlocked a hidden free tier (checked + used up server-side,
+   *  mig 20261021100000). Sent only when there is one, so the call still
+   *  works against a database without the argument. */
+  voucherCode?: string | null;
 }): Promise<string[]> {
+  const code = input.voucherCode?.trim();
   const { data, error } = await supabase.rpc('exos_claim_free_tickets', {
     p_event_id: input.eventId,
     p_tier_id: input.tierId,
@@ -858,6 +888,7 @@ export async function claimFreeTickets(input: {
     p_promoter_id: input.promoterId ?? null,
     p_channel: input.channel ?? null,
     p_order_ref: input.orderRef ?? null,
+    ...(code ? { p_voucher_code: code } : {}),
   });
   if (error) throw error;
   return (data ?? []) as string[];

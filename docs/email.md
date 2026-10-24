@@ -20,7 +20,8 @@ function (Resend). Nothing sends mail directly.
 - **Transactional mail always sends.** Receipts, tickets, transfers, refunds, event changes, payouts, fee notices,
   organizer alerts.
 - **Follow-ups ("marketing-ish") respect the opt-out.** They need an Exos account (the opt-out lives on it:
-  `exos_mail_prefs.marketing_opt_out`), carry an unsubscribe link in the footer and a `List-Unsubscribe` header,
+  `exos_mail_prefs.marketing_opt_out`), carry an unsubscribe link in the footer and a one-click `List-Unsubscribe` + `List-Unsubscribe-Post` header
+  (RFC 8058; the mail client POSTs to the `exos-mail-unsubscribe` function),
   and are skipped for anyone who opted out. `/unsubscribe?t=<token>` (signed out) and `exos_set_marketing_emails`
   (signed in) set it. One switch covers every follow-up.
 - **Never twice.** Every follow-up and alert has a dedupe key (`template:thing:recipient-id`) claimed in

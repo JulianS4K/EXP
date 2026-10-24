@@ -31,6 +31,7 @@ import {
 import { formatCents } from '../lib/refunds';
 import { listMyInvoices, type MyInvoice } from '../lib/invoicesApi';
 import { formatDocNumber, invoicePath } from '../lib/invoices';
+import { activePassCount, orderArrived, ORDER_POLL_LIMIT_MS, ORDER_POLL_MS, splitTicketGroups } from '../lib/myTickets';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
@@ -53,6 +54,12 @@ export default function MyTickets() {
   const [offerBusy, setOfferBusy] = useState<string | null>(null);
   // Receipts (mig 20261001100000): order (checkout session) id → invoice.
   const [invoices, setInvoices] = useState<Map<string, MyInvoice>>(new Map());
+  const [tab, setTab] = useState<'active' | 'archive'>('active');
+  // Back from Stripe: the webhook mints a few seconds later, so re-load every
+  // few seconds (up to a minute) until this session's tickets are here.
+  const [awaitingOrder, setAwaitingOrder] = useState<{ sessionId: string | null; baseline: number | null } | null>(null);
+  const [orderSlow, setOrderSlow] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const reloadOffers = async () => setOffers(await listMyRescheduleOffers());
 
@@ -127,6 +134,9 @@ export default function MyTickets() {
       setGuestDone(true);
     } else if (params.get('checkout') === 'success') {
       toast({ kind: 'success', title: 'Payment received', message: 'Your tickets will appear here in a moment.' });
+      const sid = params.get('session_id');
+      setAwaitingOrder({ sessionId: sid && sid.startsWith('cs_') ? sid : null, baseline: null });
+      setOrderSlow(false);
     } else if (Number.isInteger(claimed) && claimed > 0) {
       toast({ kind: 'success', title: "You're in!", message: `${claimed} ticket${claimed === 1 ? '' : 's'} reserved.` });
     } else {
@@ -158,6 +168,11 @@ export default function MyTickets() {
 
         setTickets(ticketsWithEvents);
         setSavedEvents(saved);
+        setAwaitingOrder((cur) => {
+          if (!cur) return cur;
+          const baseline = cur.baseline ?? ticketsWithEvents.length;
+          return orderArrived(ticketsWithEvents, cur.sessionId, cur.baseline) ? null : { ...cur, baseline };
+        });
 
         const grouped = ticketsWithEvents.reduce((acc, t) => {
           if (!acc[t.eventId]) acc[t.eventId] = [];
@@ -194,7 +209,21 @@ export default function MyTickets() {
     return () => {
       cancelled = true;
     };
-  }, [user, toast]);
+  }, [user, toast, reloadTick]);
+
+  const polling = !!awaitingOrder && !!user;
+  useEffect(() => {
+    if (!polling) return undefined;
+    const every = setInterval(() => setReloadTick((n) => n + 1), ORDER_POLL_MS);
+    const stop = setTimeout(() => {
+      setAwaitingOrder(null);
+      setOrderSlow(true);
+    }, ORDER_POLL_LIMIT_MS);
+    return () => {
+      clearInterval(every);
+      clearTimeout(stop);
+    };
+  }, [polling]);
 
   if (!user && guestDone) return (
     <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
@@ -223,6 +252,12 @@ export default function MyTickets() {
     </div>
   );
 
+  // Upcoming vs past (or every pass used / refunded / given away), by date.
+  const { active: activeGroups, archive: archiveGroups } = splitTicketGroups(groupedTickets, Date.now());
+  const shownGroups = tab === 'active' ? activeGroups : archiveGroups;
+  const liveCount = activeGroups.reduce((n, [, list]) => n + activePassCount(list), 0);
+  const tabClass = (on: boolean) => `disp px-8 py-2.5 text-lg tracking-wide ${on ? 'bg-brand-primary text-black' : 'text-white/60 hover:text-white transition-colors'}`;
+
   return (
     <div className="wall min-h-screen text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-10">
@@ -231,13 +266,17 @@ export default function MyTickets() {
           <div className="relative">
             <p className="type text-brand-primary text-[12px] uppercase tracking-widest mb-2">{t('tickets.kicker')}</p>
             <h1 className="disp text-6xl md:text-7xl tracking-tight leading-none" style={{ transform: 'skewX(-4deg)' }}>MY <span className="neon">TICKETS</span></h1>
-            {Object.keys(groupedTickets).length > 0 && (
-              <span className="marker absolute -right-6 -top-3 text-brand-secondary text-lg rotate-[6deg] hidden md:block">{Object.keys(groupedTickets).length} live ✦</span>
+            {liveCount > 0 && (
+              <span className="marker absolute -right-6 -top-3 text-brand-secondary text-lg rotate-[6deg] hidden md:block">{liveCount} live ✦</span>
             )}
           </div>
-          <div className="flex border border-white/10 bg-white/5">
-            <button className="disp px-8 py-2.5 text-lg tracking-wide bg-brand-primary text-black">{t('tickets.active')}</button>
-            <button className="disp px-8 py-2.5 text-lg tracking-wide text-white/60 hover:text-white transition-colors">{t('tickets.archive')}</button>
+          <div className="flex border border-white/10 bg-white/5" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'active'} onClick={() => setTab('active')} className={tabClass(tab === 'active')}>
+              {t('tickets.active')}
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'archive'} onClick={() => setTab('archive')} className={tabClass(tab === 'archive')}>
+              {t('tickets.archive')}{archiveGroups.length > 0 ? ` (${archiveGroups.length})` : ''}
+            </button>
           </div>
         </div>
 
@@ -367,17 +406,41 @@ export default function MyTickets() {
           </section>
         )}
 
-        {tickets.length === 0 ? (
+        {awaitingOrder && (
+          <div className="mb-8 p-5 border border-brand-primary/40 bg-brand-primary/10" role="status">
+            <p className="type text-[12px] text-brand-primary uppercase tracking-widest animate-pulse">Finishing your order…</p>
+            <p className="type text-xs text-white/60 mt-2">Payment received. Your tickets show up here in a few seconds.</p>
+          </div>
+        )}
+        {orderSlow && (
+          <div className="mb-8 p-5 border border-white/20 bg-white/5" role="status">
+            <p className="type text-xs text-white/80">
+              Your order is still being finished. We'll email your tickets as soon as they're ready; you can also check back here in a minute.
+            </p>
+            <button type="button" onClick={() => { setOrderSlow(false); setReloadTick((n) => n + 1); }}
+              className="type mt-3 text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary">
+              Check again
+            </button>
+          </div>
+        )}
+
+        {awaitingOrder && tickets.length === 0 ? null : shownGroups.length === 0 ? (
           <div className="text-center py-40 border border-dashed border-white/20">
             <TicketIcon className="w-24 h-24 text-white/5 mx-auto mb-10" />
-            <p className="type text-white/60 mb-12 uppercase tracking-widest text-[12px]">{t('tickets.empty')}</p>
+            <p className="type text-white/60 mb-12 uppercase tracking-widest text-[12px]">
+              {tickets.length === 0
+                ? t('tickets.empty')
+                : tab === 'active'
+                  ? '// no upcoming tickets: past ones are under archive'
+                  : '// no past tickets yet'}
+            </p>
             <Link to="/" className="disp inline-flex items-center bg-brand-primary text-black px-8 py-3 text-lg tracking-wide hover:bg-white transition-colors">
               FIND EVENTS
             </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-white/10 border border-white/10">
-            {Object.entries(groupedTickets).map(([eventId, tickets]) => {
+            {shownGroups.map(([eventId, tickets]) => {
               const eventTickets = tickets as (Ticket & { event?: Event })[];
               const mainTicket = eventTickets[0];
               const event = mainTicket.event;
@@ -407,7 +470,9 @@ export default function MyTickets() {
                       </div>
                       <div className="text-right">
                         <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('tickets.passes')}</p>
-                        <span className="stamp neon text-base">{eventTickets.length} ACTIVE</span>
+                        <span className="stamp neon text-base">
+                          {activePassCount(eventTickets) > 0 ? `${activePassCount(eventTickets)} ACTIVE` : eventTickets.every((x) => x.status === 'voided') ? 'REFUNDED' : 'DONE'}
+                        </span>
                       </div>
                     </div>
 

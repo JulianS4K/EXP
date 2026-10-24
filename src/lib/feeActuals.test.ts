@@ -23,6 +23,8 @@ describe('feeActualsFromCharge', () => {
       charge_id: 'ch_1',
       balance_txn_id: 'txn_1',
       stripe_fee_cents: 146,
+      stripe_fee_currency: null,
+      exchange_rate: null,
       application_fee_id: 'fee_1',
       application_fee_cents: 266,
       transfer_id: 'tr_1',
@@ -39,9 +41,27 @@ describe('feeActualsFromCharge', () => {
     expect(feeActualsFromCharge({ ...CHARGE, application_fee_amount: null }, 250)).toMatchObject({ application_fee_cents: 250, net_cents: 104 });
   });
 
+  it('an EUR charge on a USD platform: the fee keeps its currency, the net is in it', () => {
+    // 49.98 EUR, application fee 3.25 EUR; the balance transaction is 53.98 USD (rate 1.08), fee 0.95 USD.
+    const eur: ChargeLike = {
+      ...CHARGE, amount: 4998, currency: 'eur', application_fee_amount: 325,
+      balance_transaction: { id: 'txn_e1', fee: 95, net: 5303, currency: 'usd', exchange_rate: 1.08 },
+    };
+    expect(feeActualsFromCharge(eur)).toMatchObject({
+      stripe_fee_cents: 95, stripe_fee_currency: 'usd', exchange_rate: 1.08, application_fee_cents: 325,
+      net_cents: Math.round(325 * 1.08) - 95,
+    });
+    // Converted with no rate: the platform net is unknown, not EUR minus USD.
+    expect(feeActualsFromCharge({ ...eur, balance_transaction: { id: 'txn_e2', fee: 95, currency: 'usd' } }).net_cents).toBeNull();
+    // Same currency: as before, and the rate stays null.
+    expect(feeActualsFromCharge({ ...CHARGE, currency: 'usd', balance_transaction: { id: 'txn_1', fee: 146, currency: 'usd' } }))
+      .toMatchObject({ stripe_fee_currency: 'usd', exchange_rate: null, net_cents: 120 });
+  });
+
   it('leaves unknowns null', () => {
     expect(feeActualsFromCharge(null)).toEqual({
-      charge_id: null, balance_txn_id: null, stripe_fee_cents: null, application_fee_id: null,
+      charge_id: null, balance_txn_id: null, stripe_fee_cents: null, stripe_fee_currency: null, exchange_rate: null,
+      application_fee_id: null,
       application_fee_cents: null, transfer_id: null, net_cents: null,
     });
   });
@@ -105,6 +125,19 @@ describe('recordFeeActuals (webhook + reconcile)', () => {
         p_application_fee_id: 'fee_1', p_application_fee_cents: 266, p_transfer_id: 'tr_1', p_net_cents: 120,
       },
     }]);
+  });
+
+  it('records the fee currency and rate next to the fee', async () => {
+    const { db, rpcCalls } = fakeDb({ payment: { fees_recorded_at: null }, sessionFee: 325 });
+    const eur: ChargeLike = {
+      ...CHARGE, currency: 'eur', application_fee_amount: 325,
+      balance_transaction: { id: 'txn_e1', fee: 95, currency: 'usd', exchange_rate: 1.08 },
+    };
+    const { stripe } = fakeStripe(async () => ({ latest_charge: eur }));
+    await expect(recordFeeActuals(db, stripe, 'cs_1', 'pi_1', quiet)).resolves.toBe('recorded');
+    expect(rpcCalls.map((c) => c.fn)).toEqual(['exos_record_payment_fees', 'exos_record_payment_fee_currency']);
+    expect(rpcCalls[0].args).toMatchObject({ p_stripe_fee_cents: 95, p_net_cents: 256 });
+    expect(rpcCalls[1].args).toEqual({ p_payment_intent: 'pi_1', p_stripe_fee_currency: 'usd', p_exchange_rate: 1.08 });
   });
 
   it('makes no Stripe call on a replay once recorded', async () => {

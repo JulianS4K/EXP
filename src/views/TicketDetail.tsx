@@ -32,7 +32,7 @@ import { useT } from '../context/LanguageContext';
 
 export default function TicketDetail() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, loading: authLoading, signIn } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const t = useT();
@@ -232,6 +232,23 @@ export default function TicketDetail() {
     }
   };
 
+  // Signed out (a ticket link opened in a new browser): ask to sign in. The
+  // sign-in comes back to this page (the auth callback keeps the path), and
+  // the fetch above runs once the user is known.
+  if (!authLoading && !user) return (
+    <div className="wall min-h-screen flex items-center justify-center p-8 sm:p-20 text-center">
+      <div className="max-w-sm">
+        <p className="type text-white/80 text-sm mb-6">Sign in to see your ticket.</p>
+        <button
+          type="button"
+          onClick={() => signIn()}
+          className="type text-[12px] uppercase tracking-widest bg-brand-primary text-black px-6 py-3 hover:bg-white transition-colors"
+        >
+          Sign in
+        </button>
+      </div>
+    </div>
+  );
   if (loading) return (
     <div className="wall min-h-screen flex items-center justify-center p-20 text-center">
       <p className="type text-white/50 uppercase tracking-[0.3em] text-[12px] animate-pulse">{t('ticket.loading')}</p>
@@ -592,7 +609,7 @@ export default function TicketDetail() {
                       )}
                     </div>
                     {/* Ask for a refund (the buyer only; hidden offline: it needs the server). */}
-                    {event?.id && savedCopyAt === null && <RefundAskCard eventId={event.id} ticketId={currentTicket.id} />}
+                    {event?.id && savedCopyAt === null && <RefundAskCard eventId={event.id} ticketId={currentTicket.id} eventCancelled={event.status === 'cancelled'} />}
                     {event?.orgId && savedCopyAt === null && <SmsOptIn orgId={event.orgId} eventId={event.id} />}
                  </div>
               </div>

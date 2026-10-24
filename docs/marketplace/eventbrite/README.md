@@ -162,7 +162,10 @@ How it works:
    Eventbrite's capacity, the writer plans `{"ticket_class": {"capacity": N}}`
    and sends it only when sending is live. **A target of 0 is never sent**
    (Eventbrite refuses 0 on a normal class and reads it as unlimited on a
-   donation): the panel says to hide or end that ticket on Eventbrite instead.
+   donation): on a class Exos created (a mirror) the class is hidden instead
+   (`{"hidden": true}`, shown again with the next capacity); on any other the
+   panel says to hide or end that ticket on Eventbrite. With a Luma mirror on
+   the same ticket type, the two split `free - 2 packs` (mig 20261020110000).
 
 Simulated (`scripts/channel-sim/eventbrite_dual.py`, report `eventbrite-dual-report.txt`): with sending
 live, a 2-minute sync and a 1-pack buffer, steady demand never oversold; an on-sale rush oversold about 1

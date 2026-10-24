@@ -61,6 +61,9 @@ paid once (`UNIQUE (order_id, kind)`).
 
 Payout states: `planned` → `sending` → `sent` (with the Stripe transfer id) or `failed` → `planned` (retry).
 `exos_cancel_org_payout` cancels a planned or failed payout and frees its orders.
+The next plan folds a failed payout's orders (and clawbacks) into a new payout and cancels the failed one; each
+org is planned on its own, so one org's error is reported (`plan_errors`) without stopping the rest
+(`20261020120000`).
 
 `exos-payouts` (cron, `x-cron-secret`) does, each run:
 
@@ -72,7 +75,8 @@ Payout states: `planned` → `sending` → `sent` (with the Stripe transfer id) 
    of its orders was cancelled after planning.
 
 **Dry-run by default.** Money only moves when `EXOS_PAYOUTS_LIVE=true`; until then a run reports what it would send.
-A payout left in `sending` by a crash is safe to resend: Stripe dedupes on the idempotency key.
+A payout left in `sending` by a crash (or by a transfer whose outcome is unknown) is resent after 15 minutes with the
+same idempotency key, once Stripe shows no transfer in its transfer group. Only a transfer Stripe refused is `failed`.
 
 ## Operator setup
 
@@ -107,10 +111,12 @@ Stripe takes the amount plus its dispute fee from the platform balance, not from
   `dispute-opened` (amount, reason, evidence deadline, the event's Money section, the dispute in the Stripe
   dashboard), `dispute-won`, `dispute-lost` (`docs/email.md`). A mail problem is logged and never fails the webhook.
 - **See it.** A Disputes block under the event's Money section and on the org's Payouts page (owner / manager /
-  finance; RLS on `exos_disputes`): status, reason, amount and fee, evidence due date, the order, a link to Stripe.
-- **Evidence** is submitted from the platform's Stripe dashboard (organizers can't see the platform account), so the
-  mail and the block ask the organizer to send the Exos team what they have before the deadline. Evidence tooling
-  in Exos isn't built.
+  finance; RLS on `exos_disputes`): status, reason, amount and fee, evidence due date, the buyer's email
+  (`exos_dispute_buyers`), a link to Stripe for platform admins only. A lost dispute Exos recovers comes off
+  "Organizer net" and the Orders CSV has dispute columns.
+- **Evidence** is submitted from the platform's Stripe dashboard (organizers can't see the platform account), so each
+  open row has "Send evidence": a mail to the support address (`src/lib/legal.ts`) naming the dispute, event, order
+  and buyer. Evidence tooling in Exos isn't built.
 
 ## Recovery policy for lost disputes
 

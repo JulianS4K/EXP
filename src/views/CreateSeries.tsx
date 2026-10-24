@@ -3,8 +3,10 @@
 //
 // The current event is the TEMPLATE (it stays as member 0). The organizer
 // picks a rule, previews the generated dates in the event's timezone, prunes
-// any they don't want, and one RPC call clones the template — tiers included —
-// once per date. Running it again on the same event extends the series.
+// any they don't want, and one RPC call clones the template — tiers, tax
+// rules, capacity quotas, add-ons, check-in lists and codes, every time on them
+// moved to the new date (mig 20261021130000) — once per date. Running it
+// again on the same event extends the series.
 //
 // Owner / manager / admin; the RPC re-checks server-side.
 
@@ -159,7 +161,7 @@ export default function CreateSeries() {
 
   const submit = async () => {
     if (kept.length === 0) return;
-    if (!window.confirm(`Create ${kept.length} more date${kept.length === 1 ? '' : 's'} of "${event.title}"? Tiers are copied; nothing is sold yet on the new dates.`)) return;
+    if (!window.confirm(`Create ${kept.length} more date${kept.length === 1 ? '' : 's'} of "${event.title}"? Ticket types, tax, capacity limits, add-ons, check-in lists and codes are copied, with their dates moved to each new date; nothing is sold yet on them.`)) return;
     setBusy(true);
     try {
       const rows = await createEventSeries({

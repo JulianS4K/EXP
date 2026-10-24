@@ -45,6 +45,7 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
+import { holdAddons } from "../_shared/addonHold.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -185,7 +186,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ({ data: vUses } = await sb.from("exos_vouchers")
         .select("max_uses, used_count").eq("id", v.voucher_id).maybeSingle<VoucherUses>());
     }
-    const remainingUses = vUses ? vUses.max_uses - vUses.used_count : 0;
+    // Uses other buyers are holding count too (mig 20261021140000: live holds
+    // and open checkouts with the code); before it, only used_count.
+    let remainingUses = vUses ? vUses.max_uses - vUses.used_count : 0;
+    const { data: left, error: leftErr } = await sb.rpc("exos_voucher_uses_left", {
+      p_voucher_id: v.voucher_id, p_buyer_uid: buyerUid, p_email: buyerEmail || null,
+    });
+    if (!leftErr && typeof left === "number") remainingUses = Math.min(remainingUses, left);
     if (quantity > remainingUses) {
       return json({ error: `voucher covers ${Math.max(remainingUses, 0)} more ticket(s)` }, 409);
     }
@@ -250,7 +257,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Validate + price add-ons server-side (never trust the client's prices). Each
   // must belong to this event, be public, and have stock. Build the priced
   // snapshot stored on the session (fulfillment reads it to record the purchase).
-  type AddonRow = { addon_id: string; quantity: number; unit_price_cents: number; name: string };
+  // unit_all_in_cents: what the buyer pays per add-on (tax included), so
+  // fulfillment can leave it out of the tickets' price_paid (mig 20261021130000).
+  type AddonRow = { addon_id: string; quantity: number; unit_price_cents: number; unit_all_in_cents: number; name: string };
   const addonsForSession: AddonRow[] = [];
   const addonLines: { id: string; name: string; quantity: number; unit_face: number; unit_all_in: number; unit_tax: number; line_tax: number; tax_included: boolean }[] = [];
   let addonTotal = 0;
@@ -316,7 +325,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const addonRule = (a as unknown as { exos_tax_rules?: { rate_percent?: number; price_includes_tax?: boolean } }).exos_tax_rules;
         const taxBefore = recordedTax;
         const allIn = allInUnit(unitCents, qty, addonRule);
-        addonsForSession.push({ addon_id: a.id, quantity: qty, unit_price_cents: unitCents, name: a.name });
+        addonsForSession.push({ addon_id: a.id, quantity: qty, unit_price_cents: unitCents, unit_all_in_cents: allIn, name: a.name });
         addonLines.push({
           id: a.id, name: a.name, quantity: qty, unit_face: unitCents, unit_all_in: allIn, unit_tax: allIn - unitCents,
           line_tax: recordedTax - taxBefore, tax_included: addonRule?.price_includes_tax === true,
@@ -426,24 +435,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // else swept by the exos_expire_holds cron.
   let holdId: string | null = null;
   if (!bypassCapacity) {
-    // A hidden tier's hold re-checks the voucher (mig 20260925003000). Only
-    // sent when needed, so public tiers work before that migration is applied.
-    // A guest hold is also where the guest rate limits and the organizer's
-    // guestCheckout switch are enforced (guests never bypass, see above).
+    // The hold gets the code whenever there is one: a hidden tier's hold
+    // re-checks it (mig 20260925003000), and the hold reserves one of the
+    // code's uses (mig 20261021140000), so a 2-use link can't be paid for 3
+    // times. A guest hold is also where the guest rate limits and the
+    // organizer's guestCheckout switch are enforced (guests never bypass, see above).
     const { data: hid, error: holdErr } = buyerUid
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
-        ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
+        ...(voucherId ? { p_voucher_code: voucherCode } : {}),
       })
       : await sb.rpc("exos_create_guest_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
         p_ip_hash: ipHash,
-        p_voucher_code: voucherUnlocksTier ? voucherCode : null,
+        p_voucher_code: voucherId ? voucherCode : null,
       });
     if (holdErr) {
       return json({ error: holdErr.message || "not enough tickets available" }, 409);
     }
     holdId = hid as string;
+    // The add-ons are held on the same hold (mig 20261021130000): the last
+    // locker can't be sold twice, and a sold-out add-on stops the order here,
+    // before the buyer pays. A bypass voucher has no hold; fulfillment still
+    // re-checks the stock.
+    const addonErr = await holdAddons(sb, holdId, addonsForSession);
+    if (addonErr) {
+      await releaseHold(sb, holdId);
+      return json({ error: addonErr }, 409);
+    }
   }
 
   // A guest's free tickets: no Stripe. Record the order and fulfil it now;
@@ -465,9 +484,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await releaseHold(sb, holdId);
       return json({ error: "could not record the order" }, 500);
     }
-    if (holdId) {
-      const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
-      if (linkErr) console.error("exos-checkout: free hold link failed (non-fatal)", linkErr.message);
+    if (holdId && !(await linkHold(sb, holdId, sessionId))) {
+      // As for a paid order below: fulfilment wouldn't consume the hold.
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions")
+        .update({ status: "failed", failure_reason: "seat hold could not be linked" })
+        .eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: "could not reserve the tickets; please try again" }, 500);
     }
     const { data: ids, error: fulErr } = await sb.rpc("exos_fulfill_checkout", { p_session_id: sessionId });
     if (fulErr) {
@@ -542,10 +565,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Link the hold to the now-existing session so fulfillment consumes it (and it
   // stops counting against availability once the sale lands). Insert-then-link
   // ordering matters: exos_cart_holds.checkout_session_id FKs the session row.
-  if (holdId) {
-    const { error: linkErr } = await sb.from("exos_cart_holds")
-      .update({ checkout_session_id: session.id }).eq("id", holdId);
-    if (linkErr) console.error("exos-checkout: hold link failed (non-fatal)", linkErr);
+  // Fatal when it fails: an unlinked hold isn't consumed at fulfilment, so the
+  // seats would count twice until it expires, and the buyer would pay for
+  // seats the hold doesn't vouch for. Close the Stripe session (nobody can pay
+  // it), release the hold, retire the row, and say so.
+  if (holdId && !(await linkHold(sb, holdId, session.id))) {
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (e) {
+      console.error(`exos-checkout: expiring ${session.id} after a failed hold link failed`, e);
+    }
+    await releaseHold(sb, holdId);
+    await sb.from("exos_checkout_sessions")
+      .update({ status: "expired", failure_reason: "seat hold could not be linked" })
+      .eq("session_id", session.id).eq("status", "pending");
+    return json({ error: "could not reserve the tickets; please try again" }, 500);
   }
 
   // Price-disclosure record (mig 20260926070000): what the buyer is shown on
@@ -603,6 +637,28 @@ async function insertSessionRow(sb: SupabaseClient<any, any, any>, row: Record<s
     ({ error } = await sb.from("exos_checkout_sessions").insert(row));
   }
   return error;
+}
+
+// Point the hold at its checkout session (fulfilment consumes it through this
+// link). True only when the still-active hold was updated.
+// deno-lint-ignore no-explicit-any
+async function linkHold(sb: SupabaseClient<any, any, any>, holdId: string, sessionId: string): Promise<boolean> {
+  try {
+    const { data, error } = await sb.from("exos_cart_holds")
+      .update({ checkout_session_id: sessionId }).eq("id", holdId).eq("status", "active").select("id");
+    if (error) {
+      console.error(`exos-checkout: hold link failed for ${sessionId}`, error);
+      return false;
+    }
+    if (!Array.isArray(data) || data.length === 0) {
+      console.error(`exos-checkout: hold ${holdId} no longer active; not linked to ${sessionId}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`exos-checkout: hold link failed for ${sessionId}`, e);
+    return false;
+  }
 }
 
 // Best-effort release of a reservation when checkout can't complete (Stripe

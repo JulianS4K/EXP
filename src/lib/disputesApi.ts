@@ -21,3 +21,18 @@ export async function getDisputes(scope: { eventId?: string; orgId?: string }): 
     return null;
   }
 }
+
+/** Buyer email per dispute row id (mig 20261021120000); empty when unavailable. */
+export async function getDisputeBuyers(ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  try {
+    const { data, error } = await supabase.rpc('exos_dispute_buyers', { p_dispute_ids: ids.slice(0, 500) });
+    if (error) throw error;
+    return new Map(((data as { id: string; buyer_email: string | null }[] | null) ?? [])
+      .filter((r) => r.buyer_email)
+      .map((r) => [r.id, r.buyer_email as string]));
+  } catch (e) {
+    console.warn('dispute buyers unavailable (non-fatal):', (e as { message?: string })?.message ?? e);
+    return new Map();
+  }
+}

@@ -32,10 +32,14 @@ import CompIssuancePanel from '../components/CompIssuancePanel';
 import TierPricingPanel from '../components/TierPricingPanel';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
+import { listRefundedTicketIds } from '../lib/refundsApi';
+import { ticketBadge, type TicketBadge } from '../lib/refunds';
 import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import { canSeeMoney } from '../lib/settlement';
+import { can, cannotReason } from '../lib/orgRoles';
+import { FIGURES, ticketFigures } from '../lib/eventFigures';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
@@ -58,6 +62,14 @@ const REPORT_TABS: { key: ReportTab; label: string }[] = [
   { key: 'settings', label: 'Settings' },
 ];
 
+const BADGE_CLS: Record<TicketBadge, string> = {
+  active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  used: 'bg-slate-100 text-slate-500 border-slate-200',
+  released: 'bg-amber-50 text-amber-700 border-amber-200',
+  refunded: 'bg-rose-50 text-rose-600 border-rose-200',
+  voided: 'bg-slate-100 text-slate-600 border-slate-300',
+};
+
 export default function OrganizerEventReport() {
   const { eventId } = useParams<{ eventId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -70,7 +82,7 @@ export default function OrganizerEventReport() {
   };
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
-  const { activeRole, activeOrg } = useOrganization();
+  const { activeOrg, roleIn, loading: orgsLoading } = useOrganization();
   const { toast } = useToast();
 
   const [event, setEvent] = useState<Event | null>(null);
@@ -104,6 +116,24 @@ export default function OrganizerEventReport() {
     };
   }, [eventId]);
 
+  // Which voided tickets actually got money back (a succeeded refund line).
+  // Re-read whenever analyticsKey bumps, i.e. after a refund or void here.
+  const [refundedIds, setRefundedIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!eventId) return undefined;
+    let cancelled = false;
+    listRefundedTicketIds(eventId)
+      .then((ids) => { if (!cancelled) setRefundedIds(ids); })
+      .catch((err) => console.warn('listRefundedTicketIds failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, analyticsKey]);
+
+  // The caller's role in THIS event's org, not in whichever org is active in
+  // the switcher (an owner of org B looking at B's event while A is active).
+  const activeRole = roleIn(event?.orgId);
+
   if (!user) {
     return (
       <div className="max-w-3xl mx-auto p-12 text-center text-slate-500">
@@ -116,21 +146,24 @@ export default function OrganizerEventReport() {
   // exposed the report to content staff — gate explicitly on the finance-capable
   // roles. (Buyer emails are column-scoped to these roles server-side, mig
   // 20260925013000.) Falls back to legacy organizerId.
-  const allowedByRole =
-    isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance';
+  const allowedByRole = can(activeRole, 'viewMoney', isAdmin);
   const allowedByLegacy = event?.organizerId === user.uid;
   // Actions below go through org-role-gated RPCs (owner/manager) — a legacy
   // organizerId match can read the report but cannot act, so it must not open
   // the action panels (they would just 42501).
   const canAct = isAdmin || activeRole === 'owner' || activeRole === 'manager';
-  if (event && !allowedByRole && !allowedByLegacy) {
+  // Per-ticket buttons follow their RPCs: void is owner / manager / finance,
+  // release is owner / manager. A legacy-organizer or demoted viewer gets none.
+  const canVoid = can(activeRole, 'voidTicket', isAdmin);
+  const canRelease = can(activeRole, 'releaseSeat', isAdmin);
+  if (event && !orgsLoading && !allowedByRole && !allowedByLegacy) {
     return (
       <div className="max-w-3xl mx-auto p-12 text-center text-slate-500">
         You don't have access to this event's analytics.
       </div>
     );
   }
-  if (loading || !event) {
+  if (loading || !event || orgsLoading) {
     return (
       <div className="max-w-7xl mx-auto p-24 text-center text-slate-300 font-bold uppercase tracking-[0.3em] animate-pulse">
         Loading…
@@ -138,20 +171,19 @@ export default function OrganizerEventReport() {
     );
   }
 
-  // Refund + void a single ticket. In Exos a voided ticket IS a
-  // refunded ticket — this is the per-ticket refund control (the
-  // event-level cancellation flow already exists for whole-event
-  // refunds). Optimistic local update so the UI reflects the change
-  // without re-fetching.
+  // Void a single ticket. Optimistic local update so the UI reflects the
+  // change without re-fetching.
   //
-  // Note: this flow does NOT issue a Stripe refund. Money refunds go
-  // through RefundPanel (exos-refund) below. The void is sticky
-  // regardless: the ticket is unscannable even if a refund hasn't
-  // cleared yet, which is the important property for the door.
+  // This does NOT issue a refund, and organizers can't refund from their own
+  // Stripe dashboard (Exos takes the payment as a platform charge). Money goes
+  // back only through RefundPanel (exos-refund) below; the badge reads
+  // "refunded" only once a refund for the ticket has succeeded. The void is
+  // sticky regardless: the ticket is unscannable, which is what the door needs.
   const handleVoidTicket = async (ticket: Ticket) => {
     if (!user || !ticket || ticket.status !== 'active') return;
     const reason = window.prompt(
-      `Refund / void ticket ${ticket.id.slice(0, 8)}? Provide a short reason (audit log).`,
+      `Void ticket ${ticket.id.slice(0, 8)}? It stops scanning. This does NOT refund the buyer: ` +
+        'to send money back, use Refunds further down this page.\n\nShort reason (audit log):',
       '',
     );
     if (reason === null) return;
@@ -170,8 +202,7 @@ export default function OrganizerEventReport() {
       setAnalyticsKey((k) => k + 1);
       toast({
         kind: 'success',
-        message:
-          'Ticket voided. Issue the buyer a refund through your Stripe dashboard — the ticket is already unscannable.',
+        message: 'Ticket voided: it no longer scans. No money was returned; to refund the buyer, use Refunds below on this page.',
       });
     } catch (err) {
       console.error('Void failed:', err);
@@ -224,16 +255,10 @@ export default function OrganizerEventReport() {
     }
   };
 
-  // Compute aggregates from the loaded ticket set. Voided tickets are
-  // excluded from sold/revenue counts but kept in the attendees list
-  // (greyed out) so the organizer can audit the void rationale.
-  const activeTickets = tickets.filter(
-    (t) => t.status !== 'cancelled' && t.status !== 'voided',
-  );
-  const totalSold = activeTickets.length;
-  const totalRevenue = activeTickets.reduce((sum, t) => sum + (t.pricePaid || 0), 0);
-
-  const checkedIn = activeTickets.filter((t) => t.status === 'used').length;
+  // Header figures from the loaded ticket set, with the same definitions the
+  // sales chart and Attendance use (src/lib/eventFigures.ts). Voided tickets
+  // stay in the attendees list (greyed out) so the void can be audited.
+  const { sold: totalSold, sales: totalRevenue, checkedIn } = ticketFigures(tickets);
   const currency = event.currency || 'USD';
 
   return (
@@ -265,9 +290,10 @@ export default function OrganizerEventReport() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
+          <Stat label={FIGURES.ticketsSold.label} hint={FIGURES.ticketsSold.hint} value={String(totalSold)} icon={<Users size={16} />} />
           <Stat
-            label="Ticket sales"
+            label={FIGURES.ticketSales.label}
+            hint={FIGURES.ticketSales.hint}
             value={formatCurrency(totalRevenue, currency)}
             icon={<DollarSign size={16} />}
           />
@@ -303,7 +329,7 @@ export default function OrganizerEventReport() {
             hidden before the money views exist). Read-only. */}
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
-        <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
+        <DisputesPanel eventId={event.id} eventName={event.title} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
@@ -350,7 +376,15 @@ export default function OrganizerEventReport() {
         <div className="bg-white rounded-2xl p-6 shadow-sm mb-6">
           <h3 className="text-sm font-bold text-slate-700 mb-1">Attendees</h3>
           <p className="text-xs text-slate-400 mb-4">
-            "Void" cancels a ticket so it no longer scans. To send money back, use Refunds below.
+            "Void" cancels a ticket so it no longer scans; it doesn't return any money. To send money back, use{' '}
+            <button
+              type="button"
+              onClick={() => document.getElementById('refunds')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="underline font-bold text-slate-500 hover:text-slate-700"
+            >
+              Refunds
+            </button>{' '}
+            below.
           </p>
           {tickets.length === 0 ? (
             <p className="text-xs text-slate-400">No tickets sold yet.</p>
@@ -368,15 +402,9 @@ export default function OrganizerEventReport() {
                 <tbody>
                   {tickets.map((t) => {
                     const isVoided = t.status === 'voided';
-                    const isUsed = t.status === 'used';
                     const isReleased = isVoided && !!t.releasedAt;
-                    const statusBadge = isReleased
-                      ? { text: 'released', cls: 'bg-amber-50 text-amber-700 border-amber-200' }
-                      : isVoided
-                      ? { text: 'refunded', cls: 'bg-rose-50 text-rose-600 border-rose-200' }
-                      : isUsed
-                      ? { text: 'used', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
-                      : { text: 'active', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+                    const badge = ticketBadge(t, refundedIds.has(t.id));
+                    const statusBadge = { text: badge, cls: BADGE_CLS[badge] };
                     return (
                       <tr
                         key={t.id}
@@ -398,9 +426,9 @@ export default function OrganizerEventReport() {
                           ) : null}
                         </td>
                         <td className="py-2 text-right">
-                          {t.status === 'active' ? (
+                          {t.status === 'active' && (canVoid || canRelease) ? (
                             <span className="inline-flex flex-wrap justify-end gap-1">
-                              {(t.pricePaid ?? 0) === 0 && (
+                              {canRelease && (t.pricePaid ?? 0) === 0 && (
                                 <button
                                   onClick={() => handleReleaseTicket(t)}
                                   disabled={releasingId === t.id || voidingId === t.id}
@@ -411,6 +439,7 @@ export default function OrganizerEventReport() {
                                   {releasingId === t.id ? 'Releasing…' : 'Release seat'}
                                 </button>
                               )}
+                              {canVoid && (
                               <button
                                 onClick={() => handleVoidTicket(t)}
                                 disabled={voidingId === t.id || releasingId === t.id}
@@ -419,9 +448,11 @@ export default function OrganizerEventReport() {
                                 <Ban size={12} aria-hidden="true" />
                                 {voidingId === t.id ? 'Voiding…' : 'Void'}
                               </button>
+                              )}
                             </span>
                           ) : (
-                            <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">—</span>
+                            <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest"
+                              title={t.status === 'active' ? cannotReason('voidTicket') : undefined}>—</span>
                           )}
                         </td>
                       </tr>
@@ -440,13 +471,16 @@ export default function OrganizerEventReport() {
           onRefunded={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
         />
 
-        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks). */}
-        <RefundPanel
-          event={event}
-          canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
-          canCancel={canAct}
-          onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
-        />
+        {/* Money refunds through Stripe (owner/manager/finance; exos-refund re-checks).
+            The void prompt, toast and the attendee note point here. */}
+        <div id="refunds" className="scroll-mt-4">
+          <RefundPanel
+            event={event}
+            canRefund={activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance'}
+            canCancel={canAct}
+            onChanged={() => { void reloadTickets(); setAnalyticsKey((k) => k + 1); }}
+          />
+        </div>
 
         {/* Date changes: the refund offer and what buyers did with it (mig 20260929150000). */}
         <RescheduleRefundsPanel
@@ -550,14 +584,15 @@ export default function OrganizerEventReport() {
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
+function Stat({ label, value, icon, hint }: { label: string; value: string; icon: ReactNode; hint?: string }) {
   return (
-    <div className="bg-white p-5 rounded border border-slate-200 shadow-sm">
+    <div className="bg-white p-5 rounded border border-slate-200 shadow-sm" title={hint}>
       <div className="flex justify-between items-start mb-3">
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{label}</p>
         <span className="text-slate-400">{icon}</span>
       </div>
       <p className="disp text-4xl text-slate-900 tracking-tight" style={{ transform: 'skewX(-3deg)' }}>{value}</p>
+      {hint && <p className="text-[10px] text-slate-400 mt-2 leading-snug">{hint}</p>}
     </div>
   );
 }

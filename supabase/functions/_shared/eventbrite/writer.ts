@@ -6,10 +6,14 @@
 // What it can send: Update a Ticket Class
 //   POST /events/{event_id}/ticket_classes/{ticket_class_id}/
 //   {"ticket_class": {"capacity": N}}
-// on a ticket class the organizer already has and mapped to an Exos ticket
-// type. Nothing else: no events, no ticket classes created, no prices, no
-// orders, no check-ins, no webhooks. sendCapacity refuses any other path or
-// body.
+// on a ticket class mapped to an Exos ticket type. Eventbrite refuses a
+// capacity of 0, so when nothing is left to sell on a class Exos created
+// (mig 20261020110000: a mirror Exos made, or a class its sync added) it sends
+//   {"ticket_class": {"hidden": true}}
+// instead, and {"capacity": N, "hidden": false} when there are seats again. A
+// class Exos didn't create is never hidden: at 0 nothing is sent. Nothing
+// else: no events, no ticket classes created, no prices, no orders, no
+// check-ins, no webhooks. sendCapacity refuses any other path or body.
 //
 // Dry run unless BOTH the org's switch (exos_eventbrite_accounts.writes_enabled,
 // owner only) and the operator's EXOS_EVENTBRITE_WRITES=on are set
@@ -26,24 +30,41 @@ const MAX_CAPACITY = 1_000_000;
 export interface CapacityPlan {
   method: "POST";
   path: string;
-  body: { ticket_class: { capacity: number } };
+  body: { ticket_class: { capacity?: number; hidden?: boolean } };
   /** For the organizer: what changes. */
   ticket_class_id: string;
   from: number | null;
   to: number;
 }
 
-/** The request that sets a class's capacity, or null when nothing changes. */
-export function planCapacity(ebEventId: string, classId: string, from: number | null, to: number | null): CapacityPlan | null {
+/** How the class stands: Exos created it; the sync hid it for a 0 count; its Exos ticket type is public. */
+export interface ClassState {
+  exosCreated?: boolean;
+  hiddenByCount?: boolean;
+  /** false: the organizer hid the Exos ticket type, so the sync never shows the class. */
+  tierPublic?: boolean;
+}
+
+/** The request that sets a class's capacity (or hides it at 0), or null when nothing changes. */
+export function planCapacity(ebEventId: string, classId: string, from: number | null, to: number | null,
+                             state: ClassState = {}): CapacityPlan | null {
   if (!isEbId(ebEventId) || !isEbId(classId)) return null;
-  // Eventbrite refuses 0 for a normal class (and reads it as unlimited for a
-  // donation class), so 0 is never sent.
-  if (to == null || !Number.isInteger(to) || to < 1 || to > MAX_CAPACITY) return null;
-  if (from === to) return null;
+  if (to == null || !Number.isInteger(to) || to < 0 || to > MAX_CAPACITY) return null;
+  const path = `/events/${ebEventId}/ticket_classes/${classId}/`;
+  if (to === 0) {
+    // Eventbrite refuses 0 for a normal class (and reads it as unlimited for a
+    // donation class), so 0 is never sent: a class Exos created is hidden
+    // instead; any other class is left alone.
+    if (state.exosCreated !== true || state.hiddenByCount === true) return null;
+    return { method: "POST", path, body: { ticket_class: { hidden: true } }, ticket_class_id: classId, from, to: 0 };
+  }
+  // Hidden for a 0 count: show it again with the capacity.
+  const show = state.hiddenByCount === true && state.tierPublic !== false;
+  if (from === to && !show) return null;
   return {
     method: "POST",
-    path: `/events/${ebEventId}/ticket_classes/${classId}/`,
-    body: { ticket_class: { capacity: to } },
+    path,
+    body: { ticket_class: show ? { capacity: to, hidden: false } : { capacity: to } },
     ticket_class_id: classId,
     from,
     to,
@@ -55,14 +76,17 @@ export function writesLive(orgEnabled: boolean, envFlag: string | undefined | nu
   return orgEnabled === true && envFlag === "on";
 }
 
-/** Throws unless the request is exactly the capacity update. */
+/** Throws unless the request is exactly the capacity update: {capacity}, {capacity, hidden: false} or {hidden: true}. */
 export function assertCapacityOnly(plan: CapacityPlan): void {
   const keys = Object.keys(plan.body ?? {});
-  const inner = Object.keys(plan.body?.ticket_class ?? {});
-  if (plan.method !== "POST" || !WRITE_PATH.test(plan.path) || keys.length !== 1 || keys[0] !== "ticket_class"
-      || inner.length !== 1 || inner[0] !== "capacity"
-      || !Number.isInteger(plan.body.ticket_class.capacity) || plan.body.ticket_class.capacity < 1
-      || plan.body.ticket_class.capacity > MAX_CAPACITY) {
+  const tc = plan.body?.ticket_class ?? {};
+  const inner = Object.keys(tc).sort().join(",");
+  const capOk = Number.isInteger(tc.capacity) && (tc.capacity as number) >= 1 && (tc.capacity as number) <= MAX_CAPACITY;
+  const shape = inner === "capacity" ? capOk
+    : inner === "capacity,hidden" ? capOk && tc.hidden === false
+    : inner === "hidden" ? tc.hidden === true
+    : false;
+  if (plan.method !== "POST" || !WRITE_PATH.test(plan.path) || keys.length !== 1 || keys[0] !== "ticket_class" || !shape) {
     throw new Error("eventbrite writer: only a ticket class capacity update may be sent");
   }
 }

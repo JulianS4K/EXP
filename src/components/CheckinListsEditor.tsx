@@ -3,11 +3,13 @@
 // re-entry" (off unless turned on). Self-contained CRUD embedded in EditEvent
 // next to the door settings; it saves on its own buttons, not the event form.
 // Nothing here is required: an event with no lists admits every ticket once.
+// "Used" is per ticket, so a multi-day pass needs one re-entry list per day;
+// multiDayListWarning flags per-day lists without re-entry (festival run, 2026-10-19).
 
 import { useEffect, useState } from 'react';
 import { DoorOpen, Pencil, Plus, Trash2 } from 'lucide-react';
 import { deleteCheckinList, listCheckinLists, saveCheckinList } from '../lib/checkinLists';
-import { checkinListInputError, describeList, type CheckinListInput, type DoorCheckinList } from '../lib/door/lists';
+import { checkinListInputError, describeList, multiDayListWarning, type CheckinListInput, type DoorCheckinList } from '../lib/door/lists';
 import { getBrowserTimezone, utcToZonedWallClock, zonedWallClockToUtc } from '../lib/datetime';
 import { useToast } from '../context/ToastContext';
 
@@ -61,6 +63,7 @@ export default function CheckinListsEditor({
 
   if (!loaded || rows === null) return null;
 
+  const multiDay = multiDayListWarning(rows);
   const tierName = (id: string) => tiers.find((t) => t.id === id)?.name ?? 'a removed ticket type';
   const toIso = (wall: string) => (wall ? zonedWallClockToUtc(wall, tz)?.toISOString() ?? null : null);
   const toWall = (iso: string | null) => (iso ? utcToZonedWallClock(new Date(iso), tz) : '');
@@ -131,6 +134,13 @@ export default function CheckinListsEditor({
         certain times. Re-entry is off unless you turn it on for a list; then staff scan people out and back in.
         {rows.length === 0 ? ' With no lists, every ticket gets in once, at any door.' : ''}
       </p>
+      <p className="text-xs text-white/50 ml-1">
+        Multi-day pass: add one list per day with that day's opening and closing times, and turn on re-entry for each.
+        A ticket then gets in once per day. Without re-entry a ticket used on one day is refused on the next.
+      </p>
+      {multiDay && (
+        <p role="alert" className="text-xs text-amber-300 border border-amber-300/40 px-3 py-2 ml-1">{multiDay}</p>
+      )}
 
       {rows.length > 0 && (
         <ul className="space-y-2">

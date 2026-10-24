@@ -172,6 +172,17 @@ export default function DoorSummaryPanel({ eventId, eventTitle }: { eventId: str
             rows={s.byTier.map((t) => [t.tier, `${t.checkedIn} / ${t.sold}`])}
           />
         )}
+        {s.guests && (
+          <SmallTable
+            title={`Guests · ${s.guests.arrived} / ${s.guests.expected} in`}
+            head={['From', 'In / expected']}
+            rows={[
+              ...s.guests.bySource.map((g) => [g.source, `${g.arrived} / ${g.expected}`]),
+              ...(s.guests.offline > 0 ? [['Checked in offline', `${s.guests.offline}`]] : []),
+              ...(s.guests.eventbriteApp > 0 ? [["On Eventbrite's app", `${s.guests.eventbriteApp}`]] : []),
+            ]}
+          />
+        )}
         {s.byStaff.length > 0 && (
           <SmallTable
             title="By staff"

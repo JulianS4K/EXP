@@ -36,6 +36,10 @@ export interface QueuedScan {
    *  RPCs, which also record a refused entry as a forced check-in. */
   listId?: string | null;
   direction?: 'entry' | 'exit';
+  /** The account that scanned it. Only that account uploads it: signed in as
+   *  someone else, the scan waits (absent on scans from older builds, which
+   *  upload as whoever is signed in). */
+  uid?: string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -95,6 +99,9 @@ export function parseQueue(
         ...(typeof item.reason === 'string' && item.reason ? { reason: item.reason } : {}),
         ...((item as { kind?: unknown }).kind === 'name' ? { kind: 'name' as const } : {}),
         ...listFields(item as { listId?: unknown; direction?: unknown }),
+        ...(typeof (item as { uid?: unknown }).uid === 'string' && UUID_RE.test((item as { uid: string }).uid)
+          ? { uid: (item as { uid: string }).uid }
+          : {}),
       });
     }
   }
@@ -107,7 +114,9 @@ function listFields(item: { listId?: unknown; direction?: unknown }): Pick<Queue
   return { listId, direction: item.direction };
 }
 
-/** Scans waiting to upload on this device, across events (sign-out warns). */
+/** Check-ins waiting to upload on this device, across events (sign-out
+ *  warns): ticket scans (pending_updates_*) and guest-list arrivals
+ *  (guest_pending_*, lib/guestListsApi). */
 export function pendingScanCount(storage: Pick<Storage, 'length' | 'key' | 'getItem'> | null, now: number = Date.now()): number {
   let n = 0;
   if (!storage) return 0;
@@ -115,11 +124,47 @@ export function pendingScanCount(storage: Pick<Storage, 'length' | 'key' | 'getI
     for (let i = 0; i < storage.length; i++) {
       const k = storage.key(i);
       if (k && k.startsWith('pending_updates_')) n += parseQueue(storage.getItem(k), now, () => '').length;
+      else if (k && k.startsWith('guest_pending_')) {
+        try {
+          const q = JSON.parse(storage.getItem(k) || '[]');
+          if (Array.isArray(q)) n += q.length;
+        } catch {
+          /* unreadable queue */
+        }
+      }
     }
   } catch {
     /* storage blocked */
   }
   return n;
+}
+
+/** Split a queue into what `uid` may upload now (its own scans, and scans
+ *  from builds that didn't record who scanned) and what waits for another
+ *  account to sign in on this device. */
+export function splitByUploader<T extends { uid?: string }>(queue: T[], uid: string | null | undefined): { mine: T[]; others: T[] } {
+  const mine: T[] = [];
+  const others: T[] = [];
+  for (const q of queue) (uid && (!q.uid || q.uid === uid) ? mine : others).push(q);
+  return { mine, others };
+}
+
+/** Keys sign-out wipes from localStorage: ticket rosters + pass copies
+ *  (registry_*) and door guest lists (doorextras_*: names, notes, access
+ *  needs, imported barcodes). Upload queues (pending_updates_*,
+ *  guest_pending_*) stay so unsynced check-ins replay after sign-in. */
+export function signOutWipeKeys(storage: Pick<Storage, 'length' | 'key'> | null): string[] {
+  const out: string[] = [];
+  if (!storage) return out;
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && (k.startsWith('registry_') || k.startsWith('doorextras_'))) out.push(k);
+    }
+  } catch {
+    /* storage blocked */
+  }
+  return out;
 }
 
 /** Add a scan (a ref already queued is not added twice). */

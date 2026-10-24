@@ -7,7 +7,7 @@ import { useToast } from '../context/ToastContext';
 import { formatCents } from '../lib/refunds';
 import { askRefund, cantAskText, fetchMyRefundAsks, policyLine, withdrawRefundAsk, type MyRefundAsk } from '../lib/refundAsks';
 
-export default function RefundAskCard({ eventId, ticketId }: { eventId: string; ticketId: string }) {
+export default function RefundAskCard({ eventId, ticketId, eventCancelled = false }: { eventId: string; ticketId: string; eventCancelled?: boolean }) {
   const { toast } = useToast();
   const [row, setRow] = useState<MyRefundAsk | null>(null);
   const [open, setOpen] = useState(false);
@@ -93,7 +93,7 @@ export default function RefundAskCard({ eventId, ticketId }: { eventId: string; 
   return (
     <div className={box}>
       {declined}
-      <p className="type text-[11px] text-white/50">{policyLine(row.refundPolicy, row.askUntil)}</p>
+      <p className="type text-[11px] text-white/50">{policyLine(row.refundPolicy, row.askUntil, eventCancelled)}</p>
       {open ? (
         <div className="mt-3 space-y-2">
           <label htmlFor={`ra-${ticketId}`} className="type block text-[10px] uppercase tracking-widest text-white/50">

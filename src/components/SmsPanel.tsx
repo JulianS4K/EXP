@@ -103,7 +103,15 @@ export default function SmsPanel({ orgId, orgName, eventId, canSend, canView }: 
                 {` · ${c.sendAfter.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
                 {canSend && (c.status === 'queued' || c.status === 'sending') && (
                   <button type="button" className="ml-2 underline" onClick={async () => {
-                    const n = await cancelCampaign(c.id).catch(() => 0);
+                    // A failed cancel leaves the texts going out: say so, and
+                    // keep the campaign shown as it is.
+                    let n: number;
+                    try {
+                      n = await cancelCampaign(c.id);
+                    } catch (e) {
+                      toast({ kind: 'error', message: `Could not cancel: ${(e as Error)?.message || 'try again.'} Texts not yet sent will still go out.` });
+                      return;
+                    }
                     toast({ kind: 'success', message: `Cancelled ${n} not yet sent.` });
                     load();
                   }}>Cancel</button>

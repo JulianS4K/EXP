@@ -16,12 +16,28 @@
 //     gets gross − application fee, and the application fee is the Exos fee
 //     plus the card-fee estimate. Stripe pays that out to the organizer; Exos
 //     never holds it.
+//   * The card fee the organizer pays is the card-fee part of the application
+//     fee, fixed at checkout (application fee − Exos fee), so gross − Exos fee
+//     − card fee = net. Stripe's actual fee is what the PLATFORM paid (it can
+//     differ, and on a converted currency it's in another one): platform-side
+//     views only (orderStripeFee, stripeFeeActualCents).
 //   * A refund pulls the refunded share back from the organizer and, by
 //     default, Exos returns its application fee in the same proportion
 //     (refund_application_fee), so the organizer's net after refunds is
-//     net × (1 − refunded / gross).
+//     net × (1 − refunded / gross). A refund made under
+//     EXOS_REFUND_KEEP_PLATFORM_FEE kept the fee: the organizer covered all
+//     of it (refunded_fee_kept_cents, mig 20261021160000).
 //   * Marketplace orders are paid by Exos: organizer_net = proceeds − exos_fee,
 //     through exos_org_payouts. Cancelled orders don't count.
+//   * A lost dispute (exos_disputes, mig 20261001101000) costs its amount plus
+//     Stripe's dispute fee. The platform's account pays it; whether it comes
+//     back off the organizer is exos_org_billing.recover_lost_disputes, shown
+//     on the row as recovery_status: 'recovery_pending' / 'recovered' come off
+//     the organizer's net (recovery_candidate_cents), 'not_recovered' is
+//     absorbed by Exos and doesn't.
+
+import { can } from './orgRoles';
+import { EXOS_FEE_BPS, FEE_FREE_MONTHS, STRIPE_CARD_FEE, exosFeeBpsAt } from '../../supabase/functions/_shared/platformFee.ts';
 
 // ── Rows as the views return them ────────────────────────────────────────
 
@@ -36,10 +52,16 @@ export interface OrderMoneyRow {
   application_fee_cents: number | null;
   exos_fee_cents: number | null;
   card_fee_est_cents: number | null;
+  /** Stripe's actual fee: what the platform paid, in stripe_fee_currency. */
   card_fee_actual_cents: number | null;
+  /** application fee − Exos fee (mig 20261021160000; computed here when absent). */
+  card_fee_charged_cents?: number | null;
+  stripe_fee_currency?: string | null;
   fee_free?: boolean | null;
   organizer_net_cents: number | null;
   refunded_cents: number | null;
+  /** The part of refunded_cents whose refund kept the application fee (mig 20261021160000). */
+  refunded_fee_kept_cents?: number | null;
   payment_intent?: string | null;
   transfer_id?: string | null;
   /** Tickets in the order (exos_checkout_sessions.quantity), when readable. */
@@ -62,6 +84,17 @@ export interface CommissionMoneyRow {
   status: string;
   commission_cents: number | null;
   currency?: string | null;
+}
+
+/** The exos_disputes columns the money view needs. */
+export interface DisputeMoneyRow {
+  session_id: string | null;
+  status: string;
+  amount_cents: number | null;
+  fee_cents: number | null;
+  recovery_status: string;
+  recovery_candidate_cents: number | null;
+  created_at?: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -92,34 +125,69 @@ export function centsToDecimal(cents: number | null | undefined): string {
   return `${neg ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
 }
 
-export type CardFeeBasis = 'actual' | 'estimate' | 'none';
+export type CardFeeBasis = 'charged' | 'none';
 
-/** One order's card fee: Stripe's actual fee once recorded, else the estimate. */
-export function orderCardFee(o: Pick<OrderMoneyRow, 'card_fee_actual_cents' | 'card_fee_est_cents'>): { cents: number; basis: CardFeeBasis } {
-  if (o.card_fee_actual_cents !== null && o.card_fee_actual_cents !== undefined) {
-    return { cents: int(o.card_fee_actual_cents), basis: 'actual' };
+const has = (v: number | null | undefined): v is number => v !== null && v !== undefined;
+
+/**
+ * One order's card fee as the organizer paid it: the card-fee part of the
+ * application fee, set at checkout (application fee − Exos fee). Not Stripe's
+ * actual fee, which the platform paid (orderStripeFee).
+ */
+export function orderCardFee(
+  o: Pick<OrderMoneyRow, 'application_fee_cents' | 'exos_fee_cents' | 'card_fee_est_cents'> & { card_fee_charged_cents?: number | null },
+): { cents: number; basis: CardFeeBasis } {
+  if (has(o.application_fee_cents) && has(o.exos_fee_cents)) {
+    return { cents: Math.max(int(o.application_fee_cents) - int(o.exos_fee_cents), 0), basis: 'charged' };
   }
-  if (o.card_fee_est_cents !== null && o.card_fee_est_cents !== undefined) {
-    return { cents: int(o.card_fee_est_cents), basis: 'estimate' };
-  }
+  if (has(o.card_fee_charged_cents)) return { cents: int(o.card_fee_charged_cents), basis: 'charged' };
+  if (has(o.card_fee_est_cents)) return { cents: int(o.card_fee_est_cents), basis: 'charged' };
   return { cents: 0, basis: 'none' };
+}
+
+/**
+ * Platform side: Stripe's actual fee on the order, when recorded in the
+ * order's own currency (a converted charge's fee is in the settlement
+ * currency, so it isn't comparable here). null otherwise.
+ */
+export function orderStripeFee(o: Pick<OrderMoneyRow, 'card_fee_actual_cents' | 'currency'> & { stripe_fee_currency?: string | null }): number | null {
+  if (!has(o.card_fee_actual_cents)) return null;
+  const feeCur = (o.stripe_fee_currency ?? '').toLowerCase();
+  if (feeCur && feeCur !== (o.currency ?? '').toLowerCase()) return null;
+  return int(o.card_fee_actual_cents);
 }
 
 /**
  * The organizer's net on one order after refunds: the application fee comes
  * back in proportion to the refund, so the net shrinks in the same proportion.
- * null when the order has no fee record (checkouts before mig 20260929131000).
+ * A refund that kept the application fee (EXOS_REFUND_KEEP_PLATFORM_FEE)
+ * comes out of the net in full. null when the order has no fee record
+ * (checkouts before mig 20260929131000).
  */
-export function orderNetAfterRefunds(o: Pick<OrderMoneyRow, 'gross_cents' | 'organizer_net_cents' | 'refunded_cents'>): number | null {
+export function orderNetAfterRefunds(
+  o: Pick<OrderMoneyRow, 'gross_cents' | 'organizer_net_cents' | 'refunded_cents'> & { refunded_fee_kept_cents?: number | null },
+): number | null {
   if (o.organizer_net_cents === null || o.organizer_net_cents === undefined) return null;
   const net = int(o.organizer_net_cents);
   const gross = int(o.gross_cents);
   const refunded = Math.min(Math.max(int(o.refunded_cents), 0), Math.max(gross, 0));
   if (gross <= 0 || refunded === 0) return net;
-  return net - Math.round((net * refunded) / gross);
+  const kept = Math.min(Math.max(int(o.refunded_fee_kept_cents), 0), refunded);
+  return net - Math.round((net * (refunded - kept)) / gross) - kept;
 }
 
 const isPaid = (o: OrderMoneyRow) => (PAID_ORDER_STATUSES as readonly string[]).includes(o.status);
+
+/**
+ * What a dispute takes off the organizer's net, in cents: a lost one's amount
+ * + fee unless Exos absorbs it (recovery_status 'not_recovered'). 0 while open
+ * or once won.
+ */
+export function disputeChargeCents(d: DisputeMoneyRow): number {
+  if (d.status !== 'lost' || d.recovery_status === 'not_recovered') return 0;
+  if (d.recovery_candidate_cents !== null && d.recovery_candidate_cents !== undefined) return Math.max(int(d.recovery_candidate_cents), 0);
+  return Math.max(int(d.amount_cents), 0) + Math.max(int(d.fee_cents), 0);
+}
 const isCancelledMarketplace = (m: MarketplaceMoneyRow) =>
   (CANCELLED_MARKETPLACE_STATES as readonly string[]).includes(m.state ?? '');
 
@@ -137,10 +205,11 @@ export interface Settlement {
     taxCents: number;
     refundedCents: number;
     exosFeeCents: number;
+    /** Card fees as charged to the organizer (gross − Exos fee − card fee = net). */
     cardFeeCents: number;
-    cardFeeBasis: 'actual' | 'estimate' | 'mixed' | 'none';
-    cardFeeActualOrders: number;
-    cardFeeEstimateOrders: number;
+    /** Platform side: Stripe's actual fees, on the orders that have one in their own currency. */
+    stripeFeeActualCents: number;
+    stripeFeeActualOrders: number;
     /** Orders without a fee record: not in the fee or net totals. */
     ordersWithoutFees: number;
     organizerNetCents: number;
@@ -163,7 +232,15 @@ export interface Settlement {
     accruedCents: number;
     paidCents: number;
   };
-  /** Exos net after refunds + marketplace net. */
+  disputes: {
+    open: number;
+    lost: number;
+    /** Lost disputes that come off the organizer (amount + fee). */
+    chargedCents: number;
+    /** Lost disputes Exos absorbs (not in the net). */
+    absorbed: number;
+  };
+  /** Exos net after refunds + marketplace net − lost disputes charged to the organizer. */
   organizerNetCents: number;
   /** The same, less promoter commissions (accrued and paid). */
   organizerNetAfterCommissionsCents: number;
@@ -173,6 +250,7 @@ export function summarizeSettlement(input: {
   orders: OrderMoneyRow[];
   marketplace?: MarketplaceMoneyRow[];
   commissions?: CommissionMoneyRow[];
+  disputes?: DisputeMoneyRow[];
   /** The event's currency; the fallback when there are no rows. */
   currency?: string;
 }): Settlement {
@@ -187,7 +265,7 @@ export function summarizeSettlement(input: {
 
   let tickets: number | null = null;
   let gross = 0, tax = 0, refunded = 0, exosFee = 0, cardFee = 0, net = 0, netAfter = 0;
-  let actual = 0, estimate = 0, withoutFees = 0, feeFree = 0;
+  let stripeFee = 0, stripeFeeOrders = 0, withoutFees = 0, feeFree = 0;
   for (const o of orders) {
     addCur(o.currency);
     if (o.quantity !== null && o.quantity !== undefined) tickets = (tickets ?? 0) + int(o.quantity);
@@ -201,10 +279,12 @@ export function summarizeSettlement(input: {
       continue;
     }
     exosFee += int(o.exos_fee_cents);
-    const card = orderCardFee(o);
-    cardFee += card.cents;
-    if (card.basis === 'actual') actual++;
-    else if (card.basis === 'estimate') estimate++;
+    cardFee += orderCardFee(o).cents;
+    const sf = orderStripeFee(o);
+    if (sf !== null) {
+      stripeFee += sf;
+      stripeFeeOrders++;
+    }
     net += int(o.organizer_net_cents);
     netAfter += after;
   }
@@ -236,9 +316,18 @@ export function summarizeSettlement(input: {
     if (c.status === 'paid') cm.paidCents += int(c.commission_cents);
   }
 
-  const counted = actual + estimate;
-  const cardFeeBasis = counted === 0 ? 'none' : actual === counted ? 'actual' : estimate === counted ? 'estimate' : 'mixed';
-  const organizerNetCents = netAfter + mk.organizerNetCents;
+  const dp = { open: 0, lost: 0, chargedCents: 0, absorbed: 0 };
+  for (const d of input.disputes ?? []) {
+    if (d.status === 'lost') {
+      dp.lost++;
+      if (d.recovery_status === 'not_recovered') dp.absorbed++;
+      dp.chargedCents += disputeChargeCents(d);
+    } else if (d.status !== 'won' && d.status !== 'warning_closed') {
+      dp.open++;
+    }
+  }
+
+  const organizerNetCents = netAfter + mk.organizerNetCents - dp.chargedCents;
   const fallback = (input.currency || [...currencies][0] || 'USD').toUpperCase();
 
   return {
@@ -252,9 +341,8 @@ export function summarizeSettlement(input: {
       refundedCents: refunded,
       exosFeeCents: exosFee,
       cardFeeCents: cardFee,
-      cardFeeBasis,
-      cardFeeActualOrders: actual,
-      cardFeeEstimateOrders: estimate,
+      stripeFeeActualCents: stripeFee,
+      stripeFeeActualOrders: stripeFeeOrders,
       ordersWithoutFees: withoutFees,
       organizerNetCents: net,
       organizerNetAfterRefundsCents: netAfter,
@@ -262,6 +350,7 @@ export function summarizeSettlement(input: {
     },
     marketplace: mk,
     commissions: cm,
+    disputes: dp,
     organizerNetCents,
     organizerNetAfterCommissionsCents: organizerNetCents - cm.accruedCents,
   };
@@ -274,18 +363,35 @@ export const SETTLEMENT_CSV_HEADER = [
   'gross', 'tax', 'refunded', 'exos_fee', 'card_fee', 'card_fee_basis',
   'organizer_net', 'organizer_net_after_refunds', 'stripe_payment_intent', 'stripe_transfer',
   'invoice_number',
+  'dispute_status', 'dispute_amount', 'dispute_fee', 'dispute_charged_to_you',
 ];
 
 /**
  * @param invoiceNumbers checkout session id → invoice number (mig
  *   20261001100000); free orders and marketplace orders have none.
+ * @param disputes the event's disputes; an order with several shows the
+ *   latest status and the summed amounts.
  */
 export function settlementCsvRows(
   orders: OrderMoneyRow[],
   marketplace: MarketplaceMoneyRow[] = [],
   invoiceNumbers: ReadonlyMap<string, string> = new Map(),
+  disputes: DisputeMoneyRow[] = [],
 ): (string | number | null)[][] {
   const rows: (string | number | null)[][] = [];
+  const bySession = new Map<string, { status: string; at: string; amount: number; fee: number; charged: number }>();
+  for (const d of disputes) {
+    if (!d.session_id) continue;
+    const cur = bySession.get(d.session_id);
+    const at = d.created_at ?? '';
+    bySession.set(d.session_id, {
+      status: !cur || at >= cur.at ? d.status : cur.status,
+      at: !cur || at >= cur.at ? at : cur.at,
+      amount: (cur?.amount ?? 0) + Math.max(int(d.amount_cents), 0),
+      fee: (cur?.fee ?? 0) + Math.max(int(d.fee_cents), 0),
+      charged: (cur?.charged ?? 0) + disputeChargeCents(d),
+    });
+  }
   const paid = [...orders].filter(isPaid).sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
   for (const o of paid) {
     const card = orderCardFee(o);
@@ -308,6 +414,7 @@ export function settlementCsvRows(
       o.payment_intent ?? '',
       o.transfer_id ?? '',
       invoiceNumbers.get(o.session_id) ?? '',
+      ...disputeCells(bySession.get(o.session_id)),
     ]);
   }
   for (const m of marketplace) {
@@ -329,9 +436,15 @@ export function settlementCsvRows(
       '',
       '',
       '',
+      '', '', '', '',
     ]);
   }
   return rows;
+}
+
+function disputeCells(d: { status: string; amount: number; fee: number; charged: number } | undefined): string[] {
+  if (!d) return ['', '', '', ''];
+  return [d.status, centsToDecimal(d.amount), centsToDecimal(d.fee), centsToDecimal(d.charged)];
 }
 
 // ── Org payouts ──────────────────────────────────────────────────────────
@@ -445,7 +558,41 @@ export function payoutsCsvRows(payouts: PayoutWithLines[]): (string | number | n
   return rows;
 }
 
-/** Org roles that see money (RLS enforces the same). */
+/** Org roles that see money (RLS enforces the same; ./orgRoles.ts viewMoney). */
 export function canSeeMoney(role: string | null | undefined, isAdmin = false): boolean {
-  return isAdmin || role === 'owner' || role === 'manager' || role === 'finance';
+  return can(role, 'viewMoney', isAdmin);
+}
+
+// ── Fee terms ────────────────────────────────────────────────────────────
+
+export interface FeeTerms {
+  /** "3%": the Exos rate after the free period. */
+  rate: string;
+  /** null when the billing row isn't readable (or has no date). */
+  feeFreeUntil: Date | null;
+  inFreePeriod: boolean;
+  /** One sentence for under Payments and next to the Money tiles. */
+  text: string;
+}
+
+const pctOf = (bps: number) => `${Number((bps / 100).toFixed(2))}%`;
+
+/**
+ * The org's fee terms in words, from exos_org_billing.fee_free_until (owner /
+ * manager / finance read it; pass null when it couldn't be read) and the
+ * platform rate (platformFee.ts, the same number as exos_platform_fee_bps()).
+ */
+export function feeTerms(feeFreeUntil: string | null | undefined, now: Date = new Date()): FeeTerms {
+  const until = feeFreeUntil ? new Date(feeFreeUntil) : null;
+  const valid = until && !Number.isNaN(until.getTime()) ? until : null;
+  const inFree = exosFeeBpsAt(valid ? valid.toISOString() : null, now) === 0;
+  const rate = pctOf(EXOS_FEE_BPS);
+  const card = `card processing (Stripe, ${pctOf(STRIPE_CARD_FEE.bps)} + ${STRIPE_CARD_FEE.fixedCents}¢ per order, estimated)`;
+  const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  const text = valid && inFree
+    ? `No Exos fee until ${day(valid)}, then ${rate} of each order. ${card[0].toUpperCase()}${card.slice(1)} applies from the start. Buyers never pay an Exos fee.`
+    : valid
+      ? `Exos fee: ${rate} of each order (your fee-free period ended ${day(valid)}), plus ${card}. Buyers never pay an Exos fee.`
+      : `Exos fee: ${rate} of each order, plus ${card}; new orgs pay no Exos fee for their first ${FEE_FREE_MONTHS} months. Buyers never pay an Exos fee.`;
+  return { rate, feeFreeUntil: valid, inFreePeriod: !!valid && inFree, text };
 }

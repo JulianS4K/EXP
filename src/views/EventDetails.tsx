@@ -9,8 +9,10 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
-import { claimFreeAsGuest, startCheckout } from '../lib/checkout';
-import { guestCheckoutAllowed } from '../lib/guestCheckout';
+import { claimFreeAsGuest, isSignInRequired, startCheckout } from '../lib/checkout';
+import { fanError } from '../lib/fanErrors';
+import { backFallback, hasInAppHistory } from '../lib/backNav';
+import { guestCheckoutAllowed, signedOutBuyRoute } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
 import AddToCalendar from '../components/AddToCalendar';
@@ -83,6 +85,12 @@ export default function EventDetails() {
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
+  // Signed out: the code waiting for sign-in (VoucherField), the "sign in to
+  // use it / continue without it" choice Buy shows for it, and the code a
+  // sign-in from that choice resumes the purchase with once it's applied.
+  const [waitingCode, setWaitingCode] = useState<string | null>(null);
+  const [codeChoice, setCodeChoice] = useState<string | null>(null);
+  const resumeCodeRef = useRef<string | null>(null);
   // A hidden tier the applied voucher unlocks. The public tier list never
   // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
   const [unlockedTier, setUnlockedTier] = useState<NonNullable<Event['ticketTiers']>[number] | null>(null);
@@ -318,6 +326,20 @@ export default function EventDetails() {
     await signIn();
   };
 
+  // Sign in to use a code: once signed in, VoucherField applies it and the
+  // purchase carries on with it (the effect on `voucher` below). A redirect
+  // sign-in reloads the page, so the code is kept with the resume stash.
+  const signInForCode = async (code: string) => {
+    if (!event) return;
+    setCodeChoice(null);
+    resumeCodeRef.current = code;
+    try {
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity, code }));
+    } catch { /* storage blocked */ }
+    toast({ kind: 'info', message: `Sign in to use the code ${code}.` });
+    await signIn();
+  };
+
   // Free tickets for a signed-out buyer: issued now, claim links emailed.
   const claimFreeGuest = async (tierId: string, guestEmail: string) => {
     if (!event) return;
@@ -331,6 +353,8 @@ export default function EventDetails() {
         successUrl: publicUrl('my-tickets'),
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
+        // Free extras ride on the guest order (exos-checkout records them).
+        addons: addonSel.items,
         attribution,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
@@ -344,7 +368,8 @@ export default function EventDetails() {
       });
     } catch (err: any) {
       console.error('Guest free claim failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
+      if (isSignInRequired(err)) { setGuestOpen(false); void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not send your tickets.') });
     } finally {
       setPurchasing(false);
     }
@@ -393,12 +418,14 @@ export default function EventDetails() {
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
       console.error('Checkout failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
       setPurchasing(false);
+      // Session expired mid-visit: sign in again; the purchase resumes after.
+      if (isSignInRequired(err)) { setGuestOpen(false); void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not start checkout.') });
     }
   };
 
-  const handlePurchase = async () => {
+  const handlePurchase = async (opts: { skipCode?: boolean } = {}) => {
     if (!event) return;
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
     if (paidNotOnSale) {
@@ -409,22 +436,25 @@ export default function EventDetails() {
       // Paid tickets: check out as a guest with just an email (unless the
       // organizer switched that off, or the code is a personal capacity-bypass
       // offer). Free tickets work the same way (just an email, claim links by mail).
+      // A code waiting for sign-in is never dropped silently: the buyer picks.
       const pick = selectedTierId ? allTiers.find((x) => x.id === selectedTierId) : allTiers[0];
       const paid = (pick?.price ?? event.price ?? 0) > 0 || addonSel.totalCents > 0;
-      if (pick?.id && paid && stripeEnabled && guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass) {
-        setGuestFree(false);
-        setGuestOpen(true);
-        return;
-      }
-      // Free tickets: just an email too (claim links arrive by mail).
-      if (pick?.id && !paid && guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass) {
-        setGuestFree(true);
+      const route = signedOutBuyRoute({
+        waitingCode, skipCode: opts.skipCode, tierId: pick?.id, paid, stripeEnabled,
+        guestAllowed: guestCheckoutAllowed(event.purchaseLimits) && !voucher?.canBypass,
+      });
+      if (route === 'code-choice') { setCodeChoice(waitingCode); return; }
+      if (route === 'sign-in-code' && waitingCode) { await signInForCode(waitingCode); return; }
+      if (route === 'guest-paid' || route === 'guest-free') {
+        setGuestFree(route === 'guest-free');
         setGuestOpen(true);
         return;
       }
       await signInToBuy();
       return;
     }
+    // A Buy tap (or the resume itself) settles any purchase waiting on a code.
+    resumeCodeRef.current = null;
     // Never fall back to another tier: buying tier 0 when the buyer picked a
     // (voucher-unlocked) tier that isn't loaded would charge the wrong price.
     const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
@@ -466,6 +496,8 @@ export default function EventDetails() {
         // Idempotency key for this claim attempt — a network retry returns the
         // same tickets instead of minting twice (button is disabled meanwhile).
         orderRef,
+        // A hidden free tier is claimed with the code that unlocked it.
+        voucherCode: voucher?.code,
       });
       // Credit the friend whose link brought this buyer (paid orders are
       // credited at fulfillment from the checkout attribution).
@@ -521,7 +553,8 @@ export default function EventDetails() {
       navigate(`/my-tickets?claimed=${ids.length}`);
     } catch (err: any) {
       console.error('Free claim failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not reserve tickets. Please try again.' });
+      if (/not authenticated|jwt expired|invalid jwt/i.test(err?.message ?? '')) { void signInToBuy(); return; }
+      toast({ kind: 'error', message: fanError(err, 'Could not reserve tickets. Please try again.') });
     } finally {
       setPurchasing(false);
     }
@@ -533,12 +566,14 @@ export default function EventDetails() {
   // back and ask for one more tap. Never buys on a later, unrelated visit.
   useEffect(() => {
     if (!user || !event) return;
-    let saved: { id?: string; at?: number; tierId?: string | null; qty?: number } | null = null;
+    let saved: { id?: string; at?: number; tierId?: string | null; qty?: number; code?: string } | null = null;
     try {
       const raw = sessionStorage.getItem(RESUME_KEY);
       if (raw) saved = JSON.parse(raw);
       sessionStorage.removeItem(RESUME_KEY);
     } catch { /* storage blocked or bad JSON */ }
+    // Signed in to use a code: the purchase goes on once it's applied.
+    if (resumeCodeRef.current) return;
     if (pendingBuyRef.current) {
       pendingBuyRef.current = false;
       void handlePurchase();
@@ -547,15 +582,31 @@ export default function EventDetails() {
     if (!saved || saved.id !== event.id || !saved.at || Date.now() - saved.at > RESUME_TTL_MS) return;
     if (saved.tierId && (event.ticketTiers ?? []).some((t) => t.id === saved!.tierId)) setSelectedTierId(saved.tierId);
     if (saved.qty && saved.qty > 0) setQuantity(Math.min(maxPerOrder, saved.qty));
+    // The code they signed in to use (VoucherField applies it).
+    if (typeof saved.code === 'string' && saved.code) setPromoCode(saved.code);
     toast({ kind: 'info', message: "You're signed in. Check your tickets and tap Buy to finish." });
     buyCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, event?.id]);
 
+  // Signed in to use a code: buy once VoucherField has applied it. A code
+  // that turns out invalid stops here (onApplied(null)); the buyer decides.
+  useEffect(() => {
+    const c = resumeCodeRef.current;
+    if (!c || !user || !voucher || voucher.code.toUpperCase() !== c.toUpperCase()) return;
+    resumeCodeRef.current = null;
+    void handlePurchase();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voucher, user?.uid]);
+
+  // A changed code (or a sign-in) retires the choice shown for the old one.
+  useEffect(() => { setCodeChoice(null); }, [waitingCode, user?.uid]);
+
   // Closing the sign-in modal without signing in drops the pending purchase.
   useEffect(() => {
-    if (isAuthModalOpen || user || !pendingBuyRef.current) return;
+    if (isAuthModalOpen || user || (!pendingBuyRef.current && !resumeCodeRef.current)) return;
     pendingBuyRef.current = false;
+    resumeCodeRef.current = null;
     try { sessionStorage.removeItem(RESUME_KEY); } catch { /* storage blocked */ }
   }, [isAuthModalOpen, user]);
 
@@ -719,7 +770,8 @@ export default function EventDetails() {
         .grain::before{ content:""; position:fixed; inset:0; z-index:1; pointer-events:none; opacity:.055; mix-blend-mode:overlay; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
       `}</style>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-        <button onClick={() => navigate(-1)} className="type inline-flex items-center gap-2 text-white/50 hover:text-white mb-10 transition-colors text-[12px] uppercase tracking-widest">
+        {/* Opened from a link (story, text, email): no in-app page to go back to. */}
+        <button onClick={() => (hasInAppHistory() ? navigate(-1) : navigate(backFallback(org?.slug)))} className="type inline-flex items-center gap-2 text-white/50 hover:text-white mb-10 transition-colors text-[12px] uppercase tracking-widest">
           <ArrowLeft className="w-4 h-4 text-brand-primary" />
           back to events
         </button>
@@ -736,10 +788,9 @@ export default function EventDetails() {
               </p>
             )}
             <p className="type text-xs text-red-100/60 leading-relaxed">
-              If you bought directly through this site, your refund will be issued
-              automatically within 5 business days. If you bought via a partner site
-              (StubHub, Vivid Seats, etc.) please contact that channel for refund
-              processing.
+              Sales are closed. Bought your ticket here? The organizer handles refunds:
+              if yours hasn't arrived, open the ticket and ask for one. Bought it on a
+              partner site (StubHub, Vivid Seats, etc.)? Ask that site.
             </p>
           </div>
         )}
@@ -755,13 +806,6 @@ export default function EventDetails() {
             >
               Edit →
             </Link>
-          </div>
-        )}
-        {eventStatus === 'cancelled' && (
-          <div className="mb-8 p-4 border border-brand-accent/40 bg-brand-accent/10">
-            <p className="type text-[11px] uppercase tracking-widest text-brand-accent">
-              CANCELLED — sales are closed.
-            </p>
           </div>
         )}
 
@@ -1079,7 +1123,9 @@ export default function EventDetails() {
                 {/* Who is going — optional per-ticket names. FREE claim path only:
                     the paid path hands off to Stripe and never sees these (the
                     checkout metadata route is a later add). */}
-                {priceToDisplay === 0 && addonSel.totalCents === 0 && (
+                {/* Signed in only: a guest's tickets are parked for their claim link,
+                    and names are set by whoever claims them. */}
+                {!!user && priceToDisplay === 0 && addonSel.totalCents === 0 && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/60">{t('event.optional')}</span></p>
                    <div className="space-y-2">
@@ -1140,8 +1186,12 @@ export default function EventDetails() {
                 <VoucherField
                   eventId={event.id}
                   email={user?.email ?? null}
-                  onApplied={setVoucher}
+                  onApplied={(v) => {
+                    setVoucher(v);
+                    if (!v) resumeCodeRef.current = null;
+                  }}
                   initialCode={prefill?.coupon ?? promoCode ?? undefined}
+                  onWaitingChange={setWaitingCode}
                 />
 
                 {(!soldOut || voucher?.canBypass) && (
@@ -1155,7 +1205,7 @@ export default function EventDetails() {
 
                 <button
                   disabled={(soldOut && !voucher?.canBypass) || purchasing || paidNotOnSale}
-                  onClick={handlePurchase}
+                  onClick={() => void handlePurchase()}
                   className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide flex items-center justify-center gap-3 hover:scale-[1.01] transition-transform disabled:bg-white/10 disabled:text-white/20 disabled:scale-100"
                 >
                   {purchasing ? (
@@ -1168,6 +1218,30 @@ export default function EventDetails() {
                     </>
                   )}
                 </button>
+
+                {codeChoice && !user && (
+                  <div role="alert" className="mt-3 border-2 border-brand-primary/60 p-3">
+                    <p className="type text-[12px] text-white/80 leading-relaxed mb-3">
+                      The code {codeChoice} needs an account. Sign in to use it, or check out without it at the full price.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void signInForCode(codeChoice)}
+                        className="w-full bg-brand-primary text-black py-2 text-[11px] font-black uppercase tracking-widest"
+                      >
+                        Sign in to use code {codeChoice}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setCodeChoice(null); void handlePurchase({ skipCode: true }); }}
+                        className="w-full border-2 border-white/20 hover:border-white/50 text-white/70 py-2 text-[11px] font-black uppercase tracking-widest"
+                      >
+                        Continue without the code
+                      </button>
+                    </div>
+                  </div>
+                )}
                 </>)}
 
                 {paidNotOnSale && !soldOut && (

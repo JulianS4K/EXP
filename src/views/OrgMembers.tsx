@@ -1,15 +1,12 @@
-// OrgMembers — owner-only member roster + role/disable management.
-//
-// Sprint 1 cut: list members (uid + role + disabled flag), let the
-// owner change a member's role and soft-disable them, plus a stub
-// "invite" flow that requires the invitee's uid (the email-based
-// invite needs Cloud Functions to look up uids by email — deferred to
-// when the mail queue is rate-limited).
+// OrgMembers — the team: name / email, role, status. The owner invites,
+// changes roles, disables, removes, and hands the org over ("Make owner");
+// anyone else can leave (mig 20261021150000). A platform admin who isn't the
+// owner sees the team read-only and can only hand the org over.
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus } from 'lucide-react';
+import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus, Crown, LogOut, Trash2, Copy, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
@@ -18,15 +15,25 @@ import {
   createOrgInvite,
   disableOrgMember,
   enableOrgMember,
+  leaveOrg,
   listOrgInvites,
   listOrgMembers,
   listScannerEvents,
+  memberActions,
+  memberLabel,
+  removeOrgMember,
+  transferOrgOwnership,
   updateOrgMemberRole,
 } from '../lib/orgs';
 import { listOrgEvents } from '../lib/events';
 import ScannerEventScope, { type ScopeEvent } from '../components/ScannerEventScope';
 import { queueEmail } from '../lib/mail';
+import { errMessage, publicUrl } from '../lib/utils';
 import { OrgMembership, OrgRole } from '../types';
+import { MATRIX_CAPABILITIES, MATRIX_ROLES, ROLE_CAPABILITIES, can } from '../lib/orgRoles';
+
+/** The accept link for an invite (same as createOrgInvite's inviteUrl). */
+const inviteLink = (token: string) => publicUrl(`invite/${token}`);
 
 const ROLE_OPTIONS: OrgRole[] = ['manager', 'finance', 'content', 'scanner'];
 
@@ -40,35 +47,27 @@ const ROLE_CHIP: Record<string, string> = {
 };
 const roleChip = (r: string) => ROLE_CHIP[r] ?? 'bg-slate-100 text-slate-600 border border-slate-200';
 
-// Static roles/permissions reference — mirrors the descriptive copy the
-// view has always shown, presented as the RolePermissions matrix. Purely
-// informational (no persistence layer exists for per-role toggles).
+// Roles reference + the permissions matrix. The matrix is built from the one
+// role table (src/lib/orgRoles.ts), which a test checks against the RLS
+// policies and RPCs, so it can't promise what the server refuses.
 const ROLE_REF: Array<{ name: string; chip: string; desc: string }> = [
-  { name: 'Owner', chip: ROLE_CHIP.owner, desc: 'Full control. Billing, members, delete.' },
-  { name: 'Manager', chip: ROLE_CHIP.manager, desc: 'Run events end-to-end. No billing.' },
-  { name: 'Finance', chip: ROLE_CHIP.finance, desc: 'Money: reports, refunds, payouts.' },
+  { name: 'Owner', chip: ROLE_CHIP.owner, desc: 'Full control. Members, org settings, Stripe.' },
+  { name: 'Manager', chip: ROLE_CHIP.manager, desc: 'Run events end-to-end, money included. No members or org settings.' },
+  { name: 'Finance', chip: ROLE_CHIP.finance, desc: 'Money: reports, refunds, voids, payouts.' },
   { name: 'Scanner', chip: ROLE_CHIP.scanner, desc: 'Door only. Scan + admit.' },
-  { name: 'Content', chip: ROLE_CHIP.content, desc: 'Edit listings, storefront, promo.' },
+  { name: 'Content', chip: ROLE_CHIP.content, desc: 'Sees events and the team; read-only for now.' },
 ];
-// [owner, manager, finance, scanner, content]
-const PERM_MATRIX: Array<[string, number[]]> = [
-  ['Create & edit events', [1, 1, 0, 0, 1]],
-  ['Publish / cancel events', [1, 1, 0, 0, 0]],
-  ['View sales & financials', [1, 1, 1, 0, 0]],
-  ['Refund / void tickets', [1, 1, 1, 0, 0]],
-  ['Scan at the door (scanners: all or chosen events)', [1, 1, 0, 1, 0]],
-  ['Door override / undo a check-in', [1, 1, 0, 0, 0]],
-  ['Send announcements', [1, 1, 0, 0, 1]],
-  ['Promo codes & promote', [1, 1, 0, 0, 1]],
-  ['Edit storefront & branding', [1, 1, 0, 0, 1]],
-  ['Manage members', [1, 0, 0, 0, 0]],
-  ['Billing & payouts', [1, 0, 1, 0, 0]],
-];
+const PERM_MATRIX: Array<[string, boolean[]]> = MATRIX_CAPABILITIES.map((cap) => [
+  ROLE_CAPABILITIES[cap].label,
+  MATRIX_ROLES.map((r) => can(r, cap)),
+]);
 
 export default function OrgMembers() {
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
-  const { activeRole } = useOrganization();
+  const { orgs, refresh: refreshOrgs, roleIn } = useOrganization();
+  // The role in the org on this page (the URL's), not the switcher's.
+  const activeRole = roleIn(orgId);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -83,8 +82,14 @@ export default function OrgMembers() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<OrgRole>('manager');
   const [inviting, setInviting] = useState(false);
+  // Invite whose email didn't queue: its link is shown to copy by hand.
+  const [unsentInvite, setUnsentInvite] = useState<{ email: string; url: string } | null>(null);
+  const [resending, setResending] = useState<string | null>(null);
 
-  const canManage = isAdmin || activeRole === 'owner';
+  // This page's org (not necessarily the dashboard's active one).
+  const myRole = orgs.find((o) => o.org.id === orgId)?.membership.role ?? null;
+  // Member edits are owner-only server-side (RLS / RPCs), admins included.
+  const canManage = myRole === 'owner';
 
   async function refresh() {
     if (!orgId) return;
@@ -107,8 +112,7 @@ export default function OrgMembers() {
           .map((inv) => ({ token: inv.token, email: inv.email, role: inv.role, status: inv.status })),
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Load failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not load the team.') });
     } finally {
       setLoading(false);
     }
@@ -145,18 +149,22 @@ export default function OrgMembers() {
         role: inviteRole,
         createdBy: user.uid,
       });
-      // Best-effort enqueue of the invite email. Recipient + body are
-      // server-derived by the exos_queue_mail RPC (mig 20260520160000).
-      // exos_org_invites PK is `token`; pass it as refId so the RPC can
-      // look up the invite row. If the migration isn't applied yet the
-      // call fails silently — the owner can copy inviteUrl manually.
-      await queueEmail({ template: 'org-invite', refId: inviteToken });
-      toast({ kind: 'success', message: `Invite sent to ${email}.` });
+      // Enqueue the invite email. Recipient + body are server-derived by the
+      // exos_queue_mail RPC (mig 20260520160000); exos_org_invites PK is
+      // `token`, passed as refId. "Sent" only when it really queued:
+      // otherwise the invite exists and its link is shown to copy.
+      const queued = await queueEmail({ template: 'org-invite', refId: inviteToken });
+      if (queued) {
+        setUnsentInvite(null);
+        toast({ kind: 'success', message: `Invite sent to ${email}.` });
+      } else {
+        setUnsentInvite({ email, url: inviteUrl });
+        toast({ kind: 'warn', message: `Invite created, but the email to ${email} didn't go out. Copy the link and send it yourself.` });
+      }
       setInviteEmail('');
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Invite failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not create the invite.') });
     } finally {
       setInviting(false);
     }
@@ -169,8 +177,31 @@ export default function OrgMembers() {
       toast({ kind: 'success', message: 'Invite cancelled.' });
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Cancel failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not cancel the invite.') });
+    }
+  }
+
+  async function handleCopyInvite(token: string) {
+    try {
+      await navigator.clipboard.writeText(inviteLink(token));
+      toast({ kind: 'success', message: 'Invite link copied.' });
+    } catch {
+      toast({ kind: 'error', message: `Copy failed. The link is ${inviteLink(token)}` });
+    }
+  }
+
+  // Queue the invite email again (the RPC sends it only for the person who
+  // created the invite, and a repeat within 10 minutes is the same mail).
+  async function handleResendInvite(token: string, email: string) {
+    if (!canManage || resending) return;
+    setResending(token);
+    try {
+      const queued = await queueEmail({ template: 'org-invite', refId: token });
+      toast(queued
+        ? { kind: 'success', message: `Invite email sent to ${email}.` }
+        : { kind: 'warn', message: "The email didn't go out (only whoever sent the invite can resend it). Copy the link and send it yourself." });
+    } finally {
+      setResending(null);
     }
   }
 
@@ -181,8 +212,45 @@ export default function OrgMembers() {
       toast({ kind: 'success', message: 'Role updated.' });
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Update failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not change the role.') });
+    }
+  }
+
+  async function handleMakeOwner(m: OrgMembership) {
+    if (!orgId) return;
+    if (!window.confirm(`Make ${memberLabel(m)} the owner? They get full control, billing and members; ${canManage ? 'you stay on as a manager' : 'the current owner stays on as a manager'}.`)) return;
+    try {
+      await transferOrgOwnership(orgId, m.uid);
+      toast({ kind: 'success', message: `${memberLabel(m)} now owns the organization.` });
+      await refreshOrgs();
+      await refresh();
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Transfer failed' });
+    }
+  }
+
+  async function handleRemove(m: OrgMembership) {
+    if (!orgId || !canManage) return;
+    if (!window.confirm(`Remove ${memberLabel(m)} from the team?`)) return;
+    try {
+      await removeOrgMember(orgId, m.uid);
+      toast({ kind: 'success', message: 'Member removed.' });
+      await refresh();
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Remove failed' });
+    }
+  }
+
+  async function handleLeave() {
+    if (!orgId) return;
+    if (!window.confirm('Leave this organization? You lose access to its events and tools.')) return;
+    try {
+      await leaveOrg(orgId);
+      toast({ kind: 'success', message: 'You left the organization.' });
+      await refreshOrgs();
+      navigate('/orgs');
+    } catch (err) {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Leave failed' });
     }
   }
 
@@ -198,8 +266,7 @@ export default function OrgMembers() {
       }
       await refresh();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Update failed';
-      toast({ kind: 'error', message: msg });
+      toast({ kind: 'error', message: errMessage(err, 'Could not update the member.') });
     }
   }
 
@@ -245,7 +312,7 @@ export default function OrgMembers() {
 
         {!canManage && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-amber-700 text-xs font-bold uppercase tracking-widest">
-            Read-only — only org owners can change membership.
+            Read-only — only the org owner can change membership.
           </div>
         )}
 
@@ -280,8 +347,20 @@ export default function OrgMembers() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
-              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
+              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. To hand the organization over, use Make owner on an active member.
             </p>
+            {unsentInvite && (
+              <div role="alert" className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <p className="font-bold mb-2">The email to {unsentInvite.email} didn't go out. Send them this link:</p>
+                <input
+                  readOnly
+                  value={unsentInvite.url}
+                  aria-label="Invite link"
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full bg-white border border-amber-200 rounded px-3 py-2 font-mono text-[11px] text-slate-700"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -323,17 +402,34 @@ export default function OrgMembers() {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">◔ Invite sent</span>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">◔ Pending</span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         {canManage ? (
-                          <button
-                            onClick={() => handleCancelInvite(inv.token)}
-                            title="Cancel invite"
-                            className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
-                          >
-                            <X size={13} strokeWidth={2.5} /> Cancel
-                          </button>
+                          <div className="inline-flex items-center gap-3">
+                            <button
+                              onClick={() => handleCopyInvite(inv.token)}
+                              title="Copy invite link"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-tm-blue text-[10px] font-black uppercase tracking-widest transition-colors"
+                            >
+                              <Copy size={13} strokeWidth={2.5} /> Copy link
+                            </button>
+                            <button
+                              onClick={() => handleResendInvite(inv.token, inv.email)}
+                              disabled={resending === inv.token}
+                              title="Email the invite again"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-tm-blue text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-50"
+                            >
+                              <Send size={13} strokeWidth={2.5} /> {resending === inv.token ? 'Sending…' : 'Resend'}
+                            </button>
+                            <button
+                              onClick={() => handleCancelInvite(inv.token)}
+                              title="Cancel invite"
+                              className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
+                            >
+                              <X size={13} strokeWidth={2.5} /> Cancel
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">—</span>
                         )}
@@ -352,20 +448,23 @@ export default function OrgMembers() {
                   ) : (
                     members.map((m) => {
                       const isYou = m.uid === user.uid;
-                      const isOwner = m.role === 'owner';
+                      const act = memberActions({ uid: user.uid, role: myRole, isAdmin }, m);
+                      const label = memberLabel(m);
                       return (
                         <tr key={m.id} className={`hover:bg-slate-50/50 ${m.disabled ? 'opacity-60' : ''}`}>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-black text-slate-500 uppercase">
-                                {m.uid.charAt(0)}
+                                {label.charAt(0)}
                               </div>
                               <div className="min-w-0">
-                                <p className="font-bold text-sm text-slate-900 font-mono truncate">
-                                  {m.uid}
+                                <p className="font-bold text-sm text-slate-900 truncate">
+                                  {label}
                                   {isYou && <span className="ml-2 text-[10px] text-tm-blue font-black uppercase tracking-widest">(you)</span>}
                                 </p>
-                                <p className="text-[11px] text-slate-400 capitalize">{m.role}</p>
+                                <p className="text-[11px] text-slate-400 truncate">
+                                  {m.displayName && m.email ? m.email : <span className="capitalize">{m.role}</span>}
+                                </p>
                                 {canManage && m.role === 'scanner' && orgId ? (
                                   <ScannerEventScope
                                     orgId={orgId}
@@ -391,8 +490,9 @@ export default function OrgMembers() {
                             )}
                           </td>
                           <td className="px-6 py-4">
-                            {canManage && !isOwner ? (
+                            {act.editRole || act.remove || act.makeOwner || act.leave ? (
                               <div className="flex items-center justify-end gap-2">
+                                {act.editRole && (
                                 <select
                                   value={m.role}
                                   onChange={(e) => handleRoleChange(m.uid, e.target.value as OrgRole)}
@@ -402,6 +502,8 @@ export default function OrgMembers() {
                                     <option key={r} value={r}>{r}</option>
                                   ))}
                                 </select>
+                                )}
+                                {act.editRole && (
                                 <button
                                   onClick={() => handleDisable(m.uid, m.disabled === true)}
                                   title={m.disabled ? 'Re-enable' : 'Disable'}
@@ -409,6 +511,33 @@ export default function OrgMembers() {
                                 >
                                   {m.disabled ? <UserCheck size={14} /> : <UserX size={14} />}
                                 </button>
+                                )}
+                                {act.makeOwner && (
+                                  <button
+                                    onClick={() => handleMakeOwner(m)}
+                                    title="Make owner"
+                                    className="p-2 rounded border border-slate-200 text-slate-400 hover:border-tm-blue hover:text-tm-blue transition-colors"
+                                  >
+                                    <Crown size={14} />
+                                  </button>
+                                )}
+                                {act.remove && (
+                                  <button
+                                    onClick={() => handleRemove(m)}
+                                    title="Remove from team"
+                                    className="p-2 rounded border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500 transition-colors"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                                {act.leave && (
+                                  <button
+                                    onClick={() => handleLeave()}
+                                    className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-slate-200 text-slate-500 hover:border-rose-300 hover:text-rose-500 text-[10px] font-black uppercase tracking-widest transition-colors"
+                                  >
+                                    <LogOut size={13} /> Leave
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               <div className="text-right">

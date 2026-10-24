@@ -61,6 +61,8 @@ describe('the one write: a ticket class capacity', () => {
     // Eventbrite refuses 0 on a normal class (and reads it as unlimited on a donation): never sent.
     expect(planCapacity('555', '101', 50, 0)).toBeNull();
     expect(planCapacity('555', '101', 50, null)).toBeNull();
+    // ...except on a class Exos created: hidden instead (mig 20261020110000).
+    expect(planCapacity('555', '101', 50, 0, { exosCreated: true })?.body).toEqual({ ticket_class: { hidden: true } });
     expect(planCapacity('55x', '101', 50, 60)).toBeNull();
     expect(planCapacity('555', '101', 50, 96)).toEqual({
       method: 'POST', path: '/events/555/ticket_classes/101/', body: { ticket_class: { capacity: 96 } },

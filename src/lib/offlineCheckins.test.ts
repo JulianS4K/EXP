@@ -7,6 +7,7 @@ import {
   newClientRef,
   parseQueue,
   removeRefs,
+  signOutWipeKeys,
   type QueuedScan,
 } from './offlineCheckins';
 
@@ -104,5 +105,22 @@ describe('parseQueue: check-in lists (mig 20260929140000)', () => {
   it('drops a malformed list id and an unknown direction', () => {
     expect(parseQueue(JSON.stringify([{ ...base, listId: 'nope', direction: 'entry' }]), 0)[0].listId).toBeNull();
     expect(parseQueue(JSON.stringify([{ ...base, direction: 'sideways' }]), 0)[0].direction).toBeUndefined();
+  });
+});
+
+describe('signOutWipeKeys', () => {
+  const store = (keys: string[]) => ({ length: keys.length, key: (i: number) => keys[i] ?? null });
+
+  it('wipes rosters, pass copies and door guest lists, keeps upload queues', () => {
+    const keys = [
+      'registry_ev1', 'registry_pass_t1', 'doorextras_ev1', 'doorextras_ev2',
+      'pending_updates_ev1', 'guest_pending_ev1', 'exos_lang', 'door_device',
+    ];
+    expect(signOutWipeKeys(store(keys)).sort()).toEqual(['doorextras_ev1', 'doorextras_ev2', 'registry_ev1', 'registry_pass_t1']);
+  });
+
+  it('is empty without storage, and when storage throws', () => {
+    expect(signOutWipeKeys(null)).toEqual([]);
+    expect(signOutWipeKeys({ get length(): number { throw new Error('blocked'); }, key: () => null })).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ import { supabase } from './supabase';
 import { Organization, OrgMembership, OrgRole } from '../types';
 import { publicUrl } from './utils';
 import { parseSite } from './site';
+import { can } from './orgRoles';
 
 // --- Slug helpers (pure) ---------------------------------------------------
 
@@ -36,6 +37,29 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+// --- Theme helpers (pure) --------------------------------------------------
+
+const HEX_COLOR_RE = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+
+/** #rgb or #rrggbb — the shape ThemeContext accepts. */
+export function isHexColor(v: string): boolean {
+  return typeof v === 'string' && HEX_COLOR_RE.test(v);
+}
+
+/**
+ * The org theme with `patch` applied on top: keys the patch leaves out (a
+ * logo uploaded a moment ago) survive, since updateOrganization writes the
+ * whole theme column.
+ */
+export function mergeOrgTheme(
+  prev: Organization['theme'] | undefined,
+  patch: NonNullable<Organization['theme']>,
+): NonNullable<Organization['theme']> {
+  const out: Record<string, unknown> = { ...(prev ?? {}) };
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) out[k] = v;
+  return out as NonNullable<Organization['theme']>;
+}
+
 // --- Row → type mappers ----------------------------------------------------
 
 const toTs = (iso: string | null | undefined): Timestamp =>
@@ -55,6 +79,7 @@ function mapOrg(row: any, secrets?: any): Organization {
     currency: row.currency ?? undefined,
     compBudget: row.comp_budget ?? null,
     s4kNetwork: row.s4k_network === true,
+    checkoutRemindersEnabled: row.checkout_reminders_enabled !== false,
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
     site: parseSite(row.site),
@@ -140,6 +165,18 @@ export async function getPublicOrg(orgId: string): Promise<Organization | null> 
   return data ? mapPublicOrg(data) : null;
 }
 
+/**
+ * Live handle check for the create-org forms: exos_public_orgs lists every
+ * org's slug to anyone. null when the check itself failed (don't block on it;
+ * the UNIQUE index still refuses a taken handle on create).
+ */
+export async function isOrgHandleAvailable(slug: string): Promise<boolean | null> {
+  if (!isValidOrgSlug(slug)) return false;
+  const { data, error } = await supabase.from('exos_public_orgs').select('id').eq('slug', slug).limit(1);
+  if (error) return null;
+  return (data ?? []).length === 0;
+}
+
 export async function getPublicOrgBySlug(slug: string): Promise<Organization | null> {
   const { data, error } = await supabase.from('exos_public_orgs').select('*').eq('slug', slug).maybeSingle();
   if (error) throw error;
@@ -193,61 +230,105 @@ export async function listOrgsForUser(
   return out;
 }
 
-/** List all members of an org. Owner/manager-only via RLS. */
+/** The org's team (exos_org_members, mig 20261021150000): owner / manager /
+ *  platform admin get everyone with email + name; other members their own row. */
 export async function listOrgMembers(orgId: string): Promise<OrgMembership[]> {
-  const { data, error } = await supabase
-    .from('exos_org_memberships')
-    .select('*')
-    .eq('org_id', orgId);
-  if (error) throw error;
-  return (data ?? []).map(mapMembership);
+  const { data, error } = await supabase.rpc('exos_org_members', { p_org_id: orgId });
+  if (error) throw rpcError(error);
+  return ((data ?? []) as any[]).map((r) => ({
+    ...mapMembership({ ...r, created_at: r.added_at }),
+    email: r.email ?? undefined,
+    displayName: r.display_name ?? undefined,
+  }));
+}
+
+/** Server refusal text without the function-name prefix. */
+function rpcError(e: { message?: string }): Error {
+  return new Error((e.message ?? 'Not saved.').replace(/^exos_\w+: /, ''));
+}
+
+/** A direct table write that RLS filtered to nothing reports no error; say so
+ *  instead of letting the caller show "Saved". */
+export const NOT_SAVED = "Nothing was saved: you don't have permission to change this.";
+export function assertChanged(rows: unknown[] | null | undefined): void {
+  if (!rows || rows.length === 0) throw new Error(NOT_SAVED);
+}
+
+/** How a member is shown: name, else email, else a short id. */
+export function memberLabel(m: Pick<OrgMembership, 'uid' | 'email' | 'displayName'>): string {
+  return m.displayName?.trim() || m.email || `Member ${m.uid.slice(0, 8)}`;
+}
+
+export interface MemberActions {
+  editRole: boolean;   // role select + disable / enable
+  remove: boolean;
+  makeOwner: boolean;
+  leave: boolean;
+}
+
+/** What the Members page offers on one row. Edits go through owner-only RLS /
+ *  RPCs, so a platform admin who isn't the owner can only hand the org over. */
+export function memberActions(
+  viewer: { uid: string; role: OrgRole | null | undefined; isAdmin: boolean },
+  m: Pick<OrgMembership, 'uid' | 'role' | 'disabled'>,
+): MemberActions {
+  const isOwnerRow = m.role === 'owner';
+  const isYou = m.uid === viewer.uid;
+  const owner = viewer.role === 'owner';
+  return {
+    editRole: owner && !isOwnerRow && !isYou,
+    remove: owner && !isOwnerRow && !isYou,
+    makeOwner: (owner || viewer.isAdmin) && !isOwnerRow && m.disabled !== true,
+    leave: isYou && !isOwnerRow,
+  };
 }
 
 // --- Member management -----------------------------------------------------
+// New members join through an invite (exos_claim_invite); a direct insert is
+// refused (mig 20261021150000). The owner role moves only with
+// transferOrgOwnership.
 
-export interface AddMemberInput {
-  orgId: string;
-  uid: string;
-  role: OrgRole;
-  addedBy: string;
-}
-
-export async function addOrgMember(input: AddMemberInput): Promise<void> {
-  const { orgId, uid, role, addedBy } = input;
-  if (role === 'owner') {
-    throw new Error('Granting org ownership requires admin tooling.');
-  }
-  const { error } = await supabase
+async function updateMembership(orgId: string, uid: string, patch: Record<string, unknown>): Promise<void> {
+  const { data, error } = await supabase
     .from('exos_org_memberships')
-    .insert({ org_id: orgId, user_id: uid, role, added_by: addedBy });
+    .update(patch)
+    .eq('org_id', orgId)
+    .eq('user_id', uid)
+    .select('id');
   if (error) throw error;
+  assertChanged(data);
 }
 
 export async function updateOrgMemberRole(orgId: string, uid: string, role: OrgRole): Promise<void> {
-  const { error } = await supabase
-    .from('exos_org_memberships')
-    .update({ role })
-    .eq('org_id', orgId)
-    .eq('user_id', uid);
-  if (error) throw error;
+  if (role === 'owner') throw new Error('Use "Make owner" to hand the organization over.');
+  await updateMembership(orgId, uid, { role });
 }
 
 export async function disableOrgMember(orgId: string, uid: string): Promise<void> {
-  const { error } = await supabase
-    .from('exos_org_memberships')
-    .update({ disabled: true })
-    .eq('org_id', orgId)
-    .eq('user_id', uid);
-  if (error) throw error;
+  await updateMembership(orgId, uid, { disabled: true });
 }
 
 export async function enableOrgMember(orgId: string, uid: string): Promise<void> {
-  const { error } = await supabase
-    .from('exos_org_memberships')
-    .update({ disabled: false })
-    .eq('org_id', orgId)
-    .eq('user_id', uid);
-  if (error) throw error;
+  await updateMembership(orgId, uid, { disabled: false });
+}
+
+/** Owner (or platform admin): hand the org to an active member. The previous
+ *  owner stays on as a manager. */
+export async function transferOrgOwnership(orgId: string, newOwnerUid: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_transfer_org_ownership', { p_org_id: orgId, p_new_owner: newOwnerUid });
+  if (error) throw rpcError(error);
+}
+
+/** Any member but the owner: leave the team. */
+export async function leaveOrg(orgId: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_leave_org', { p_org_id: orgId });
+  if (error) throw rpcError(error);
+}
+
+/** Owner: take someone off the team (never the owner). */
+export async function removeOrgMember(orgId: string, uid: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_remove_org_member', { p_org_id: orgId, p_user_id: uid });
+  if (error) throw rpcError(error);
 }
 
 // --- Scanner event scope (mig 20260929041000) ------------------------------
@@ -265,6 +346,19 @@ export async function listScannerEvents(orgId: string): Promise<Record<string, s
     (out[r.user_id] ??= []).push(r.event_id);
   }
   return out;
+}
+
+/** The events this member is limited to in the org (their own
+ *  exos_event_staff rows, RLS); empty = every event. Door home lists only
+ *  these for a scoped scanner. */
+export async function listMyScannerEvents(orgId: string, uid: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('exos_event_staff')
+    .select('event_id')
+    .eq('org_id', orgId)
+    .eq('user_id', uid);
+  if (error) throw error;
+  return ((data ?? []) as Array<{ event_id: string }>).map((r) => r.event_id);
 }
 
 /** Limit a scanner to these events (empty = every event). Owner / manager. */
@@ -297,19 +391,36 @@ export async function updateOrganization(orgId: string, patch: OrgUpdatePatch): 
   if (patch.theme !== undefined) orgFields.theme = stripUndefined(patch.theme);
   if (patch.marketing !== undefined) orgFields.marketing = stripUndefined(patch.marketing);
   if (Object.keys(orgFields).length > 0) {
-    const { error } = await supabase.from('exos_orgs').update(orgFields).eq('id', orgId);
+    const { data, error } = await supabase.from('exos_orgs').update(orgFields).eq('id', orgId).select('id');
     if (error) throw error;
+    assertChanged(data);
   }
   // payments/distribution route to the secrets sidecar (owner-only RLS).
   if (patch.payments !== undefined || patch.distribution !== undefined) {
     const secretFields: Record<string, unknown> = { org_id: orgId };
     if (patch.payments !== undefined) secretFields.payments = stripUndefined(patch.payments);
     if (patch.distribution !== undefined) secretFields.distribution = stripUndefined(patch.distribution);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('exos_org_secrets')
-      .upsert(secretFields, { onConflict: 'org_id' });
+      .upsert(secretFields, { onConflict: 'org_id' })
+      .select('org_id');
     if (error) throw error;
+    assertChanged(data);
   }
+}
+
+/** Abandoned-checkout reminders on / off (owner; RLS exos_orgs_upd). Returns the saved value. */
+export async function setCheckoutReminders(orgId: string, on: boolean): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('exos_orgs')
+    .update({ checkout_reminders_enabled: on })
+    .eq('id', orgId)
+    .select('checkout_reminders_enabled')
+    .maybeSingle();
+  if (error) throw error;
+  // RLS filters the row out for a non-owner: nothing was saved.
+  if (!data) throw new Error('Only the org owner can change this.');
+  return (data as { checkout_reminders_enabled: boolean }).checkout_reminders_enabled !== false;
 }
 
 function stripUndefined<T extends Record<string, unknown> | undefined>(obj: T): T {
@@ -349,21 +460,23 @@ export function roleAtLeast(holder: OrgRole | null | undefined, min: OrgRole): b
   return ROLE_RANK[holder] >= ROLE_RANK[min];
 }
 
+// Gates come from the one role table (./orgRoles.ts, checked against the
+// migrations). roleAtLeast is a rank, not a permission: finance outranks
+// content but neither can edit events.
 export function canEditEvents(role: OrgRole | null | undefined): boolean {
-  return roleAtLeast(role, 'content');
+  return can(role, 'editEvents');
 }
 
 export function canManageEvents(role: OrgRole | null | undefined): boolean {
-  return roleAtLeast(role, 'manager');
+  return can(role, 'publishEvents');
 }
 
 export function canRunCheckIn(role: OrgRole | null | undefined): boolean {
-  if (!role) return false;
-  return role === 'scanner' || role === 'manager' || role === 'owner';
+  return can(role, 'scan');
 }
 
 export function canManageOrg(role: OrgRole | null | undefined): boolean {
-  return role === 'owner';
+  return can(role, 'members');
 }
 
 // --- Email-based invites ---------------------------------------------------
@@ -383,7 +496,7 @@ export async function createOrgInvite(
 ): Promise<{ token: string; inviteUrl: string }> {
   const { orgId, email, role, createdBy } = input;
   if (role === 'owner') {
-    throw new Error('Owner role cannot be granted via invite — use admin tooling.');
+    throw new Error('Owner role cannot be granted via invite — invite them, then use Make owner.');
   }
   if (!email || !email.includes('@')) {
     throw new Error('Provide a valid email address.');

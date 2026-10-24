@@ -34,4 +34,11 @@ describe('refund asks', () => {
     expect(policyLine('none', null)).toBe('All sales final.');
     expect(policyLine(null, new Date('2026-11-13T19:00:00Z'))).toMatch(/until .* The organizer decides\./);
   });
+
+  it('a cancelled event: no promise of automatic refunds, and asking is open', () => {
+    expect(cantAskText('event-cancelled')).not.toMatch(/automatic/i);
+    expect(cantAskText('event-cancelled')).toMatch(/organizer/);
+    expect(policyLine('none', null, true)).toBe('The event was cancelled. Ask the organizer for your refund.');
+    expect(policyLine('until_7d', new Date('2026-01-01T00:00:00Z'), true)).toMatch(/cancelled/);
+  });
 });

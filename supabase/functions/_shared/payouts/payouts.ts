@@ -94,3 +94,27 @@ export function connectTransfer(p: PlannedPayout, destination: string | null | u
     idempotencyKey: p.idempotency_key,
   };
 }
+
+/**
+ * Minutes a payout's 'sending' claim is trusted. An older one is a run that
+ * died mid-send: the next run may claim it again (exos_mark_org_payout,
+ * mig 20261020120000, uses the same number) and resend it.
+ */
+export const STALE_SENDING_MINUTES = 15;
+
+/**
+ * Did Stripe definitely refuse the transfer (no money moved)? Then the payout
+ * is marked failed and its orders are re-planned. A network error, a 5xx or
+ * a rate limit may have gone through: the payout stays 'sending' and is resent
+ * later with the same idempotency key.
+ */
+export function transferRefused(e: unknown): boolean {
+  const err = (e ?? {}) as { statusCode?: unknown; type?: unknown };
+  if (err.type === 'StripeIdempotencyError') return false;
+  return typeof err.statusCode === 'number' && [400, 401, 402, 403, 404].includes(err.statusCode);
+}
+
+/** A 'sending' payout last touched before this (ISO) is stale. */
+export function staleSendingCutoff(now: Date): string {
+  return new Date(now.getTime() - STALE_SENDING_MINUTES * 60_000).toISOString();
+}

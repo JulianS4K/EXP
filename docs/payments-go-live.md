@@ -60,7 +60,10 @@ the details with counsel.)
       (`exos_checkout_sessions.application_fee_cents` = `exos_fee_cents` + `card_fee_est_cents`) and,
       after fulfilment, Stripe's actual fee from the charge's balance transaction
       (`exos_order_payments.stripe_fee_cents`, `net_cents`, `transfer_id`). Compare them in
-      `exos_order_money` (`card_fee_est_cents` vs `card_fee_actual_cents`).
+      `exos_order_money` (`card_fee_est_cents` vs `card_fee_actual_cents`). The same US rate is used for
+      every currency; on a converted charge (EUR on a USD platform) the actual fee is in the settlement
+      currency (`exos_order_payments.stripe_fee_currency`, mig `20261021160000`). The Money tab shows the
+      card fee charged (application fee − Exos fee), not Stripe's actual.
 - [ ] **Refunds and the card fee.** A refund returns the application fee in proportion by default
       (`refund_application_fee`), card-fee part included, but Stripe keeps its fee, so Exos pays it on
       refunded orders. Decide whether a refund keeps the card-fee part (`EXOS_REFUND_KEEP_PLATFORM_FEE`

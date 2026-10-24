@@ -12,9 +12,9 @@
 // breakdowns by tier, etc.) we'll evaluate a real chart lib then.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Timestamp } from '../lib/timestamp';
 import { listEventTickets, listMyOrgTickets, listAllTickets } from '../lib/tickets';
 import { Ticket } from '../types';
+import { FIGURES, historyDays, salesByDay, type DayBucket } from '../lib/eventFigures';
 
 const DAYS = 30;
 const CHART_W = 760;
@@ -24,11 +24,7 @@ const PAD_B = 28;
 const PAD_L = 36;
 const PAD_R = 12;
 
-interface DayBucket {
-  date: Date; // start-of-day in viewer's timezone
-  daily: number;
-  cumulative: number;
-}
+
 
 interface Props {
   organizerId: string | null; // null = admin / all
@@ -82,7 +78,11 @@ export default function SalesChart({ organizerId, eventId, fullHistory }: Props)
     };
   }, [organizerId, eventId, fullHistory]);
 
-  const buckets = useMemo(() => bucketByDay(tickets, DAYS), [tickets]);
+  // Same "Tickets sold" as the report header (voided tickets left out,
+  // src/lib/eventFigures.ts). An event's report shows its whole history.
+  const days = eventId && fullHistory ? historyDays(tickets) : DAYS;
+  const buckets = useMemo(() => salesByDay(tickets, days), [tickets, days]);
+  const title = days === DAYS ? 'Sales — last 30 days' : `Sales — all ${days} days`;
 
   if (loading) {
     return (
@@ -95,9 +95,9 @@ export default function SalesChart({ organizerId, eventId, fullHistory }: Props)
   if (error || buckets.every((b) => b.daily === 0)) {
     return (
       <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h3 className="text-sm font-bold text-slate-700 mb-1">Sales — last 30 days</h3>
+        <h3 className="text-sm font-bold text-slate-700 mb-1">{title}</h3>
         <p className="text-xs text-slate-400">
-          {error ?? 'No tickets sold in the last 30 days. Once buyers start checking out, this chart fills in automatically.'}
+          {error ?? `No tickets sold in the last ${days} days. Once buyers start checking out, this chart fills in automatically.`}
         </p>
       </div>
     );
@@ -107,46 +107,18 @@ export default function SalesChart({ organizerId, eventId, fullHistory }: Props)
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-baseline justify-between mb-3">
         <div>
-          <h3 className="text-sm font-bold text-slate-700">Sales — last 30 days</h3>
-          <p className="text-xs text-slate-400">
-            {buckets[buckets.length - 1].cumulative} tickets total · peak day {Math.max(...buckets.map((b) => b.daily))}
+          <h3 className="text-sm font-bold text-slate-700">{title}</h3>
+          <p className="text-xs text-slate-400" title={FIGURES.ticketsSold.hint}>
+            {buckets[buckets.length - 1].cumulative} {FIGURES.ticketsSold.label.toLowerCase()}{days === DAYS && eventId ? ' in this window' : ''} · peak day {Math.max(...buckets.map((b) => b.daily))}
           </p>
         </div>
       </div>
-      <ChartSvg buckets={buckets} />
+      <ChartSvg buckets={buckets} label={`Daily and cumulative ticket sales, ${days === DAYS ? 'last 30 days' : `last ${days} days`}`} />
     </div>
   );
 }
 
-function bucketByDay(tickets: Ticket[], days: number): DayBucket[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const out: DayBucket[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    out.push({ date: d, daily: 0, cumulative: 0 });
-  }
-  // Map a ticket's purchaseDate to its bucket index.
-  for (const t of tickets) {
-    const pd = (t.purchaseDate as unknown as Timestamp | undefined)?.toDate?.();
-    if (!pd) continue;
-    const dayStart = new Date(pd.getFullYear(), pd.getMonth(), pd.getDate());
-    const diff = Math.floor(
-      (today.getTime() - dayStart.getTime()) / (24 * 60 * 60 * 1000),
-    );
-    if (diff < 0 || diff >= days) continue;
-    out[days - 1 - diff].daily += 1;
-  }
-  let running = 0;
-  for (const b of out) {
-    running += b.daily;
-    b.cumulative = running;
-  }
-  return out;
-}
-
-function ChartSvg({ buckets }: { buckets: DayBucket[] }) {
+function ChartSvg({ buckets, label }: { buckets: DayBucket[]; label: string }) {
   const innerW = CHART_W - PAD_L - PAD_R;
   const innerH = CHART_H - PAD_T - PAD_B;
 
@@ -173,7 +145,7 @@ function ChartSvg({ buckets }: { buckets: DayBucket[] }) {
   return (
     <svg
       role="img"
-      aria-label="Daily and cumulative ticket sales over the last 30 days"
+      aria-label={label}
       viewBox={`0 0 ${CHART_W} ${CHART_H}`}
       width="100%"
       preserveAspectRatio="xMidYMid meet"

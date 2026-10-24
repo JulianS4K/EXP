@@ -99,7 +99,8 @@ export function cantAskText(reason: string | null, askUntil?: Date | null): stri
     case 'in-transfer':
       return 'This ticket is being transferred. Cancel the transfer to ask for a refund.';
     case 'event-cancelled':
-      return 'The event was cancelled; refunds are sent automatically.';
+      // Older databases (before mig 20261021100000) refuse asks on a cancelled event.
+      return 'The event was cancelled. The organizer handles refunds: contact them if yours hasn\'t arrived.';
     case 'marketplace':
       return 'Bought on a resale marketplace: ask the marketplace you bought it from.';
     case 'not-exos-paid':
@@ -110,8 +111,10 @@ export function cantAskText(reason: string | null, askUntil?: Date | null): stri
   }
 }
 
-/** One line on the organizer's refund policy, for the ticket page. */
-export function policyLine(policy: string | null, askUntil: Date | null): string {
+/** One line on the organizer's refund policy, for the ticket page. A
+ *  cancelled event can always be asked about (mig 20261021100000). */
+export function policyLine(policy: string | null, askUntil: Date | null, eventCancelled = false): string {
+  if (eventCancelled) return 'The event was cancelled. Ask the organizer for your refund.';
   if (policy === 'none') return 'All sales final.';
   if (!askUntil) return 'Ask the organizer for a refund.';
   const when = askUntil.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });

@@ -7,7 +7,7 @@ import { Store } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import {
-  BACKEND_LABEL, fetchBackendStatus, LUMA_ENABLED, linkBackend, refFromLink, setTicketBackend, SYNC_PROVIDERS, syncBackend, unlinkBackend,
+  BACKEND_LABEL, fetchBackendStatus, LUMA_ENABLED, linkBackend, refFromLink, setTicketBackend, staleBackendLink, SYNC_PROVIDERS, syncBackend, unlinkBackend,
   type BackendStatus, type SyncProvider, type TicketBackend,
 } from '../lib/integrations';
 
@@ -40,6 +40,7 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
   const changed = backend !== st.ticketBackend || (backend !== 'exos' && url.trim() !== (st.externalTicketUrl ?? ''));
   const syncProvider = (SYNC_PROVIDERS as string[]).includes(backend) ? backend as SyncProvider : null;
   const connected = syncProvider ? st.connected.includes(syncProvider) : false;
+  const stale = staleBackendLink(st);
 
   const save = async () => {
     setBusy(true);
@@ -182,6 +183,17 @@ export default function TicketBackendPanel({ eventId, orgId }: { eventId: string
               <button type="button" onClick={() => void link()} disabled={busy || !ref.trim()} className={BTN}>Link and sync</button>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {stale && (
+        <div className="border-t border-white/10 pt-4 space-y-2">
+          <p className="type text-[11px] uppercase tracking-widest text-white/60">Door sync from {BACKEND_LABEL[stale.provider]} is still on</p>
+          <p className="type text-xs text-white/50">
+            {stale.externalName ?? 'Linked'} · {stale.syncedCount} guests. Tickets sell on {BACKEND_LABEL[st.ticketBackend]} now;
+            unlink to stop syncing (guests already on the door list stay).
+          </p>
+          {st.canManage && <button type="button" onClick={() => void unlink()} disabled={busy} className={BTN}>Unlink</button>}
         </div>
       )}
     </section>
