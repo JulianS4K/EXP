@@ -52,7 +52,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange, ini
     const totalCents = items.reduce((sum, it) => {
       const found = list.find((x) => x.id === it.addon_id);
       // All-in (incl. exclusive tax), matching what exos-checkout charges.
-      return sum + Math.round(allInPrice(found?.price ?? 0, found?.exclusiveTaxPercent) * 100) * it.quantity;
+      return sum + Math.round(allInPrice(found?.price ?? 0, found?.exclusiveTaxPercent, found?.passedOnFees) * 100) * it.quantity;
     }, 0);
     onChange({ items, totalCents });
   };
@@ -92,7 +92,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange, ini
               <p className="font-black uppercase italic tracking-tighter text-sm truncate">{a.name}</p>
               {a.description && <p className="text-white/40 text-xs font-bold truncate">{a.description}</p>}
               <p className="text-brand-primary text-xs font-black mt-0.5">
-                {a.price > 0 ? formatCurrency(allInPrice(a.price, a.exclusiveTaxPercent), currency) : t('event.free')}
+                {a.price > 0 ? formatCurrency(allInPrice(a.price, a.exclusiveTaxPercent, a.passedOnFees), currency) : t('event.free')}
                 {soldOut && <span className="text-brand-accent ml-2">{t('event.soldOut')}</span>}
               </p>
             </div>

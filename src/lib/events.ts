@@ -15,6 +15,8 @@ import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } f
 import { parseEventFormat } from './onlineEvents';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
+import { parseUnitFees } from './fees';
+import { listPublicFeeRules, withTierFees } from './feeRules';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
 import { eventTypeForCategory } from './eventTaxonomy';
@@ -39,6 +41,7 @@ export function mapTier(t: any): Tier {
     salesEnd: t.sales_end ? toTs(t.sales_end) : null,
     priceSchedule: Array.isArray(t.price_schedule) ? t.price_schedule : undefined,
     exclusiveTaxPercent: Number(t.exclusive_tax_percent) || 0,
+    passedOnFees: parseUnitFees(t.passed_on_fees),
     accessible: t.accessible === true,
     accessibleNote: t.accessible_note || undefined,
     marketSplit: parseMarketSplit(t.market_split),
@@ -157,16 +160,17 @@ export function hasStoreColumns(): Promise<boolean> {
 // --- Public reads (anon + signed-in buyers) — column-narrowed views --------
 
 // Listing cards show an all-in "from $X" price, which needs each event's public
-// tiers; one extra query for the whole page rather than one per event.
+// tiers and passed-on fee rules; one extra query each for the whole page rather
+// than one per event.
 async function withPublicTiers(rows: any[]): Promise<Event[]> {
   if (rows.length === 0) return [];
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .in('event_id', rows.map((r) => r.id))
-    .order('sort_order', { ascending: true });
+  const ids = rows.map((r) => r.id);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').in('event_id', ids).order('sort_order', { ascending: true }),
+    listPublicFeeRules(ids),
+  ]);
   const byEvent = new Map<string, any[]>();
-  for (const t of tiers ?? []) {
+  for (const t of withTierFees(tiers ?? [], fees)) {
     const list = byEvent.get(t.event_id) ?? [];
     list.push(t);
     byEvent.set(t.event_id, list);
@@ -199,24 +203,22 @@ export async function getPublicEvent(id: string): Promise<Event | null> {
   const { data, error } = await supabase.from('exos_public_events').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .eq('event_id', id)
-    .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').eq('event_id', id).order('sort_order', { ascending: true }),
+    listPublicFeeRules([id]),
+  ]);
+  return mapEvent(data, withTierFees(tiers ?? [], fees));
 }
 
 export async function getPublicEventBySlug(slug: string): Promise<Event | null> {
   const { data, error } = await supabase.from('exos_public_events').select('*').eq('slug', slug).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .eq('event_id', data.id)
-    .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').eq('event_id', data.id).order('sort_order', { ascending: true }),
+    listPublicFeeRules([data.id]),
+  ]);
+  return mapEvent(data, withTierFees(tiers ?? [], fees));
 }
 
 // --- Staff reads (org dashboard / editor) — base tables, RLS-gated ---------

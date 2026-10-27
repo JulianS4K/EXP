@@ -6,6 +6,8 @@
 // lib/checkout.ts); $0 extras attach to a free claim via exos_claim_free_addons.
 
 import { supabase } from './supabase';
+import { parseUnitFees, type UnitFee } from './fees';
+import { listPublicFeeRules, withAddonFees } from './feeRules';
 
 export interface PublicAddon {
   id: string;
@@ -20,6 +22,8 @@ export interface PublicAddon {
   sortOrder: number;
   /** Exclusive tax on top of `price` (0 when included) — for all-in display. */
   exclusiveTaxPercent: number;
+  /** Passed-on fees inside the all-in price (fee rules, mig 20261027100000; [] = none). */
+  passedOnFees: UnitFee[];
 }
 
 export interface AddonInput {
@@ -47,18 +51,18 @@ function mapPublic(r: any): PublicAddon {
     imageUrl: r.image_url ?? null,
     sortOrder: Number(r.sort_order) || 0,
     exclusiveTaxPercent: Number(r.exclusive_tax_percent) || 0,
+    passedOnFees: parseUnitFees(r.passed_on_fees),
   };
 }
 
 /** Buyer-facing: public add-ons for a published event. */
 export async function listPublicAddons(eventId: string): Promise<PublicAddon[]> {
-  const { data, error } = await supabase
-    .from('exos_public_addons')
-    .select('*')
-    .eq('event_id', eventId)
-    .order('sort_order', { ascending: true });
+  const [{ data, error }, fees] = await Promise.all([
+    supabase.from('exos_public_addons').select('*').eq('event_id', eventId).order('sort_order', { ascending: true }),
+    listPublicFeeRules([eventId]),
+  ]);
   if (error) throw error;
-  return (data ?? []).map(mapPublic);
+  return withAddonFees(data ?? [], fees.get(eventId) ?? []).map(mapPublic);
 }
 
 /** Organizer: full catalog (incl. hidden) for an event. Staff RLS. */

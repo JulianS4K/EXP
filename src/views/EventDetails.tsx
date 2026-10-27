@@ -42,7 +42,7 @@ import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
-import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
+import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
@@ -251,15 +251,24 @@ export default function EventDetails() {
   
   // All-in: exactly what exos-checkout will charge per ticket — the scheduled
   // price, after a server-validated code's rule (pinned price, % or $ off;
-  // voucherUnitPrice is the function checkout uses), plus exclusive tax.
+  // voucherUnitPrice is the function checkout uses), plus the organizer's
+  // passed-on fees and exclusive tax (tierAllInPrice, mig 20261027100000).
   const calculateFinalPrice = () => {
     if (!event) return 0;
     if (!selectedTier) return event.price;
     const voucherApplies = !!voucher && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
     const scheduled = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
     const base = voucherApplies ? voucherUnitPrice(scheduled, voucher) : scheduled;
-    return allInPrice(base, selectedTier.exclusiveTaxPercent);
+    return tierAllInPrice(selectedTier, base);
   };
+
+  // The passed-on fees inside the selected ticket's price ("includes $2.00 facility fee").
+  const feesIncluded = (() => {
+    if (!selectedTier?.passedOnFees?.length) return [];
+    const voucherApplies = !!voucher && (!voucher.restrictTierId || voucher.restrictTierId === selectedTier.id);
+    const scheduled = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
+    return includedFees(voucherApplies ? voucherUnitPrice(scheduled, voucher) : scheduled, selectedTier.passedOnFees);
+  })();
 
   const priceToDisplay = calculateFinalPrice();
 
@@ -966,15 +975,22 @@ export default function EventDetails() {
                       </p>
                     )}
                     <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
-                      {selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
+                      {feesIncluded.length > 0
+                        ? `all-in · incl. fees${selectedTier?.exclusiveTaxPercent ? ' & tax' : ''} · nothing added at checkout`
+                        : selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
                     </p>
+                    {feesIncluded.length > 0 && (
+                      <p className="type mt-1 text-[11px] text-white/50">
+                        Each ticket includes {feesIncluded.map((f) => `${formatCurrency(f.amount, event.currency)} ${f.name.toLowerCase()}`).join(', ')}.
+                      </p>
+                    )}
                     {selectedTier && (() => {
                       // Scheduled-pricing urgency nudge: surface the next upward
                       // step so buyers see "price rises to $X on <date>".
                       const cur = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);
                       const next = nextPriceStep(selectedTier.priceSchedule);
                       if (!next || next.price <= cur) return null;
-                      const nextAllIn = allInPrice(next.price, selectedTier.exclusiveTaxPercent);
+                      const nextAllIn = tierAllInPrice(selectedTier, next.price);
                       return (
                         <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent">
                           ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
@@ -1012,7 +1028,7 @@ export default function EventDetails() {
                             <p className="disp text-xl tracking-tight text-white">{tier.name}</p>
                             {(() => {
                               const eff = buyerTierPrice(tier);
-                              const opening = allInPrice(tier.price, tier.exclusiveTaxPercent);
+                              const opening = tierAllInPrice(tier, tier.price);
                               const markedDown = eff < opening;
                               return (
                                 <span className="inline-flex items-center gap-2 shrink-0">

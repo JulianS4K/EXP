@@ -14,6 +14,8 @@
 import {
   attendanceModeUrl, parseAttendanceFormat, schemaLocation, type AttendanceFormat,
 } from '../../../supabase/functions/_shared/attendance.ts';
+import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
+import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
@@ -79,9 +81,11 @@ interface TierRow {
   price?: unknown;
   price_schedule?: unknown;
   exclusive_tax_percent?: unknown;
+  /** The tier's passed-on fees (fee rules, mig 20261027100000), attached from exos_public_fee_rules. */
+  passed_on_fees?: unknown;
 }
 
-/** Lowest all-in (price + exclusive tax) tier price in cents, as the storefront shows it. */
+/** Lowest all-in (price + passed-on fees + exclusive tax) tier price in cents, as the storefront shows it. */
 export function fromPriceCents(tiers: TierRow[], now: Date = new Date()): number | null {
   let best: number | null = null;
   for (const t of tiers ?? []) {
@@ -89,7 +93,7 @@ export function fromPriceCents(tiers: TierRow[], now: Date = new Date()): number
     if (!Number.isFinite(base)) continue;
     const unit = Math.round(effectivePrice(base, t.price_schedule, now) * 100);
     const rate = Number(t.exclusive_tax_percent ?? 0) || 0;
-    const allIn = unit + Math.round((unit * rate) / 100);
+    const allIn = allInCents(unit, rate, parseUnitFees(t.passed_on_fees));
     best = best === null ? allIn : Math.min(best, allIn);
   }
   return best;
@@ -284,11 +288,11 @@ export function inject(shell: string, tagBlock: string | null | undefined): stri
 // ── Data ─────────────────────────────────────────────────────────────
 
 /**
- * Reads the public views (exos_public_events / _tiers / _orgs). The server
+ * Reads the public views (exos_public_events / _tiers / _orgs / _fee_rules). The server
  * backs it with supabase-js + the anon key; tests pass a fake.
  */
 export type PublicReader = (
-  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs',
+  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs' | 'exos_public_fee_rules',
   cols: string,
   filter: { col: string; val: string } | null,
   limit: number,
@@ -332,7 +336,8 @@ export interface PreviewPage {
 // Extra event columns for the full crawler page (store content + online
 // events); read with a fallback so an older database still gets the tags.
 const CONTENT_COLS = ',summary,lineup,faq,min_age,refund_policy,policy_notes,what_to_bring';
-const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
+const FEE_RULE_COLS = 'id,name,kind,per,calc,percent,amount_cents,cap_cents,taxable,applies_to_addons,tier_ids,rank';
+const CONTENT_TIER_COLS = 'id,name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
 
 /**
  * Head tags, plus with `opts.content` (server.ts EXOS_AI_DISCOVERY, off until
@@ -384,10 +389,17 @@ async function previewParts(
   if (!events.length) return null;
   const ev = events[0];
   let tiers: Row[] = [];
+  const byEvent = { col: 'event_id', val: String(ev.id) };
   if (content) {
-    try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, { col: 'event_id', val: String(ev.id) }, 50); } catch { tiers = []; }
+    try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, byEvent, 50); } catch { tiers = []; }
   }
-  if (!tiers.length) tiers = await read('exos_public_tiers', 'price,price_schedule,exclusive_tax_percent', { col: 'event_id', val: String(ev.id) }, 50);
+  if (!tiers.length) tiers = await read('exos_public_tiers', 'id,price,price_schedule,exclusive_tax_percent', byEvent, 50);
+  // The passed-on fee rules (mig 20261027100000) are inside every price shown;
+  // a database without them (or a failed read) prices without fees.
+  let feeRows: Row[] = [];
+  try { feeRows = await read('exos_public_fee_rules', FEE_RULE_COLS, byEvent, 20, { order: 'rank' }); } catch { feeRows = []; }
+  const rules = parseFeeRules(feeRows);
+  tiers = tiers.map((t) => ({ ...t, passed_on_fees: tierPassedOnFees(rules, String(t.id)) }));
   const orgs = ev.org_id ? await read('exos_public_orgs', 'name', { col: 'id', val: String(ev.org_id) }, 1) : [];
   const s = eventSummary(ev, tiers as TierRow[], orgs[0] ?? null);
   if (!s) return null;
