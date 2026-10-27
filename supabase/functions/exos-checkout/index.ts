@@ -33,10 +33,20 @@
 // request's hashed IP and User-Agent, and the fee split behind the
 // application fee (checkoutFeeSplit). Before that migration is applied the
 // row is recorded without them.
+//
+// Organizer fee rules (mig 20261027100000, docs/fees.md): the event's
+// passed-on fees are folded into each all-in unit price (allInCents, the same
+// function the storefront and the feeds use), so Stripe charges exactly what
+// the buyer was shown; no fee line is added. Every fee line, passed on and
+// absorbed, is stored on the session (fee_breakdown) and copied to
+// exos_order_fees at fulfillment. Not the Exos platform fee above.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
+import {
+  addonPassedOnFees, feeTotals, orderFeeLines, parseFeeRules, tierPassedOnFees, unitFeeTotals, type FeeRule, type UnitFee,
+} from "../_shared/fees.ts";
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
@@ -234,6 +244,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!isCheckoutCurrency(currency)) {
     return json({ error: `tickets can't be sold in ${currency.toUpperCase()} yet: pick another currency for this event` }, 409);
   }
+  // The event's fee rules in effect (org rules unless opted out, then the
+  // event's own). Before the migration the view is missing: no rules, as
+  // before. Any other read error stops the sale rather than charging a price
+  // the storefront didn't show.
+  let feeRules: FeeRule[] = [];
+  let feeRulesRead = false;
+  {
+    const { data: fr, error: frErr } = await sb.from("exos_effective_fee_rules").select("*")
+      .eq("event_id", event_id).order("rank", { ascending: true });
+    if (frErr && !["42P01", "PGRST205", "PGRST200"].includes(String(frErr.code))) {
+      console.error("exos-checkout: fee rules read failed", frErr.message);
+      return json({ error: "could not price the order, try again" }, 503);
+    }
+    if (!frErr) {
+      feeRules = parseFeeRules(fr ?? []);
+      feeRulesRead = true;
+    }
+  }
+  const ticketFees: UnitFee[] = tierPassedOnFees(feeRules, tier_id);
+  const addonFees: UnitFee[] = addonPassedOnFees(feeRules);
+
   // The tier's scheduled price as of now, the same price the storefront shows
   // (early-bird → regular → last-minute), then the voucher's rule: a pinned
   // price, a percent off or an amount off (voucherUnitPrice, shared with the SPA).
@@ -252,25 +283,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // snapshot stored on the session (fulfillment reads it to record the purchase).
   type AddonRow = { addon_id: string; quantity: number; unit_price_cents: number; name: string };
   const addonsForSession: AddonRow[] = [];
-  const addonLines: { id: string; name: string; quantity: number; unit_face: number; unit_all_in: number; unit_tax: number; line_tax: number; tax_included: boolean }[] = [];
+  const addonLines: {
+    id: string; name: string; quantity: number; unit_face: number; unit_all_in: number;
+    unit_tax: number; unit_fee: number; line_tax: number; tax_included: boolean;
+  }[] = [];
   let addonTotal = 0;
   // recordedTax = the tax portion of the order (inclusive or exclusive), stored
   // on the session for invoices/reporting. Exclusive tax is already inside the
   // all-in unit amounts below, never added as a separate charge.
   let recordedTax = 0;
-  // All-in pricing: exclusive tax is computed PER UNIT and folded into each
-  // line's unit_amount, so the buyer pays exactly the all-in price the
-  // storefront showed (allInCents, shared with the SPA). Returns the all-in unit
-  // amount; inclusive tax is only recorded (it's already in the price).
-  const allInUnit = (unitCents: number, qty: number, rule: { rate_percent?: number; price_includes_tax?: boolean } | null | undefined): number => {
+  // All-in pricing: the passed-on fees and the exclusive tax are computed PER
+  // UNIT and folded into each line's unit_amount, so the buyer pays exactly the
+  // all-in price the storefront showed (allInCents, shared with the SPA).
+  // Returns the all-in unit amount; inclusive tax is only recorded (it's
+  // already in the price, and in a taxable fee).
+  const allInUnit = (
+    unitCents: number, qty: number,
+    rule: { rate_percent?: number; price_includes_tax?: boolean } | null | undefined,
+    fees: readonly UnitFee[],
+  ): number => {
     const rate = Number(rule?.rate_percent ?? 0);
-    if (!rate) return unitCents;
+    const f = unitFeeTotals(unitCents, fees);
+    if (!rate) return unitCents + f.total;
     if (rule?.price_includes_tax === true) {
-      recordedTax += taxCents(unitCents * qty, rate, true);
-      return unitCents;
+      recordedTax += taxCents((unitCents + f.taxable) * qty, rate, true);
+      return unitCents + f.total;
     }
-    const withTax = allInCents(unitCents, rate);
-    const tax = (withTax - unitCents) * qty;
+    const withTax = allInCents(unitCents, rate, fees);
+    const tax = (withTax - unitCents - f.total) * qty;
     recordedTax += tax;
     return withTax;
   };
@@ -315,10 +355,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const unitCents = Math.round(Number(a.price) * 100);
         const addonRule = (a as unknown as { exos_tax_rules?: { rate_percent?: number; price_includes_tax?: boolean } }).exos_tax_rules;
         const taxBefore = recordedTax;
-        const allIn = allInUnit(unitCents, qty, addonRule);
+        const allIn = allInUnit(unitCents, qty, addonRule, addonFees);
+        const unitFee = unitFeeTotals(unitCents, addonFees).total;
         addonsForSession.push({ addon_id: a.id, quantity: qty, unit_price_cents: unitCents, name: a.name });
         addonLines.push({
-          id: a.id, name: a.name, quantity: qty, unit_face: unitCents, unit_all_in: allIn, unit_tax: allIn - unitCents,
+          id: a.id, name: a.name, quantity: qty, unit_face: unitCents, unit_all_in: allIn,
+          unit_tax: allIn - unitCents - unitFee, unit_fee: unitFee,
           line_tax: recordedTax - taxBefore, tax_included: addonRule?.price_includes_tax === true,
         });
         addonTotal += allIn * qty;
@@ -329,8 +371,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Tier tax (after the voucher price override is applied to unitAmount).
   const tierRule = (tier as unknown as { exos_tax_rules?: { rate_percent?: number; price_includes_tax?: boolean } }).exos_tax_rules;
   const ticketTaxBefore = recordedTax;
-  const ticketAllIn = allInUnit(unitAmount, quantity, tierRule);
+  const ticketAllIn = allInUnit(unitAmount, quantity, tierRule, ticketFees);
   const ticketLineTax = recordedTax - ticketTaxBefore;
+  const ticketUnitFee = unitFeeTotals(unitAmount, ticketFees).total;
+
+  // Every fee line of the order, passed on and absorbed (exos_order_fees at
+  // fulfillment). The passed-on lines are exactly what the unit prices above
+  // folded in.
+  const feeLines = orderFeeLines(feeRules, {
+    tierId: tier_id, ticketUnitCents: unitAmount, quantity,
+    addons: addonLines.map((a) => ({ id: a.id, unitCents: a.unit_face, quantity: a.quantity })),
+  });
+  {
+    const inPrices = ticketUnitFee * quantity + addonLines.reduce((n, a) => n + a.unit_fee * a.quantity, 0);
+    if (feeTotals(feeLines).passedOn !== inPrices) {
+      console.error("exos-checkout: fee breakdown != fees in the prices", feeTotals(feeLines).passedOn, inPrices);
+    }
+  }
+  const feeRecord0 = feeRulesRead ? { fee_breakdown: feeLines } : {};
 
   // addonTotal is already all-in; the exclusive tax sits inside both unit amounts.
   const amountCents = ticketAllIn * quantity + addonTotal;
@@ -369,16 +427,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // a free tier + paid add-ons charges just the add-ons. Ticket quantity is still
   // recorded on the session for minting regardless of the tier's price.
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-  // All-in: one line per product at its all-in unit price; the tax inside it is
-  // disclosed in the line description instead of appearing as an extra line.
-  const taxNote = (unitTax: number) =>
-    unitTax > 0 ? { description: `Includes ${(unitTax / 100).toFixed(2)} ${currency.toUpperCase()} tax per item` } : {};
+  // All-in: one line per product at its all-in unit price; the passed-on fees
+  // and the tax inside it are disclosed in the line description instead of
+  // appearing as extra lines.
+  const money = (c: number) => `${(c / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  const feeNames = (fees: readonly UnitFee[], unit: number) =>
+    fees.filter((f) => unitFeeTotals(unit, [f]).total > 0).map((f) => String(f.name ?? "fee").toLowerCase());
+  const taxNote = (unitTax: number, unitFee = 0, names: string[] = []) => {
+    const parts = [
+      ...(unitFee > 0 ? [`${money(unitFee)} ${names.join(" + ") || "fees"}`] : []),
+      ...(unitTax > 0 ? [`${money(unitTax)} tax`] : []),
+    ];
+    return parts.length ? { description: `Includes ${parts.join(" and ")} per item` } : {};
+  };
   if (ticketAllIn > 0) {
     lineItems.push({
       quantity,
       price_data: {
         currency, unit_amount: ticketAllIn,
-        product_data: { name: `${ev.name} — ${tier.name}`, ...taxNote(ticketAllIn - unitAmount) },
+        product_data: {
+          name: `${ev.name} — ${tier.name}`,
+          ...taxNote(ticketAllIn - unitAmount - ticketUnitFee, ticketUnitFee, feeNames(ticketFees, unitAmount)),
+        },
       },
     });
   }
@@ -388,7 +458,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         quantity: a.quantity,
         price_data: {
           currency, unit_amount: a.unit_all_in,
-          product_data: { name: `${ev.name} — ${a.name}`, ...taxNote(a.unit_tax) },
+          product_data: { name: `${ev.name} — ${a.name}`, ...taxNote(a.unit_tax, a.unit_fee, feeNames(addonFees, a.unit_face)) },
         },
       });
     }
@@ -459,6 +529,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       voucher_id: voucherId, promoter_id: promoterId ?? null,
       attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
       ...checkoutRecord,
+      ...feeRecord0,
     });
     if (fInsErr) {
       console.error("exos-checkout: free guest order not recorded", fInsErr.message);
@@ -531,6 +602,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
     ...checkoutRecord,
     ...feeRecord,
+    ...feeRecord0,
   };
   const insErr = await insertSessionRow(sb, ledgerRow);
   if (insErr) {
@@ -550,7 +622,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // Price-disclosure record (mig 20260926070000): what the buyer is shown on
   // Stripe's page, per line, so the charged amount can be checked against it
-  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee. Non-fatal: the
+  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee; fee_cents is the
+  // organizer's passed-on fees inside each line (fee rules). Non-fatal: the
   // sale is already recorded; a missing record is visible in the export.
   const { error: pdErr } = await sb.rpc("exos_record_price_disclosure", {
     p_session_id: session.id,
@@ -560,12 +633,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         kind: "ticket", item_id: tier_id, name: tier.name, quantity,
         face_unit_cents: unitAmount, tax_cents: ticketLineTax,
         tax_included: tierRule?.price_includes_tax === true,
-        fee_cents: 0, unit_all_in_cents: ticketAllIn,
+        fee_cents: ticketUnitFee * quantity, unit_all_in_cents: ticketAllIn,
       },
       ...addonLines.map((a) => ({
         kind: "addon", item_id: a.id, name: a.name, quantity: a.quantity,
         face_unit_cents: a.unit_face, tax_cents: a.line_tax, tax_included: a.tax_included,
-        fee_cents: 0, unit_all_in_cents: a.unit_all_in,
+        fee_cents: a.unit_fee * a.quantity, unit_all_in_cents: a.unit_all_in,
       })),
     ],
   });
@@ -591,6 +664,11 @@ const RECORD_COLUMNS = [
 async function insertSessionRow(sb: SupabaseClient<any, any, any>, row: Record<string, unknown>) {
   const missingColumn = (e: { code?: string } | null) => !!e && (e.code === "42703" || e.code === "PGRST204");
   let { error } = await sb.from("exos_checkout_sessions").insert(row);
+  if (missingColumn(error) && "fee_breakdown" in row) {
+    console.error("exos-checkout: fee_breakdown column missing (apply 20261027100000?); recording without it");
+    delete row.fee_breakdown;
+    ({ error } = await sb.from("exos_checkout_sessions").insert(row));
+  }
   if (error && (missingColumn(error) || error.code === "23514") && RECORD_COLUMNS.some((k) => k in row)) {
     console.error("exos-checkout: checkout-record columns refused (apply 20260929131000?); recording without them", error.message);
     for (const k of RECORD_COLUMNS) delete row[k];

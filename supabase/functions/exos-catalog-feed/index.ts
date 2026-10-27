@@ -11,7 +11,7 @@
 //                         key>): the events left out, with why.
 //
 // Reads only the public views (exos_public_orgs, exos_public_events,
-// exos_public_tiers) with the anon key, so it can only serve what the event
+// exos_public_tiers, exos_public_fee_rules) with the anon key, so it can only serve what the event
 // page already shows. The service role is used for the rate limiter alone.
 //
 // Limits: 30 calls a minute per network (exos_rate_hit, mig 20260929060000);
@@ -33,6 +33,7 @@ import {
   type CatalogTierRow,
 } from "../_shared/catalog/feed.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
+import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { redactError } from "../_shared/log.ts";
 
 const PER_MINUTE = 30;
@@ -116,7 +117,8 @@ async function readCatalogInput(sb: SupabaseClient, slug: string, now: Date) {
     if (tErr) throw new Error(`tiers: ${tErr.message}`);
     tiers.push(...((t ?? []) as unknown as CatalogTierRow[]));
   }
-  return { org: org as CatalogOrg, events, tiers };
+  // Prices are all-in: the organizer's passed-on fees (exos_public_fee_rules) are in them.
+  return { org: org as CatalogOrg, events, tiers: await withPublicTierFees(sb, tiers) };
 }
 
 /** Bearer <service role key>, compared in constant time over the SHA-256 digests. */
