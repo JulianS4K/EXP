@@ -8,6 +8,8 @@
 // Only tools are served (no resources or prompts), all read-only. No Deno or
 // Node APIs, so vitest imports it too. Spec: modelcontextprotocol.io.
 
+import { hasScope, type Scope } from '../api/scopes.ts';
+
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const;
 export const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
@@ -46,6 +48,12 @@ export interface ToolAnnotations {
 export interface ToolContext {
   /** The organizer's org when the request carried a valid API key, else null. */
   orgId: string | null;
+  /**
+   * The key's stored scopes (exos_api_keys.scopes). exos-mcp always sets it
+   * with a key; a tool with a `scope` is hidden and refused unless the key
+   * covers it (_shared/api/scopes.ts hasScope). Unset only in tests.
+   */
+  scopes?: readonly string[];
 }
 
 export interface ToolDefinition {
@@ -56,6 +64,8 @@ export interface ToolDefinition {
   annotations?: ToolAnnotations;
   /** Needs an organizer API key (hidden from tools/list without one). */
   requiresOrg?: boolean;
+  /** The partner API scope an organizer tool needs (same scopes as exos-api). */
+  scope?: Scope;
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 }
 
@@ -90,8 +100,15 @@ function isRequest(m: unknown): m is JsonRpcRequest {
   return !!m && typeof m === 'object' && (m as JsonRpcRequest).jsonrpc === '2.0' && typeof (m as JsonRpcRequest).method === 'string';
 }
 
+/** The caller may see and call this tool: an org key for org tools, and the tool's scope. */
+function toolAllowed(t: ToolDefinition, ctx: ToolContext): boolean {
+  if (t.requiresOrg && !ctx.orgId) return false;
+  if (t.scope && ctx.scopes && !hasScope(ctx.scopes, t.scope)) return false;
+  return true;
+}
+
 function visibleTools(server: McpServer, ctx: ToolContext): ToolDefinition[] {
-  return server.tools.filter((t) => !t.requiresOrg || ctx.orgId);
+  return server.tools.filter((t) => toolAllowed(t, ctx));
 }
 
 /**
@@ -151,6 +168,9 @@ export async function handleMessage(
       if (!tool) return error(id, ERR.invalidParams, `unknown tool: ${name}`);
       if (tool.requiresOrg && !ctx.orgId) {
         return { jsonrpc: '2.0', id, result: toolResult({ error: 'this tool needs an Exos organizer API key' }, true) };
+      }
+      if (!toolAllowed(tool, ctx)) {
+        return { jsonrpc: '2.0', id, result: toolResult({ error: `this API key lacks the ${tool.scope} scope` }, true) };
       }
       const args = params.arguments;
       if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {

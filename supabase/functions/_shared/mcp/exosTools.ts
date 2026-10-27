@@ -366,6 +366,7 @@ export function exosTools(data: ExosData, opts: ExosMcpOptions): ToolDefinition[
     name: 'my_events',
     title: 'My events',
     requiresOrg: true,
+    scope: 'events:read',
     description: "The organizer's events (any status) with tickets sold, newest first.",
     inputSchema: {
       type: 'object',
@@ -387,6 +388,7 @@ export function exosTools(data: ExosData, opts: ExosMcpOptions): ToolDefinition[
     name: 'event_sales',
     title: 'Event sales',
     requiresOrg: true,
+    scope: 'orders:read',
     description: 'Sales for one of the organizer\'s events: per ticket type sold/capacity, paid orders, gross and refunds.',
     inputSchema: {
       type: 'object',
@@ -410,6 +412,7 @@ export function exosTools(data: ExosData, opts: ExosMcpOptions): ToolDefinition[
     name: 'door_status',
     title: 'Door status',
     requiresOrg: true,
+    scope: 'tickets:read',
     description: 'How many tickets are issued, checked in and voided for one of the organizer\'s events, and the last scan.',
     inputSchema: {
       type: 'object',
@@ -429,6 +432,7 @@ export function exosTools(data: ExosData, opts: ExosMcpOptions): ToolDefinition[
     name: 'marketplace_attention',
     title: 'Marketplace orders needing a person',
     requiresOrg: true,
+    scope: 'orders:read',
     description: 'Marketplace orders that Exos could not handle on its own (and why), optionally for one event.',
     inputSchema: {
       type: 'object',

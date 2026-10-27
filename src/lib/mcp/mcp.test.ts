@@ -128,3 +128,22 @@ describe('Exos tools', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+describe('organizer tools follow the key scopes', () => {
+  it('a narrowed key sees and calls only the tools its scopes cover', async () => {
+    const narrow: ToolContext = { orgId: ORG, scopes: ['events:read'] };
+    const names = (await rpc('tools/list', {}, narrow)).result.tools.map((t: any) => t.name);
+    expect(names).toContain('my_events');
+    expect(names).not.toContain('event_sales');
+    expect(names).not.toContain('door_status');
+    expect(names).not.toContain('marketplace_attention');
+    const res = await call('event_sales', { event_id: EV.id }, narrow);
+    expect(res).toMatchObject({ isError: true, structuredContent: { error: 'this API key lacks the orders:read scope' } });
+  });
+
+  it('a legacy read key keeps every organizer tool', async () => {
+    const legacy: ToolContext = { orgId: ORG, scopes: ['read'] };
+    const names = (await rpc('tools/list', {}, legacy)).result.tools.map((t: any) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['my_events', 'event_sales', 'door_status', 'marketplace_attention']));
+  });
+});

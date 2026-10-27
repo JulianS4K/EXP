@@ -73,12 +73,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   let bucket: { keyId?: string; net?: string };
   if (key) {
-    const { data: row } = await sb.from("exos_api_keys").select("id, org_id")
+    const { data: row } = await sb.from("exos_api_keys").select("id, org_id, scopes")
       .eq("key_hash", await sha256Hex(key)).is("revoked_at", null).maybeSingle();
     if (!row) {
       return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": 'Bearer realm="exos"' });
     }
     ctx.orgId = row.org_id as string;
+    ctx.scopes = (row.scopes ?? []) as string[];
     bucket = { keyId: row.id as string };
   } else {
     const salt = Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
