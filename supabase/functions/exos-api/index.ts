@@ -1,26 +1,65 @@
-// exos-api — read-only, org-scoped public REST API for Exos (Hi.Events parity).
+// exos-api — read-only, org-scoped partner REST API for Exos.
+// Reference: docs/api-reference.md and /developers (built from docs/api/*.json).
 //
 // Auth: `Authorization: Bearer sk_live_...`. The key is never stored in plaintext
 // (migration 20260616200000) — we SHA-256 the presented key and look up the
 // matching non-revoked row in exos_api_keys, which yields the org_id every query
-// is then scoped to. Read-only: no endpoint mutates anything.
+// is then scoped to, and the key's scopes. Read-only: no endpoint mutates anything.
+//
+// Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
+// (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
+// which covers every `:read` scope. Missing scope → 403 + WWW-Authenticate.
 //
 // Rate limit: 120 requests per key per minute; over it → 429 with Retry-After.
 //
+// Lists are paged: ?page=1&per_page=50 (max 200) → { data, meta }.
+//
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 //
-// Endpoints (all GET, all scoped to the key's org):
-//   GET /events                      → the org's events
-//   GET /events/:id                  → one event + its tiers
-//   GET /events/:id/attendees        → tickets for the event
-//   GET /orders                      → the org's checkout sessions
+// Endpoints (all GET, all scoped to the key's org; each also under /v1):
+//   /me, /events, /events/:id, /events/:id/{ticket-types, add-ons, promo-codes,
+//   attendees, check-ins, check-in-lists, guest-lists, waitlist}, /orders,
+//   /orders/:id, /invoices, /refunds, /webhooks
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { apiPath, matchRoute, type ApiRoute } from "../_shared/api/routes.ts";
+import { effectiveScopes, hasScope } from "../_shared/api/scopes.ts";
+import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
+
+const EVENT_LIST_COLS = "id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at";
+const EVENT_COLS =
+  "id, name, slug, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_location, " +
+  "tickets_sold, total_tickets, created_at";
+const TIER_COLS =
+  "id, name, description, price, capacity, sold, ticket_type, visibility, sales_start, sales_end, sort_order";
+const ORDER_COLS =
+  "session_id, event_id, status, quantity, amount_cents, tax_cents, currency, buyer_email, created_at, fulfilled_at";
+
+const EVENT_STATUSES = new Set(["draft", "published", "cancelled"]);
+
+class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+interface Ctx {
+  sb: SupabaseClient;
+  orgId: string;
+  key: { id: string; name: string | null; key_prefix: string; scopes: string[] };
+  params: Record<string, string>;
+  q: URLSearchParams;
+  page: Page;
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+  if (req.method !== "GET") return json({ error: "method not allowed" }, 405, { allow: "GET" });
 
   const auth = req.headers.get("Authorization") ?? "";
   const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
@@ -31,7 +70,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const keyHash = await sha256Hex(key);
   const { data: keyRow } = await sb
     .from("exos_api_keys")
-    .select("id, org_id, revoked_at")
+    .select("id, org_id, name, key_prefix, scopes, revoked_at")
     .eq("key_hash", keyHash)
     .is("revoked_at", null)
     .maybeSingle();
@@ -62,79 +101,247 @@ Deno.serve(async (req: Request): Promise<Response> => {
     await sb.from("exos_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRow.id);
   } catch { /* best-effort */ }
 
-  // Path after the function name: /exos-api/<...>.
-  const path = new URL(req.url).pathname.replace(/^.*\/exos-api/, "").replace(/\/+$/, "");
-  const seg = path.split("/").filter(Boolean); // e.g. ['events', ':id', 'attendees']
+  const url = new URL(req.url);
+  const match = matchRoute("GET", apiPath(url.pathname));
+  if (!match) {
+    return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
+  }
+  const scopes = (keyRow.scopes ?? []) as string[];
+  if (match.route.scope && !hasScope(scopes, match.route.scope)) {
+    return json({ error: "insufficient scope", required_scope: match.route.scope }, 403, {
+      "www-authenticate": `Bearer error="insufficient_scope", scope="${match.route.scope}"`,
+    });
+  }
 
   try {
-    if (seg[0] === "events" && seg.length === 1) {
-      const { data, error } = await sb
-        .from("exos_events")
-        .select("id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at")
-        .eq("org_id", orgId)
-        .order("starts_at", { ascending: false });
-      if (error) throw error;
-      return json({ data });
-    }
-
-    if (seg[0] === "events" && seg.length === 2) {
-      const { data: ev, error } = await sb
-        .from("exos_events")
-        .select("id, name, slug, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_location, tickets_sold, total_tickets, created_at")
-        .eq("org_id", orgId).eq("id", seg[1]).maybeSingle();
-      if (error) throw error;
-      if (!ev) return json({ error: "event not found" }, 404);
-      const { data: tiers } = await sb
-        .from("exos_ticket_tiers")
-        .select("id, name, price, capacity, sold, ticket_type, visibility")
-        .eq("event_id", seg[1]).order("sort_order", { ascending: true });
-      return json({ data: { ...ev, tiers: tiers ?? [] } });
-    }
-
-    if (seg[0] === "events" && seg.length === 3 && seg[2] === "attendees") {
-      // Confirm the event belongs to this org before exposing its attendees.
-      const { data: ev } = await sb.from("exos_events").select("id").eq("org_id", orgId).eq("id", seg[1]).maybeSingle();
-      if (!ev) return json({ error: "event not found" }, 404);
-      const { data, error } = await sb
-        .from("exos_tickets")
-        .select("id, tier_name, owner_email, status, check_in_at, price_paid, channel_source, created_at")
-        .eq("event_id", seg[1]).eq("org_id", orgId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return json({ data });
-    }
-
-    if (seg[0] === "orders" && seg.length === 1) {
-      const { data, error } = await sb
-        .from("exos_checkout_sessions")
-        .select("session_id, event_id, status, quantity, amount_cents, tax_cents, currency, buyer_email, created_at, fulfilled_at")
-        .eq("org_id", orgId)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return json({ data });
-    }
-
-    if (seg[0] === "invoices" && seg.length === 1) {
-      // exos_invoice_totals (mig 20261001100000): invoices are immutable and
-      // refunds are credit notes; `status` is derived ('issued',
-      // 'partially_refunded', 'refunded', 'cancelled'), refunded_cents added.
-      const { data, error } = await sb
-        .from("exos_invoice_totals")
-        .select("number, event_id, session_id, buyer_email, currency, subtotal_cents, tax_cents, total_cents, status, refunded_cents, issued_at")
-        .eq("org_id", orgId)
-        .order("issued_at", { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return json({ data });
-    }
-
-    return json({ error: "not found", hint: "GET /events, /events/:id, /events/:id/attendees, /orders, /invoices" }, 404);
+    const ctx: Ctx = {
+      sb, orgId,
+      key: { id: keyRow.id, name: keyRow.name, key_prefix: keyRow.key_prefix, scopes },
+      params: match.params,
+      q: url.searchParams,
+      page: parsePage(url.searchParams),
+    };
+    return json(await handle(match.route, ctx));
   } catch (e) {
+    if (e instanceof PagingError) return json({ error: e.message }, 400);
+    if (e instanceof ApiError) return json({ error: e.message }, e.status);
     console.error("exos-api error:", e);
     return json({ error: "internal error" }, 500);
   }
 });
+
+async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
+  const { sb, orgId, page } = c;
+  switch (route.id) {
+    case "me": {
+      const { data: org } = await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
+      return {
+        data: {
+          org,
+          key: { id: c.key.id, name: c.key.name, key_prefix: c.key.key_prefix, scopes: c.key.scopes },
+          effective_scopes: effectiveScopes(c.key.scopes),
+        },
+      };
+    }
+
+    case "list-events": {
+      let q = sb.from("exos_events").select(EVENT_LIST_COLS, { count: "exact" }).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!EVENT_STATUSES.has(status)) throw new ApiError(400, "status must be draft, published or cancelled.");
+        q = q.eq("status", status);
+      }
+      const after = isoParam(c.q, "starts_after");
+      if (after) q = q.gte("starts_at", after);
+      const before = isoParam(c.q, "starts_before");
+      if (before) q = q.lt("starts_at", before);
+      return paged(await q.order("starts_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-event": {
+      const id = eventId(c);
+      const { data: ev, error } = await sb.from("exos_events").select(EVENT_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!ev) throw new ApiError(404, "event not found");
+      return { data: { ...(ev as unknown as Record<string, unknown>), tiers: await tiers(sb, id) } };
+    }
+
+    case "list-ticket-types": {
+      const id = await ownEvent(c);
+      return { data: await tiers(sb, id) };
+    }
+
+    case "list-add-ons": {
+      const id = await ownEvent(c);
+      return rows(await sb.from("exos_event_addons")
+        .select("id, name, description, price, capacity, sold, max_per_order, visibility, sort_order")
+        .eq("event_id", id).order("sort_order", { ascending: true }));
+    }
+
+    case "list-promo-codes": {
+      const id = await ownEvent(c);
+      // Never reserved_email: a promo code's holder is not the partner's business.
+      return paged(await sb.from("exos_vouchers")
+        .select("id, code, tier_id, max_uses, used_count, discount_percent, discount_amount, price_override, " +
+          "valid_until, link_label, link_channel, link_clicks, created_at", { count: "exact" })
+        .eq("event_id", id).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-attendees": {
+      const id = await ownEvent(c);
+      // Never barcode_secret.
+      let q = sb.from("exos_tickets")
+        .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
+          "order_ref, channel_source, created_at", { count: "exact" })
+        .eq("event_id", id).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-check-ins": {
+      const id = await ownEvent(c);
+      return paged(await sb.from("exos_event_checkins")
+        .select("id, ticket_id, scanned_at, source, verification, direction, list_id, gate, forced, device",
+          { count: "exact" })
+        .eq("event_id", id).eq("org_id", orgId)
+        .order("scanned_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-check-in-lists": {
+      const id = await ownEvent(c);
+      return rows(await sb.from("exos_checkin_lists")
+        .select("id, name, tier_ids, allow_reentry, valid_from, valid_until, sort_order")
+        .eq("event_id", id).eq("org_id", orgId).order("sort_order", { ascending: true }));
+    }
+
+    case "list-guest-lists": {
+      const id = await ownEvent(c);
+      return rows(await sb.from("exos_guest_lists")
+        .select("id, name, promoter_id, cap, max_plus_ones, status, closes_at, created_at")
+        .eq("event_id", id).eq("org_id", orgId).order("created_at", { ascending: true }));
+    }
+
+    case "list-waitlist": {
+      const id = await ownEvent(c);
+      return paged(await sb.from("exos_waitlist")
+        .select("id, tier_id, email, name, quantity, status, notified_at, offered_at, claim_expires_at, created_at",
+          { count: "exact" })
+        .eq("event_id", id).order("created_at", { ascending: true }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-orders": {
+      let q = sb.from("exos_checkout_sessions").select(ORDER_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!UUID_RE.test(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("session_id").range(page.from, page.to), page);
+    }
+
+    case "get-order": {
+      const sid = c.params.id;
+      if (!SESSION_RE.test(sid)) throw new ApiError(404, "order not found");
+      const { data: order, error } = await sb.from("exos_checkout_sessions").select(ORDER_COLS)
+        .eq("org_id", orgId).eq("session_id", sid).maybeSingle();
+      if (error) throw error;
+      if (!order) throw new ApiError(404, "order not found");
+      const [tickets, addons, refunds] = await Promise.all([
+        sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at")
+          .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
+        sb.from("exos_order_addons").select("id, addon_id, addon_name, quantity, unit_price_paid, status")
+          .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
+        sb.from("exos_order_refunds").select("id, amount_cents, currency, status, reason, is_partial, created_at")
+          .eq("org_id", orgId).eq("session_id", sid).order("created_at"),
+      ]);
+      for (const r of [tickets, addons, refunds]) if (r.error) throw r.error;
+      return { data: { ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data } };
+    }
+
+    case "list-invoices":
+      // exos_invoice_totals (mig 20261001100000): invoices are immutable and
+      // refunds are credit notes; `status` is derived ('issued',
+      // 'partially_refunded', 'refunded', 'cancelled'), refunded_cents added.
+      return paged(await sb.from("exos_invoice_totals")
+        .select("number, event_id, session_id, buyer_email, currency, subtotal_cents, tax_cents, total_cents, " +
+          "status, refunded_cents, issued_at", { count: "exact" })
+        .eq("org_id", orgId).order("issued_at", { ascending: false }).order("number").range(page.from, page.to), page);
+
+    case "list-refunds":
+      return paged(await sb.from("exos_order_refunds")
+        .select("id, session_id, amount_cents, currency, status, reason, is_partial, created_at", { count: "exact" })
+        .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    case "list-webhooks":
+      // Never the signing secret.
+      return rows(await sb.from("exos_webhooks")
+        .select("id, url, event_types, enabled, description, created_at")
+        .eq("org_id", orgId).order("created_at", { ascending: true }));
+  }
+  throw new ApiError(404, "not found");
+}
+
+/** The :id path parameter as an event id; anything but a UUID is simply not found. */
+function eventId(c: Ctx): string {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, "event not found");
+  return id;
+}
+
+/** Confirm the event belongs to the key's org before exposing anything under it. */
+async function ownEvent(c: Ctx): Promise<string> {
+  const id = eventId(c);
+  const { data, error } = await c.sb.from("exos_events").select("id").eq("org_id", c.orgId).eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "event not found");
+  return id;
+}
+
+async function tiers(sb: SupabaseClient, eventId: string): Promise<unknown[]> {
+  const { data, error } = await sb.from("exos_ticket_tiers").select(TIER_COLS)
+    .eq("event_id", eventId).order("sort_order", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+function isoParam(q: URLSearchParams, name: string): string | null {
+  const v = q.get(name);
+  if (v === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v) || Number.isNaN(Date.parse(v))) {
+    throw new ApiError(400, `${name} must be an ISO 8601 date or time.`);
+  }
+  return new Date(v).toISOString();
+}
+
+// deno-lint-ignore no-explicit-any
+function rows(r: { data: any; error: unknown }): { data: unknown[] } {
+  if (r.error) throw r.error;
+  return { data: r.data ?? [] };
+}
+
+// deno-lint-ignore no-explicit-any
+function paged(r: { data: any; error: any; count: number | null }, page: Page) {
+  if (r.error) {
+    // A page past the end: PostgREST answers 416 (PGRST103) with "…there are
+    // only N rows" instead of an empty list. Give the client an empty page.
+    if (r.error.code === "PGRST103") {
+      const m = /only (\d+) rows?/.exec(String(r.error.details ?? ""));
+      return pageEnvelope([], page, m ? Number(m[1]) : null);
+    }
+    throw r.error;
+  }
+  return pageEnvelope(r.data ?? [], page, r.count);
+}
 
 async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
