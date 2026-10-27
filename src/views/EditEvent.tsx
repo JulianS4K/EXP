@@ -99,10 +99,13 @@ import RefundOfferFields from '../components/RefundOfferFields';
 import { rescheduleEvent } from '../lib/reschedule';
 import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
 import { utcToOccursAtLocal } from '../lib/datetime';
+import FeeRulesEditor from '../components/FeeRulesEditor';
+import { useOrganization } from '../context/OrganizationContext';
 
 export default function EditEvent() {
   const { eventId } = useParams();
   const { user, isAdmin } = useAuth();
+  const { orgs } = useOrganization();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -1554,6 +1557,19 @@ export default function EditEvent() {
 
         {/* Tax / VAT rules — self-contained CRUD (not part of the form submit). */}
         {eventId && <TaxRulesEditor eventId={eventId} />}
+
+        {/* Fee rules: org rules on/off + this event's own; owner / manager edit
+            (mig 20261027100000). Self-contained, not part of the form submit. */}
+        {eventId && eventData.orgId && (
+          <FeeRulesEditor
+            orgId={eventData.orgId}
+            eventId={eventId}
+            currency={eventData.currency || 'USD'}
+            canEdit={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id))
+              .map((t) => ({ id: t.id, name: t.name, price: Number(t.price) || 0, priceSchedule: t.priceSchedule }))}
+          />
+        )}
 
 
         {/* Distribution Hub Section (Already present but refined) */}
