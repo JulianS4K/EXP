@@ -38,6 +38,7 @@ const EditEvent = lazy(() => import('./views/EditEvent'));
 const Privacy = lazy(() => import('./views/Privacy'));
 const Terms = lazy(() => import('./views/Terms'));
 const Status = lazy(() => import('./views/Status'));
+const Developers = lazy(() => import('./views/Developers'));
 const Profile = lazy(() => import('./views/Profile'));
 const OrganizerProfile = lazy(() => import('./views/OrganizerProfile'));
 const SlugRedirect = lazy(() => import('./views/SlugRedirect'));
@@ -194,6 +195,7 @@ export default function App() {
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />
+                    <Route path="/developers" element={<Developers />} />
                     {/* 404 catch-all — punk "off the door list" screen. */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>
