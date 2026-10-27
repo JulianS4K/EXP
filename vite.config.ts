@@ -2,7 +2,48 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+import { buildSpecFiles } from './scripts/api-spec.mjs';
+
+/**
+ * Generates public/api-spec.json and public/openapi.json (the /developers
+ * reference) from docs/api/*.json via scripts/api-spec.mjs before any build,
+ * and again under the dev server when a spec file changes. A spec that does
+ * not validate fails the build; in dev it is logged and the last good files
+ * stay. Skipped under vitest (src/lib/apiReference.test.ts validates instead).
+ */
+function apiSpecPlugin(): Plugin {
+  let command: 'build' | 'serve' = 'build';
+  return {
+    name: 'exos-api-spec',
+    configResolved(c) {
+      command = c.command;
+    },
+    buildStart() {
+      if (process.env.VITEST) return;
+      try {
+        buildSpecFiles();
+      } catch (err) {
+        if (command === 'build') this.error((err as Error).message);
+        this.warn((err as Error).message);
+      }
+    },
+    configureServer(server) {
+      if (process.env.VITEST) return;
+      const dir = path.resolve(__dirname, 'docs/api');
+      server.watcher.add(dir);
+      server.watcher.on('change', (file) => {
+        if (!file.startsWith(dir) || !file.endsWith('.json')) return;
+        try {
+          buildSpecFiles();
+          server.config.logger.info('[exos-api-spec] regenerated public/api-spec.json');
+        } catch (err) {
+          server.config.logger.error((err as Error).message);
+        }
+      });
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
@@ -11,7 +52,7 @@ export default defineConfig(() => {
     // refs as /bridge/assets/... so they resolve under the prefix. Pair with
     // <BrowserRouter basename="/bridge"> in App.tsx.
     base: '/bridge/',
-    plugins: [react(), tailwindcss()],
+    plugins: [apiSpecPlugin(), react(), tailwindcss()],
     test: {
       // .claude/** holds agent worktrees (full copies of the repo): without
       // this, a local `npm test` runs every test once per worktree.

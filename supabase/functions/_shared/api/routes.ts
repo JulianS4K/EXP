@@ -1,7 +1,7 @@
 // The partner API's route table (exos-api). docs/api-reference.md.
 //
 // One row per route: the scope it needs and whether it is a paged list. The
-// edge function dispatches on `id`; src/lib/apiRoutes.test.ts checks that
+// edge function dispatches on `id`; src/lib/apiReference.test.ts checks that
 // every row has a docs/api/*.json entry and every documented exos-api path a
 // row, so a route can't ship undocumented or unscoped.
 //

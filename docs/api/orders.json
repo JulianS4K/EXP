@@ -1,0 +1,427 @@
+{
+  "file": "orders",
+  "name": "Orders and money",
+  "order": 30,
+  "description": "Orders with buyer email and amounts, invoices, refunds and the waitlist. Every route here needs `orders:read`. Amounts ending in `_cents` are integers in the currency's minor unit; currencies are ISO 4217 codes.",
+  "endpoints": [
+    {
+      "id": "list-orders",
+      "method": "GET",
+      "path": "/v1/orders",
+      "summary": "List orders",
+      "description": "The organization's orders (checkout sessions), newest first. `status` is pending, fulfilled, failed, expired, refunded or partially_refunded; `amount_cents` is the total charged, tax included.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only orders for this event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only orders in this status.",
+          "enum": [
+            "pending",
+            "fulfilled",
+            "failed",
+            "expired",
+            "refunded",
+            "partially_refunded"
+          ],
+          "example": "fulfilled"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "status": "fulfilled",
+                "quantity": 2,
+                "amount_cents": 3260,
+                "tax_cents": 260,
+                "currency": "usd",
+                "buyer_email": "dana@example.com",
+                "created_at": "2026-10-04T14:01:02+00:00",
+                "fulfilled_at": "2026-10-04T14:02:11+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 212,
+              "total_pages": 5
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "event_id must be a UUID."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-order",
+      "method": "GET",
+      "path": "/v1/orders/:id",
+      "summary": "Get an order",
+      "description": "One order with its tickets, add-ons and refunds.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id: its checkout session id (session_id in the list). An order of another organization answers 404.",
+          "example": "cs_live_a1B2c3D4e5F6g7H8i9J0"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "fulfilled",
+              "quantity": 2,
+              "amount_cents": 3260,
+              "tax_cents": 260,
+              "currency": "usd",
+              "buyer_email": "dana@example.com",
+              "created_at": "2026-10-04T14:01:02+00:00",
+              "fulfilled_at": "2026-10-04T14:02:11+00:00",
+              "tickets": [
+                {
+                  "id": "e7b5a6f8-9d02-43b4-aed5-f60718293a45",
+                  "tier_id": "a3f1c2d4-5b6e-4f70-8a91-b2c3d4e5f601",
+                  "tier_name": "Early bird",
+                  "attendee_name": "Dana Kim",
+                  "owner_email": "dana@example.com",
+                  "status": "used",
+                  "price_paid": 15,
+                  "check_in_at": "2026-12-05T03:12:44+00:00"
+                },
+                {
+                  "id": "3d4e5f60-7182-4394-b5c6-d7e8f90a1b2c",
+                  "tier_id": "a3f1c2d4-5b6e-4f70-8a91-b2c3d4e5f601",
+                  "tier_name": "Early bird",
+                  "attendee_name": "Sam Ortiz",
+                  "owner_email": "dana@example.com",
+                  "status": "active",
+                  "price_paid": 15,
+                  "check_in_at": null
+                }
+              ],
+              "add_ons": [],
+              "refunds": []
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-invoices",
+      "method": "GET",
+      "path": "/v1/invoices",
+      "summary": "List invoices",
+      "description": "Issued invoices, newest first. Invoices never change after issue: refunds are credit notes, so `status` (issued, partially_refunded, refunded or cancelled) and `refunded_cents` are derived from them.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "number": "INV-000123",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                "buyer_email": "dana@example.com",
+                "currency": "usd",
+                "subtotal_cents": 3000,
+                "tax_cents": 260,
+                "total_cents": 3260,
+                "status": "partially_refunded",
+                "refunded_cents": 1630,
+                "issued_at": "2026-10-04T14:02:11+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 198,
+              "total_pages": 4
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "per_page must be between 1 and 200."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-refunds",
+      "method": "GET",
+      "path": "/v1/refunds",
+      "summary": "List refunds",
+      "description": "Refunds across the organization, newest first. `status` is pending, succeeded, failed or canceled.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "2c3d4e5f-6071-4283-a4b5-c6d7e8f90a1b",
+                "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                "amount_cents": 1630,
+                "currency": "usd",
+                "status": "succeeded",
+                "reason": "requested_by_customer",
+                "is_partial": true,
+                "created_at": "2026-10-10T09:30:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 7,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "per_page must be between 1 and 200."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-waitlist",
+      "method": "GET",
+      "path": "/v1/events/:id/waitlist",
+      "summary": "List an event's waitlist",
+      "description": "People waiting for tickets, first come first. `status` is waiting, notified, offered, converted, expired or cancelled; an offer must be claimed before `claim_expires_at`. Needs `orders:read` because it holds buyer emails.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "4e5f6071-8293-44a5-86d7-e8f90a1b2c3d",
+                "tier_id": "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712",
+                "email": "lee@example.com",
+                "name": "Lee Park",
+                "quantity": 2,
+                "status": "offered",
+                "notified_at": "2026-11-28T16:00:00+00:00",
+                "offered_at": "2026-11-28T16:00:00+00:00",
+                "claim_expires_at": "2026-11-29T16:00:00+00:00",
+                "created_at": "2026-11-20T10:15:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "per_page must be between 1 and 200."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}
