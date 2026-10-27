@@ -21,12 +21,13 @@ describe('matchRoute', () => {
     expect(m?.params).toEqual({ id: 'abc' });
     expect(matchRoute('GET', '/events')?.route.id).toBe('list-events');
     expect(matchRoute('GET', '/orders/cs_test_1')?.params).toEqual({ id: 'cs_test_1' });
-    expect(matchRoute('head', '/me')?.route.id).toBe('me');
+    expect(matchRoute('get', '/me')?.route.id).toBe('me');
   });
 
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
     expect(matchRoute('POST', '/events')).toBeNull();
+    expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
   });

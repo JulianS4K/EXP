@@ -3,7 +3,8 @@
 // One row per route: the scope it needs and whether it is a paged list. The
 // edge function dispatches on `id`; src/lib/apiReference.test.ts checks that
 // every row has a docs/api/*.json entry and every documented exos-api path a
-// row, so a route can't ship undocumented or unscoped.
+// row, so a route can't ship undocumented or unscoped. The matcher itself is
+// tested in src/lib/apiRoutes.test.ts.
 //
 // Paths are relative to the function (…/functions/v1/exos-api). Each is
 // reachable with or without a leading /v1 (the unversioned paths are the
@@ -55,9 +56,9 @@ export function apiPath(urlPath: string): string {
   return p.replace(/^\/v1(?=\/|$)/, '') || '/';
 }
 
-/** The route for a method and function-relative path, or null. HEAD matches GET. */
+/** The route for a method and function-relative path, or null. */
 export function matchRoute(method: string, path: string): RouteMatch | null {
-  const m = method.toUpperCase() === 'HEAD' ? 'GET' : method.toUpperCase();
+  const m = method.toUpperCase();
   const segs = path.split('/').filter(Boolean);
   for (const route of ROUTES) {
     if (route.method !== m) continue;

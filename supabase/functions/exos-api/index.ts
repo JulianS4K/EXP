@@ -119,7 +119,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       key: { id: keyRow.id, name: keyRow.name, key_prefix: keyRow.key_prefix, scopes },
       params: match.params,
       q: url.searchParams,
-      page: parsePage(url.searchParams),
+      // Only lists read ?page / ?per_page; elsewhere they are ignored.
+      page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
     };
     return json(await handle(match.route, ctx));
   } catch (e) {
