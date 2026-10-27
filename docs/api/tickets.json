@@ -1,0 +1,318 @@
+{
+  "file": "tickets",
+  "name": "Tickets and door",
+  "order": 20,
+  "description": "Attendees (one row per ticket), door scans, check-in lists and guest lists. Every route here needs `tickets:read`. A ticket's barcode secret is never returned.",
+  "endpoints": [
+    {
+      "id": "list-attendees",
+      "method": "GET",
+      "path": "/v1/events/:id/attendees",
+      "summary": "List an event's attendees",
+      "description": "One row per ticket, newest first. `status` is active, transferred, used (checked in) or voided; `order_ref` is the order's id; `price_paid` is in the major unit.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only tickets in this status.",
+          "enum": [
+            "active",
+            "transferred",
+            "used",
+            "voided"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "e7b5a6f8-9d02-43b4-aed5-f60718293a45",
+                "tier_id": "a3f1c2d4-5b6e-4f70-8a91-b2c3d4e5f601",
+                "tier_name": "Early bird",
+                "attendee_name": "Dana Kim",
+                "owner_email": "dana@example.com",
+                "status": "used",
+                "check_in_at": "2026-12-05T03:12:44+00:00",
+                "price_paid": 15,
+                "order_ref": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                "channel_source": "stripe",
+                "created_at": "2026-10-04T14:02:11+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 57,
+              "total_pages": 2
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-check-ins",
+      "method": "GET",
+      "path": "/v1/events/:id/check-ins",
+      "summary": "List an event's check-ins",
+      "description": "Every door scan, latest first: entries and exits (`direction`), the list and gate it was made at, and whether door staff forced it. `source` is camera or manual; `verification` is verified (signed barcode), legacy or manual.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "f8c6b7a9-0e13-44c5-bfe6-0718293a4b56",
+                "ticket_id": "e7b5a6f8-9d02-43b4-aed5-f60718293a45",
+                "scanned_at": "2026-12-05T03:12:44+00:00",
+                "source": "camera",
+                "verification": "verified",
+                "direction": "entry",
+                "list_id": null,
+                "gate": "Main door",
+                "forced": false,
+                "device": "door-ipad-2"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 41,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "per_page must be between 1 and 200."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-check-in-lists",
+      "method": "GET",
+      "path": "/v1/events/:id/check-in-lists",
+      "summary": "List an event's check-in lists",
+      "description": "Door lists that split an event into areas or days: the ticket types each admits (`tier_ids` null = all), whether re-entry is allowed, and when the list is valid.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0a1b2c3d-4e5f-4061-8293-a4b5c6d7e8f9",
+                "name": "VIP balcony",
+                "tier_ids": [
+                  "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712"
+                ],
+                "allow_reentry": true,
+                "valid_from": "2026-12-05T02:30:00+00:00",
+                "valid_until": null,
+                "sort_order": 0
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-guest-lists",
+      "method": "GET",
+      "path": "/v1/events/:id/guest-lists",
+      "summary": "List an event's guest lists",
+      "description": "Guest lists (often one per promoter), oldest first: the cap on names, plus-ones allowed per name, and whether the list is open or closed.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "1b2c3d4e-5f60-4172-93a4-b5c6d7e8f90a",
+                "name": "DJ Nova guests",
+                "promoter_id": null,
+                "cap": 40,
+                "max_plus_ones": 1,
+                "status": "open",
+                "closes_at": "2026-12-04T23:00:00+00:00",
+                "created_at": "2026-11-01T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

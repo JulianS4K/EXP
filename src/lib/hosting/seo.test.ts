@@ -194,6 +194,20 @@ describe('buildPreview', () => {
     expect(await buildPreview(sb(), ['event', '33333333-3333-4333-8333-333333333333'], base)).toBeNull();
   });
 
+  it('prices include the organizer\'s passed-on fees (exos_public_fee_rules)', async () => {
+    const withFees = fake({
+      exos_public_events: [{ id: EV, org_id: 'o1', name: 'Fall Party', starts_at: '2026-10-03T02:00:00Z', venue_name: 'Elsewhere', currency: 'USD' }],
+      exos_public_tiers: [{ id: TIER, event_id: EV, price: 25, exclusive_tax_percent: 0 }],
+      exos_public_orgs: [],
+      exos_public_fee_rules: [
+        { event_id: EV, id: 'f1', name: 'Facility fee', kind: 'passed_on', per: 'ticket', calc: 'fixed', amount_cents: 200, taxable: true, tier_ids: null },
+        { event_id: EV, id: 'f2', name: 'Other tier', kind: 'passed_on', per: 'ticket', calc: 'fixed', amount_cents: 900, taxable: true, tier_ids: ['someone-else'] },
+      ],
+    });
+    expect(await buildPreview(withFees, ['event', EV], base)).toContain('from $27 all-in');
+    expect(fromPriceCents([{ price: 40, passed_on_fees: [{ calc: 'fixed', amount_cents: 200 }], exclusive_tax_percent: 8.875 }])).toBe(4573);
+  });
+
   it('a promoter link previews as the promoter, never indexed', async () => {
     const who = async (slug: string, code: string) => (slug === 'bk-nights' && code === 'kay' ? 'DJ Kay' : null);
     const bio = await buildPreview(sb(), ['bio', 'bk-nights/kay'], base, who);

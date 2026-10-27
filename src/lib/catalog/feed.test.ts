@@ -80,6 +80,12 @@ describe('priceAndAvailability', () => {
     expect(r?.cents).toBe(3266); // 30.00 + 8.875% = 32.66
   });
 
+  it('includes the organizer passed-on fees, taxed like the storefront (fee rules)', () => {
+    const fee = [{ calc: 'fixed', amount_cents: 200 }];
+    expect(priceAndAvailability(ev(), [tier({ price: 40, passed_on_fees: fee })], NOW)?.cents).toBe(4573); // 40 + 2 + 8.875% of 42
+    expect(priceAndAvailability(ev(), [tier({ price: 40, exclusive_tax_percent: 0, passed_on_fees: [{ calc: 'percent', percent: 5 }] })], NOW)?.cents).toBe(4200);
+  });
+
   it('is preorder with the earliest opening when every open tier is still to come', () => {
     const r = priceAndAvailability(ev(), [
       tier({ sales_start: '2026-10-05T16:00:00Z', price: 25 }),

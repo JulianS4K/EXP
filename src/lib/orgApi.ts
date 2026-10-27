@@ -5,6 +5,7 @@
 // directly via staff RLS on exos_webhooks.
 
 import { supabase } from './supabase';
+import { LEGACY_READ, READ_SCOPES, type Scope } from '../../supabase/functions/_shared/api/scopes.ts';
 
 export interface ApiKey {
   id: string;
@@ -35,11 +36,49 @@ export const WEBHOOK_EVENT_TYPES = [
   'event.published',
 ] as const;
 
-/** Create an API key; returns the plaintext ONCE (store it now — irrecoverable). */
-export async function createApiKey(orgId: string, name?: string): Promise<string> {
-  const { data, error } = await supabase.rpc('exos_create_api_key', { p_org_id: orgId, p_name: name ?? null });
-  if (error) throw error;
+/** At most this many active (unrevoked) keys per org (mig 20261027090000). */
+export const MAX_ACTIVE_API_KEYS = 10;
+
+/** Scopes a new key starts with in the picker: every `:read` scope. */
+export const DEFAULT_KEY_SCOPES: readonly Scope[] = READ_SCOPES;
+
+/**
+ * Create an API key held to `scopes` (_shared/api/scopes.ts); returns the
+ * plaintext ONCE (store it now — irrecoverable). At most
+ * MAX_ACTIVE_API_KEYS active keys per org: over it the RPC raises 54000,
+ * surfaced as an ApiKeyLimitError.
+ */
+export async function createApiKey(orgId: string, name: string | undefined, scopes: readonly string[]): Promise<string> {
+  const { data, error } = await supabase.rpc('exos_create_api_key', {
+    p_org_id: orgId, p_name: name ?? null, p_scopes: [...scopes],
+  });
+  if (error) throw apiKeyError(error);
   return data as string;
+}
+
+/** Narrow or widen a live key's scopes (owner / manager). Returns the stored, normalized list. */
+export async function setApiKeyScopes(keyId: string, scopes: readonly string[]): Promise<string[]> {
+  const { data, error } = await supabase.rpc('exos_set_api_key_scopes', { p_key_id: keyId, p_scopes: [...scopes] });
+  if (error) throw apiKeyError(error);
+  return (data ?? []) as string[];
+}
+
+export class ApiKeyLimitError extends Error {}
+
+/** The RPCs' errors without their function-name prefix; the key cap as ApiKeyLimitError. */
+function apiKeyError(error: { code?: string; message?: string }): Error {
+  const msg = String(error.message ?? 'Request failed').replace(/^exos_[a-z_]+:\s*/, '');
+  if (error.code === '54000') {
+    return new ApiKeyLimitError(
+      `Your organization already has ${MAX_ACTIVE_API_KEYS} active API keys, the most it can have. Revoke one before creating another.`,
+    );
+  }
+  return new Error(msg.charAt(0).toUpperCase() + msg.slice(1));
+}
+
+/** True for a key made before scopes existed: `read` = every `:read` scope. */
+export function isLegacyReadKey(scopes: readonly string[]): boolean {
+  return scopes.includes(LEGACY_READ);
 }
 
 export async function revokeApiKey(keyId: string): Promise<boolean> {

@@ -30,6 +30,7 @@
 // Pure: no Deno or Supabase imports; the edge function does the reads.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
+import { parseUnitFees, type UnitFee } from '../fees.ts';
 import { ageLimit, marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
 import { mdToPlain } from '../richText.ts';
 
@@ -78,6 +79,8 @@ export interface FeedTierRow {
   sales_end: string | null;
   price_schedule: unknown;
   exclusive_tax_percent: number | string | null;
+  /** The passed-on fees inside the all-in price (fee rules, mig 20261027100000). */
+  passed_on_fees?: readonly UnitFee[] | null;
 }
 
 export interface FeedGeo {
@@ -266,7 +269,7 @@ function eventDescription(e: FeedEventRow): string | undefined {
 
 function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: string, now: Date, cancelled: boolean): SchemaOffer {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
-  const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0);
+  const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0, parseUnitFees(t.passed_on_fees));
   const left = t.capacity > 0 ? t.capacity - t.sold : Infinity;
   const notYet = !!t.sales_start && Date.parse(t.sales_start) > now.getTime();
   const ended = !!t.sales_end && Date.parse(t.sales_end) < now.getTime();

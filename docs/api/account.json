@@ -1,0 +1,53 @@
+{
+  "file": "account",
+  "name": "Account",
+  "order": 5,
+  "description": "Who a key belongs to and what it may do. Useful as a connection test: it needs no scope.",
+  "endpoints": [
+    {
+      "id": "me",
+      "method": "GET",
+      "path": "/v1/me",
+      "summary": "Get the key's organization and scopes",
+      "description": "The organization the key belongs to, the key itself (never the secret) and its scopes: `scopes` as stored, `effective_scopes` with the legacy `read` and any `:write` scope expanded into the `:read` scopes they cover.",
+      "auth": "api_key",
+      "scope": null,
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org": {
+                "id": "5d4c3b2a-1f0e-4d9c-8b7a-6e5f4d3c2b1a",
+                "name": "The Loft",
+                "slug": "the-loft"
+              },
+              "key": {
+                "id": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "Zapier",
+                "key_prefix": "sk_live_3f9a1c2b",
+                "scopes": [
+                  "events:read",
+                  "orders:read"
+                ]
+              },
+              "effective_scopes": [
+                "events:read",
+                "orders:read"
+              ]
+            }
+          }
+        },
+        {
+          "status": 401,
+          "description": "Missing, invalid or revoked key.",
+          "example": {
+            "error": "invalid or revoked API key"
+          }
+        }
+      ]
+    }
+  ]
+}

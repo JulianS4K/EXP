@@ -128,3 +128,34 @@ describe('Exos tools', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+describe('organizer tools follow the key scopes', () => {
+  it('a narrowed key sees and calls only the tools its scopes cover', async () => {
+    const narrow: ToolContext = { orgId: ORG, scopes: ['events:read'] };
+    const names = (await rpc('tools/list', {}, narrow)).result.tools.map((t: any) => t.name);
+    expect(names).toContain('my_events');
+    expect(names).not.toContain('event_sales');
+    expect(names).not.toContain('door_status');
+    expect(names).not.toContain('marketplace_attention');
+    const res = await call('event_sales', { event_id: EV.id }, narrow);
+    expect(res).toMatchObject({ isError: true, structuredContent: { error: 'this API key lacks the orders:read scope' } });
+  });
+
+  it('a legacy read key keeps every organizer tool', async () => {
+    const legacy: ToolContext = { orgId: ORG, scopes: ['read'] };
+    const names = (await rpc('tools/list', {}, legacy)).result.tools.map((t: any) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['my_events', 'event_sales', 'door_status', 'marketplace_attention']));
+  });
+});
+
+describe('prices include the organizer passed-on fees', () => {
+  it('tierView folds a passed-on fee (taxed with the ticket) into the all-in price', async () => {
+    const { tierView } = await import('.');
+    const now = new Date('2026-10-15T00:00:00Z');
+    const plain = tierView(T_GA, now);
+    const withFee = tierView({ ...T_GA, passed_on_fees: [{ calc: 'fixed', amount_cents: 200, taxable: true }] }, now);
+    // $45 scheduled + 10% tax = $49.50; with a $2 taxable fee: $47 + 10% = $51.70.
+    expect(JSON.stringify(plain)).toContain('49.5');
+    expect(JSON.stringify(withFee)).toContain('51.7');
+  });
+});

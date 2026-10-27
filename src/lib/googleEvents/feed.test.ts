@@ -132,6 +132,11 @@ describe('Google events feed', () => {
     expect(c.availability).toBe('https://schema.org/Discontinued');
   });
 
+  it('offers include the organizer passed-on fees (fee rules)', () => {
+    const { feed } = build([ev()], [tier({ price: 20, exclusive_tax_percent: 0, passed_on_fees: [{ calc: 'fixed', amount_cents: 150 }] })]);
+    expect(feed.events[0].event.offers[0].price).toBe('21.50');
+  });
+
   it('lists a cancelled event that was on sale as EventCancelled, and leaves the rest out with a reason', () => {
     const cancelled = ev({ id: '66666666-6666-4666-8666-666666666666', status: 'cancelled' });
     const neverSold = ev({ id: '77777777-7777-4777-8777-777777777777', status: 'cancelled', tickets_sold: 0 });
