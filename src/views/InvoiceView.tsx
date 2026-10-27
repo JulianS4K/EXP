@@ -15,6 +15,7 @@ import {
   documentTitle,
   documentTotals,
   formatCredit,
+  allInNote,
   formatDocNumber,
   formatMoney,
   formatRate,
@@ -245,7 +246,7 @@ export default function InvoiceView({ kind }: { kind: 'invoice' | 'credit_note' 
               )}
             </dl>
             <p className="text-xs text-slate-500 mt-6">
-              {inv.total_cents > 0 ? 'Prices are all-in: tax is included and no fees were added at checkout.' : ''}
+              {allInNote(doc)}
               {state === 'full' && ' This order was refunded in full.'}
               {state === 'partial' && ' Part of this order was refunded (see the credit notes above).'}
               {doc.order.paid_at ? ` Paid by card on ${day(doc.order.paid_at, tz)}.` : ''}

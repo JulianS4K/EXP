@@ -28,6 +28,7 @@ import {
   type FeedTierRow,
 } from "../_shared/googleEvents/feed.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
+import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { redactError } from "../_shared/log.ts";
 
 const PER_MINUTE = 30;
@@ -116,7 +117,9 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
     if (oErr) throw new Error(`orgs: ${oErr.message}`);
     for (const r of (o ?? []) as FeedOrg[]) orgs.set(r.id, r);
   }
-  return { events, tiers, geo, orgs };
+  // Prices are all-in: the organizer's passed-on fees are in them (service
+  // role, so a cancelled event's tiers price like they last did).
+  return { events, tiers: await withPublicTierFees(sb, tiers, { serviceRole: true }), geo, orgs };
 }
 
 /** Bearer <service role key>, compared in constant time over the SHA-256 digests. */

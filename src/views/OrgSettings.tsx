@@ -33,6 +33,7 @@ import CatalogFeedPanel from '../components/CatalogFeedPanel';
 import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
+import FeeRulesEditor from '../components/FeeRulesEditor';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -600,6 +601,11 @@ export default function OrgSettings() {
             {/* Bring-your-own accounts: ticket backends, SMS, marketplaces (mig 20261016090000). */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
+
+            {/* Fee rules every event inherits: passed on (inside the all-in price) or absorbed (mig 20261027100000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <FeeRulesEditor orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}

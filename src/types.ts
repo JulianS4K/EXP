@@ -292,6 +292,9 @@ export interface Event {
     // Exclusive tax rate the buyer pays on top of `price` (0 when the price
     // already includes tax). From exos_public_tiers; drives all-in display.
     exclusiveTaxPercent?: number;
+    // Organizer fee rules passed on to the buyer (mig 20261027100000), inside
+    // the all-in price; picked from exos_public_fee_rules ([] = none).
+    passedOnFees?: import('./lib/fees').UnitFee[];
     // Accessible ticket type (mig 20260926090000) + its short note, e.g.
     // "Wheelchair space + 1 companion seat".
     accessible?: boolean;

@@ -28,6 +28,7 @@
 // Pure: no Deno or Supabase imports; the edge function does the reads.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
+import { parseUnitFees, type UnitFee } from '../fees.ts';
 import { marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
 import { mdToPlain } from '../richText.ts';
 import { eventPageUrl, zonedIso } from '../googleEvents/feed.ts';
@@ -83,6 +84,8 @@ export interface CatalogTierRow {
   sales_end: string | null;
   price_schedule?: unknown;
   exclusive_tax_percent?: number | string | null;
+  /** The passed-on fees inside the all-in price (fee rules, mig 20261027100000). */
+  passed_on_fees?: readonly UnitFee[] | null;
   /** What Exos itself can sell now (mig 20261014160000): S4K's and the
    *  marketplaces' pools left out; null = no cap; absent before the migration. */
   available?: number | null;
@@ -191,7 +194,7 @@ interface TierState {
 
 function tierState(t: CatalogTierRow, now: Date): TierState {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
-  const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0);
+  const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0, parseUnitFees(t.passed_on_fees));
   const left = exosLeft(t);
   const opensAt = t.sales_start ? Date.parse(t.sales_start) : NaN;
   const endsAt = t.sales_end ? Date.parse(t.sales_end) : NaN;

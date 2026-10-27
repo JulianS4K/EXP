@@ -35,6 +35,7 @@ import {
 } from "../_shared/mcp/exosTools.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { redactError } from "../_shared/log.ts";
+import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 
 const VERSION = "1.0.0";
 const MAX_BODY = 64 * 1024;
@@ -144,7 +145,8 @@ function supabaseData(sb: SupabaseClient): ExosData {
       let { data, error } = await run(TIER_COLS + ", available");
       if (error?.code === "42703") ({ data, error } = await run(TIER_COLS));
       if (error) throw new Error(`tiers: ${error.message}`);
-      return (data ?? []) as unknown as PublicTier[];
+      // All-in like the storefront: the organizer's passed-on fees are in the price.
+      return await withPublicTierFees(sb, (data ?? []) as unknown as PublicTier[]);
     },
     async orgEvents(orgId: string, opts: { upcomingOnly: boolean; limit: number }): Promise<OrgEvent[]> {
       let query = sb.from("exos_events").select("id, name, status, starts_at, venue_name, tickets_sold, total_tickets")

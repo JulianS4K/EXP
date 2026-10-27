@@ -147,3 +147,15 @@ describe('organizer tools follow the key scopes', () => {
     expect(names).toEqual(expect.arrayContaining(['my_events', 'event_sales', 'door_status', 'marketplace_attention']));
   });
 });
+
+describe('prices include the organizer passed-on fees', () => {
+  it('tierView folds a passed-on fee (taxed with the ticket) into the all-in price', async () => {
+    const { tierView } = await import('.');
+    const now = new Date('2026-10-15T00:00:00Z');
+    const plain = tierView(T_GA, now);
+    const withFee = tierView({ ...T_GA, passed_on_fees: [{ calc: 'fixed', amount_cents: 200, taxable: true }] }, now);
+    // $45 scheduled + 10% tax = $49.50; with a $2 taxable fee: $47 + 10% = $51.70.
+    expect(JSON.stringify(plain)).toContain('49.5');
+    expect(JSON.stringify(withFee)).toContain('51.7');
+  });
+});

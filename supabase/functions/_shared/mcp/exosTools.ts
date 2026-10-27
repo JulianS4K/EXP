@@ -16,6 +16,7 @@
 // injected ExosData so this file has no Deno or Supabase imports.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
+import { parseUnitFees } from '../fees.ts';
 import { exosLeft } from '../catalog/feed.ts';
 import { ToolError, int, isoDate, str, type McpServer, type ToolDefinition } from './protocol.ts';
 
@@ -58,6 +59,8 @@ export interface PublicTier {
   accessible: boolean | null;
   /** What Exos can sell now (mig 20261014160000); absent before it. */
   available?: number | null;
+  /** The organizer's passed-on fees (mig 20261027100000), folded into the all-in price. */
+  passed_on_fees?: unknown;
 }
 
 export interface EventSearch {
@@ -145,7 +148,7 @@ export function eventUrl(appBase: string, e: Pick<PublicEvent, 'id' | 'slug'>): 
 /** What a tier costs and whether it's on sale, as a person would see it now. */
 export function tierView(t: PublicTier, now: Date) {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
-  const allIn = money(allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0));
+  const allIn = money(allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0, parseUnitFees(t.passed_on_fees)));
   // Exos's own pool (S4K's and the marketplaces' seats aren't Exos's to sell).
   const pool = exosLeft(t);
   const left = Number.isFinite(pool) ? pool : null;
