@@ -22,8 +22,12 @@ export interface Figures {
 }
 
 export interface ChannelRow {
+  /** The key, [a-z0-9_-] only. */
   channel: string;
+  /** Always a fixed label (SQL _exos_channel_label): "Other" for any key it doesn't know. */
   label: string;
+  /** Behind a grouped / "Other" row: the promoter code, import source or raw key ([a-z0-9_-]). The dashboard only. */
+  detail: string | null;
   group: string;
   kind: ChannelKind;
   currency: string;
@@ -92,15 +96,21 @@ export function parseFigures(v: unknown): Figures | null {
 const KINDS = new Set(["sale", "comp", "attendee"]);
 const FEES = new Set(["reported", "not_reported", "none"]);
 
+/** A key as it may appear in any output: [a-z0-9_-] only. */
+export function cleanKey(v: unknown): string {
+  return typeof v === "string" ? v.toLowerCase().replace(/[^a-z0-9_-]+/g, "").slice(0, 80) : "";
+}
+
 export function parseChannel(v: unknown): ChannelRow | null {
   if (!isObj(v)) return null;
   const toDate = parseFigures(v.to_date);
-  const channel = s(v.channel);
+  const channel = cleanKey(v.channel);
   if (!toDate || !channel) return null;
   const kind = KINDS.has(s(v.kind)) ? (s(v.kind) as ChannelKind) : "sale";
   return {
     channel,
-    label: s(v.label, channel),
+    label: s(v.label, "Other"),
+    detail: cleanKey(v.detail) || null,
     group: s(v.group, "exos"),
     kind,
     currency: s(v.currency, "usd").toLowerCase(),
@@ -160,6 +170,43 @@ export function parseChannelReport(v: unknown): ChannelReport | null {
     moreEvents: n(v.more_events) ?? 0,
     totals: parsePeriods(v.totals),
   };
+}
+
+const addFig = (a: number | null, b: number | null): number | null => (a === null || b === null ? null : a + b);
+function addFigures(a: Figures | null, b: Figures | null): Figures | null {
+  if (!a || !b) return a ?? b;
+  return {
+    tickets: a.tickets + b.tickets,
+    grossCents: addFig(a.grossCents, b.grossCents),
+    feeCents: addFig(a.feeCents, b.feeCents),
+    exosFeeCents: addFig(a.exosFeeCents, b.exosFeeCents),
+    netCents: addFig(a.netCents, b.netCents),
+  };
+}
+
+/**
+ * Rows for a message (mail, text): one row per label and currency, so every
+ * "Other" key (and every promoter code, every import source) is one row and
+ * no key or detail reaches the message. A merged figure is "not reported"
+ * when any part of it was; a merged row is undated only if all parts were.
+ */
+export function messageRows(rows: ChannelRow[]): ChannelRow[] {
+  const out = new Map<string, ChannelRow>();
+  for (const r of rows) {
+    const id = `${r.kind}|${r.label}|${r.currency}`;
+    const g = out.get(id);
+    if (!g) {
+      out.set(id, { ...r, detail: null });
+      continue;
+    }
+    g.toDate = addFigures(g.toDate, r.toDate)!;
+    g.week = g.dated && r.dated ? addFigures(g.week, r.week) : g.dated ? g.week : r.week;
+    g.dated = g.dated || r.dated;
+    g.fees = g.fees === "not_reported" || r.fees === "not_reported" ? "not_reported"
+      : g.fees === "reported" || r.fees === "reported" ? "reported" : "none";
+  }
+  return [...out.values()].sort((a, b) =>
+    Number(a.label === "Other") - Number(b.label === "Other") || b.toDate.tickets - a.toDate.tickets || a.label.localeCompare(b.label));
 }
 
 /** Money for display; "not reported" for a figure the channel didn't send. */

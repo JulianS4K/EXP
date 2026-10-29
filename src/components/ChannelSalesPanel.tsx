@@ -36,7 +36,11 @@ export function ChannelTable({ e }: { e: EventChannels }) {
             const nr = (v: number | null) => (v === null ? 'text-slate-400 italic' : '');
             return (
               <tr key={`${r.channel}:${r.currency}`} className="border-b border-slate-50 last:border-0">
-                <td className={`py-2 pr-4 ${r.channel === 'direct' ? 'text-slate-400 italic' : 'text-slate-700'} break-all`}>{r.label}</td>
+                <td className={`py-2 pr-4 ${r.channel === 'direct' ? 'text-slate-400 italic' : 'text-slate-700'} break-all`}>
+                  {r.label}
+                  {/* The key behind "Other" / a grouped row, [a-z0-9_-] only, as text. */}
+                  {r.detail && <span className="text-slate-400"> ({r.detail})</span>}
+                </td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.week ? r.week.tickets : <span className="text-slate-300" title="This channel reports counts without dates">–</span>}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{r.toDate.tickets}</td>
                 <td className={`py-2 pr-4 text-right tabular-nums ${nr(r.toDate.grossCents)}`}>{money(r.toDate.grossCents, r.currency)}</td>

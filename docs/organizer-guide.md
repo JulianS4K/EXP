@@ -248,7 +248,11 @@ totals. It goes to the owner and managers; anyone can unsubscribe from the foote
 owner can turn it off for the org at **`/orgs/:orgId/channels`** (Dashboard → Channels), which also shows any
 earlier week. It replaces that week's *Your week on Exos* summary for the people it reaches. **Weekly text:** with
 Twilio or Telnyx connected, the owner can add a mobile number for a short summary with a link, sent from your own
-number between 9:00 and 20:00 New York time; replying STOP turns it off. Each org gets one report per week however
+number between 9:00 and 20:00 New York time; replying STOP turns it off for good: that number can't be saved
+again until it texts START to your number. (Not built yet: confirming the number with a code when it's saved.)
+Because anyone can put anything in a link's `utm_source`, the email and the text only use Exos' fixed channel
+names: promoter codes show as *Promoters*, and any source Exos doesn't know shows as *Other* (the Channels card
+shows its cleaned name beside it). Each org gets one report per week however
 often the job runs. The operator turns the job on (see `docs/email.md`).
 
 ### Text messages

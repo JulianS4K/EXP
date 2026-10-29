@@ -3,8 +3,11 @@
 -- ============================================================================
 -- Touches:  C: TABLE exos_channel_report_settings (per-org switch + the SMS
 --              number; RPCs only), exos_channel_reports (one row per org and
---              ISO week: the idempotency key and what was sent)
---           C: FUNCTION _exos_channel_key, _exos_channel_label (pure);
+--              ISO week: the idempotency key and what was sent),
+--              exos_sms_stops (durable STOP per org + number, until START)
+--           C: FUNCTION _exos_channel_key, _exos_channel_label,
+--              _exos_channel_out_key, _exos_channel_detail (pure);
+--              _exos_sms_stopped (internal);
 --              _exos_channel_lines, _exos_channel_sales, _exos_channel_totals,
 --              _exos_channel_event_json, _exos_channel_report_payload
 --              (internal, no client grant);
@@ -87,7 +90,15 @@
 -- mailed, so the older summary isn't sent on top. A text goes to the number
 -- the owner set, only when the org has Twilio / Telnyx connected and that
 -- number hasn't replied STOP; it waits for 9:00-20:00 New York time and is a
--- dry run until EXOS_SMS_LIVE=on (exos-sms-drain).
+-- dry run until EXOS_SMS_LIVE=on (exos-sms-drain). STOP is durable
+-- (exos_sms_stops): the number is cleared, can't be saved again, and is
+-- re-checked at send time, until it texts START. (Follow-up, not built: verify
+-- the number with a code when the owner saves it.)
+--
+-- Labels: utm_source is buyer-controlled, so the mail, the text and the SPA
+-- only show labels from _exos_channel_label's fixed list; promoter codes and
+-- import sources are grouped, every other key is "Other". Keys in any output
+-- keep [a-z0-9_-] only.
 --
 -- Cron: scheduled INACTIVE when pg_cron is present (Exos crons are off on
 -- prod; the operator turns it on, docs/email.md). A job that already exists is
@@ -126,6 +137,34 @@ ALTER TABLE public.exos_channel_reports ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.exos_channel_reports FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.exos_channel_reports TO service_role;
 
+-- Every STOP an org's number received, kept until that number texts START.
+-- Durable: clearing the report number alone would let it be saved again.
+-- (exos_sms_subscribers isn't used for this: a row there needs the fan's
+-- consent text and feeds the fan audience and its opted-out count.)
+CREATE TABLE IF NOT EXISTS public.exos_sms_stops (
+  org_id      uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  phone       text NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  stopped_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (org_id, phone)
+);
+COMMENT ON TABLE public.exos_sms_stops IS
+  'Numbers that replied STOP to an org (exos_sms_inbound; START removes the row). The weekly report text never goes to one, and it can''t be saved as the report number (mig 20261029120000).';
+ALTER TABLE public.exos_sms_stops ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.exos_sms_stops FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.exos_sms_stops TO service_role;
+
+-- A number may not be texted by this org: it replied STOP (and not START since).
+CREATE OR REPLACE FUNCTION public._exos_sms_stopped(p_org_id uuid, p_phone text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.exos_sms_stops s WHERE s.org_id = p_org_id AND s.phone = p_phone)
+      OR EXISTS (SELECT 1 FROM public.exos_sms_subscribers ss
+                  WHERE ss.org_id = p_org_id AND ss.phone = p_phone AND ss.opted_out_at IS NOT NULL)
+$$;
+REVOKE ALL ON FUNCTION public._exos_sms_stopped(uuid, text) FROM PUBLIC, anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 2. Channel names
 -- ---------------------------------------------------------------------------
@@ -161,7 +200,9 @@ AS $$
       WHEN v = 'meta' THEN 'meta'
       WHEN v IN ('link', 'share_sheet', 'share') THEN 'share'
       WHEN v = '' THEN NULL
-      ELSE left(btrim(v, '-'), 40)
+      -- Anyone can put anything in utm_source: an unknown key keeps only
+      -- [a-z0-9_-] (no dots, so no domain), and its label is "Other".
+      ELSE left(btrim(regexp_replace(v, '[^a-z0-9_-]+', '', 'g'), '-_'), 40)
     END AS c, m FROM s
   )
   SELECT CASE
@@ -172,6 +213,12 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_channel_key(text, text) FROM PUBLIC, anon, authenticated;
 
+-- THE one place a channel gets its display label (the mail, the text and the
+-- SPA all show this label; nothing renders a buyer-supplied key as a label).
+-- Fixed labels only: Exos' own channels, the platforms and marketplaces.
+-- Promoter codes and import sources are grouped ("Promoters", "Imported
+-- list"); every other key is "Other". The detail behind a grouped / Other
+-- row is _exos_channel_detail ([a-z0-9_-] only), shown by the dashboard alone.
 CREATE OR REPLACE FUNCTION public._exos_channel_label(p_channel text)
 RETURNS text
 LANGUAGE sql IMMUTABLE
@@ -218,15 +265,41 @@ AS $$
     WHEN 'staff_issued' THEN 'Issued by staff'
     WHEN 'referral_reward' THEN 'Referral rewards'
     WHEN 'guest_list' THEN 'Guest lists'
+    WHEN 'posh' THEN 'Posh'
     WHEN 'import' THEN 'Imported list'
+    WHEN 'import:posh' THEN 'Imported list (Posh)'
     ELSE CASE
-      WHEN p_channel LIKE 'promoter:%' THEN 'Promoter ' || substr(p_channel, 10)
-      WHEN p_channel LIKE 'import:%' THEN 'Imported list (' || substr(p_channel, 8) || ')'
-      ELSE initcap(replace(replace(coalesce(p_channel, 'other'), '-', ' '), '_', ' '))
+      WHEN p_channel LIKE 'promoter:%' THEN 'Promoters'
+      WHEN p_channel LIKE 'import:%' THEN 'Imported list'
+      ELSE 'Other'
     END
   END
 $$;
 REVOKE ALL ON FUNCTION public._exos_channel_label(text) FROM PUBLIC, anon, authenticated;
+
+-- A channel key for output: [a-z0-9_-] only ("promoter:DJ-Kay" -> "promoter-dj-kay").
+CREATE OR REPLACE FUNCTION public._exos_channel_out_key(p_channel text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT left(regexp_replace(replace(lower(coalesce(p_channel, '')), ':', '-'), '[^a-z0-9_-]+', '', 'g'), 80)
+$$;
+REVOKE ALL ON FUNCTION public._exos_channel_out_key(text) FROM PUBLIC, anon, authenticated;
+
+-- What a grouped or "Other" label stands for (the promoter code, the import
+-- source, the unknown key), [a-z0-9_-] only; NULL for a fixed channel.
+CREATE OR REPLACE FUNCTION public._exos_channel_detail(p_channel text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN public._exos_channel_label(p_channel) NOT IN ('Promoters', 'Imported list', 'Other') THEN NULL
+    ELSE nullif(left(regexp_replace(lower(regexp_replace(coalesce(p_channel, ''), '^(promoter|import):', '')), '[^a-z0-9_-]+', '', 'g'), 40), '')
+  END
+$$;
+REVOKE ALL ON FUNCTION public._exos_channel_detail(text) FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 3. Lines: one per order / ticket / door entry, with its channel and money
@@ -374,7 +447,7 @@ AS $$
   UNION ALL
   -- Guest lists (comps) and CSV door imports (other-platform attendees, no price).
   SELECT CASE WHEN g.external_code IS NULL AND g.source IS NULL THEN 'guest_list'
-              ELSE coalesce('import:' || nullif(left(btrim(regexp_replace(lower(coalesce(g.source, '')), '[^a-z0-9._-]+', '-', 'g'), '-'), 30), ''),
+              ELSE coalesce('import:' || nullif(left(btrim(regexp_replace(lower(coalesce(g.source, '')), '[^a-z0-9_-]+', '-', 'g'), '-'), 30), ''),
                             'import') END,
          CASE WHEN g.external_code IS NULL AND g.source IS NULL THEN 'comp' ELSE 'imported' END,
          CASE WHEN g.external_code IS NULL AND g.source IS NULL THEN 'comp' ELSE 'attendee' END,
@@ -448,7 +521,8 @@ AS $$
     'currency', lower(coalesce(nullif(e.currency, ''), 'usd')), 'capacity', e.total_tickets,
     'channels', coalesce((
       SELECT jsonb_agg(jsonb_build_object(
-               'channel', a.channel, 'label', a.label, 'group', a.channel_group, 'kind', a.kind,
+               'channel', public._exos_channel_out_key(a.channel), 'label', a.label,
+               'detail', public._exos_channel_detail(a.channel), 'group', a.channel_group, 'kind', a.kind,
                'currency', a.currency, 'fees', a.fees, 'dated', a.dated,
                'week', CASE WHEN a.dated THEN
                          CASE WHEN w.channel IS NULL THEN jsonb_build_array(0, 0, 0, 0, 0)
@@ -534,7 +608,9 @@ BEGIN
   IF v_org IS NULL OR NOT public.exos_has_org_role(v_org, ARRAY['owner', 'manager', 'finance']) THEN
     RAISE EXCEPTION 'exos_channel_sales: not authorized' USING ERRCODE = '42501';
   END IF;
-  RETURN QUERY SELECT * FROM public._exos_channel_sales(p_event_id, p_from, p_to) c
+  RETURN QUERY SELECT public._exos_channel_out_key(c.channel), c.label, c.channel_group, c.kind, c.currency, c.tickets,
+                      c.gross_cents, c.fee_cents, c.exos_fee_cents, c.net_cents, c.fees, c.dated
+                 FROM public._exos_channel_sales(p_event_id, p_from, p_to) c
                 ORDER BY (c.kind = 'sale') DESC, c.tickets DESC, c.channel;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_channel_sales(uuid, timestamptz, timestamptz) FROM PUBLIC, anon, authenticated;
@@ -618,6 +694,11 @@ BEGIN
     IF v_phone IS NULL THEN
       RAISE EXCEPTION 'exos_set_channel_report: enter a mobile number, e.g. +1 212 555 0100' USING ERRCODE = '22023';
     END IF;
+    -- STOP is durable: only the number itself can undo it, by texting START.
+    IF public._exos_sms_stopped(p_org_id, v_phone) THEN
+      RAISE EXCEPTION 'exos_set_channel_report: that number replied STOP to your texts. To get the weekly text again, text START from it to your org''s number, then save it here.'
+        USING ERRCODE = '22023';
+    END IF;
   END IF;
   INSERT INTO public.exos_channel_report_settings AS s (org_id, enabled, sms_phone, updated_by, updated_at)
   VALUES (p_org_id, coalesce(p_enabled, true), v_phone, auth.uid(), now())
@@ -682,8 +763,9 @@ BEGIN
   END IF;
 END $$;
 
--- STOP from the report number also turns the weekly text off (same body as
--- mig 20261016120000 plus that one UPDATE).
+-- STOP is recorded for the number (exos_sms_stops, any number, subscriber or
+-- not) and turns the weekly text off; START removes it. Otherwise the same
+-- body as mig 20261016120000.
 CREATE OR REPLACE FUNCTION public.exos_sms_inbound(p_org_id uuid, p_from text, p_text text)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER
@@ -692,6 +774,8 @@ AS $$
 DECLARE
   v_phone text := public.exos_sms_normalize_phone(p_from);
   v_word  text := upper(btrim(regexp_replace(coalesce(p_text, ''), '[^A-Za-z ]', '', 'g')));
+  v_sub   int;
+  v_stop  int;
 BEGIN
   IF v_phone IS NULL THEN RETURN 'ignored'; END IF;
   IF v_word IN ('STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT', 'STOP ALL', 'OPTOUT', 'REVOKE') THEN
@@ -699,13 +783,20 @@ BEGIN
      WHERE org_id = p_org_id AND phone = v_phone;
     UPDATE public.exos_sms_outbox SET status = 'skipped', error = 'opted out'
      WHERE org_id = p_org_id AND phone = v_phone AND status = 'queued';
+    IF EXISTS (SELECT 1 FROM public.exos_orgs WHERE id = p_org_id) THEN
+      INSERT INTO public.exos_sms_stops (org_id, phone) VALUES (p_org_id, v_phone)
+      ON CONFLICT (org_id, phone) DO UPDATE SET stopped_at = now();
+    END IF;
     UPDATE public.exos_channel_report_settings SET sms_phone = NULL, updated_at = now()
      WHERE org_id = p_org_id AND sms_phone = v_phone;
     RETURN 'stopped';
   ELSIF v_word IN ('START', 'UNSTOP', 'YES') THEN
     UPDATE public.exos_sms_subscribers SET opted_out_at = NULL, updated_at = now()
      WHERE org_id = p_org_id AND phone = v_phone AND opted_out_at IS NOT NULL;
-    RETURN CASE WHEN FOUND THEN 'started' ELSE 'ignored' END;
+    GET DIAGNOSTICS v_sub = ROW_COUNT;
+    DELETE FROM public.exos_sms_stops WHERE org_id = p_org_id AND phone = v_phone;
+    GET DIAGNOSTICS v_stop = ROW_COUNT;
+    RETURN CASE WHEN v_sub + v_stop > 0 THEN 'started' ELSE 'ignored' END;
   ELSIF v_word = 'HELP' OR v_word = 'INFO' THEN
     RETURN 'help';
   END IF;
@@ -789,8 +880,7 @@ BEGIN
 
       -- The text: a set number, a connected provider, no STOP on that number.
       IF r.sms_phone IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM public.exos_sms_subscribers ss
-                          WHERE ss.org_id = r.id AND ss.phone = r.sms_phone AND ss.opted_out_at IS NOT NULL) THEN
+         AND NOT public._exos_sms_stopped(r.id, r.sms_phone) THEN
         SELECT i.provider INTO v_prov FROM public.exos_org_integrations i
          WHERE i.org_id = r.id AND i.provider IN ('twilio', 'telnyx') AND i.status = 'connected'
          ORDER BY (i.provider = 'twilio') DESC LIMIT 1;
@@ -866,5 +956,6 @@ END $$;
 
 -- ROLLBACK (manual): SELECT cron.unschedule('exos_send_channel_reports');
 -- drop the functions in sections 2-4 and 6; re-apply exos_sms_inbound from
--- 20261016120000; drop exos_channel_reports and exos_channel_report_settings.
+-- 20261016120000; drop exos_channel_reports, exos_channel_report_settings and
+-- exos_sms_stops.
 -- The two allowlist values can stay.

@@ -6,7 +6,7 @@
 // (src/lib/mailTemplates.test.ts) both load it.
 
 import {
-  type ChannelRow, type EventChannels, feeText, money, notReportedNote, parseChannelReport, plural, sideCounts,
+  type ChannelRow, type EventChannels, feeText, messageRows, money, notReportedNote, parseChannelReport, plural, sideCounts,
   sumTickets, totalsText, weekLabel,
 } from "./channelReport.ts";
 //
@@ -264,9 +264,12 @@ function disputeLinks(ctx: Ctx, v: DisputeView): string {
 }
 
 // Weekly sales by channel (mig 20261029120000). The SPA's Channels card and
-// /orgs/:id/channels read the same document (channelReport.ts).
+// /orgs/:id/channels read the same document (channelReport.ts). The mail shows
+// labels only (fixed list, SQL _exos_channel_label), one row per label
+// (messageRows): utm_source is buyer-controlled, so no key reaches the mail.
 function channelTable(e: EventChannels): string {
-  if (e.sales.length === 0) return `<p style="color:#666">No sales yet.</p>`;
+  const rows = messageRows(e.sales);
+  if (rows.length === 0) return `<p style="color:#666">No sales yet.</p>`;
   const td = `style="padding:2px 10px 2px 0;text-align:right;white-space:nowrap"`;
   const head = `<tr style="color:#666;font-size:12px"><td style="padding:2px 10px 2px 0">Channel</td><td ${td}>This week</td>` +
     `<td ${td}>To date</td><td ${td}>Gross</td><td ${td}>Channel fees</td><td ${td}>Net to you</td></tr>`;
@@ -276,14 +279,14 @@ function channelTable(e: EventChannels): string {
     `<td ${td}>${esc(money(r.toDate.grossCents, r.currency))}</td>` +
     `<td ${td}>${esc(feeText(r.toDate, r.fees, r.currency))}</td>` +
     `<td ${td}>${esc(money(r.toDate.netCents, r.currency))}</td></tr>`;
-  return `<table style="border-collapse:collapse;font-size:14px">${head}${e.sales.map(row).join("")}</table>`;
+  return `<table style="border-collapse:collapse;font-size:14px">${head}${rows.map(row).join("")}</table>`;
 }
 
 function channelEvent(ctx: Ctx, e: EventChannels): string {
   const when = e.startsAt ? formatWhen(e.startsAt, e.timezone) : "";
   const exos = e.sales.reduce((k, r) => k + (r.toDate.exosFeeCents ?? 0), 0);
   const side = sideCounts(e, "toDate");
-  const undated = e.sales.filter((r) => !r.dated).map((r) => r.label);
+  const undated = messageRows(e.sales).filter((r) => !r.dated).map((r) => r.label);
   const extra = [
     side.comps ? plural(side.comps, "comp") : "",
     side.attendees ? `${plural(side.attendees, "imported attendee")} from other lists` : "",

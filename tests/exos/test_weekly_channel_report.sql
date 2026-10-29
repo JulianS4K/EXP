@@ -16,6 +16,8 @@
 --      with a number + a connected provider
 --   C6 idempotent per org and ISO week; STOP turns the text off
 --   C7 the dashboard reads (event + org) match the mailed document
+--   C8 buyer-written utm_source ("evil.com", a phone number, markup) shows as
+--      Other in the text and the mail; keys in output are [a-z0-9_-] only
 -- Self-contained ids c3…; runs after the full run_p0.sh chain.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -124,7 +126,11 @@ INSERT INTO public.exos_tickets (id, event_id, org_id, tier_id, owner_id, buyer_
   (pg_temp.u('000000000141'), pg_temp.u('0000000000e1'), pg_temp.u('000000000001'), pg_temp.u('0000000000d1'), pg_temp.u('0000000000a1'), pg_temp.u('0000000000a1'), 'own-c3@x.com', 'active', 'x', 45, 'sh_1', 'stubhub', NULL, pg_temp.w() + interval '4 days'),
   (pg_temp.u('000000000142'), pg_temp.u('0000000000e1'), pg_temp.u('000000000001'), pg_temp.u('0000000000d1'), pg_temp.u('0000000000a1'), pg_temp.u('0000000000a1'), 'own-c3@x.com', 'active', 'x', 45, 'sh_1', 'stubhub', NULL, pg_temp.w() + interval '4 days'),
   -- the past event: one direct free claim in the week
-  (pg_temp.u('000000000201'), pg_temp.u('0000000000e2'), pg_temp.u('000000000001'), NULL, pg_temp.u('0000000000b1'), pg_temp.u('0000000000b1'), 'fan1-c3@x.com', 'used', 'x', 0, 'free_3', 'vibepass', NULL, pg_temp.w() + interval '1 day');
+  (pg_temp.u('000000000201'), pg_temp.u('0000000000e2'), pg_temp.u('000000000001'), NULL, pg_temp.u('0000000000b1'), pg_temp.u('0000000000b1'), 'fan1-c3@x.com', 'used', 'x', 0, 'free_3', 'vibepass', NULL, pg_temp.w() + interval '1 day'),
+  -- ... and three claims whose ?utm_source anyone could have written (C8)
+  (pg_temp.u('000000000202'), pg_temp.u('0000000000e2'), pg_temp.u('000000000001'), NULL, pg_temp.u('0000000000b1'), pg_temp.u('0000000000b1'), 'fan1-c3@x.com', 'active', 'x', 0, 'free_4', 'evil.com', NULL, pg_temp.w() + interval '1 day'),
+  (pg_temp.u('000000000203'), pg_temp.u('0000000000e2'), pg_temp.u('000000000001'), NULL, pg_temp.u('0000000000b1'), pg_temp.u('0000000000b1'), 'fan1-c3@x.com', 'active', 'x', 0, 'free_5', '+1 212 555 0100', NULL, pg_temp.w() + interval '1 day'),
+  (pg_temp.u('000000000204'), pg_temp.u('0000000000e2'), pg_temp.u('000000000001'), NULL, pg_temp.u('0000000000b1'), pg_temp.u('0000000000b1'), 'fan1-c3@x.com', 'active', 'x', 0, 'free_6', '<b>x</b>', NULL, pg_temp.w() + interval '1 day');
 
 -- Marketplace orders: StubHub (fee reported), SeatGeek (only the payout), Vivid cancelled.
 INSERT INTO public.exos_marketplace_orders (channel, external_order_id, event_id, org_id, quantity, proceeds, currency, sale_status, status, sold_at, list_unit_price, ticket_ids, buyer_email) VALUES
@@ -165,7 +171,7 @@ BEGIN
   j := pg_temp.ch(NULL, NULL, 'tiktok');
   ASSERT (j->>'tickets')::int = 2 AND (j->>'gross_cents')::int = 0 AND j->>'fees' = 'none', 'C1 free claims by utm (refunded S4 out): ' || coalesce(j::text, 'missing');
   j := pg_temp.ch(NULL, NULL, 'promoter:dj-kay');
-  ASSERT (j->>'tickets')::int = 1 AND j->>'label' = 'Promoter dj-kay', 'C1 promoter: ' || coalesce(j::text, 'missing');
+  ASSERT (j->>'tickets')::int = 1 AND j->>'label' = 'Promoters' AND public._exos_channel_detail(j->>'channel') = 'dj-kay', 'C1 promoter: ' || coalesce(j::text, 'missing');
   j := pg_temp.ch(NULL, NULL, 'box_office');
   ASSERT (j->>'tickets')::int = 1 AND (j->>'gross_cents')::int = 4000 AND (j->>'net_cents')::int = 4000 AND j->>'channel_group' = 'box_office', 'C1 box office: ' || coalesce(j::text, 'missing');
   j := pg_temp.ch(NULL, NULL, 'stubhub');
@@ -185,7 +191,7 @@ BEGIN
   ASSERT pg_temp.ch(NULL, NULL, 'staff_issued')->>'kind' = 'comp' AND pg_temp.ch(NULL, NULL, 'referral_reward')->>'kind' = 'comp', 'C3 staff issue + reward are comps';
   ASSERT (pg_temp.ch(NULL, NULL, 'guest_list')->>'tickets')::int = 2 AND pg_temp.ch(NULL, NULL, 'guest_list')->>'kind' = 'comp', 'C3 guest list counts plus-ones';
   j := pg_temp.ch(NULL, NULL, 'import:posh');
-  ASSERT (j->>'tickets')::int = 1 AND j->>'kind' = 'attendee' AND j->>'label' = 'Imported list (posh)', 'C3 CSV import = attendees: ' || coalesce(j::text, 'missing');
+  ASSERT (j->>'tickets')::int = 1 AND j->>'kind' = 'attendee' AND j->>'label' = 'Imported list (Posh)', 'C3 CSV import = attendees: ' || coalesce(j::text, 'missing');
   -- Every Exos-recorded sale has a channel: the non-comp, non-marketplace live
   -- tickets equal the Exos + box office sale tickets.
   ASSERT (SELECT sum(tickets) FROM public._exos_channel_sales(pg_temp.u('0000000000e1'), NULL, NULL)
@@ -266,13 +272,14 @@ BEGIN
   FOREACH f IN ARRAY ARRAY['_exos_channel_lines(uuid)', '_exos_channel_sales(uuid,timestamptz,timestamptz)',
                            '_exos_channel_totals(uuid[],timestamptz,timestamptz)', '_exos_channel_event_json(uuid,timestamptz,timestamptz)',
                            '_exos_channel_report_payload(uuid,timestamptz,timestamptz,timestamptz)',
-                           'exos_send_channel_reports(timestamptz,integer)'] LOOP
+                           '_exos_sms_stopped(uuid,text)', 'exos_send_channel_reports(timestamptz,integer)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', 'public.' || f, 'EXECUTE'), 'C4 internal: ' || f;
     ASSERT NOT has_function_privilege('anon', 'public.' || f, 'EXECUTE'), 'C4 internal (anon): ' || f;
   END LOOP;
   ASSERT has_function_privilege('service_role', 'public.exos_send_channel_reports(timestamptz,integer)', 'EXECUTE'), 'C4 cron entry is service role';
   ASSERT NOT has_table_privilege('authenticated', 'public.exos_channel_report_settings', 'SELECT')
-     AND NOT has_table_privilege('authenticated', 'public.exos_channel_reports', 'SELECT'), 'C4 tables are RPC-only';
+     AND NOT has_table_privilege('authenticated', 'public.exos_channel_reports', 'SELECT')
+     AND NOT has_table_privilege('authenticated', 'public.exos_sms_stops', 'SELECT'), 'C4 tables are RPC-only';
   RAISE NOTICE 'OK  C4 roles and grants';
 END $$;
 
@@ -303,6 +310,14 @@ BEGIN
   ASSERT o.phone = '+12125550142' AND o.status = 'queued', 'C5 text queued: ' || row_to_json(o)::text;
   ASSERT o.body LIKE 'C3 <Org>: last week % tickets (%) , % to date. Report: {{app_url}}/orgs/' || pg_temp.u('000000000001') || '/channels Reply STOP to opt out.'
       OR o.body LIKE 'C3 <Org>: last week % tickets (%), % to date. Report: {{app_url}}/orgs/' || pg_temp.u('000000000001') || '/channels Reply STOP to opt out.', 'C5 text body: ' || o.body;
+  -- C8: buyer-written utm_source never reaches the text or the mail payload's labels.
+  ASSERT o.body LIKE '%(Other 3, %' AND o.body NOT LIKE '%evil%' AND o.body NOT LIKE '%0100%'
+     AND o.body NOT LIKE '%<b>%' AND o.body NOT LIKE '%b-x-b%', 'C8 text shows Other only: ' || o.body;
+  ASSERT p::text NOT LIKE '%evil.com%' AND p::text NOT LIKE '%<b>%' AND p::text NOT LIKE '%+1 212%' AND p::text NOT LIKE '%212 555%', 'C8 raw sources not in the payload';
+  ASSERT (SELECT array_agg(DISTINCT c->>'label') FROM jsonb_array_elements(p->'events'->0->'channels') c
+           WHERE c->>'channel' IN ('evil', '1-212-555-0100', 'b-x-b')) = ARRAY['Other'], 'C8 labelled Other: ' || (p->'events'->0->'channels')::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(p->'events') e, jsonb_array_elements(e->'channels') c
+                      WHERE c->>'channel' !~ '^[a-z0-9_-]+$' OR coalesce(c->>'detail', 'x') !~ '^[a-z0-9_-]+$'), 'C8 keys / details [a-z0-9_-] only';
   ASSERT (SELECT audience FROM public.exos_sms_campaigns WHERE id = o.campaign_id) = 'staff_report', 'C5 staff_report campaign';
   ASSERT ((o.send_after AT TIME ZONE 'America/New_York')::time BETWEEN time '09:00' AND time '20:00'), 'C5 quiet hours';
   RAISE NOTICE 'OK  C5 weekly run';
@@ -324,20 +339,46 @@ SET LOCAL ROLE authenticated;
 SELECT pg_temp.act('c3000000-0000-0000-0000-0000000000a6');
 SELECT public.exos_set_channel_report(pg_temp.u('000000000002'), true, '+12125550177');
 SELECT set_config('c3.clear', public.exos_set_channel_report(pg_temp.u('000000000002'), false, '')::text, true);
+-- STOP is durable: the owner can't save that number again (any spelling).
+SELECT pg_temp.act('c3000000-0000-0000-0000-0000000000a1');
+SELECT set_config('c3.resave', pg_temp.refused($$SELECT public.exos_set_channel_report(pg_temp.u('000000000001'), true, '212-555-0142')$$, 'text START')::text, true);
 RESET ROLE;
 SELECT pg_temp.act(NULL);
+SELECT set_config('c3.cleared', (SELECT (sms_phone IS NULL)::text FROM public.exos_channel_report_settings WHERE org_id = pg_temp.u('000000000001')), true);
+-- Even with the number forced back into the settings, the send-time check holds.
+UPDATE public.exos_channel_report_settings SET sms_phone = '+12125550142' WHERE org_id = pg_temp.u('000000000001');
+SELECT set_config('c3.run3', public.exos_send_channel_reports(now() + interval '7 days')::text, true);
 DO $$
 DECLARE r jsonb := current_setting('c3.run2')::jsonb;
 BEGIN
   ASSERT (r->>'orgs')::int = 0 AND (r->>'mails')::int = 0 AND (r->>'texts')::int = 0, 'C6 second run sends nothing: ' || r::text;
-  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'org-channel-report' AND payload->'org'->>'id' = pg_temp.u('000000000001')::text) = 1, 'C6 still one mail';
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'org-channel-report' AND payload->'org'->>'id' = pg_temp.u('000000000001')::text
+           AND payload->>'iso_week' = to_char(pg_temp.w() AT TIME ZONE 'UTC', 'IYYY-"W"IW')) = 1, 'C6 still one mail for the week';
   ASSERT (SELECT count(*) FROM public.exos_sms_outbox WHERE org_id = pg_temp.u('000000000001')) = 1, 'C6 still one text';
-  ASSERT (SELECT sms_phone FROM public.exos_channel_report_settings WHERE org_id = pg_temp.u('000000000001')) IS NULL, 'C6 STOP clears the number';
-  ASSERT (SELECT status FROM public.exos_sms_outbox WHERE org_id = pg_temp.u('000000000001')) = 'skipped', 'C6 STOP skips the queued text';
+  ASSERT (SELECT status FROM public.exos_sms_outbox WHERE org_id = pg_temp.u('000000000001') ORDER BY created_at LIMIT 1) = 'skipped', 'C6 STOP skips the queued text';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_sms_stops WHERE org_id = pg_temp.u('000000000001') AND phone = '+12125550142'), 'C6 STOP recorded';
+  ASSERT current_setting('c3.cleared')::boolean, 'C6 STOP clears the number';
   ASSERT current_setting('c3.clear')::jsonb->'sms_phone_hint' = 'null'::jsonb AND NOT (current_setting('c3.clear')::jsonb->>'enabled')::boolean, 'C6 '''' clears the number; off';
-  -- A different week reports again (the key is the ISO week).
-  ASSERT (public.exos_send_channel_reports(now() + interval '7 days')->>'orgs')::int >= 1, 'C6 next week is a new report';
-  RAISE NOTICE 'OK  C6 idempotent per org + ISO week; STOP';
+  ASSERT current_setting('c3.resave')::boolean, 'C6 a stopped number can''t be saved again';
+  -- A different week reports again (the key is the ISO week), without a text.
+  ASSERT (current_setting('c3.run3')::jsonb->>'orgs')::int >= 1, 'C6 next week is a new report';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_channel_reports WHERE org_id = pg_temp.u('000000000001') AND week_start = pg_temp.w() + interval '7 days' AND texts = 0), 'C6 next week: no text';
+  ASSERT (SELECT count(*) FROM public.exos_sms_outbox WHERE org_id = pg_temp.u('000000000001')) = 1, 'C6 nothing queued to a stopped number';
+  RAISE NOTICE 'OK  C6 idempotent per org + ISO week; STOP is durable';
+END $$;
+
+-- START from the number lifts it; then the owner may save it again.
+SELECT public.exos_sms_inbound(pg_temp.u('000000000001'), '+12125550142', 'START');
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('c3000000-0000-0000-0000-0000000000a1');
+SELECT set_config('c3.restart', public.exos_set_channel_report(pg_temp.u('000000000001'), true, '+12125550142')::text, true);
+RESET ROLE;
+SELECT pg_temp.act(NULL);
+DO $$
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_sms_stops WHERE org_id = pg_temp.u('000000000001')), 'C6 START clears the stop';
+  ASSERT current_setting('c3.restart')::jsonb->>'sms_phone_hint' = '…0142', 'C6 saved again after START';
+  RAISE NOTICE 'OK  C6 START';
 END $$;
 
 -- C7 ------------------------------------------------------------------------

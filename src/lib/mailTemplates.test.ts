@@ -84,11 +84,20 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
           week: [1, null, null, 0, null], to_date: [4, null, null, 0, null] },
         { channel: 'luma', label: 'Luma', group: 'luma', kind: 'sale', currency: 'usd', fees: 'not_reported', dated: false,
           week: null, to_date: [5, null, null, 0, null] },
-        { channel: 'promoter:x', label: 'Promoter <x>', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+        { channel: 'promoter-x', label: 'Promoters', detail: 'x', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
           week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'promoter-dj-kay', label: 'Promoters', detail: 'dj-kay', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        // utm_source "evil.com", "+1 212 555 0100", "<b>x</b>" as the SQL hands them over (C8).
+        { channel: 'evil', label: 'Other', detail: 'evil', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: '1-212-555-0100', label: 'Other', detail: '1-212-555-0100', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'b-x-b', label: 'Other', detail: 'b-x-b', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [2, 0, 0, 0, 0] },
         { channel: 'comp', label: 'Comps', group: 'comp', kind: 'comp', currency: 'usd', fees: 'none', dated: true,
           week: [2, null, 0, 0, null], to_date: [6, null, 0, 0, null] },
-        { channel: 'import:posh', label: 'Imported list (posh)', group: 'imported', kind: 'attendee', currency: 'usd', fees: 'none', dated: true,
+        { channel: 'import-posh', label: 'Imported list (Posh)', detail: null, group: 'imported', kind: 'attendee', currency: 'usd', fees: 'none', dated: true,
           week: [0, null, null, null, null], to_date: [3, null, null, null, null] },
       ],
       totals: {
@@ -227,7 +236,13 @@ describe('renderTemplate', () => {
     expect(r.html).toMatch(/Luma<\/td><td[^>]*>–<\/td><td[^>]*>5<\/td>/);
     expect(r.html).toContain('Luma: counts only, without sale dates');
     // Free channel: no fees.
-    expect(r.html).toMatch(/Promoter &lt;x&gt;<\/td><td[^>]*>0<\/td><td[^>]*>1<\/td><td[^>]*>\$0\.00<\/td><td[^>]*>none<\/td>/);
+    // Promoter codes are grouped: one row, no code in the mail.
+    expect(r.html).toMatch(/Promoters<\/td><td[^>]*>0<\/td><td[^>]*>2<\/td><td[^>]*>\$0\.00<\/td><td[^>]*>none<\/td>/);
+    expect(r.html).not.toContain('dj-kay');
+    // Buyer-written sources: one "Other" row, last; none of the keys reach the mail.
+    expect(r.html).toMatch(/Other<\/td><td[^>]*>3<\/td><td[^>]*>4<\/td>[^]*<\/table>/);
+    expect(r.html.match(/>Other<\/td>/g)).toHaveLength(1);
+    for (const bad of ['evil', '0100', '212', 'b-x-b', '&lt;b&gt;']) expect(r.html).not.toContain(bad);
     expect(r.html).toContain('Exos fee to date: $2.25');
     expect(r.html).toContain('Not sales: 6 comps, 3 imported attendees from other lists.');
     expect(r.html).not.toMatch(/Comps<\/td>/);

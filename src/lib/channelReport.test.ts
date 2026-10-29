@@ -1,7 +1,7 @@
 // Sales by channel reader (supabase/functions/_shared/channelReport.ts, mig 20261029120000).
 import { describe, it, expect } from 'vitest';
 import {
-  feeText, money, notReportedNote, parseChannel, parseChannelReport, parseEventChannels, parseFigures, sideCounts,
+  cleanKey, feeText, messageRows, money, notReportedNote, parseChannel, parseChannelReport, parseEventChannels, parseFigures, sideCounts,
   sumTickets, totalsText, weekLabel,
 } from '../../supabase/functions/_shared/channelReport.ts';
 import { trackingLinks, trackingUrl, TRACKING_CHANNELS } from './trackingLinks';
@@ -45,6 +45,35 @@ describe('parse', () => {
     expect(r.moreEvents).toBe(1);
     expect(r.totals).toEqual({ week: [], toDate: [] });
     expect(parseChannelReport('x')).toBeNull();
+  });
+});
+
+describe('buyer-written sources (C8)', () => {
+  it('keys and details keep [a-z0-9_-] only', () => {
+    expect(cleanKey('Evil.com')).toBe('evilcom');
+    expect(cleanKey('+1 212 555 0100')).toBe('12125550100');
+    expect(cleanKey('<b>x</b>')).toBe('bxb');
+    expect(cleanKey(42)).toBe('');
+    const r = parseChannel({ channel: '<b>x</b>', label: 'Other', detail: 'a.b<c>', to_date: [1, 0, 0, 0, 0] })!;
+    expect(r.channel).toBe('bxb');
+    expect(r.detail).toBe('abc');
+    expect(parseChannel({ channel: 'x', to_date: [1] })!.label).toBe('Other');
+  });
+
+  it('message rows: one row per label, so every unknown key is one "Other"', () => {
+    const rows = ['evil', '1-212-555-0100', 'b-x-b'].map((k, i) => parseChannel({
+      channel: k, label: 'Other', detail: k, kind: 'sale', fees: 'none', dated: true,
+      week: [1, 100, 0, 0, 100], to_date: [i + 1, 100 * (i + 1), 0, 0, 100 * (i + 1)],
+    })!);
+    rows.push(parseChannel({ channel: 'instagram', label: 'Instagram', kind: 'sale', fees: 'reported', dated: true, week: [1, 50, 1, 2, 47], to_date: [1, 50, 1, 2, 47] })!);
+    rows.push(parseChannel({ channel: 'eventbrite', label: 'Eventbrite', kind: 'sale', fees: 'not_reported', dated: true, week: [0, 0, 0, 0, 0], to_date: [9, null, null, 0, null] })!);
+    const m = messageRows(rows);
+    expect(m.map((r) => r.label)).toEqual(['Eventbrite', 'Instagram', 'Other']);
+    const other = m[2];
+    expect(other).toMatchObject({ detail: null, week: { tickets: 3, grossCents: 300 }, toDate: { tickets: 6, grossCents: 600, netCents: 600 } });
+    // merging a not-reported part keeps it not reported
+    const mixed = messageRows([rows[0], { ...rows[4], label: 'Other' }]);
+    expect(mixed[0]).toMatchObject({ label: 'Other', fees: 'not_reported', toDate: { tickets: 10, grossCents: null } });
   });
 });
 
