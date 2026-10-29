@@ -35,6 +35,7 @@ import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
+import ChannelSalesPanel from '../components/ChannelSalesPanel';
 import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
@@ -304,6 +305,9 @@ export default function OrganizerEventReport() {
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
         <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Every ticket by channel, week + to date, fees as reported; the same
+            numbers as the Monday report (mig 20261029120000). */}
+        <ChannelSalesPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
