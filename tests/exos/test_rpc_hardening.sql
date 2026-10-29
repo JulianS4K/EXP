@@ -128,6 +128,8 @@ BEGIN
        'exos_promo_link_hit',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
+       -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
+       'exos_public_tier_available',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',

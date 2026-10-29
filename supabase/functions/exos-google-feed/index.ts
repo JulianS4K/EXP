@@ -41,7 +41,11 @@ const EVENT_COLS =
 const STORE_COLS = ", summary, description_md, lineup, min_age";
 // Online / hybrid + noindex (mig 20261005090000), with the same fallback.
 const ONLINE_COLS = ", format, noindex";
-const TIER_COLS = "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule, exclusive_tax_percent";
+// exclusive_tax_percent is computed by exos_public_tiers (it isn't a column of
+// exos_ticket_tiers), so published events read the view; a cancelled event's
+// tiers come from the table without it (its price is shown off sale anyway).
+const TIER_BASE_COLS = "id, event_id, name, description, price, capacity, sold, sales_start, sales_end, price_schedule";
+const TIER_COLS = TIER_BASE_COLS + ", exclusive_tax_percent";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "use GET" }, 405, { Allow: "GET, HEAD" });
@@ -98,12 +102,23 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
     // Public ticket types only (hidden ones are unlocked by codes; never listed).
-    // exos_public_tiers covers published events; a cancelled event's tiers come
-    // from the table with the same filter.
-    const { data: t, error: tErr } = await sb.from("exos_ticket_tiers").select(TIER_COLS)
-      .in("event_id", chunk).eq("visibility", "public").order("sort_order", { ascending: true });
-    if (tErr) throw new Error(`tiers: ${tErr.message}`);
-    tiers.push(...((t ?? []) as unknown as FeedTierRow[]));
+    // exos_public_tiers covers published events (with the tax rate); a
+    // cancelled event's tiers come from the table with the same filter.
+    const published = new Set(events.filter((e) => e.status !== "cancelled").map((e) => e.id));
+    const pubIds = chunk.filter((id) => published.has(id));
+    const cancelledIds = chunk.filter((id) => !published.has(id));
+    if (pubIds.length) {
+      const { data: t, error: tErr } = await sb.from("exos_public_tiers").select(TIER_COLS)
+        .in("event_id", pubIds).order("sort_order", { ascending: true });
+      if (tErr) throw new Error(`tiers: ${tErr.message}`);
+      tiers.push(...((t ?? []) as unknown as FeedTierRow[]));
+    }
+    if (cancelledIds.length) {
+      const { data: t, error: tErr } = await sb.from("exos_ticket_tiers").select(TIER_BASE_COLS)
+        .in("event_id", cancelledIds).eq("visibility", "public").order("sort_order", { ascending: true });
+      if (tErr) throw new Error(`tiers: ${tErr.message}`);
+      tiers.push(...((t ?? []) as unknown as FeedTierRow[]).map((r) => ({ ...r, exclusive_tax_percent: null })));
+    }
     const { data: g, error: gErr } = await sb.from("exos_event_geo").select("event_id, lat, lng, place_id")
       .in("event_id", chunk).eq("status", "ok").not("lat", "is", null);
     if (gErr) throw new Error(`geo: ${gErr.message}`);
