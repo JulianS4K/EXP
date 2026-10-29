@@ -58,8 +58,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY) return json({ error: "body too large" }, 413);
-  const text = await req.text();
-  if (text.length > MAX_BODY) return json({ error: "body too large" }, 413);
+  const text = await readCapped(req, MAX_BODY);
+  if (text === null) return json({ error: "body too large" }, 413);
 
   const tokenHash = await sha256Hex(r.token);
   const { data: allowed, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: `posh:${tokenHash.slice(0, 40)}`, p_limit: PER_MINUTE });
@@ -88,3 +88,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (out?.outcome === "unknown_hook") return json({ error: "not found" }, 404);
   return json({ ok: true, outcome: out?.outcome });
 });
+
+/** The body as text, read as a stream and cut off past `max` bytes (null). */
+async function readCapped(req: Request, max: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let off = 0;
+  for (const c of chunks) { all.set(c, off); off += c.byteLength; }
+  return new TextDecoder().decode(all);
+}

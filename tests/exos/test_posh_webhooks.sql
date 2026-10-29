@@ -349,6 +349,27 @@ BEGIN
   RAISE NOTICE 'OK  P12 retention';
 END $t$;
 
+-- P12b: the daily purge covers every org; disconnect deletes the org's log.
+DO $t$
+DECLARE v_n int;
+BEGIN
+  UPDATE public.exos_posh_webhook_log SET received_at = now() - interval '91 days'
+   WHERE id = (SELECT id FROM public.exos_posh_webhook_log WHERE org_id = pg_temp.u('01') ORDER BY id LIMIT 1);
+  UPDATE public.exos_posh_hooks SET status = 'disabled' WHERE org_id = pg_temp.u('01');
+  v_n := public.exos_posh_purge_logs();
+  ASSERT v_n = 1, 'P12b: purge removed ' || v_n;
+  UPDATE public.exos_posh_hooks SET status = 'active' WHERE org_id = pg_temp.u('01');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_posh_webhook_log WHERE org_id = pg_temp.u('01')), 'P12b: recent rows kept';
+  PERFORM pg_temp.act('b5000000-0000-0000-0000-0000000000a1');
+  ASSERT public.exos_posh_disconnect(pg_temp.u('01')), 'P12b: disconnect';
+  PERFORM pg_temp.act(NULL);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_posh_webhook_log WHERE org_id = pg_temp.u('01')), 'P12b: disconnect deletes the log';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_posh_orders WHERE org_id = pg_temp.u('01')), 'P12b: orders stay';
+  ASSERT NOT has_function_privilege('authenticated', 'public.exos_posh_purge_logs(integer)', 'EXECUTE'), 'P12b: purge is service only';
+  UPDATE public.exos_posh_hooks SET status = 'active' WHERE org_id = pg_temp.u('01');
+  RAISE NOTICE 'OK  P12b retention across orgs; disconnect clears the log';
+END $t$;
+
 -- P1 (disable) + P10 ---------------------------------------------------------
 SET LOCAL ROLE authenticated;
 SELECT pg_temp.act('b5000000-0000-0000-0000-0000000000a1');

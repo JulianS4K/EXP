@@ -629,7 +629,13 @@ BEGIN
     RAISE EXCEPTION 'exos_posh_disconnect: owner or manager only' USING ERRCODE = '42501';
   END IF;
   UPDATE public.exos_posh_hooks SET status = 'disabled' WHERE org_id = p_org_id;
-  RETURN FOUND;
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+  -- The delivery log holds buyer names and emails: it goes with the
+  -- connection (orders and door entries stay).
+  DELETE FROM public.exos_posh_webhook_log WHERE org_id = p_org_id;
+  RETURN true;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_posh_disconnect(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_posh_disconnect(uuid) TO authenticated, service_role;
@@ -994,6 +1000,40 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_posh_event_status(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_posh_event_status(uuid) TO authenticated, service_role;
+
+-- Retention for every org, whatever its hook's state (a disabled hook gets no
+-- deliveries, so the per-delivery purge in exos_posh_ingest never runs for it).
+-- Service role; the daily cron below calls it. Returns rows deleted.
+CREATE OR REPLACE FUNCTION public.exos_posh_purge_logs(p_limit integer DEFAULT 50000)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_n integer;
+BEGIN
+  DELETE FROM public.exos_posh_webhook_log
+   WHERE id IN (SELECT l.id FROM public.exos_posh_webhook_log l
+                  LEFT JOIN public.exos_posh_hooks h ON h.org_id = l.org_id
+                 WHERE l.received_at < now() - make_interval(days => coalesce(h.retention_days, 30))
+                 LIMIT greatest(coalesce(p_limit, 50000), 1));
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_posh_purge_logs(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_posh_purge_logs(integer) TO service_role;
+
+-- Daily purge. Guarded so CI Postgres without pg_cron applies; all Exos crons
+-- are off on prod (2026-10-21), so scheduling there needs the operator.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'exos-posh-log-retention-daily') THEN
+      PERFORM cron.unschedule('exos-posh-log-retention-daily');
+    END IF;
+    PERFORM cron.schedule('exos-posh-log-retention-daily', '17 4 * * *',
+      $cron$SELECT public.exos_posh_purge_logs()$cron$);
+  END IF;
+END $$;
 
 -- ROLLBACK (manual): restore exos_channel_allocated from 20260926193000 (drop
 -- the "+ public._exos_posh_reserved(p_tier_id)" term), then drop the

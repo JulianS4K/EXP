@@ -117,3 +117,12 @@ How the count works:
    `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, and `CRON_SECRET` for replay).
 3. With one organizer: make the URL, add it in Posh, buy one test ticket, and check the log row
    against the parser table above before relying on it.
+
+## Retention
+
+The delivery log (`exos_posh_webhook_log`, buyer name and email only) is kept
+for the hook's `retention_days` (30 by default). `exos_posh_purge_logs()` runs
+daily from the `exos-posh-log-retention-daily` cron and covers every org,
+including disconnected ones; disconnecting deletes the org's log at once.
+Orders and door entries stay. All Exos crons are off on prod, so enabling this
+one is the operator's call.
