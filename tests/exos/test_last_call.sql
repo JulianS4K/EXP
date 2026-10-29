@@ -11,6 +11,9 @@
 --   L4 primary Eventbrite: Exos sells nothing (checkout, public tiers);
 --      Eventbrite's target is its sold + every free seat; Luma sold out; the
 --      storefront points at Eventbrite's page
+--   L4b no SQL mint path (comps, box office, mint, a bypass voucher, a
+--       referral reward) gets round it; Stripe fulfilment and marketplace
+--       sales go through
 --   L5 primary Luma: the same the other way round, with the mirror's URL
 --   L6 off again (threshold 0, cancelled): every channel back
 --   L7 S4K: off the feed, pool planned 0 and released, listings dropped, no
@@ -193,6 +196,40 @@ BEGIN
   PERFORM pg_temp.act(NULL);
 END $$;
 
+-- L4b. No SQL mint path gets round it, a bypass voucher included: one
+-- trigger on exos_tickets. A paid Exos checkout being fulfilled and a
+-- marketplace sale that already happened go through.
+DO $$
+DECLARE n0 int := (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1'));
+        v uuid;
+BEGIN
+  PERFORM pg_temp.act('d7000000-0000-0000-0000-0000000000a0');
+  -- The comp batch reports per address instead of raising: none issued.
+  BEGIN
+    PERFORM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['comp@x.com'], 1);
+  EXCEPTION WHEN others THEN NULL;
+  END;
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1')) = n0, 'L4b: comps';
+  ASSERT pg_temp.refused($q$SELECT public.exos_issue_ticket_to_email(pg_temp.u('e1'), pg_temp.u('d2'), 'door@x.com', 1, 'bo-1')$q$, ''), 'L4b: box office (the empty count, or the trigger)';
+  ASSERT pg_temp.refused($q$SELECT public.exos_mint_tickets(pg_temp.u('e1'), pg_temp.u('d2'), 1)$q$, ''), 'L4b: mint';
+  PERFORM pg_temp.act(NULL);
+  -- A bypass_capacity voucher on a free claim: the count doesn't stop it, the trigger does.
+  INSERT INTO public.exos_vouchers (event_id, code, tier_id, max_uses, bypass_capacity)
+  VALUES (pg_temp.u('e1'), 'D7BYPASS', pg_temp.u('d2'), 5, true) RETURNING id INTO v;
+  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'v@x.com', 'active', 'x1', 0, 'D7BYPASS', 'vibepass')$q$,
+                         'on sale only at Eventbrite'), 'L4b: a voucher mint';
+  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'r@x.com', 'active', 'x2', 0, 'referral_1', 'referral_reward')$q$,
+                         'last call'), 'L4b: a referral reward';
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1')) = n0, 'L4b: nothing minted';
+  -- Let through: a fulfilled Stripe checkout, a marketplace sale.
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+  VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 's@x.com', 'active', 'x3', 90, 'cs_d7', 'stripe'),
+         (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'm@x.com', 'active', 'x4', 90, 'sh-1', 'stubhub');
+  DELETE FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND barcode_secret IN ('x3', 'x4');
+END $$;
+
 -- L5. Primary Luma.
 DO $$
 DECLARE s public.exos_public_event_sales;
@@ -219,6 +256,11 @@ BEGIN
   UPDATE public.exos_events SET status = 'cancelled' WHERE id = pg_temp.u('e1');
   ASSERT NOT public.exos_event_last_call(pg_temp.u('e1')), 'L6: cancelled is not last call';
   UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('e1');
+  -- Primary Exos at last call: Exos keeps minting (the trigger lets it through).
+  PERFORM pg_temp.act('d7000000-0000-0000-0000-0000000000a0');
+  PERFORM public.exos_issue_ticket_to_email(pg_temp.u('e1'), pg_temp.u('d2'), 'door@x.com', 1, 'bo-2');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND order_ref = 'bo-2'), 'L6: Exos primary still mints';
+  PERFORM pg_temp.act(NULL);
 END $$;
 
 -- L7. S4K.
@@ -255,7 +297,7 @@ DECLARE r jsonb;
 BEGIN
   PERFORM pg_temp.act('d7000000-0000-0000-0000-0000000000a2');   -- finance reads
   r := public.exos_last_call_status(pg_temp.u('e1'));
-  ASSERT (r ->> 'active')::boolean AND (r ->> 'remaining')::int = 10 AND (r ->> 'threshold')::int = 10
+  ASSERT (r ->> 'active')::boolean AND (r ->> 'remaining')::int = 9 AND (r ->> 'threshold')::int = 10
      AND r ->> 'threshold_source' = 'platform' AND r ->> 'primary_source' = 'exos' AND NOT (r ->> 'can_manage')::boolean, 'L8: status ' || r::text;
   ASSERT pg_temp.refused($q$SELECT public.exos_set_last_call_threshold(pg_temp.u('e1'), 5)$q$, 'not allowed'), 'L8: finance can''t set';
   ASSERT pg_temp.refused($q$SELECT public.exos_set_org_last_call_threshold('d7000000-0000-0000-0000-000000000001', 5)$q$, 'not allowed'), 'L8: finance org';
@@ -287,7 +329,7 @@ BEGIN
   FOREACH f IN ARRAY ARRAY['public.exos_last_call_default()', 'public.exos_event_last_call_threshold(uuid)',
                            'public.exos_event_remaining(uuid)', 'public.exos_event_last_call(uuid)',
                            'public.exos_last_call_closes(uuid, text)', 'public._exos_primary_url(uuid)',
-                           'public._exos_primary_hold(uuid, bigint)'] LOOP
+                           'public._exos_primary_hold(uuid, bigint)', 'public.exos_tg_ticket_last_call()'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'L9: service only ' || f;
   END LOOP;
   ASSERT has_function_privilege('anon', 'public.exos_public_event_sale(uuid)', 'EXECUTE'), 'L9: the view''s function is the public one';

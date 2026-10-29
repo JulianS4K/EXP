@@ -12,6 +12,8 @@
 --              (anon: published events only, where to buy and nothing else)
 --           R: FUNCTION _exos_primary_hold (+ last call: Exos closes when it
 --              isn't the primary)
+--           C: TRIGGER exos_tickets_last_call (BEFORE INSERT on exos_tickets:
+--              no Exos mint while Exos is closed, vouchers included)
 --           W: FUNCTION exos_channel_pool_plan, _exos_channel_split_plan,
 --              _exos_feed_eligible, exos_eventbrite_inventory_apply,
 --              exos_luma_inventory_apply (patched in place)
@@ -249,6 +251,42 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_primary_hold(uuid, bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_primary_hold(uuid, bigint) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 5b. No Exos mint at all while Exos is closed, whatever the path: free
+--     claims, comps, box office, referral rewards, a bypass_capacity voucher
+--     (which skips the count the primary hold empties). One trigger on the
+--     ticket table, so a new mint path can't miss it. Let through: a paid
+--     Exos checkout being fulfilled (channel_source 'stripe': its seats were
+--     held before last call, and exos-checkout refuses new sessions during
+--     it) and a marketplace / S4K sale that already happened elsewhere
+--     (channel_source = its channel). Clients can't insert tickets directly
+--     (RLS), so channel_source is set only by those definer functions.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.exos_tg_ticket_last_call()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_primary text;
+BEGIN
+  IF coalesce(NEW.channel_source, '') IN ('stripe', 's4k', 'stubhub', 'seatgeek', 'gametime', 'vivid', 'gotickets',
+                                          'tickpick', 'evo', 'automatiq') THEN
+    RETURN NEW;
+  END IF;
+  IF public.exos_last_call_closes(NEW.event_id, 'exos') THEN
+    SELECT primary_source INTO v_primary FROM public.exos_events WHERE id = NEW.event_id;
+    RAISE EXCEPTION 'last call: the last tickets for this event are on sale only at %',
+      CASE v_primary WHEN 'luma' THEN 'Luma' WHEN 'eventbrite' THEN 'Eventbrite' ELSE v_primary END
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_tg_ticket_last_call() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE TRIGGER exos_tickets_last_call
+  BEFORE INSERT ON public.exos_tickets
+  FOR EACH ROW EXECUTE FUNCTION public.exos_tg_ticket_last_call();
 
 -- ---------------------------------------------------------------------------
 -- 6. The storefront: published events only, nothing but where to buy.

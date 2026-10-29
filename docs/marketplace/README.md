@@ -22,7 +22,10 @@ for grep (`text/`), machine-readable specs where the vendor publishes them
 2026-10-14 and 2026-10-29, migs `20261014140000`, `20261029090000`): an event
 whose max capacity (its overall cap, never above what its capped ticket types
 add up to; else the capped types' sum; a table counts its party size) is 150
-or less is the **free tier** (no Exos fee, never resold). Over 150, resale
+or less is the **free tier** (no Exos fee, never resold), judged on the larger of
+the max capacity and the tickets actually sold (`exos_event_tier_size`), so an
+event that sells past its cap (bypass vouchers, comps, box office) leaves it:
+the checkout counts sold + its own order (`exos_event_fee_terms`). Over 150, resale
 needs an owner or manager's **opt-in for that event** (`exos_resale_consents`,
 `exos_set_resale_consent`), revoked by itself if the max capacity drops back
 to 150 or less. Until both hold, the marketplaces above (and TickPick, Tixel
@@ -39,7 +42,11 @@ Luma aren't resale and aren't affected. The numbers are operator settings
 **Last call** (spec §5, mig `20261029100000`): at 10 tickets left or fewer
 (per event, else the org's, else the `last_call_threshold` setting; 0 = off)
 every pool plans to 0 as when resale is locked, and only the primary
-checkout sells (`exos_event_last_call`, read by every planner).
+checkout sells (`exos_event_last_call`, read by every planner). When that
+primary isn't Exos, a trigger on `exos_tickets` refuses every Exos mint
+(free claims, comps, box office, referral rewards, bypass vouchers); only a
+paid Stripe checkout already held and a marketplace sale that already
+happened go through.
 
 **Hard Rule #2 applies** (see `CLAUDE.md`): upstream ticketing APIs are
 read-only. Every endpoint is tagged below as **read** or **write**. A write
