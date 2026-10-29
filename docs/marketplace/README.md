@@ -48,6 +48,19 @@ primary isn't Exos, a trigger on `exos_tickets` refuses every Exos mint
 paid Stripe checkout already held and a marketplace sale that already
 happened go through.
 
+**Fixed block** (spec §5, mig `20261029160000`): an event whose primary is a
+platform Exos can't sync (`primary_source = 'external'`, `primary_platform`
+DICE / Shotgun / RA / a box office) sells a block per ticket type: the block
+is the type's capacity, so the free-tier and resale rules above read the
+block (150 or less never resold; over 150 with the opt-in). For last call
+Exos is the seller of its block: pools plan to 0, Exos keeps selling. At the
+release time (`block_release_at`, default 24 hours before doors) every pool
+plans to 0 (`block_released`), the auto split and the S4K feed leave the
+event out, Exos sells nothing more (the primary hold takes every free seat;
+the same mint trigger rule as last call), and the per-type count to put back
+goes to the organizer (`exos_fixed_block_releases`, the
+`fixed-block-released` mail).
+
 **Hard Rule #2 applies** (see `CLAUDE.md`): upstream ticketing APIs are
 read-only. Every endpoint is tagged below as **read** or **write**. A write
 (listing create/update/delete, sale fulfilment, account or webhook changes)

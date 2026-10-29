@@ -113,14 +113,15 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
          20261029090000_exos_free_tier_resale_consent \
-         20261029100000_exos_last_call; do
+         20261029100000_exos_last_call \
+         20261029160000_exos_fixed_block; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
 # and opted in) and last call (mig 20261029100000) postdate the marketplace
 # fixtures (small events, no opt-in, a few seats): off for them.
-# test_resale_min_capacity.sql, test_free_tier_resale.sql and
-# test_last_call.sql put the rules back for themselves.
+# test_resale_min_capacity.sql, test_free_tier_resale.sql, test_last_call.sql
+# and test_fixed_block.sql put the rules back for themselves.
 $PSQL -c "INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_capacity', '-1'), ('resale_consent_required', 'false'), ('last_call_threshold', '0') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_p0.sql"
@@ -250,7 +251,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
          20261029090000_exos_free_tier_resale_consent \
-         20261029100000_exos_last_call; do
+         20261029100000_exos_last_call \
+         20261029160000_exos_fixed_block; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -288,3 +290,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_day_
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_online_event_followups.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_free_tier_resale.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_last_call.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fixed_block.sql"

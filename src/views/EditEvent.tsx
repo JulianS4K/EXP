@@ -84,6 +84,7 @@ import ChannelSplitPanel from '../components/ChannelSplitPanel';
 import S4kRoutePanel from '../components/S4kRoutePanel';
 import ResaleConsentPanel from '../components/ResaleConsentPanel';
 import LastCallPanel from '../components/LastCallPanel';
+import FixedBlockPanel from '../components/FixedBlockPanel';
 import type { SalesRules } from '../lib/marketplace/resaleConsent';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
@@ -1674,6 +1675,16 @@ export default function EditEvent() {
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
         {eventId && <LastCallPanel eventId={eventId} />}
+        {/* A fixed block for a platform Exos can't sync (mig 20261029160000): the block is the capacity. */}
+        {eventId && (
+          <FixedBlockPanel
+            eventId={eventId}
+            onBlocks={(caps) => setEventData((d) => ({
+              ...d,
+              ticketTiers: (d.ticketTiers || []).map((t) => (t.id && caps[t.id] !== undefined ? { ...t, capacity: caps[t.id] } : t)),
+            }))}
+          />
+        )}
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
 
         {SHOW_MARKETPLACES && (<>

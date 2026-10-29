@@ -458,6 +458,43 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // A fixed block handed back to the organizer's primary platform (mig
+  // 20261029160000). Counts only: Exos can't write to that platform, so the
+  // organizer puts these tickets back on sale there.
+  "fixed-block-released": (ctx) => {
+    const ev = event(ctx.p);
+    const platform = str(ctx.p, "platform", "your ticketing platform");
+    const total = num(ctx.p, "total_returned", 0);
+    const pending = num(ctx.p, "total_pending", 0);
+    const unit = (t: Obj, n: number) => {
+      const table = str(t, "kind", "standard") === "table";
+      const party = num(t, "party_size", 1);
+      return table
+        ? `${n} table${n === 1 ? "" : "s"}${party > 1 ? ` of ${party}` : ""}`
+        : `${n} ticket${n === 1 ? "" : "s"}`;
+    };
+    const rows = list(ctx.p, "tiers").map((t) =>
+      `<tr><td style="padding:2px 12px 2px 0">${esc(str(t, "name", "Ticket"))}</td>` +
+      `<td style="padding:2px 12px 2px 0;text-align:right"><strong>${esc(unit(t, num(t, "returned", 0)))}</strong></td>` +
+      `<td style="padding:2px 0;color:#666">sold ${num(t, "sold", 0)} of ${num(t, "block", 0)} on Exos</td></tr>`
+    ).join("");
+    return {
+      audience: "organizer",
+      orgName: str(obj(ctx.p, "event"), "org_name", ""),
+      subject: `Put ${total} ticket${total === 1 ? "" : "s"} back on ${platform}: ${ev.name}`,
+      body:
+        eventBlock(ev) +
+        `<p>Exos has stopped selling its block for this event. Put these back on sale on <strong>${esc(platform)}</strong> ` +
+        `(Exos can't change your listing there):</p>` +
+        (rows ? `<table style="border-collapse:collapse;font-size:14px">${rows}</table>` : "") +
+        (pending > 0
+          ? `<p>${pending} more ${pending === 1 ? "is" : "are"} still in a checkout or on a marketplace. If they don't sell, the event page shows them as "put back".</p>`
+          : "") +
+        `<p>Tickets sold on Exos are on your Exos door list. For the rest, import ${esc(platform)}'s attendee export into a guest list.</p>` +
+        button(ctx, `/dashboard/event/${ev.id}`, "Open the event"),
+    };
+  },
+
   "payout-sent": (ctx) => {
     const o = org(ctx.p);
     const amount = formatMoney(num(ctx.p, "amount_cents"), str(ctx.p, "currency"));
