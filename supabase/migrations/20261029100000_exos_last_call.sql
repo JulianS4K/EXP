@@ -394,6 +394,23 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_set_org_last_call_threshold(uuid, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_set_org_last_call_threshold(uuid, integer) TO authenticated, service_role;
 
+-- ---------------------------------------------------------------------------
+-- 8. A free claim can't pose as a paid or marketplace sale.
+--    exos_tickets_last_call (above) lets 'stripe' and the marketplace channels
+--    through, and other code reads channel_source too. exos_claim_free_tickets
+--    is client-callable and took p_channel from the caller, mapping only
+--    'comp' / 'boxoffice' to 'vibepass'; any reserved channel now maps to
+--    'vibepass' as well (a branch ahead of that one, so 20260925021000's own
+--    re-run marker still matches).
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.exos_patch_n('public.exos_claim_free_tickets(uuid, uuid, integer, text, text, text)',
+  'reserved channels (mig 20261029100000)',
+  $o$CASE WHEN lower(btrim(coalesce(p_channel, ''))) IN ('comp', 'boxoffice')$o$,
+  $n$CASE WHEN lower(btrim(coalesce(p_channel, ''))) IN ('stripe', 's4k', 'stubhub', 'seatgeek', 'gametime', 'vivid',
+                'gotickets', 'tickpick', 'evo', 'automatiq', 'eventbrite', 'luma', 'pos') /* reserved channels (mig 20261029100000) */
+             THEN 'vibepass'
+           WHEN lower(btrim(coalesce(p_channel, ''))) IN ('comp', 'boxoffice')$n$, 1);
+
 -- ROLLBACK (manual): re-create _exos_primary_hold from 20261019090000 and the
 -- five patched functions from their earlier sources; DROP VIEW
 -- exos_public_event_sales; drop the functions above and the two

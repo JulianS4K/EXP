@@ -349,4 +349,27 @@ END $$;
 RESET ROLE;
 
 \echo 'test_last_call: all passed'
+-- L10. A free claim can't pose as a paid or marketplace sale: a reserved
+-- channel passed to exos_claim_free_tickets is stored as 'vibepass', so the
+-- last-call trigger (and anything else reading channel_source) can't be fooled.
+DO $$
+DECLARE v_ch text; r record;
+BEGIN
+  INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,venue_name,total_tickets,tickets_sold,timezone,created_by)
+  VALUES ('d7000000-0000-0000-0000-0000000000ea','d7000000-0000-0000-0000-000000000001','Free','d7-free','published',
+          now() + interval '20 days','Hall',0,0,'America/New_York','d7000000-0000-0000-0000-0000000000a0');
+  INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility,sort_order)
+  VALUES ('d7000000-0000-0000-0000-0000000000fa','d7000000-0000-0000-0000-0000000000ea','RSVP',0,100,0,'public',1);
+  PERFORM set_config('app.uid', 'd7000000-0000-0000-0000-0000000000a4', true);
+  FOR r IN SELECT unnest(ARRAY['stripe','stubhub','s4k','automatiq','Stripe ']) AS ch LOOP
+    PERFORM public.exos_claim_free_tickets('d7000000-0000-0000-0000-0000000000ea','d7000000-0000-0000-0000-0000000000fa',
+                                           1, NULL, r.ch, NULL);
+  END LOOP;
+  PERFORM set_config('app.uid', '', true);
+  SELECT string_agg(DISTINCT channel_source, ',') INTO v_ch FROM public.exos_tickets
+   WHERE event_id = 'd7000000-0000-0000-0000-0000000000ea';
+  ASSERT v_ch = 'vibepass', 'L10: reserved channel kept by a free claim: ' || coalesce(v_ch, 'none');
+  RAISE NOTICE 'OK  L10 a free claim can''t take a reserved channel';
+END $$;
+
 ROLLBACK;
