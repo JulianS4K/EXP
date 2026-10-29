@@ -22,6 +22,15 @@
 //     (every platform requires one).
 //   * brand: the organizer's name.
 //
+// Link-out events (imported from Eventbrite / Luma / Posh, mig 20261029170000;
+// Exos sells nothing): price = the imported lowest price, availability from
+// the re-checked source status (sold out = out of stock; cancelled or ended
+// at the source = left out), link = the organizer's checkout with the same
+// UTM tags, except on Google Merchant Center, whose listings must land on
+// the feed's own verified domain: there the link stays the Exos event page,
+// whose button goes on to the checkout. Free listings only; no ads are run
+// from this feed.
+//
 // Only fields that are already public on the event page are used (the edge
 // function reads the exos_public_* views with the anon key).
 //
@@ -31,6 +40,7 @@ import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
 import { mdToPlain } from '../richText.ts';
 import { eventPageUrl, zonedIso } from '../googleEvents/feed.ts';
+import { isLinkOut, linkOutGone, linkOutSoldOut, platformLabel, priceRange, trackedBuyUrl, type WhereToBuy } from '../eventImport/linkOut.ts';
 
 export type CatalogPlatform = 'meta' | 'tiktok' | 'google';
 export type CatalogFileType = 'csv' | 'xml';
@@ -247,21 +257,25 @@ function whenLabel(startMs: number, now: Date): string {
   return days <= 7 ? 'this_week' : days <= 31 ? 'this_month' : 'later';
 }
 
-function description(e: CatalogEventRow, title: string, when: string): string {
+function description(e: CatalogEventRow, title: string, when: string, sellsOn = 'Exos'): string {
   const body = e.description_md?.trim() ? mdToPlain(e.description_md) : (e.description ?? '');
   const full = plain([e.summary ?? '', body].filter((s) => s.trim()).join(' '), 5000);
   // Required everywhere, and Meta wants it to differ from the title.
   if (full && full.toLowerCase() !== title.toLowerCase()) return full;
   const where = [text(e.venue_name), city(e.venue_address)].filter(Boolean).join(', ');
-  return plain(`${title}${where ? ` at ${where}` : ''}${when ? `, ${when}` : ''}. Tickets on Exos.`, 5000);
+  return plain(`${title}${where ? ` at ${where}` : ''}${when ? `, ${when}` : ''}. Tickets on ${sellsOn}.`, 5000);
 }
 
 /** Why an event can't be a catalog item, or null. */
-export function catalogBlocker(e: CatalogEventRow, tiers: CatalogTierRow[], now: Date): string | null {
+export function catalogBlocker(e: CatalogEventRow, tiers: CatalogTierRow[], now: Date, linkOut?: WhereToBuy | null): string | null {
   if (e.noindex === true) return 'hidden from search by the organizer';
   if (!e.starts_at || Number.isNaN(Date.parse(e.starts_at))) return 'no start time';
   if (eventEnd(e) < now.getTime()) return 'already over';
-  if (!tiers.length) return 'no public ticket types';
+  if (isLinkOut(linkOut)) {
+    const gone = linkOutGone(linkOut);
+    if (gone) return gone === 'cancelled' ? 'cancelled at the source' : 'over at the source';
+    if (!priceRange(linkOut)) return 'no price from the source (link-out)';
+  } else if (!tiers.length) return 'no public ticket types';
   if (!marketTitle({ name: e.name, primary_performer_name: e.primary_performer_name ?? null, venue_name: e.venue_name ?? null })) {
     return 'no usable title';
   }
@@ -270,12 +284,18 @@ export function catalogBlocker(e: CatalogEventRow, tiers: CatalogTierRow[], now:
 }
 
 /** One event as a catalog item. Call catalogBlocker first. */
-export function catalogItem(e: CatalogEventRow, tiers: CatalogTierRow[], org: CatalogOrg, opts: CatalogOptions): CatalogItem {
+export function catalogItem(
+  e: CatalogEventRow, tiers: CatalogTierRow[], org: CatalogOrg, opts: CatalogOptions, linkOut?: WhereToBuy | null,
+): CatalogItem {
   const now = opts.now ?? new Date();
   const tz = e.timezone || 'UTC';
   const currency = (e.currency || 'USD').toUpperCase();
   const title = plain(marketTitle({ name: e.name, primary_performer_name: e.primary_performer_name ?? null, venue_name: e.venue_name ?? null }), 150);
-  const pa = priceAndAvailability(e, tiers, now)!;
+  const lo = isLinkOut(linkOut) ? linkOut : null;
+  const pa = lo
+    ? { cents: Math.round(priceRange(lo)!.min * 100), availability: (linkOutSoldOut(lo) ? 'out of stock' : 'in stock') as Availability, opensAt: null }
+    : priceAndAvailability(e, tiers, now)!;
+  const priceCurrency = lo ? priceRange(lo)!.currency : currency;
   const start = zonedIso(e.starts_at!, tz) ?? new Date(Date.parse(e.starts_at!)).toISOString();
   const localDate = start.slice(0, 10);
   const imgs = images(e);
@@ -285,12 +305,12 @@ export function catalogItem(e: CatalogEventRow, tiers: CatalogTierRow[], org: Ca
   return {
     id: e.id,
     title,
-    description: description(e, title, localDate),
+    description: description(e, title, localDate, lo ? platformLabel(lo) : 'Exos'),
     availability: pa.availability,
     ...(pa.availability === 'preorder' && opens ? { availabilityDate: zonedIso(opens, tz) ?? opens } : {}),
     condition: 'new',
-    price: formatPrice(pa.cents, currency),
-    link: catalogLink(opts.appBase, e, opts.platform),
+    price: formatPrice(pa.cents, priceCurrency),
+    link: lo && opts.platform !== 'google' ? linkOutCatalogLink(lo, e, opts.platform) : catalogLink(opts.appBase, e, opts.platform),
     imageLink: imgs[0],
     additionalImageLinks: imgs.slice(1),
     brand: plain(org.name, 100) || 'Exos',
@@ -306,9 +326,15 @@ export function catalogItem(e: CatalogEventRow, tiers: CatalogTierRow[], org: Ca
   };
 }
 
+/** A link-out event's link: the organizer's checkout, tagged like catalogLink. */
+export function linkOutCatalogLink(w: WhereToBuy & { url: string }, e: Pick<CatalogEventRow, 'id'>, platform: CatalogPlatform): string {
+  return trackedBuyUrl(w, { utm_source: platform, utm_medium: 'paid_social', utm_campaign: 'catalog', utm_content: e.id });
+}
+
 /** The org's catalog: items in start order, plus the events left out and why. */
 export function buildCatalog(
-  input: { org: CatalogOrg; events: CatalogEventRow[]; tiers: CatalogTierRow[] }, opts: CatalogOptions,
+  input: { org: CatalogOrg; events: CatalogEventRow[]; tiers: CatalogTierRow[]; linkOuts?: ReadonlyMap<string, WhereToBuy> },
+  opts: CatalogOptions,
 ): { items: CatalogItem[]; skipped: SkippedItem[] } {
   const now = opts.now ?? new Date();
   const byEvent = new Map<string, CatalogTierRow[]>();
@@ -320,9 +346,10 @@ export function buildCatalog(
     .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)) || a.id.localeCompare(b.id));
   for (const e of events) {
     const tiers = byEvent.get(e.id) ?? [];
-    const why = catalogBlocker(e, tiers, now);
+    const lo = input.linkOuts?.get(e.id) ?? null;
+    const why = catalogBlocker(e, tiers, now, lo);
     if (why) skipped.push({ event_id: e.id, name: e.name, reason: why });
-    else items.push(catalogItem(e, tiers, input.org, opts));
+    else items.push(catalogItem(e, tiers, input.org, opts, lo));
   }
   return { items, skipped };
 }

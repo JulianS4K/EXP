@@ -51,9 +51,23 @@ at least one public ticket type, and has an https image. Hidden (code-unlocked) 
 CSV is RFC 4180 (UTF-8, CRLF, fields with commas, quotes or line breaks quoted, quotes doubled); XML text is escaped
 and characters XML 1.0 forbids are removed.
 
+**Link-out events** (listed from Eventbrite, Luma or Posh, mig `20261029170000`; Exos sells nothing) have no Exos
+ticket types; the feed reads `exos_public_link_outs` (anon) instead:
+
+- price: the imported lowest price (`25.00 USD`); availability: `out of stock` when the source is sold out, else
+  `in stock`; left out when the source is cancelled or over, or gave no price;
+- link: the organizer's checkout with the same UTM tags
+  (`https://www.eventbrite.com/e/…?utm_source=meta&utm_medium=paid_social&utm_campaign=catalog&utm_content=<event id>`)
+  for Meta and TikTok. **Google Merchant Center keeps the Exos event page**: Merchant Center requires the landing
+  page to be on the feed's own verified domain, and the event page's button goes on to the checkout;
+- the fallback description says "Tickets on Eventbrite." (or Luma / Posh).
+
+Use this feed for **free** listings only; no ads are run from it.
+
 ### How it reads data
 
-- The function reads **only the public views** (`exos_public_orgs`, `exos_public_events`, `exos_public_tiers`) with the
+- The function reads **only the public views** (`exos_public_orgs`, `exos_public_events`, `exos_public_tiers`,
+  `exos_public_link_outs`) with the
   **anon key**, so it can only serve what the event page already shows. The service role is used only for the rate
   limiter (`exos_rate_hit`).
 - 30 calls a minute per network; if the limiter errors, calls are refused (503). Responses are

@@ -32,6 +32,7 @@ import {
   type CatalogOrg,
   type CatalogTierRow,
 } from "../_shared/catalog/feed.ts";
+import type { WhereToBuy } from "../_shared/eventImport/linkOut.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { redactError } from "../_shared/log.ts";
 
@@ -105,6 +106,7 @@ async function readCatalogInput(sb: SupabaseClient, slug: string, now: Date) {
   if (eErr) throw new Error(`events: ${eErr.message}`);
   const events = (evs ?? []) as unknown as CatalogEventRow[];
   const tiers: CatalogTierRow[] = [];
+  const linkOuts = new Map<string, WhereToBuy>();
   const ids = events.map((e) => e.id);
   for (let i = 0; i < ids.length; i += 200) {
     // `available` (mig 20261014160000): what Exos can sell. Before the
@@ -115,8 +117,14 @@ async function readCatalogInput(sb: SupabaseClient, slug: string, now: Date) {
     if (tErr?.code === "42703") ({ data: t, error: tErr } = await run(TIER_COLS));
     if (tErr) throw new Error(`tiers: ${tErr.message}`);
     tiers.push(...((t ?? []) as unknown as CatalogTierRow[]));
+    // Link-out events (mig 20261029170000): the organizer's checkout and the
+    // imported prices. Before the migration the view is missing (42P01 /
+    // PGRST205): none.
+    const { data: lo, error: lErr } = await sb.from("exos_public_link_outs").select("*").in("event_id", ids.slice(i, i + 200));
+    if (lErr && !["42P01", "PGRST205"].includes(lErr.code ?? "")) throw new Error(`link-outs: ${lErr.message}`);
+    for (const r of (lo ?? []) as WhereToBuy[]) linkOuts.set(r.event_id, { ...r, link_out: true });
   }
-  return { org: org as CatalogOrg, events, tiers };
+  return { org: org as CatalogOrg, events, tiers, linkOuts };
 }
 
 /** Bearer <service role key>, compared in constant time over the SHA-256 digests. */

@@ -27,11 +27,28 @@
 // pricing rules both want the total up front. Offer URLs go to the Exos
 // checkout with that ticket type in the cart, tagged utm_source=google.
 //
+// Sold elsewhere (where to buy: exos_event_buy_link, mig 20261029170000):
+//   * a LINK-OUT event (imported from Eventbrite / Luma / Posh; Exos sells
+//     nothing) has no Exos ticket types. Its offers are the imported ticket
+//     types (else one "Tickets" offer at the lowest price), each with the
+//     organizer's checkout URL (tagged utm_source=google), the platform as
+//     seller, and availability from the re-checked source status (SoldOut /
+//     InStock). googleFields.sellerType is LINK_OUT: Exos lists it, the
+//     organizer's platform sells it. Cancelled at the source: EventCancelled
+//     until its start (the import cancels the Exos event); ended: left out.
+//     Moved at the source: EventRescheduled with previousStartDate.
+//   * an event another backend sells (ticket_backend, or last call on another
+//     primary) keeps its Exos ticket types but its offer URLs go to that shop.
+//
 // Pure: no Deno or Supabase imports; the edge function does the reads.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { ageLimit, marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
 import { mdToPlain } from '../richText.ts';
+import {
+  displayTypes, isLinkOut, linkOutGone, linkOutSoldOut, platformLabel, priceRange, sellsElsewhere, trackedBuyUrl,
+  type WhereToBuy,
+} from '../eventImport/linkOut.ts';
 
 export const GOOGLE_FEED_VERSION = 1;
 
@@ -98,6 +115,8 @@ export interface FeedInput {
   tiers: FeedTierRow[];
   geo: ReadonlyMap<string, FeedGeo>;
   orgs: ReadonlyMap<string, FeedOrg>;
+  /** exos_feed_where_to_buy rows by event id (absent: everything sells on Exos). */
+  buy?: ReadonlyMap<string, WhereToBuy>;
 }
 
 export interface FeedOptions {
@@ -116,8 +135,10 @@ export interface GoogleFeedItem {
     category: GoogleEventCategory;
     /** Google Maps Place ID of the venue, when Exos geocoded it. */
     placeId: string | null;
-    /** The Exos "official seller" claim: Exos is the organizer's primary ticketer. */
-    sellerType: 'PRIMARY';
+    /** PRIMARY: Exos is the organizer's primary ticketer. LINK_OUT: Exos lists
+     *  the event and the organizer's own platform sells it (the offers say
+     *  which). Provisional until the partner spec names its value. */
+    sellerType: 'PRIMARY' | 'LINK_OUT';
     updatedFrom: 'exos';
   };
   event: SchemaEvent;
@@ -154,7 +175,7 @@ export interface SchemaOffer {
   validFrom?: Iso;
   validThrough?: Iso;
   category: 'primary';
-  seller: { '@type': 'Organization'; name: 'Exos' };
+  seller: { '@type': 'Organization'; name: string };
   sku: string;
 }
 
@@ -169,7 +190,8 @@ export interface SchemaEvent {
   startDate: Iso;
   endDate?: Iso;
   doorTime?: Iso;
-  eventStatus: 'https://schema.org/EventScheduled' | 'https://schema.org/EventCancelled';
+  eventStatus: 'https://schema.org/EventScheduled' | 'https://schema.org/EventCancelled' | 'https://schema.org/EventRescheduled';
+  previousStartDate?: Iso;
   eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode' | 'https://schema.org/MixedEventAttendanceMode';
   location: {
     '@type': 'Place';
@@ -264,7 +286,8 @@ function eventDescription(e: FeedEventRow): string | undefined {
   return plainDescription([e.summary ?? '', body].filter((s) => s.trim()).join(' '));
 }
 
-function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: string, now: Date, cancelled: boolean): SchemaOffer {
+function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: string, now: Date, cancelled: boolean,
+  buy?: WhereToBuy | null): SchemaOffer {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
   const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0);
   const left = t.capacity > 0 ? t.capacity - t.sold : Infinity;
@@ -281,20 +304,47 @@ function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: st
   return {
     '@type': 'Offer',
     name: t.name.slice(0, 200),
-    url: offerUrl(appBase, e.id, t.id),
+    // Sold on another shop right now: its page, not the Exos checkout.
+    url: sellsElsewhere(buy) ? trackedBuyUrl(buy, GOOGLE_UTM) : offerUrl(appBase, e.id, t.id),
     price: (cents / 100).toFixed(2),
     priceCurrency: currency,
     availability,
     ...(from ? { validFrom: from } : {}),
     ...(through ? { validThrough: through } : {}),
     category: 'primary',
-    seller: { '@type': 'Organization', name: 'Exos' },
+    seller: { '@type': 'Organization', name: sellsElsewhere(buy) ? platformLabel(buy) : 'Exos' },
     sku: t.id,
   };
 }
 
+const GOOGLE_UTM = { utm_source: 'google', utm_medium: 'events_feed' };
+
+/**
+ * A link-out event's offers: one per imported ticket type with a price, else
+ * one "Tickets" offer at the lowest price. All go to the organizer's checkout.
+ */
+export function linkOutOffers(e: FeedEventRow, w: WhereToBuy & { url: string }, cancelled: boolean): SchemaOffer[] {
+  const range = priceRange(w)!;
+  const url = trackedBuyUrl(w, GOOGLE_UTM);
+  const seller = { '@type': 'Organization' as const, name: platformLabel(w) };
+  const soldOutAll = linkOutSoldOut(w);
+  const avail = (soldOut: boolean): SchemaOffer['availability'] => cancelled
+    ? 'https://schema.org/Discontinued'
+    : soldOutAll || soldOut ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock';
+  const types = displayTypes(w);
+  if (!types.length) {
+    return [{ '@type': 'Offer', name: 'Tickets', url, price: range.min.toFixed(2), priceCurrency: range.currency,
+      availability: avail(false), category: 'primary', seller, sku: `${e.id}:tickets` }];
+  }
+  return types.map((t, i) => ({
+    '@type': 'Offer', name: t.name, url, price: t.price.toFixed(2), priceCurrency: range.currency,
+    availability: avail(t.soldOut), category: 'primary', seller, sku: `${e.id}:${i + 1}`,
+  }));
+}
+
 /** Why an event can't go in the feed, or null. */
-export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date): string | null {
+export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date, buy?: WhereToBuy | null): string | null {
+  const linkOut = isLinkOut(buy);
   if (e.status !== 'published' && e.status !== 'cancelled') return 'not published';
   if (e.noindex === true) return 'hidden from search by the organizer';
   // Google's ticketing feed lists events at a place; a stream has none.
@@ -304,13 +354,20 @@ export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date): s
   if (end < now.getTime()) return 'already over';
   if (e.status === 'cancelled') {
     if (Date.parse(e.starts_at) < now.getTime()) return 'cancelled and past its start';
-    if (!(Number(e.tickets_sold) > 0)) return 'cancelled before any sale (never listed)';
+    if (!linkOut && !(Number(e.tickets_sold) > 0)) return 'cancelled before any sale (never listed)';
+    // A link-out event has no Exos sales to prove it was public. List it only
+    // when the source itself cancelled it (a public listing there); a draft
+    // the organizer cancelled in Exos stays out.
+    if (linkOut && linkOutGone(buy!) !== 'cancelled') return 'cancelled in Exos, not at the source (never listed)';
   }
   if (!e.timezone) return "no time zone (Google needs the venue's local time)";
   if (!text(e.venue_name)) return 'no venue name';
   const a = address(e.venue_address);
   if (!a.addressLocality || !a.addressCountry) return 'venue address needs at least a city and a country';
-  if (!tiers.length) return 'no public ticket types';
+  if (linkOut) {
+    if (linkOutGone(buy!) === 'ended') return 'over at the source';
+    if (!priceRange(buy!)) return 'no price from the source (link-out)';
+  } else if (!tiers.length) return 'no public ticket types';
   if (!marketTitle(e)) return 'no usable title';
   return null;
 }
@@ -318,6 +375,7 @@ export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date): s
 /** One event as a feed item. Call feedBlocker first. */
 export function feedItem(
   e: FeedEventRow, tiers: FeedTierRow[], geo: FeedGeo | null, org: FeedOrg | null, opts: FeedOptions,
+  buy?: WhereToBuy | null,
 ): GoogleFeedItem {
   const now = opts.now ?? new Date();
   const tz = e.timezone!;
@@ -329,7 +387,9 @@ export function feedItem(
   const lineup = Array.isArray(e.lineup) ? e.lineup.map((a) => (typeof a?.name === 'string' ? a.name : '')).filter(Boolean) : [];
   const performers = (lineup.length ? lineup : e.performer_names?.length ? e.performer_names : e.primary_performer_name ? [e.primary_performer_name] : [])
     .map((n) => text(n)).filter(Boolean).slice(0, 20);
-  const offers = tiers.map((t) => offerFor(t, e, currency, opts.appBase, now, cancelled));
+  const linkOut = isLinkOut(buy);
+  const offers = linkOut ? linkOutOffers(e, buy, cancelled) : tiers.map((t) => offerFor(t, e, currency, opts.appBase, now, cancelled, buy));
+  const prevStart = linkOut && buy.rescheduled_at && buy.previous_starts_at ? zonedIso(buy.previous_starts_at, tz) : null;
   const age = ageLimit(e.name, e.min_age);
   const start = zonedIso(e.starts_at!, tz)!;
   const endIso = e.ends_at ? zonedIso(e.ends_at, tz) : null;
@@ -345,7 +405,9 @@ export function feedItem(
     startDate: start,
     ...(endIso ? { endDate: endIso } : {}),
     ...(doors ? { doorTime: doors } : {}),
-    eventStatus: cancelled ? 'https://schema.org/EventCancelled' : 'https://schema.org/EventScheduled',
+    eventStatus: cancelled ? 'https://schema.org/EventCancelled'
+      : prevStart ? 'https://schema.org/EventRescheduled' : 'https://schema.org/EventScheduled',
+    ...(prevStart && !cancelled ? { previousStartDate: prevStart } : {}),
     eventAttendanceMode: e.format === 'hybrid'
       ? 'https://schema.org/MixedEventAttendanceMode'
       : 'https://schema.org/OfflineEventAttendanceMode',
@@ -365,7 +427,7 @@ export function feedItem(
   };
   return {
     id: e.id,
-    googleFields: { category: GOOGLE_CATEGORY[cat], placeId: geo?.place_id ?? null, sellerType: 'PRIMARY', updatedFrom: 'exos' },
+    googleFields: { category: GOOGLE_CATEGORY[cat], placeId: geo?.place_id ?? null, sellerType: linkOut ? 'LINK_OUT' : 'PRIMARY', updatedFrom: 'exos' },
     event,
   };
 }
@@ -379,12 +441,13 @@ export function buildGoogleFeed(input: FeedInput, opts: FeedOptions): { feed: Go
   const skipped: SkippedEvent[] = [];
   for (const e of [...input.events].sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)) || a.id.localeCompare(b.id))) {
     const tiers = byEvent.get(e.id) ?? [];
-    const why = feedBlocker(e, tiers, now);
+    const buy = input.buy?.get(e.id) ?? null;
+    const why = feedBlocker(e, tiers, now, buy);
     if (why) {
       skipped.push({ event_id: e.id, name: e.name, reason: why });
       continue;
     }
-    items.push(feedItem(e, tiers, input.geo.get(e.id) ?? null, input.orgs.get(e.org_id) ?? null, opts));
+    items.push(feedItem(e, tiers, input.geo.get(e.id) ?? null, input.orgs.get(e.org_id) ?? null, opts, buy));
   }
   return {
     feed: {
