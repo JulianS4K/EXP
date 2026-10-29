@@ -8,6 +8,7 @@
 //   * a paste-ready embed snippet for the venue's own site
 //   * caption templates for IG / TikTok / X
 //   * a jump to Marketing & socials (pixels) so ad spend is measurable
+//   * discovery listings: feed status + queueing for local calendars
 //
 // All URLs are built with publicUrl() so they carry the /bridge base in the
 // current deployment (and resolve at root post-beta). A bare ${origin}/event
@@ -31,6 +32,7 @@ import { buildEmbedSnippet } from '../lib/embed';
 import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
 import PromoterKitPanel from '../components/PromoterKitPanel';
+import DiscoveryListingsPanel from '../components/DiscoveryListingsPanel';
 import SocialLinks from '../components/SocialLinks';
 
 // Channel presets for the campaign-link builder. utm_medium follows the GA4
@@ -300,6 +302,8 @@ export default function PromoteEvent() {
             <p className="text-[11px] text-white/40 italic">Enter a campaign name above to make a promoter kit for that code.</p>
           )}
         </section>
+
+        {eventId && <DiscoveryListingsPanel eventId={eventId} />}
 
         {/* QR code */}
         <section className="bg-[#111] p-6 border border-white/10 mb-6">

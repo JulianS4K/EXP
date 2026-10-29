@@ -219,6 +219,73 @@ partner's newsletter). Each link has a name, a channel, a **limit** (tickets), a
 It opens your event with the code already applied; when the limit is reached or it expires, the code stops working.
 Visits and redemptions show per link, and sales are attributed to the channel under *Sales by source*.
 
+### Discovery listings
+
+**Promote page → Discovery listings** shows every place fans can find the event, with a status per channel
+(mig `20261029130000_exos_discovery_publishing.sql`; channel list in
+`supabase/functions/_shared/discovery/channels.ts`, mirrored by the `exos_discovery_channels` seed).
+
+- **Automatic (feeds):** Google Search & Maps (`exos-google-feed`, see [`google-events.md`](google-events.md)),
+  calendar feeds (`exos-calendar`, [`calendar.md`](calendar.md)) and ad catalogs (`exos-catalog-feed`,
+  [`marketing-catalog.md`](marketing-catalog.md)). The status is **Live** when the event is in that feed and
+  **Not listed** with the feed's own reason otherwise ("hidden from search by the organizer", "no time zone", "no https
+  image"…). Nothing is stored: Google uses `feedBlocker`, the catalog `catalogBlocker`, and the calendar asks
+  `exos_calendar_public_feed` whether the event is in the org's `.ics`. Live means *in the feed*: Google reads it only
+  once Exos is in its events ticketing program, and ad platforms only once the organizer adds the catalog URL.
+- **Calendars and listings sites (manual):** DoNYC, Time Out New York, CitySpark local calendars, Resident Advisor,
+  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown. **Queue for submission** puts the event in the operator's
+  queue; a person submits it on the channel's form and records **Submitted**, **Live** (with the listing's URL) or
+  **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
+  again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
+- **Free-tier cap:** an event whose max capacity (`exos_event_max_capacity`) is at or under the free-tier cutoff
+  (`exos_platform_settings` `free_tier_max_capacity`, 150 when the row is missing) can use **at most 5 manual
+  channels**. A channel counts once queued and not withdrawn (rejected and removed ones still count; queueing them again
+  doesn't add one); feeds never count. The 6th is refused with a message saying so; withdrawing a queued one frees the
+  slot. An event with no capacity set at all counts as small.
+- **Manual minutes (discovery pilot):** when recording submitted, live or rejected, the operator enters the minutes
+  that step took (0-600, optional). They add up per record; `exos_discovery_minutes(org, since, until)` totals them per
+  event (with the minutes per channel) and per org, with minutes per event. The operator screen shows the totals; the
+  Promote page shows the event's total.
+- Some channels only take the organizer's own account (RA, Meetup, Songkick, Bandsintown): the organizer submits and
+  records **I submitted it** / **It's live** on the same screen.
+- Each channel's "How to submit" link was looked up on 2026-10-29; links marked *not verified* point at the site, not
+  a submission page.
+- **Tracking:** the ticket link given to each channel is the event page with `utm_source=<channel id>`,
+  `utm_medium=listing`, `utm_campaign=discovery`, so its sales show under *Sales by source*. Every ticket link
+  discovery shows or copies comes from one function, `discoveryTicketLink` (`_shared/discovery/copy.ts`), so imported
+  link-out events (buy button on the organizer's own Eventbrite, Luma or Posh checkout) can point it at that checkout.
+
+| Channel | Kind | Region | Submission path (verified?) |
+|---|---|---|---|
+| Google Search & Maps | feed | global | `exos-google-feed` (Google program not joined) |
+| Calendar feeds | feed | global | `exos-calendar` org / venue `.ics` |
+| Ad catalogs (Meta, TikTok, Google Merchant) | feed | global | `exos-catalog-feed` (organizer adds the URL) |
+| DoNYC | manual | NYC | donyc.com/p/how-to-nyc: register, then email for event-editing rights (yes) |
+| Time Out New York | manual | NYC | timeout.com/newyork/get-listed: email the section editor (yes) |
+| CitySpark calendars | manual | US | CitySpark help "How to submit an event"; one submission reaches every CitySpark calendar in the area (yes) |
+| Resident Advisor | manual | global | support.ra.co "Submitting events", promoter account (yes) |
+| Oh My Rockness | manual | NYC | ohmyrockness.com, no form found (no) |
+| Edmtrain | manual | US | edmtrain.com "Add Event" (sign-in) (no) |
+| Meetup | manual | global | the organizer's own group (no) |
+| Songkick | manual | global | Songkick help: "Add an event" footer link (yes) |
+| Bandsintown | manual | global | Bandsintown for Artists "Add an event", per artist (yes) |
+
+**Why Edmtrain and Meetup aren't automatic:** Edmtrain's public API is read-only (event and location listings with a
+client key) and takes no submissions. Meetup's GraphQL API has `createEvent`, but only for an organizer of the group
+with Meetup Pro and an approved OAuth client, and it would be a new third-party write. The read-only rule
+(`CLAUDE.md`) allows writes only to the organizer's own Eventbrite and Luma, so a Meetup adapter needs the operator's
+decision first; until then both are manual.
+
+**Operator queue** (`/admin/listings`, platform admins only, `exos_is_admin`): queued / submitted / live / rejected
+tabs across every org, filterable by channel. Each item has the copy-ready details (title, date and time in venue
+time, venue, address, all-in price range, the channel's tracking link, image, plain-text description) with copy
+buttons, a link to the channel's submission page, and the actions above.
+
+Access: owners and managers queue, withdraw and record results; finance can see the statuses; scanners can't.
+RPCs: `exos_discovery_event_channels`, `exos_discovery_queue`, `exos_discovery_withdraw`,
+`exos_discovery_set_status` (with minutes), `exos_discovery_queue_list` (admin), `exos_discovery_minutes`. Tests: `tests/exos/test_discovery_publishing.sql`,
+`src/lib/discovery/*.test.ts`.
+
 ### Text messages
 
 Fans opt in from their ticket ("Get texts about … next events"), with the consent words stored. To send:
