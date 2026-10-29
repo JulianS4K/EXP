@@ -18,6 +18,9 @@
 // org's exos_org_billing.fee_free_until (signup + 6 months). Card processing
 // still passes through at checkout.
 //
+// The free tier (operator, 2026-10-29): events with a max capacity of 150 or
+// less pay no Exos fee at all (exosFeeBpsForEvent below). No commission.
+//
 // Buyers never pay an Exos fee. Rounded to the cent, half up. The SQL side reads the same rate from
 // exos_platform_fee_bps(); change both together.
 
@@ -33,6 +36,54 @@ export const FEE_FREE_MONTHS = 6;
 export function exosFeeBpsAt(feeFreeUntil: string | null | undefined, now: Date, bps: number = EXOS_FEE_BPS): number {
   const until = feeFreeUntil ? Date.parse(feeFreeUntil) : NaN;
   return Number.isFinite(until) && now.getTime() < until ? 0 : bps;
+}
+
+/**
+ * The free tier (operator, 2026-10-29): an event whose max capacity is 150 or
+ * less pays no Exos fee (and is never resold). The SQL side is
+ * exos_event_is_free_tier / exos_event_fee_bps (mig 20261029090000); the
+ * operator can change both numbers there (exos_platform_settings
+ * free_tier_max_capacity / free_tier_fee_bps), and exos_event_fee_terms hands
+ * them to the checkout with the event's max capacity.
+ */
+export const FREE_TIER_MAX_CAPACITY = 150;
+export const FREE_TIER_FEE_BPS = 0;
+
+export interface FreeTierTerms {
+  /** At or under this max capacity is the free tier (-1: no free tier). */
+  freeTierMaxCapacity?: number;
+  /** The free tier's Exos rate. */
+  freeTierFeeBps?: number;
+}
+
+/**
+ * Is an event with this max capacity the free tier? `null` / `undefined` is an
+ * event with no max (an uncapped ticket type and no overall cap): never.
+ */
+export function isFreeTier(maxCapacity: number | null | undefined, cutoff: number = FREE_TIER_MAX_CAPACITY): boolean {
+  if (maxCapacity === null || maxCapacity === undefined || !Number.isFinite(maxCapacity)) return false;
+  if (!Number.isFinite(cutoff)) return false;
+  return Math.max(0, Math.trunc(maxCapacity)) <= Math.trunc(cutoff);
+}
+
+/**
+ * The Exos rate for one event's sale at `now`: 0 in the org's free months,
+ * else the free tier's rate (0) when the event is the free tier, else `bps`.
+ * Same order as SQL exos_event_fee_bps.
+ */
+export function exosFeeBpsForEvent(opts: {
+  maxCapacity: number | null | undefined;
+  feeFreeUntil: string | null | undefined;
+  now: Date;
+  bps?: number;
+} & FreeTierTerms): number {
+  const bps = opts.bps ?? EXOS_FEE_BPS;
+  if (exosFeeBpsAt(opts.feeFreeUntil, opts.now, bps) === 0) return 0;
+  if (isFreeTier(opts.maxCapacity, opts.freeTierMaxCapacity ?? FREE_TIER_MAX_CAPACITY)) {
+    const free = opts.freeTierFeeBps ?? FREE_TIER_FEE_BPS;
+    return Number.isFinite(free) && free > 0 ? Math.round(free) : 0;
+  }
+  return bps;
 }
 
 /** The Exos fee on a transaction of `amountCents`: 3%, to the cent, half up (4000 -> 120, 2150 -> 65). */

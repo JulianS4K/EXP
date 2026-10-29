@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXOS_FEE_BPS,
+  FREE_TIER_FEE_BPS,
+  FREE_TIER_MAX_CAPACITY,
   STRIPE_CARD_FEE,
   checkoutApplicationFeeCents,
   checkoutFeeSplit,
   exosFeeBpsAt,
+  exosFeeBpsForEvent,
   isFeeFreeAt,
+  isFreeTier,
   exosFeeCents,
   FEE_FREE_MONTHS,
   organizerNetCents,
@@ -91,5 +95,44 @@ describe('checkoutFeeSplit: the application fee, broken down for the order recor
     expect(isFeeFreeAt('2026-09-01T00:00:00Z', now)).toBe(false);
     expect(isFeeFreeAt(null, now)).toBe(false);
     expect(isFeeFreeAt('not a date', now)).toBe(false);
+  });
+});
+
+describe('the free tier: max capacity 150 or less pays no Exos fee (operator, 2026-10-29)', () => {
+  const now = new Date('2027-06-01T00:00:00Z');
+  const past = '2027-01-01T00:00:00Z'; // the free months are over
+  const future = '2027-09-01T00:00:00Z';
+
+  it('is 150 or less, and an event with no max is never the free tier', () => {
+    expect(FREE_TIER_MAX_CAPACITY).toBe(150);
+    expect(FREE_TIER_FEE_BPS).toBe(0);
+    expect(isFreeTier(150)).toBe(true);
+    expect(isFreeTier(151)).toBe(false);
+    expect(isFreeTier(0)).toBe(true); // a bounded event with nothing in it
+    expect(isFreeTier(null)).toBe(false);
+    expect(isFreeTier(undefined)).toBe(false);
+    expect(isFreeTier(Number.NaN)).toBe(false);
+    expect(isFreeTier(100, 99)).toBe(false);
+    expect(isFreeTier(0, -1)).toBe(false); // -1: no free tier
+  });
+
+  it('charges 0 on the free tier and 3% over it, after the free months', () => {
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: null, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: future, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: past, now, bps: 250 })).toBe(250);
+  });
+
+  it('takes the operator\'s numbers', () => {
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierMaxCapacity: 100 })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: 50 })).toBe(50);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: future, now, freeTierFeeBps: 50 })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: -5 })).toBe(0);
+  });
+
+  it('leaves only the card fee on a free-tier checkout', () => {
+    const bps = exosFeeBpsForEvent({ maxCapacity: 120, feeFreeUntil: past, now });
+    expect(checkoutFeeSplit(4000, { bps })).toEqual({ applicationFeeCents: 146, exosFeeCents: 0, cardFeeEstCents: 146, feeBps: 0 });
   });
 });
