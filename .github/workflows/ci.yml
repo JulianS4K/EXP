@@ -8,7 +8,7 @@ on:
 jobs:
   typescript:
     name: TypeScript (typecheck, unit tests, build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
 
   edge-functions:
     name: Edge functions (deno check + Deno tests)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The edge functions are Deno and excluded from the Node tsconfig: the
     # parts shared with the app (_shared/marketplace, pricing, scrub) are
@@ -70,12 +70,12 @@ jobs:
           done
           exit $fail
 
-      - name: Deno tests (ssrf, ticket backends, sms)
-        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts
+      - name: Deno tests (ssrf, ticket backends, sms, posh)
+        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
 
   exos-sql:
     name: Exos SQL (migrations + lifecycle)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Applies the exos migrations to a throwaway Postgres and drives the real
     # RPC bodies: platform suite + ticket lifecycle (mint → roster → HMAC scan
