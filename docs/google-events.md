@@ -59,6 +59,39 @@ business step (see "Going live").
 Hidden ticket types (unlocked by codes) are never listed. The feed is a **snapshot**: an event that drops out is
 removed from Google.
 
+### Events sold on another checkout (mig `20261029170000`)
+
+Where to buy comes from one SQL function, `exos_event_buy_link`, which the storefront reads too; the feed gets it
+through `exos_feed_where_to_buy`.
+
+- **Link-out events** (listed from Eventbrite, Luma or Posh; Exos sells nothing): no Exos ticket types, so the
+  offers are the **imported ticket types** (else one "Tickets" offer at the lowest price), each linking to the
+  organizer's checkout tagged `utm_source=google&utm_medium=events_feed`, with the platform as `seller`
+  (`{"@type":"Organization","name":"Eventbrite"}`) and `category: primary` (it is the organizer's own primary
+  sale, not a resale). `googleFields.sellerType` is `LINK_OUT` (provisional until the partner spec names its
+  value). Availability follows the re-checked source: `SoldOut` when the source is sold out (or that type is),
+  else `InStock`. Example:
+
+  ```jsonc
+  "googleFields": { "category": "CONCERT", "placeId": null, "sellerType": "LINK_OUT", "updatedFrom": "exos" },
+  "event": { "@type": "MusicEvent", "name": "Rooftop Party", "eventStatus": "https://schema.org/EventScheduled",
+    "offers": [
+      { "@type": "Offer", "name": "Early", "price": "25.00", "priceCurrency": "USD", "availability": "https://schema.org/SoldOut",
+        "url": "https://www.eventbrite.com/e/rooftop-party-tickets-1234567890?utm_source=google&utm_medium=events_feed",
+        "category": "primary", "seller": { "@type": "Organization", "name": "Eventbrite" }, "sku": "<event id>:1" },
+      { "@type": "Offer", "name": "GA", "price": "45.00", "availability": "https://schema.org/InStock", … } ] }
+  ```
+  - Moved at the source: `eventStatus` `EventRescheduled` with `previousStartDate`.
+  - Cancelled at the source: the Exos event is cancelled, and the feed shows it as `EventCancelled` until its start
+    (it was listed, even with no Exos sales). Ended at the source: left out. No price from the source: left out
+    (`no price from the source`).
+- **Events another backend sells** (Edit event → Where tickets are sold, or last call on another primary): their
+  Exos ticket types stay the offers, but each offer links to that shop with the same tags, seller = the platform.
+- Google's Event guidelines want the offer URL to be a page where the ticket can be bought and the price to match
+  that page; the imported price is re-read with the status, but between checks it can lag the source. *Not
+  verified against Google's live docs in this change (the session couldn't reach developers.google.com); confirm
+  the third-party ticket URL rules and the partner spec's seller field at onboarding.*
+
 ## Report (operator)
 
 `GET …/exos-google-feed?report=1` with `Authorization: Bearer <service role key>` returns the counts and every event

@@ -32,6 +32,11 @@ export interface CalendarEventRow {
   venue_key?: string | null;
   /** /me feed only: the subscriber holds tickets for this event. */
   has_tickets?: boolean;
+  /** Where to buy (exos_event_buy_link, mig 20261029170000): set when the
+   *  tickets are on another site (a link-out event, another backend, last
+   *  call); NULL / absent: the Exos event page. */
+  buy_on?: string | null;
+  buy_url?: string | null;
 }
 
 export interface CalendarFeedOptions {
@@ -160,7 +165,9 @@ export function calendarEvent(row: CalendarEventRow, opts: CalendarFeedOptions):
   const endRaw = row.ends_at ? new Date(row.ends_at) : null;
   const end = endRaw && !Number.isNaN(endRaw.getTime()) && endRaw > start ? endRaw : new Date(start.getTime() + DEFAULT_DURATION_MS);
   const cancelled = row.status === 'cancelled';
-  const url = eventPageUrl(opts.appBase, row);
+  // A link-out event's tickets are on the organizer's checkout: link there.
+  const buyUrl = typeof row.buy_url === 'string' && /^https:\/\/[^\s/]+\.[^\s]+$/.test(row.buy_url) ? row.buy_url : null;
+  const url = buyUrl ?? eventPageUrl(opts.appBase, row);
   const doors = row.doors_at ? localTime(row.doors_at, row.timezone) : null;
   const body = [plain(row.summary, 300), plain(row.description, 1500)].filter(Boolean).join('\n\n');
   const description = [

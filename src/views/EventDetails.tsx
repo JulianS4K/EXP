@@ -45,6 +45,7 @@ import SaveEventButton from '../components/SaveEventButton';
 import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from '../lib/marketplace/lastCall';
+import LinkOutBuyCard from '../components/LinkOutBuyCard';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
@@ -309,7 +310,7 @@ export default function EventDetails() {
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   // Sold on the organizer's own Eventbrite / pretix / hi.events / Luma shop (mig 20261016100000).
   const externalShop = event?.ticketBackend && event.ticketBackend !== 'exos' && event.externalTicketUrl
-    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma' } as const)[event.ticketBackend] }
+    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma', posh: 'Posh' } as const)[event.ticketBackend] }
     : null;
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
@@ -965,6 +966,11 @@ export default function EventDetails() {
           <div className="lg:col-span-1">
             <div id="buy" ref={buyCardRef} className="lg:sticky top-24 bg-[#111] border border-white/10 overflow-hidden scroll-mt-24">
               <div className="p-7">
+                {/* Link-out (mig 20261029170000): sold only on the organizer's checkout. */}
+                {event.linkOut ? (
+                  <LinkOutBuyCard event={event} linkOut={event.linkOut}
+                    onBuy={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })} />
+                ) : (<>
                 <div className="mb-8">
                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
                     {/* The order total: tickets plus add-ons (what Stripe will charge). */}
@@ -1233,6 +1239,7 @@ export default function EventDetails() {
                     🧪 test mint (admin · bypasses stripe)
                   </button>
                 )}
+                </>)}
 
                 <div className="mt-7 flex flex-col gap-3.5 type text-[11px] uppercase tracking-widest text-white/60">
                   <div className="flex items-center gap-3">

@@ -10,6 +10,7 @@ import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
+import ImportEventsPanel from '../components/ImportEventsPanel';
 import { canSeeMoney } from '../lib/settlement';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
@@ -162,6 +163,9 @@ export default function OrganizerDashboard() {
             </Link>
           </div>
         </div>
+
+        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170000). */}
+        {activeOrg && (isAdmin || activeRole === 'owner' || activeRole === 'manager') && <ImportEventsPanel orgId={activeOrg.id} />}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[

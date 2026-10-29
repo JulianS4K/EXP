@@ -15,6 +15,7 @@ import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } f
 import { parseEventFormat } from './onlineEvents';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
+import { fetchPublicLinkOuts, type PublicLinkOut } from './linkOut';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
 import { eventTypeForCategory } from './eventTaxonomy';
@@ -133,7 +134,7 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     // Where tickets are sold (mig 20261016100000); likewise.
     ...('ticket_backend' in row
       ? {
-          ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
+          ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma', 'posh'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
           externalTicketUrl: typeof row.external_ticket_url === 'string' && row.external_ticket_url.startsWith('https://')
             ? row.external_ticket_url : undefined,
         }
@@ -160,6 +161,7 @@ export function hasStoreColumns(): Promise<boolean> {
 // tiers; one extra query for the whole page rather than one per event.
 async function withPublicTiers(rows: any[]): Promise<Event[]> {
   if (rows.length === 0) return [];
+  const linkOuts = linkOutsFor(rows);
   const { data: tiers } = await supabase
     .from('exos_public_tiers')
     .select('*')
@@ -171,7 +173,20 @@ async function withPublicTiers(rows: any[]): Promise<Event[]> {
     list.push(t);
     byEvent.set(t.event_id, list);
   }
-  return rows.map((r) => mapEvent(r, byEvent.get(r.id) ?? []));
+  const los = await linkOuts;
+  return rows.map((r) => withLinkOut(mapEvent(r, byEvent.get(r.id) ?? []), los.get(r.id)));
+}
+
+// Link-out events (mig 20261029170000) have no Exos ticket types: their card
+// price is the imported lowest price. Only events another platform sells can
+// be link-outs, so the others cost no query.
+function linkOutsFor(rows: any[]): Promise<Map<string, PublicLinkOut>> {
+  const ids = rows.filter((r) => r.ticket_backend && r.ticket_backend !== 'exos').map((r) => r.id);
+  return ids.length ? fetchPublicLinkOuts(ids) : Promise.resolve(new Map());
+}
+
+function withLinkOut(e: Event, lo: PublicLinkOut | undefined): Event {
+  return lo ? { ...e, linkOut: lo, price: lo.priceMin ?? e.price } : e;
 }
 
 export async function listPublicEvents(limit = 50): Promise<Event[]> {
@@ -204,7 +219,7 @@ export async function getPublicEvent(id: string): Promise<Event | null> {
     .select('*')
     .eq('event_id', id)
     .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  return withLinkOut(mapEvent(data, tiers ?? []), (await linkOutsFor([data])).get(data.id));
 }
 
 export async function getPublicEventBySlug(slug: string): Promise<Event | null> {
@@ -216,7 +231,7 @@ export async function getPublicEventBySlug(slug: string): Promise<Event | null> 
     .select('*')
     .eq('event_id', data.id)
     .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  return withLinkOut(mapEvent(data, tiers ?? []), (await linkOutsFor([data])).get(data.id));
 }
 
 // --- Staff reads (org dashboard / editor) — base tables, RLS-gated ---------
