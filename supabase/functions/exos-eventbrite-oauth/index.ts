@@ -17,14 +17,19 @@
 //        rather than a 302 because the SPA calls it with fetch (the JWT is a
 //        header) and then navigates.
 //   GET  /callback?code&state  Eventbrite sends the browser here (no JWT). The
-//        code is parked on the state row and the browser goes back to
-//        <EXOS_APP_URL>/orgs/<org>/settings?eventbrite=finish&eventbrite_state=<state>.
+//        code is parked on the state row with the SHA-256 of a fresh 256-bit
+//        finish token, and the browser goes back to
+//        <EXOS_APP_URL>/orgs/<org>/settings?eventbrite=finish&eventbrite_state=<state>#eventbrite_finish=<token>
+//        (the token in the fragment: _shared/oauthFinish.ts says why).
 //        A refusal (?error=access_denied) or an unknown / used / expired
 //        state goes back with ?eventbrite=error&reason=….
-//   POST /finish {state}       Authorization: Bearer <user JWT>. The settings
-//        page calls this on return. The state is consumed only for the user
-//        who started it (login CSRF: a link completed in someone else's
-//        browser can't attach their Eventbrite account to this org), the
+//   POST /finish {state, finish} Authorization: Bearer <user JWT>. The
+//        settings page calls this when the user clicks Confirm. It needs the
+//        state, the finish token AND the JWT of the user who started it
+//        (exos_eventbrite_oauth_consume): the starter never sees the token,
+//        and the browser that has it doesn't have the starter's JWT, so a
+//        link finished in someone else's browser can't attach their
+//        Eventbrite account to this org (refused: other_user / token). The
 //        code is exchanged at https://www.eventbrite.com/oauth/token, the
 //        token is checked with GET /users/me/ and stored in Vault
 //        (exos_eventbrite_connect_oauth). Answers { connected: true,
@@ -54,6 +59,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { finishRefusal, withFinishFragment } from "../_shared/oauthFinish.ts";
 import { whoAmI } from "../_shared/eventbrite/client.ts";
 import {
   buildAuthorizeUrl, buildCodeExchangeRequest, callbackErrorReason, eventbriteOAuthConfig, integrationsReturnUrl,
@@ -106,8 +112,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const code = url.searchParams.get("code");
     const ebErr = url.searchParams.get("error");
     if (!isStateShaped(state)) return redirect(integrationsReturnUrl(app, null, { eventbrite: "error", reason: "state" }));
+    // A fresh finish token for the browser that came back from Eventbrite:
+    // only its hash is stored, next to the parked code.
+    const finish = newState();
     const { data: orgId, error } = await sb.rpc("exos_oauth_state_return", {
-      p_state_hash: await stateHash(state), p_code: ebErr ? null : code,
+      p_state_hash: await stateHash(state), p_code: ebErr ? null : code, p_finish_hash: await stateHash(finish),
     });
     if (error) {
       console.error("exos-eventbrite-oauth: callback failed", redactError(error));
@@ -118,27 +127,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (ebErr || !code) {
       return redirect(integrationsReturnUrl(app, org, { eventbrite: "error", reason: callbackErrorReason(ebErr) }));
     }
-    return redirect(integrationsReturnUrl(app, org, { eventbrite: "finish", eventbrite_state: state }));
+    // The state in the query, the finish token in the fragment (not sent to
+    // any server, not logged, not in a Referer).
+    return redirect(withFinishFragment(
+      integrationsReturnUrl(app, org, { eventbrite: "finish", eventbrite_state: state }), "eventbrite_finish", finish));
   }
 
   if (route === "finish" && req.method === "POST") {
     const user = await signedInUser(req);
     if (!user) return json({ error: "sign in first", reason: "auth" }, 401, cors);
-    let body: { state?: unknown };
+    let body: { state?: unknown; finish?: unknown };
     try { body = await req.json(); } catch { return json({ error: "invalid JSON", reason: "state" }, 400, cors); }
     if (!isStateShaped(body.state)) return json({ error: "bad state", reason: "state" }, 400, cors);
+    // A missing or malformed finish token still goes to the SQL (as no hash),
+    // so the starting user's state is burned rather than left to retry.
+    const finishHash = isStateShaped(body.finish) ? await stateHash(body.finish) : null;
 
     const { data, error } = await sb.rpc("exos_eventbrite_oauth_consume", {
-      p_state_hash: await stateHash(body.state), p_user_id: user,
+      p_state_hash: await stateHash(body.state), p_user_id: user, p_finish_hash: finishHash,
     });
     if (error) {
       console.error("exos-eventbrite-oauth: consume failed", redactError(error));
       return json({ error: "could not finish the Eventbrite sign-in", reason: "server" }, 500, cors);
     }
     const row = (Array.isArray(data) ? data[0] : null) as
-      { org_id: string; code: string; return_event_id: string | null } | null;
+      { org_id: string | null; code: string | null; return_event_id: string | null; refused: string | null } | null;
     if (!row?.org_id || !row.code) {
-      return json({ error: "this Eventbrite sign-in expired or was started by someone else; connect again", reason: "expired" }, 400, cors);
+      const refusal = finishRefusal(row?.refused);
+      return json({ error: refusal.error, reason: refusal.reason }, refusal.status, cors);
     }
 
     const tok = await postTokenRequest(buildCodeExchangeRequest(cfg, row.code), (u, i) => fetch(u, i));

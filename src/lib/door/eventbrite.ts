@@ -276,14 +276,18 @@ export async function startEventbriteConnect(orgId: string, eventId?: string | n
   return body.url;
 }
 
-/** Finish after Eventbrite sent the browser back (?eventbrite=finish). */
-export async function finishEventbriteConnect(state: string): Promise<{ accountName: string | null; eventId: string | null }> {
+/**
+ * Finish after Eventbrite sent the browser back and the user clicked Confirm
+ * (components/OAuthFinish.tsx). `finish` is the token from the URL fragment;
+ * it goes nowhere else.
+ */
+export async function finishEventbriteConnect(state: string, finish: string): Promise<{ accountName: string | null; eventId: string | null }> {
   const base = oauthBase();
   if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
   const res = await fetch(`${base}/finish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await oauthHeaders()) },
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ state, finish }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok || body?.connected !== true) throw oauthError(res.status, body);

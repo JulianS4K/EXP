@@ -43,15 +43,30 @@ approves the app.
 2. **Eventbrite.** The organizer signs in and allows Exos. Eventbrite sends the
    browser to the registered redirect URI with `?code=…&state=…` (or `?error=access_denied`).
 3. **Callback** (`/callback`, no JWT). The code is parked on the state row (first
-   return only) and the browser goes to `<EXOS_APP_URL>/orgs/<org>/settings?eventbrite=finish&eventbrite_state=<state>`.
-   `EXOS_APP_URL`'s origin must be in `EXOS_REDIRECT_ORIGINS` (`_shared/redirects.ts`),
-   and only that base plus the org's uuid go into the URL: no open redirect.
-4. **Finish** (`POST /finish {state}`, JWT). The settings page calls it. The state
-   is consumed only by the user who started it (so a link started by someone else
-   and finished in your browser can't attach your Eventbrite account to their org),
-   the code is exchanged server side with the client secret, the token is checked
-   with `GET /users/me/`, and stored in Vault. The token, code and secret are never
-   logged or sent to the browser.
+   return only) together with the SHA-256 of a fresh 256-bit **finish token**, and the
+   browser goes to
+   `<EXOS_APP_URL>/orgs/<org>/settings?eventbrite=finish&eventbrite_state=<state>#eventbrite_finish=<token>`.
+   The token is in the URL **fragment**: browsers never send it to a server, so it isn't
+   in access logs and can't leak through a Referer. `EXOS_APP_URL`'s origin must be in
+   `EXOS_REDIRECT_ORIGINS` (`_shared/redirects.ts`), and only that base plus the org's
+   uuid go into the URL: no open redirect.
+4. **Confirm, then finish.** The settings page takes the state and token out of the
+   address bar (keeping them in memory only), shows which organization the Eventbrite
+   account will be connected to, and sends nothing until the user clicks **Confirm**.
+   Then `POST /finish {state, finish}` with the user's JWT: it needs the finish token
+   **and** the user who started the sign-in, once, before expiry. The code is exchanged
+   server side with the client secret, the token is checked with `GET /users/me/`, and
+   stored in Vault. The token, code and secret are never logged or sent to the browser.
+
+   **Why the finish token (account linking).** Whoever starts a sign-in knows the
+   state. Without the token they could send the authorize link to someone else, let
+   them sign in on Eventbrite (their code lands on the starter's state), and finish
+   with their own JWT, attaching the other person's Eventbrite account to their org.
+   Checking that `/finish` comes from the starting user doesn't stop that: the starter
+   is the attacker. Now the starter never sees the token (refused, state burned), and
+   the browser that has it doesn't have the starter's JWT (refused as "started by
+   another Exos account", state burned); the page says nothing was connected. Connect
+   Google Ads has the same fix (`docs/marketing-conversions.md`).
 5. **Pick the event.** If the sign-in started on an event's door tab, the SPA goes
    back to that event (`?tab=door&eventbrite=pick`) with the Eventbrite event list
    open, and the existing **Link and sync** step links it. From Integrations, each
@@ -100,7 +115,10 @@ Eventbrite account's connected apps.
 4. Apply mig `20261029140000_exos_eventbrite_oauth.sql`, then deploy
    `supabase functions deploy exos-eventbrite-oauth --no-verify-jwt` (Eventbrite's
    redirect carries no Supabase JWT; `/start` and `/finish` check it themselves).
-   Both are operator-gated.
+   Redeploy `exos-oauth-google` and the SPA in the same window: the migration drops
+   the old two-argument state functions, so Connect Google Ads fails closed (no
+   connection, nothing leaked) until the new function and confirm screen are live.
+   All of this is operator-gated.
 5. Test with a throwaway org: Org settings → Integrations → **Connect Eventbrite**;
    it should come back connected ("Connected with Eventbrite sign-in"). Check the
    `state` round trip, a refusal (click Deny: "access was declined"), and

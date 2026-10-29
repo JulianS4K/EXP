@@ -1,41 +1,11 @@
-// "Connect Eventbrite" return handling (exos-eventbrite-oauth, mig
-// 20261029140000). Pure, so vitest covers it; the fetch calls are in
-// ./door/eventbrite.
-//
-// Eventbrite sends the browser back to /orgs/<org>/settings with either
-//   ?eventbrite=finish&eventbrite_state=<state>  → POST /finish with the JWT
-//   ?eventbrite=error&reason=<why>               → a message
-// After /finish, a sign-in started from an event's door page goes back there
-// (eventPickPath) so the organizer picks the Eventbrite event straight away.
+// "Connect Eventbrite" helpers (exos-eventbrite-oauth, mig 20261029140000).
+// Pure, so vitest covers it; the fetch calls are in ./door/eventbrite, the
+// return from Eventbrite is read by ./oauthReturn and confirmed in
+// components/OAuthFinish.tsx. After /finish, a sign-in started from an
+// event's door page goes back there (eventPickPath) so the organizer picks
+// the Eventbrite event straight away.
 
-export type EventbriteReturn =
-  | { kind: 'finish'; state: string }
-  | { kind: 'error'; reason: string };
-
-const STATE_RE = /^[A-Za-z0-9_-]{43}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function readEventbriteReturn(search: string): EventbriteReturn | null {
-  const q = new URLSearchParams(search);
-  const v = q.get('eventbrite');
-  if (v === 'finish') {
-    const state = q.get('eventbrite_state') ?? '';
-    return STATE_RE.test(state) ? { kind: 'finish', state } : { kind: 'error', reason: 'state' };
-  }
-  if (v === 'error') {
-    return { kind: 'error', reason: (q.get('reason') ?? 'unknown').replace(/[^a-z_]/g, '').slice(0, 20) || 'unknown' };
-  }
-  return null;
-}
-
-/** The query string with the Eventbrite return params removed ('' or '?…'). */
-export function stripEventbriteReturn(search: string): string {
-  const q = new URLSearchParams(search);
-  if (!q.has('eventbrite')) return search && search !== '?' ? search : '';
-  for (const k of ['eventbrite', 'eventbrite_state', 'reason']) q.delete(k);
-  const s = q.toString();
-  return s ? `?${s}` : '';
-}
 
 /**
  * Where to pick the Eventbrite event after connecting from an event's door

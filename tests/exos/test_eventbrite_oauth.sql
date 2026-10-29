@@ -7,9 +7,12 @@
 --      definer functions pin search_path
 --   O2 begin: owner / manager only; the return event must be the org's;
 --      10-minute expiry; the per-user start cap (shared with Google Ads)
---   O3 return + consume: only the starting user, once, before expiry, only an
---      Eventbrite state (and Google's consume no longer takes one); the code
---      is cleared; an error return burns the state
+--   O3 return + consume: needs the state, the finish token (parked as a
+--      hash at the callback) and the starting user, once, before expiry,
+--      Eventbrite states only (Google's consume refuses one). The linking
+--      attack (starter finishes a victim's sign-in; the victim's browser
+--      finishes without the starter's JWT) is refused; wrong / missing /
+--      reused / expired tokens are refused; an error return burns the state
 --   O4 store: OAuth token in the same Vault secret as a private token,
 --      auth_method 'oauth', role re-checked, shape checked, writes stay off;
 --      a private-token reconnect flips it back (same secret)
@@ -73,13 +76,16 @@ BEGIN
     ASSERT NOT has_table_privilege(r, 'public.exos_oauth_states', 'SELECT,INSERT,UPDATE,DELETE'), 'O1: ' || r || ' touches states';
     FOREACH f IN ARRAY ARRAY[
       'public.exos_eventbrite_oauth_begin(uuid,uuid,text,uuid)',
-      'public.exos_eventbrite_oauth_consume(text,uuid)',
+      'public.exos_eventbrite_oauth_consume(text,uuid,text)',
+      'public._exos_oauth_state_take(text,text,uuid,text)',
+      'public._exos_oauth_hash_eq(text,text)',
+      'public.exos_oauth_state_return(text,text,text)',
       'public.exos_eventbrite_connect_oauth(uuid,uuid,text,text)',
       'public._exos_eventbrite_store(uuid,uuid,text,text,text)',
       'public.exos_eventbrite_connect(uuid,uuid,text,text)',
       'public.exos_eventbrite_disconnect(uuid,uuid)',
       'public.exos_oauth_state_begin(text,uuid,uuid,text,integer)',
-      'public.exos_oauth_state_consume(text,uuid)'] LOOP
+      'public.exos_oauth_state_consume(text,uuid,text)'] LOOP
       ASSERT NOT has_function_privilege(r, f, 'EXECUTE'), 'O1: ' || r || ' runs ' || f;
       ASSERT has_function_privilege('service_role', f, 'EXECUTE'), 'O1: service role cannot run ' || f;
     END LOOP;
@@ -90,7 +96,8 @@ BEGIN
    WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
      AND p.proname IN ('exos_eventbrite_oauth_begin','exos_eventbrite_oauth_consume','exos_eventbrite_connect_oauth',
                        '_exos_eventbrite_store','exos_eventbrite_connect','exos_eventbrite_disconnect',
-                       'exos_eventbrite_org_status','exos_eventbrite_status','exos_oauth_state_begin','exos_oauth_state_consume')
+                       'exos_eventbrite_org_status','exos_eventbrite_status','exos_oauth_state_begin','exos_oauth_state_consume',
+                       'exos_oauth_state_return','_exos_oauth_state_take','_exos_oauth_hash_eq')
      AND NOT coalesce(array_to_string(p.proconfig, ',') LIKE '%search_path=public, pg_temp%', false);
   ASSERT r IS NULL, 'O1: search_path not pinned: ' || r;
   RAISE NOTICE 'OK  O1 Eventbrite OAuth objects are service role only';
@@ -134,50 +141,92 @@ BEGIN
 END $$;
 
 -- O3 -------------------------------------------------------------------------
+-- The finish token (pg_temp.h('tok-…') stands for its SHA-256; the raw token
+-- only ever exists in the returning browser's URL fragment).
 DO $$
 DECLARE v_org uuid; r record; n int;
 BEGIN
-  v_org := public.exos_oauth_state_return(pg_temp.h('one'), 'EBCODE123456');
+  v_org := public.exos_oauth_state_return(pg_temp.h('one'), 'EBCODE123456', pg_temp.h('tok-one'));
   ASSERT v_org = pg_temp.org(), 'O3: return gave ' || coalesce(v_org::text, 'null');
-  ASSERT public.exos_oauth_state_return(pg_temp.h('one'), 'EBCODE999999') IS NULL, 'O3: second return accepted';
-  ASSERT (SELECT code FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('one')) = 'EBCODE123456', 'O3: first code kept';
-  -- Someone else (even the manager) can't use a1's state, and doesn't burn it.
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a2'));
-  ASSERT n = 0, 'O3: another user consumed';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('one'), 'EBCODE999999', pg_temp.h('tok-evil')) IS NULL, 'O3: second return accepted';
+  ASSERT (SELECT code = 'EBCODE123456' AND finish_hash = pg_temp.h('tok-one') FROM public.exos_oauth_states
+           WHERE state_hash = pg_temp.h('one')), 'O3: first code / token not kept';
+  -- Another user without the token (the manager, say) is refused and burns nothing.
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a2'), pg_temp.h('tok-guess'));
+  ASSERT r.org_id IS NULL AND r.refused = 'other_user', 'O3: another user ' || r::text;
   -- Google's consume refuses an Eventbrite state, and doesn't burn it.
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('one'), pg_temp.u('a1'));
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('one'), pg_temp.u('a1'), pg_temp.h('tok-one'))
+   WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'O3: Google consumed an Eventbrite state';
   ASSERT (SELECT consumed_at FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('one')) IS NULL, 'O3: burned by others';
-  -- The starting user, once.
-  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a1'));
-  ASSERT r.org_id = pg_temp.org() AND r.code = 'EBCODE123456' AND r.return_event_id = pg_temp.u('e1'), 'O3: consume ' || r::text;
-  ASSERT (SELECT code IS NULL AND consumed_at IS NOT NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('one')),
-         'O3: code not cleared';
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a1'));
-  ASSERT n = 0, 'O3: consumed twice';
+  -- The starting user, with the token, once.
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a1'), pg_temp.h('tok-one'));
+  ASSERT r.org_id = pg_temp.org() AND r.code = 'EBCODE123456' AND r.return_event_id = pg_temp.u('e1') AND r.refused IS NULL,
+         'O3: consume ' || r::text;
+  ASSERT (SELECT code IS NULL AND finish_hash IS NULL AND consumed_at IS NOT NULL FROM public.exos_oauth_states
+           WHERE state_hash = pg_temp.h('one')), 'O3: code / token not cleared';
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('one'), pg_temp.u('a1'), pg_temp.h('tok-one'));
+  ASSERT r.org_id IS NULL AND r.refused = 'expired', 'O3: token reused ' || r::text;
   -- Eventbrite's consume refuses a Google state.
-  PERFORM public.exos_oauth_state_return(pg_temp.h('g1'), 'GCODE1234567');
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('g1'), pg_temp.u('a1'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('g1'), 'GCODE1234567', pg_temp.h('tok-g1'));
+  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('g1'), pg_temp.u('a1'), pg_temp.h('tok-g1'))
+   WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'O3: Eventbrite consumed a Google state';
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('g1'), pg_temp.u('a1'));
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('g1'), pg_temp.u('a1'), pg_temp.h('tok-g1'))
+   WHERE org_id IS NOT NULL;
   ASSERT n = 1, 'O3: Google consume broken';
-  -- Expired.
-  PERFORM public.exos_oauth_state_return(pg_temp.h('cap1'), 'EBCODEEXPIRE');
+
+  -- THE ATTACK: a1 starts (knows the state), a victim (a6, another Exos
+  -- account) signs in on Eventbrite; the callback parks the victim's code and
+  -- gives the token only to the victim's browser.
+  PERFORM public.exos_oauth_state_return(pg_temp.h('cap3'), 'EBVICTIMCODE', pg_temp.h('tok-victim'));
+  -- The attacker finishes with their own JWT but no token: refused, burned.
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap3'), pg_temp.u('a1'), NULL);
+  ASSERT r.org_id IS NULL AND r.code IS NULL AND r.refused = 'token', 'O3: attacker without token ' || r::text;
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap3'), pg_temp.u('a1'), pg_temp.h('tok-victim'));
+  ASSERT r.org_id IS NULL, 'O3: attacker finished a burned state';
+  -- A wrong token: refused, burned.
+  PERFORM public.exos_oauth_state_return(pg_temp.h('cap4'), 'EBVICTIMCODE', pg_temp.h('tok-victim4'));
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap4'), pg_temp.u('a1'), pg_temp.h('tok-guess'));
+  ASSERT r.org_id IS NULL AND r.refused = 'token', 'O3: wrong token ' || r::text;
+  ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('cap4')),
+         'O3: wrong token left the code';
+  -- The victim's browser (token, but the victim's own JWT): refused as
+  -- another account's sign-in, and burned, so the attacker can't race it.
+  PERFORM public.exos_oauth_state_return(pg_temp.h('cap5'), 'EBVICTIMCODE', pg_temp.h('tok-victim5'));
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap5'), pg_temp.u('a6'), pg_temp.h('tok-victim5'));
+  ASSERT r.org_id IS NULL AND r.refused = 'other_user', 'O3: victim JWT ' || r::text;
+  ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('cap5')),
+         'O3: victim attempt left the code';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_accounts WHERE org_id = pg_temp.org()), 'O3: something was connected';
+
+  -- Expired, with the right token.
+  PERFORM public.exos_oauth_state_return(pg_temp.h('cap1'), 'EBCODEEXPIRE', pg_temp.h('tok-cap1'));
   UPDATE public.exos_oauth_states SET expires_at = now() - interval '1 second' WHERE state_hash = pg_temp.h('cap1');
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap1'), pg_temp.u('a1'));
-  ASSERT n = 0, 'O3: expired consumed';
-  ASSERT public.exos_oauth_state_return(pg_temp.h('cap1'), 'EBCODEEXPIRE') IS NULL, 'O3: expired returned';
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap1'), pg_temp.u('a1'), pg_temp.h('tok-cap1'));
+  ASSERT r.org_id IS NULL AND r.refused = 'expired', 'O3: expired consumed ' || r::text;
+  ASSERT public.exos_oauth_state_return(pg_temp.h('cap1'), 'EBCODEEXPIRE', pg_temp.h('tok-cap1')) IS NULL, 'O3: expired returned';
   -- Declined on Eventbrite: no code, the state is burned.
-  ASSERT public.exos_oauth_state_return(pg_temp.h('cap2'), NULL) = pg_temp.org(), 'O3: error return';
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap2'), pg_temp.u('a1'));
+  ASSERT public.exos_oauth_state_return(pg_temp.h('cap2'), NULL, pg_temp.h('tok-cap2')) = pg_temp.org(), 'O3: error return';
+  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('cap2'), pg_temp.u('a1'), pg_temp.h('tok-cap2'))
+   WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'O3: declined state consumed';
+  -- A callback without a finish hash parks nothing.
+  PERFORM public.exos_oauth_state_return(pg_temp.h('cap6'), 'EBCODE666666', NULL);
+  ASSERT (SELECT code IS NULL AND consumed_at IS NOT NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('cap6')),
+         'O3: code parked without a finish hash';
   -- A user no longer owner / manager can't finish.
-  PERFORM public.exos_oauth_state_return(pg_temp.h('mgr'), 'EBCODEMGR123');
+  PERFORM public.exos_oauth_state_return(pg_temp.h('mgr'), 'EBCODEMGR123', pg_temp.h('tok-mgr'));
   UPDATE public.exos_org_memberships SET disabled = true WHERE user_id = pg_temp.u('a2');
-  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('mgr'), pg_temp.u('a2'));
-  ASSERT n = 0, 'O3: disabled manager finished';
+  SELECT * INTO r FROM public.exos_eventbrite_oauth_consume(pg_temp.h('mgr'), pg_temp.u('a2'), pg_temp.h('tok-mgr'));
+  ASSERT r.org_id IS NULL AND r.refused = 'forbidden', 'O3: disabled manager ' || r::text;
   UPDATE public.exos_org_memberships SET disabled = false WHERE user_id = pg_temp.u('a2');
-  RAISE NOTICE 'OK  O3 return + consume: starting user, once, Eventbrite states only';
+  -- Constant-time comparison helper.
+  ASSERT public._exos_oauth_hash_eq(pg_temp.h('x'), pg_temp.h('x')), 'O3: hash_eq equal';
+  ASSERT NOT public._exos_oauth_hash_eq(pg_temp.h('x'), pg_temp.h('y')), 'O3: hash_eq differ';
+  ASSERT NOT public._exos_oauth_hash_eq(pg_temp.h('x'), NULL) AND NOT public._exos_oauth_hash_eq(NULL, NULL)
+         AND NOT public._exos_oauth_hash_eq('ABC', 'ABC'), 'O3: hash_eq bad input';
+  RAISE NOTICE 'OK  O3 finish: state + finish token + starting user, once; the linking attack is refused';
 END $$;
 
 -- O4 -------------------------------------------------------------------------

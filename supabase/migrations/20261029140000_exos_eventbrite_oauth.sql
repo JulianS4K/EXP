@@ -2,16 +2,21 @@
 -- Migration 20261029140000 — Exos (Bridge / D4): "Connect Eventbrite" (OAuth)
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
--- Touches:  W: TABLE exos_oauth_states (+ provider 'eventbrite', + return_event_id)
+-- Touches:  W: TABLE exos_oauth_states (+ provider 'eventbrite', + return_event_id,
+--              + finish_hash)
 --              TABLE exos_eventbrite_accounts (+ auth_method)
 --           C: TABLE exos_eventbrite_connection_log (new; service role only)
 --           C: FUNCTION _exos_eventbrite_store, exos_eventbrite_connect_oauth,
---              exos_eventbrite_oauth_begin, exos_eventbrite_oauth_consume
---              (service role only); exos_eventbrite_org_status
---              (authenticated, role-checked)
---           W: FUNCTION exos_oauth_state_begin (+ provider 'eventbrite'),
---              exos_oauth_state_consume (Google Ads states only now),
---              exos_eventbrite_connect (same checks; records auth_method and
+--              exos_eventbrite_oauth_begin, exos_eventbrite_oauth_consume,
+--              _exos_oauth_state_take, _exos_oauth_hash_eq (service role
+--              only); exos_eventbrite_org_status (authenticated, role-checked)
+--           W: FUNCTION exos_oauth_state_begin (patched: + provider 'eventbrite')
+--           D+C: FUNCTION exos_oauth_state_return(text, text) and
+--              exos_oauth_state_consume(text, uuid) DROPPED; replaced by
+--              (text, text, text) / (text, uuid, text) that take the finish
+--              token (an old exos-oauth-google deploy fails closed until
+--              redeployed). Consume: Google Ads states only.
+--           W: FUNCTION exos_eventbrite_connect (same checks; records auth_method and
 --              the log), exos_eventbrite_disconnect (same; + the log),
 --              exos_eventbrite_status (patched in place: + auth_method)
 --           R: exos_org_memberships, exos_events, vault.secrets /
@@ -32,19 +37,26 @@
 --               back to (it must be the org's). The browser goes to
 --               Eventbrite's authorize page.
 --   2. /callback (Eventbrite redirects the browser, no JWT): the code is
---               parked on the state (exos_oauth_state_return, first return
---               only) and the browser goes back to the org's settings page.
---   3. /finish  (settings page, JWT): the state is consumed ONLY by the user
---               who started it, once, before expiry, and only an Eventbrite
---               state (exos_eventbrite_oauth_consume). The code is exchanged
+--               parked on the state together with the SHA-256 of a fresh
+--               256-bit finish token (exos_oauth_state_return, first return
+--               only), and the browser goes back to the org's settings page
+--               with the state in the query and the finish token in the URL
+--               FRAGMENT (#eventbrite_finish=…).
+--   3. /finish  (settings page, after the user clicks Confirm, JWT): needs
+--               the state, the finish token and the JWT of the user who
+--               started it; once, before expiry, Eventbrite states only
+--               (exos_eventbrite_oauth_consume). The code is exchanged
 --               server side, the token checked with GET /users/me/, then
 --               stored in Vault exactly where the pasted private token goes
 --               (exos_eventbrite:<org>) with auth_method 'oauth'
 --               (exos_eventbrite_connect_oauth).
 --
--- Step 3's user check stops login CSRF: an authorize link started by someone
--- else and finished in a victim's browser can't attach the victim's
--- Eventbrite account to the other person's org.
+-- Account linking, both ways round: a link started by someone else and
+-- finished in a victim's browser can't attach the victim's account to the
+-- starter's org. The starter has the state but never the finish token (only
+-- the browser that came back from the provider gets it); that browser has
+-- the token but not the starter's JWT. The same fix covers Connect Google
+-- Ads (exos-oauth-google, section 1).
 --
 -- The pasted private token keeps working (exos_eventbrite_connect, unchanged
 -- checks): it is how the pilot runs before Eventbrite approves the app, and
@@ -83,10 +95,28 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 1. States: Eventbrite as a provider, and the Exos event to go back to.
+-- 1. States: Eventbrite as a provider, the Exos event to go back to, and the
+--    finish token that binds /finish to the browser that came back from the
+--    provider (both flows: Eventbrite and Google Ads).
+--
+-- The account-linking attack this closes: the initiator of /start knows the
+-- raw state. They send the authorize link to a victim, the victim signs in on
+-- Eventbrite / Google, and /callback parks the VICTIM's code on the
+-- attacker's state. Before this, the attacker could then call /finish with
+-- their own JWT and attach the victim's account to their org (binding /finish
+-- to the starting user doesn't help: the starting user IS the attacker).
+--
+-- Now /callback also mints a fresh 256-bit finish token, stores only its
+-- SHA-256 next to the parked code (finish_hash), and hands the token to the
+-- returning browser in the URL fragment (never logged, never sent to a
+-- server, never in a Referer). /finish needs the state, the finish token AND
+-- the starting user's JWT. The attacker never sees the token; the victim's
+-- browser has it but not the attacker's JWT. Both are single use and expire
+-- with the state (10 minutes).
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.exos_oauth_states
-  ADD COLUMN IF NOT EXISTS return_event_id uuid REFERENCES public.exos_events (id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS return_event_id uuid REFERENCES public.exos_events (id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS finish_hash     text;   -- SHA-256 of the finish token, between /callback and /finish only
 
 DO $c$
 BEGIN
@@ -97,81 +127,161 @@ BEGIN
     ALTER TABLE public.exos_oauth_states ADD CONSTRAINT exos_oauth_states_provider_chk
       CHECK (provider IN ('google_ads', 'eventbrite'));
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_oauth_states_finish_hash_chk') THEN
+    ALTER TABLE public.exos_oauth_states ADD CONSTRAINT exos_oauth_states_finish_hash_chk
+      CHECK (finish_hash IS NULL OR finish_hash ~ '^[0-9a-f]{64}$');
+  END IF;
 END $c$;
 
 COMMENT ON TABLE public.exos_oauth_states IS
-  'Single-use OAuth states for exos-oauth-google (Connect Google Ads) and exos-eventbrite-oauth (Connect Eventbrite). SHA-256 of the state only; 10-minute expiry; service role only. migs 20260930102000, 20261029140000.';
+  'Single-use OAuth states for exos-oauth-google (Connect Google Ads) and exos-eventbrite-oauth (Connect Eventbrite). SHA-256 of the state and of the finish token only; 10-minute expiry; service role only. migs 20260930102000, 20261029140000.';
 
--- Same body as 20260930102000, with 'eventbrite' accepted.
-CREATE OR REPLACE FUNCTION public.exos_oauth_state_begin(
-  p_provider    text,
-  p_org_id      uuid,
-  p_user_id     uuid,
-  p_state_hash  text,
-  p_ttl_minutes integer DEFAULT 10
-) RETURNS timestamptz
+-- Begin (mig 20260930102000): accept 'eventbrite' too. Same body otherwise.
+SELECT pg_temp.exos_patch_n('public.exos_oauth_state_begin(text, uuid, uuid, text, integer)',
+  '''eventbrite''',
+  $o$p_provider <> 'google_ads'$o$,
+  $n$p_provider NOT IN ('google_ads', 'eventbrite')$n$, 1);
+
+-- Two SHA-256 hex digests equal, compared over every byte with no early exit
+-- (the inputs are hashes of 256-bit secrets, so timing would leak nothing
+-- usable anyway; this keeps the comparison constant time regardless).
+CREATE OR REPLACE FUNCTION public._exos_oauth_hash_eq(a text, b text)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  x bytea; y bytea; acc int := 0; i int;
+BEGIN
+  IF a IS NULL OR b IS NULL OR a !~ '^[0-9a-f]{64}$' OR b !~ '^[0-9a-f]{64}$' THEN
+    RETURN false;
+  END IF;
+  x := decode(a, 'hex');
+  y := decode(b, 'hex');
+  FOR i IN 0..31 LOOP
+    acc := acc | (get_byte(x, i) # get_byte(y, i));
+  END LOOP;
+  RETURN acc = 0;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_oauth_hash_eq(text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_oauth_hash_eq(text, text) TO service_role;
+
+-- Return (replaces mig 20260930102000's two-argument version, which is
+-- DROPPED: a stale caller fails closed instead of parking a code that has no
+-- finish token). With a code AND a well-formed finish-token hash: park both
+-- on a live, unused state that has none yet (the first return wins). Without
+-- a code (declined, provider error, junk) or without a finish hash: consume
+-- the state. Returns the state's org id, or NULL when the state is unknown,
+-- expired or used.
+DROP FUNCTION IF EXISTS public.exos_oauth_state_return(text, text);
+CREATE OR REPLACE FUNCTION public.exos_oauth_state_return(p_state_hash text, p_code text, p_finish_hash text)
+RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_exp timestamptz;
+  v_org uuid;
 BEGIN
-  IF p_provider IS NULL OR p_provider NOT IN ('google_ads', 'eventbrite') THEN
-    RAISE EXCEPTION 'exos_oauth_state_begin: unknown provider %', p_provider USING ERRCODE = '22023';
-  END IF;
   IF p_state_hash IS NULL OR p_state_hash !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'exos_oauth_state_begin: bad state hash' USING ERRCODE = '22023';
+    RETURN NULL;
   END IF;
-  IF NOT public._exos_oauth_can_connect(p_org_id, p_user_id) THEN
-    RAISE EXCEPTION 'exos_oauth_state_begin: owner or manager only' USING ERRCODE = '42501';
+  IF p_code IS NOT NULL AND (length(p_code) NOT BETWEEN 8 AND 2048 OR p_code ~ '[[:cntrl:][:space:]]') THEN
+    p_code := NULL;  -- not a code: treat as an error return
   END IF;
-
-  DELETE FROM public.exos_oauth_states WHERE expires_at < now() - interval '1 day';
-
-  IF (SELECT count(*) FROM public.exos_oauth_states
-       WHERE user_id = p_user_id AND created_at > now() - interval '10 minutes') >= 10 THEN
-    RAISE EXCEPTION 'exos_oauth_state_begin: too many attempts, try again in a few minutes' USING ERRCODE = '54000';
+  IF p_finish_hash IS NULL OR p_finish_hash !~ '^[0-9a-f]{64}$' THEN
+    p_code := NULL;  -- no finish token: the code could never be used safely
   END IF;
-
-  v_exp := now() + make_interval(mins => LEAST(GREATEST(coalesce(p_ttl_minutes, 10), 1), 10));
-  INSERT INTO public.exos_oauth_states (state_hash, provider, org_id, user_id, expires_at)
-  VALUES (p_state_hash, p_provider, p_org_id, p_user_id, v_exp);
-  RETURN v_exp;
+  UPDATE public.exos_oauth_states
+     SET code        = p_code,
+         finish_hash = CASE WHEN p_code IS NULL THEN NULL ELSE p_finish_hash END,
+         returned_at = now(),
+         consumed_at = CASE WHEN p_code IS NULL THEN now() END
+   WHERE state_hash = p_state_hash
+     AND consumed_at IS NULL
+     AND returned_at IS NULL
+     AND expires_at > now()
+  RETURNING org_id INTO v_org;
+  RETURN v_org;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_oauth_state_begin(text, uuid, uuid, text, integer) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_oauth_state_begin(text, uuid, uuid, text, integer) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_oauth_state_return(text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_oauth_state_return(text, text, text) TO service_role;
 
--- Same body as 20260930102000, but only a Google Ads state: exos-oauth-google
--- must not burn (or exchange the code of) an Eventbrite sign-in.
-CREATE OR REPLACE FUNCTION public.exos_oauth_state_consume(p_state_hash text, p_user_id uuid)
-RETURNS TABLE(org_id uuid, code text)
+-- The shared consume: one provider's state, the finish token, the user.
+-- Returns one row: (org_id, code, return_event_id) on success with refused
+-- NULL, or all NULL with refused =
+--   'expired'    unknown, used, expired, or the provider never returned a code
+--   'other_user' a different Exos user than the one who started it. If that
+--                user also holds the right finish token (the victim's
+--                browser in the attack above), the state is burned too.
+--   'token'      the starting user without the right finish token (the
+--                attacker in the attack above); the state is burned
+--   'forbidden'  the starting user is no longer owner / manager; burned
+-- Every outcome but 'other_user' without the token burns the state; a used
+-- state never comes back. The code and finish hash are cleared when burned.
+CREATE OR REPLACE FUNCTION public._exos_oauth_state_take(
+  p_provider text, p_state_hash text, p_user_id uuid, p_finish_hash text
+) RETURNS TABLE(org_id uuid, code text, return_event_id uuid, refused text)
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 #variable_conflict use_column
 DECLARE
   v_row public.exos_oauth_states%ROWTYPE;
+  v_tok boolean;
 BEGIN
   IF p_state_hash IS NULL OR p_state_hash !~ '^[0-9a-f]{64}$' OR p_user_id IS NULL THEN
+    refused := 'expired';
+    RETURN NEXT;
     RETURN;
   END IF;
   SELECT * INTO v_row FROM public.exos_oauth_states s
-   WHERE s.state_hash = p_state_hash AND s.user_id = p_user_id AND s.provider = 'google_ads'
+   WHERE s.state_hash = p_state_hash AND s.provider = p_provider
    FOR UPDATE;
   IF NOT FOUND OR v_row.consumed_at IS NOT NULL THEN
+    refused := 'expired';
+    RETURN NEXT;
     RETURN;
   END IF;
-  UPDATE public.exos_oauth_states s SET consumed_at = now(), code = NULL WHERE s.state_hash = p_state_hash;
-  IF v_row.expires_at <= now() OR v_row.code IS NULL
-     OR NOT public._exos_oauth_can_connect(v_row.org_id, p_user_id) THEN
+  v_tok := public._exos_oauth_hash_eq(v_row.finish_hash, p_finish_hash);
+  IF v_row.user_id <> p_user_id THEN
+    IF v_tok THEN
+      UPDATE public.exos_oauth_states s SET consumed_at = now(), code = NULL, finish_hash = NULL
+       WHERE s.state_hash = p_state_hash;
+    END IF;
+    refused := 'other_user';
+    RETURN NEXT;
     RETURN;
   END IF;
-  org_id := v_row.org_id;
-  code := v_row.code;
+  UPDATE public.exos_oauth_states s SET consumed_at = now(), code = NULL, finish_hash = NULL
+   WHERE s.state_hash = p_state_hash;
+  IF v_row.expires_at <= now() OR v_row.code IS NULL THEN
+    refused := 'expired';
+  ELSIF NOT v_tok THEN
+    refused := 'token';
+  ELSIF NOT public._exos_oauth_can_connect(v_row.org_id, p_user_id) THEN
+    refused := 'forbidden';
+  ELSE
+    org_id := v_row.org_id;
+    code := v_row.code;
+    return_event_id := v_row.return_event_id;
+  END IF;
   RETURN NEXT;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_oauth_state_consume(text, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_oauth_state_consume(text, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_oauth_state_take(text, text, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_oauth_state_take(text, text, uuid, text) TO service_role;
+
+-- Google Ads consume (replaces mig 20260930102000's two-argument version,
+-- which is DROPPED: it finished without a finish token, so a stale caller
+-- must fail closed). Google Ads states only.
+DROP FUNCTION IF EXISTS public.exos_oauth_state_consume(text, uuid);
+CREATE OR REPLACE FUNCTION public.exos_oauth_state_consume(p_state_hash text, p_user_id uuid, p_finish_hash text)
+RETURNS TABLE(org_id uuid, code text, refused text)
+LANGUAGE sql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT t.org_id, t.code, t.refused FROM public._exos_oauth_state_take('google_ads', p_state_hash, p_user_id, p_finish_hash) t
+$$;
+REVOKE ALL ON FUNCTION public.exos_oauth_state_consume(text, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_oauth_state_consume(text, uuid, text) TO service_role;
 
 -- Start an Eventbrite sign-in: the shared begin (role, rate limit, expiry),
 -- plus the Exos event to return to, which must be the org's own.
@@ -197,40 +307,18 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_eventbrite_oauth_begin(uuid, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_eventbrite_oauth_begin(uuid, uuid, text, uuid) TO service_role;
 
--- Use an Eventbrite state: only by the user who started it, once, before it
--- expires, after Eventbrite returned a code, while that user is still an
--- owner / manager. Returns (org_id, code, return_event_id) and clears the
--- stored code, or no row. A refused attempt by the right user still burns it.
-CREATE OR REPLACE FUNCTION public.exos_eventbrite_oauth_consume(p_state_hash text, p_user_id uuid)
-RETURNS TABLE(org_id uuid, code text, return_event_id uuid)
-LANGUAGE plpgsql SECURITY DEFINER
+-- Eventbrite consume: Eventbrite states only, same rules (_exos_oauth_state_take).
+DROP FUNCTION IF EXISTS public.exos_eventbrite_oauth_consume(text, uuid);
+CREATE OR REPLACE FUNCTION public.exos_eventbrite_oauth_consume(p_state_hash text, p_user_id uuid, p_finish_hash text)
+RETURNS TABLE(org_id uuid, code text, return_event_id uuid, refused text)
+LANGUAGE sql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-#variable_conflict use_column
-DECLARE
-  v_row public.exos_oauth_states%ROWTYPE;
-BEGIN
-  IF p_state_hash IS NULL OR p_state_hash !~ '^[0-9a-f]{64}$' OR p_user_id IS NULL THEN
-    RETURN;
-  END IF;
-  SELECT * INTO v_row FROM public.exos_oauth_states s
-   WHERE s.state_hash = p_state_hash AND s.user_id = p_user_id AND s.provider = 'eventbrite'
-   FOR UPDATE;
-  IF NOT FOUND OR v_row.consumed_at IS NOT NULL THEN
-    RETURN;
-  END IF;
-  UPDATE public.exos_oauth_states s SET consumed_at = now(), code = NULL WHERE s.state_hash = p_state_hash;
-  IF v_row.expires_at <= now() OR v_row.code IS NULL
-     OR NOT public._exos_oauth_can_connect(v_row.org_id, p_user_id) THEN
-    RETURN;
-  END IF;
-  org_id := v_row.org_id;
-  code := v_row.code;
-  return_event_id := v_row.return_event_id;
-  RETURN NEXT;
-END $$;
-REVOKE ALL ON FUNCTION public.exos_eventbrite_oauth_consume(text, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_eventbrite_oauth_consume(text, uuid) TO service_role;
+  SELECT t.org_id, t.code, t.return_event_id, t.refused
+    FROM public._exos_oauth_state_take('eventbrite', p_state_hash, p_user_id, p_finish_hash) t
+$$;
+REVOKE ALL ON FUNCTION public.exos_eventbrite_oauth_consume(text, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_eventbrite_oauth_consume(text, uuid, text) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. Accounts: how the token was obtained, and a connection history.

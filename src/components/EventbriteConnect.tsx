@@ -2,26 +2,21 @@
 // Eventbrite connection. "Connect Eventbrite" signs in on Eventbrite
 // (exos-eventbrite-oauth) when this server has the OAuth app configured;
 // otherwise the private token is pasted on an event's door page, as before.
-// Eventbrite sends the browser back here (?eventbrite=finish|error), handled
-// below; a sign-in started from a door page then goes back to that event to
-// pick the Eventbrite event. Exos only reads Eventbrite; nothing changes there
+// Eventbrite sends the browser back to the settings page, where OAuthFinish
+// asks the user to confirm before anything is saved; a sign-in started from
+// a door page then goes back to that event to pick the Eventbrite event. Exos only reads Eventbrite; nothing changes there
 // unless the org also switches on the capacity sync.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  disconnectEventbrite, eventbriteOAuthAvailable, fetchEventbriteOrgStatus, finishEventbriteConnect,
-  startEventbriteConnect, type EventbriteOrgStatus,
+  disconnectEventbrite, eventbriteOAuthAvailable, fetchEventbriteOrgStatus, startEventbriteConnect,
+  type EventbriteOrgStatus,
 } from '../lib/door/eventbrite';
-import {
-  authMethodLabel, eventbriteErrorMessage, eventPickPath, readEventbriteReturn, stripEventbriteReturn,
-} from '../lib/eventbriteConnect';
+import { authMethodLabel, eventbriteErrorMessage } from '../lib/eventbriteConnect';
 
 const BTN = 'px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest disabled:opacity-50';
-/** A return URL is handled once, even if the effect runs twice (StrictMode). */
-const finishedStates = new Set<string>();
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -29,11 +24,9 @@ function when(iso: string): string {
 
 export default function EventbriteConnect({ orgId }: { orgId: string }) {
   const { toast } = useToast();
-  const location = useLocation();
-  const navigate = useNavigate();
   const [status, setStatus] = useState<EventbriteOrgStatus | null | undefined>(undefined);
   const [oauth, setOauth] = useState(false);
-  const [busy, setBusy] = useState<null | 'connect' | 'finish' | 'disconnect'>(null);
+  const [busy, setBusy] = useState<null | 'connect' | 'disconnect'>(null);
   const alive = useRef(true);
 
   const load = useCallback(async () => {
@@ -51,30 +44,6 @@ export default function EventbriteConnect({ orgId }: { orgId: string }) {
     void eventbriteOAuthAvailable().then((v) => { if (alive.current) setOauth(v); });
     return () => { alive.current = false; };
   }, [load]);
-
-  // Back from Eventbrite's authorize page.
-  useEffect(() => {
-    const ret = readEventbriteReturn(location.search);
-    if (!ret) return;
-    navigate({ pathname: location.pathname, search: stripEventbriteReturn(location.search), hash: location.hash }, { replace: true });
-    if (ret.kind === 'error') {
-      toast({ kind: 'error', message: eventbriteErrorMessage(ret.reason) });
-      return;
-    }
-    if (finishedStates.has(ret.state)) return;
-    finishedStates.add(ret.state);
-    setBusy('finish');
-    finishEventbriteConnect(ret.state)
-      .then(async (r) => {
-        toast({ kind: 'success', message: `Eventbrite connected${r.accountName ? `: ${r.accountName}` : ''}.` });
-        const pick = eventPickPath(r.eventId);
-        if (pick) navigate(pick);
-        else await load();
-      })
-      .catch((e: any) => toast({ kind: 'error', message: eventbriteErrorMessage(e?.reason ?? 'unknown') }))
-      .finally(() => { if (alive.current) setBusy(null); });
-    // eslint-disable-next-line
-  }, [location.search]);
 
   const connect = async () => {
     setBusy('connect');
@@ -142,8 +111,8 @@ export default function EventbriteConnect({ orgId }: { orgId: string }) {
           {oauth && (
             <button type="button" onClick={() => void connect()} disabled={busy !== null}
               className={`${BTN} ${status.connected ? 'border border-slate-200 text-slate-700' : 'bg-tm-blue text-white'} inline-flex items-center gap-1`}>
-              {(busy === 'connect' || busy === 'finish') && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
-              {busy === 'finish' ? 'Finishing…' : status.connected ? 'Reconnect' : 'Connect Eventbrite'}
+              {busy === 'connect' && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
+              {status.connected ? 'Reconnect' : 'Connect Eventbrite'}
             </button>
           )}
           {status.connected && (

@@ -5,8 +5,7 @@ import {
   postTokenRequest, returnAppUrl, stateHash,
 } from '../../supabase/functions/_shared/eventbrite/oauth.ts';
 import {
-  authMethodLabel, eventPickPath, eventbriteErrorMessage, isEventbriteAuthorizeUrl, readEventbriteReturn,
-  stripEventbriteReturn, wantsEventbritePick,
+  authMethodLabel, eventPickPath, eventbriteErrorMessage, isEventbriteAuthorizeUrl, wantsEventbritePick,
 } from './eventbriteConnect';
 import { parseEventbriteOrgStatus, parseEventbriteStatus } from './door/eventbrite';
 
@@ -151,22 +150,6 @@ describe('Eventbrite token exchange', () => {
 });
 
 describe('Connect Eventbrite return (SPA)', () => {
-  const S = 'B'.repeat(43);
-  it('reads finish / error', () => {
-    expect(readEventbriteReturn(`?eventbrite=finish&eventbrite_state=${S}`)).toEqual({ kind: 'finish', state: S });
-    expect(readEventbriteReturn('?eventbrite=finish&eventbrite_state=nope')).toEqual({ kind: 'error', reason: 'state' });
-    expect(readEventbriteReturn('?eventbrite=error&reason=denied')).toEqual({ kind: 'error', reason: 'denied' });
-    expect(readEventbriteReturn('?eventbrite=error&reason=<b>')).toEqual({ kind: 'error', reason: 'b' });
-    expect(readEventbriteReturn('?eventbrite=pick')).toBeNull();
-    expect(readEventbriteReturn('?google_ads=finish')).toBeNull();
-  });
-
-  it('strips only its own params', () => {
-    expect(stripEventbriteReturn(`?tab=x&eventbrite=finish&eventbrite_state=${S}`)).toBe('?tab=x');
-    expect(stripEventbriteReturn('?eventbrite=error&reason=denied')).toBe('');
-    expect(stripEventbriteReturn('?reason=keep')).toBe('?reason=keep');
-  });
-
   it('goes back to the event only for an event id', () => {
     expect(eventPickPath(EVT)).toBe(`/dashboard/event/${EVT}?tab=door&eventbrite=pick`);
     expect(eventPickPath('//evil.example')).toBeNull();
