@@ -25,6 +25,7 @@ import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import WebsitePanel from '../components/WebsitePanel';
 import IntegrationsPanel from '../components/IntegrationsPanel';
+import PoshIntegrationPanel from '../components/PoshIntegrationPanel';
 import DeveloperSettings from '../components/DeveloperSettings';
 import PixelIdsEditor, { pixelIdsSavable } from '../components/PixelIdsEditor';
 import { paymentsEnabled } from '../lib/payments';
@@ -600,6 +601,11 @@ export default function OrgSettings() {
             {/* Bring-your-own accounts: ticket backends, SMS, marketplaces (mig 20261016090000). */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
+
+            {/* Posh: webhooks in, unmatched orders, event links (mig 20261029150000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <PoshIntegrationPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
