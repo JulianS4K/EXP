@@ -46,6 +46,7 @@ const CreateOrg = lazy(() => import('./views/CreateOrg'));
 const OrgSettings = lazy(() => import('./views/OrgSettings'));
 const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgLimitFlags = lazy(() => import('./views/OrgLimitFlags'));
+const ListingQueue = lazy(() => import('./views/ListingQueue'));
 const OrgPayouts = lazy(() => import('./views/OrgPayouts'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
@@ -176,6 +177,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/settings" element={<OrgSettings />} />
                     <Route path="/orgs/:orgId/members" element={<OrgMembers />} />
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
+                    <Route path="/admin/listings" element={<ListingQueue />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
