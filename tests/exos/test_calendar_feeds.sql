@@ -172,7 +172,8 @@ BEGIN
   ASSERT ids = ARRAY['e5','e8'], 'K4 has_tickets: ' || ids::text;
   FOR r IN SELECT * FROM jsonb_array_elements(f->'events') LOOP
     SELECT array_agg(k ORDER BY k) INTO keys FROM jsonb_object_keys(r) k;
-    ASSERT keys = ARRAY['description','doors_at','ends_at','has_tickets','id','image_url','lat','lng','name','org_name',
+    -- buy_on / buy_url: where to buy (mig 20261029170000), public on the event page too.
+    ASSERT keys = ARRAY['buy_on','buy_url','description','doors_at','ends_at','has_tickets','id','image_url','lat','lng','name','org_name',
                         'org_slug','place_id','slug','starts_at','status','timezone','updated_at','venue_address',
                         'venue_key','venue_name'], 'K4 row fields: ' || keys::text;
   END LOOP;
