@@ -193,11 +193,26 @@ export async function readTicketClasses(f: Fetch, token: string, id: string): Pr
  * One Eventbrite event read for import or re-check: GET /events/{id}/ with
  * EVENT_EXPAND, then its ticket classes (two requests). A failed ticket-class
  * read still imports the event, without per-type prices.
+ *
+ * With `owned`, the event must belong to one of the token's own Eventbrite
+ * organizations (one more GET). Any token can read a public event, so without
+ * this an org could import someone else's event as its own.
  */
-export async function readImportEvent(f: Fetch, token: string, id: string, now: Date = new Date()): Promise<EbResult<ImportData>> {
+export async function readImportEvent(
+  f: Fetch, token: string, id: string, now: Date = new Date(), opts: { owned?: boolean } = {},
+): Promise<EbResult<ImportData>> {
   if (!isEbId(id)) return { ok: false, status: 400, body: null, error: 'bad event id' };
   const r = await ebGet<Raw>(f, token, `/events/${id}/`, { expand: EVENT_EXPAND });
   if (!r.ok || !r.body) return { ...r, body: null };
+  if (opts.owned) {
+    const orgs = await ebGet<{ organizations?: Raw[] }>(f, token, '/users/me/organizations/');
+    if (!orgs.ok) return { ...orgs, body: null };
+    const mine = new Set((orgs.body?.organizations ?? []).map((o) => String(o?.id ?? '')).filter(isEbId));
+    const owner = String(r.body.organization_id ?? '');
+    if (!isEbId(owner) || !mine.has(owner)) {
+      return { ok: false, status: 403, body: null, error: 'NOT_YOUR_EVENT' };
+    }
+  }
   const classes = await readTicketClasses(f, token, id);
   const d = toImportData(r.body, classes.ok ? classes.body ?? [] : [], now);
   return d ? { ok: true, status: 200, body: d } : { ok: false, status: 502, body: null, error: 'bad event' };

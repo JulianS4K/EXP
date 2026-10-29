@@ -54,7 +54,7 @@ describe('parseEventUrl', () => {
 
 const NOW = new Date('2026-10-01T12:00:00Z');
 const EB_EVENT = {
-  id: '1234567890', name: { text: 'Rooftop Party' }, summary: 'Sunset set', description: { text: 'Long description' },
+  id: '1234567890', organization_id: '77', name: { text: 'Rooftop Party' }, summary: 'Sunset set', description: { text: 'Long description' },
   url: 'https://www.eventbrite.com/e/rooftop-party-tickets-1234567890',
   start: { utc: '2026-11-07T01:00:00Z', timezone: 'America/New_York' }, end: { utc: '2026-11-07T05:00:00Z' },
   status: 'live', currency: 'USD', online_event: false, is_free: false,
@@ -75,6 +75,7 @@ function fakeFetch(): { fetch: Fetch; calls: Array<{ url: string; method?: strin
     calls.push({ url: input, method: init?.method });
     const u = new URL(input);
     const body = u.pathname === '/v3/events/1234567890/' ? EB_EVENT
+      : u.pathname === '/v3/events/5555555555/' ? { ...EB_EVENT, id: '5555555555', organization_id: '88' }
       : u.pathname === '/v3/events/1234567890/ticket_classes/' ? { ticket_classes: CLASSES }
       : u.pathname === '/v3/users/me/organizations/' ? { organizations: [{ id: '77' }] }
       : u.pathname === '/v3/organizations/77/events/' ? { events: [EB_EVENT, { id: 'bad' }] }
@@ -121,6 +122,20 @@ describe('Eventbrite import', () => {
     expect(new URL(calls[0].url).searchParams.get('expand')).toBe('venue,ticket_availability,category,logo');
     expect(calls).toHaveLength(2);
     expect((await readImportEvent(fetch, 'TOKEN123456', 'nope')).ok).toBe(false);
+    expect((await readImportEvent(fetch, 'TOKEN123456', '999')).error).toBe('NOT_FOUND');
+  });
+  it('imports only events on one of the token\'s own organizations', async () => {
+    const { fetch, calls } = fakeFetch();
+    const own = await readImportEvent(fetch, 'TOKEN123456', '1234567890', NOW, { owned: true });
+    expect(own.ok).toBe(true);
+    expect(calls.map((c) => new URL(c.url).pathname)).toContain('/v3/users/me/organizations/');
+    expect(calls.every((c) => c.method === 'GET')).toBe(true);
+    const other = await readImportEvent(fetch, 'TOKEN123456', '5555555555', NOW, { owned: true });
+    expect(other).toMatchObject({ ok: false, status: 403, error: 'NOT_YOUR_EVENT' });
+    // The re-check reads an already-imported event and skips the ownership read.
+    const before = calls.length;
+    await readImportEvent(fetch, 'TOKEN123456', '5555555555', NOW);
+    expect(calls.slice(before).some((c) => c.url.includes('/users/me/organizations/'))).toBe(false);
     expect((await readImportEvent(fetch, 'TOKEN123456', '999')).error).toBe('NOT_FOUND');
   });
   it('lists live and upcoming events across the account', async () => {
@@ -198,6 +213,8 @@ describe('Google feed, link-out', () => {
     const c = google(gEv({ status: 'cancelled' }), [], where({ source_status: 'cancelled' }));
     expect(c.feed.events[0].event.eventStatus).toBe('https://schema.org/EventCancelled');
     expect(c.feed.events[0].event.offers[0].availability).toBe('https://schema.org/Discontinued');
+    // Cancelled in Exos while still on sale at the source (e.g. a draft): never listed, so left out.
+    expect(google(gEv({ status: 'cancelled' }), [], where()).skipped[0].reason).toMatch(/never listed/);
     expect(google(gEv(), [], where({ source_status: 'ended' })).skipped[0].reason).toBe('over at the source');
     expect(google(gEv(), [], where({ price_min: null })).skipped[0].reason).toMatch(/no price/);
   });

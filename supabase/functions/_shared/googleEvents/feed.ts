@@ -354,8 +354,11 @@ export function feedBlocker(e: FeedEventRow, tiers: FeedTierRow[], now: Date, bu
   if (end < now.getTime()) return 'already over';
   if (e.status === 'cancelled') {
     if (Date.parse(e.starts_at) < now.getTime()) return 'cancelled and past its start';
-    // A link-out event has no Exos sales; it was listed while published.
     if (!linkOut && !(Number(e.tickets_sold) > 0)) return 'cancelled before any sale (never listed)';
+    // A link-out event has no Exos sales to prove it was public. List it only
+    // when the source itself cancelled it (a public listing there); a draft
+    // the organizer cancelled in Exos stays out.
+    if (linkOut && linkOutGone(buy!) !== 'cancelled') return 'cancelled in Exos, not at the source (never listed)';
   }
   if (!e.timezone) return "no time zone (Google needs the venue's local time)";
   if (!text(e.venue_name)) return 'no venue name';

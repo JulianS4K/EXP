@@ -162,7 +162,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
 async function importEventbrite(
   sb: SupabaseClient, org: string, user: string, token: string, id: string, origin: "account" | "link",
 ): Promise<Record<string, unknown> & { ok: boolean }> {
-  const ev = await readImportEvent(fetch, token, id);
+  const ev = await readImportEvent(fetch, token, id, new Date(), { owned: true });
+  if (ev.error === "NOT_YOUR_EVENT") {
+    return { ok: false, error: "That event isn't on the connected Eventbrite account. Only your own events can be imported." };
+  }
   if (!ev.ok || !ev.body) return { ok: false, error: ebErrorMessage(ev) };
   const r = await sb.rpc("exos_link_out_import", {
     p_org_id: org, p_user_id: user, p_platform: "eventbrite", p_origin: origin, p_data: { ...ev.body, publish: true },
