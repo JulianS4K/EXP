@@ -44,6 +44,7 @@ import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
 import { allInPrice, buyerTierPrice, effectiveTierPrice, nextPriceStep } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
+import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from '../lib/marketplace/lastCall';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import { claimFreeAddons } from '../lib/addons';
@@ -110,6 +111,15 @@ export default function EventDetails() {
     if (notes && notes.length > 0) toast({ kind: 'info', message: notes.join(' ') });
   }, [location.state]);
   const [userTicketCount, setUserTicketCount] = useState(0);
+  // Last call (mig 20261029100000): near sell-out only the event's primary
+  // checkout sells; when that isn't Exos, send buyers there.
+  const [sale, setSale] = useState<PublicSale | null>(null);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    fetchPublicSale(event.id).then((s) => { if (live) setSale(s); }, () => undefined);
+    return () => { live = false; };
+  }, [event?.id]);
   // Per-tier sold/capacity, sourced from the events/{id}/tierSales sub-
   // collection. Buyers can no longer mutate the embedded ticketTiers array
   // (the rule lockdown that closed the price-rewrite vulnerability) so the
@@ -696,12 +706,15 @@ export default function EventDetails() {
   // published-only and getEventForEdit is RLS-gated to org staff, so a draft in
   // state means the viewer is authorized — no extra client gate needed.
 
-  const soldOut = selectedTier
+  const elsewhere = sellsElsewhere(sale);
+  const soldOut = elsewhere || (selectedTier
     ? (() => {
         const t = liveTier(selectedTier.id, selectedTier.capacity);
         return t.sold >= t.capacity;
       })()
-    : event.ticketsSold >= event.totalTickets;
+    : event.ticketsSold >= event.totalTickets);
+  // A voucher can't bypass a last call that sells elsewhere (exos-checkout refuses it too).
+  const canBypass = !elsewhere && !!voucher?.canBypass;
 
   const primaryStyle = event.branding?.primaryColor ? { backgroundColor: event.branding.primaryColor } : {};
   const accentStyle = event.branding?.accentColor ? { color: event.branding.accentColor } : {};
@@ -1050,7 +1063,7 @@ export default function EventDetails() {
                   </div>
                 )}
 
-                {(!soldOut || voucher?.canBypass) && (
+                {(!soldOut || canBypass) && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
@@ -1144,7 +1157,7 @@ export default function EventDetails() {
                   initialCode={prefill?.coupon ?? promoCode ?? undefined}
                 />
 
-                {(!soldOut || voucher?.canBypass) && (
+                {(!soldOut || canBypass) && (
                   <AddonSelector
                     eventId={event.id}
                     currency={event.currency || 'USD'}
@@ -1154,7 +1167,7 @@ export default function EventDetails() {
                 )}
 
                 <button
-                  disabled={(soldOut && !voucher?.canBypass) || purchasing || paidNotOnSale}
+                  disabled={(soldOut && !canBypass) || purchasing || paidNotOnSale}
                   onClick={handlePurchase}
                   className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide flex items-center justify-center gap-3 hover:scale-[1.01] transition-transform disabled:bg-white/10 disabled:text-white/20 disabled:scale-100"
                 >
@@ -1163,7 +1176,7 @@ export default function EventDetails() {
                   ) : (
                     <>
                       <Ticket className="w-5 h-5" />
-                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon')
+                      <span className="tracking-wide">{(soldOut && !canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon')
                         : priceToDisplay === 0 && addonSel.totalCents === 0 ? t('event.getFree') : t('event.buy')}</span>
                     </>
                   )}
@@ -1176,7 +1189,21 @@ export default function EventDetails() {
                   </p>
                 )}
 
-                {soldOut && !voucher?.canBypass && (
+                {elsewhere && (
+                  <div role="status" className="mt-3 space-y-2">
+                    <p className="type text-[11px] text-white/70 leading-relaxed">
+                      {t('event.lastCallElsewhere', { platform: PLATFORM_LABEL[sale.sellsOn] })}
+                    </p>
+                    {sale.sellsOnUrl && (
+                      <a href={sale.sellsOnUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-block border border-white/30 px-4 py-2 text-[11px] uppercase tracking-widest text-white hover:border-brand-primary hover:text-brand-primary">
+                        {t('event.buyOn', { platform: PLATFORM_LABEL[sale.sellsOn] })}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {soldOut && !canBypass && !elsewhere && (
                   <div className="mt-3">
                     <WaitlistCTA
                       eventId={event.id}

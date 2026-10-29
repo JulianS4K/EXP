@@ -46,6 +46,7 @@ import AttendeeLookup from '../components/AttendeeLookup';
 import SmsPanel from '../components/SmsPanel';
 import PromoLinksPanel from '../components/PromoLinksPanel';
 import RefundAsksPanel from '../components/RefundAsksPanel';
+import LastCallBadge from '../components/LastCallBadge';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -263,6 +264,9 @@ export default function OrganizerEventReport() {
             </span>
           </span>
         </div>
+
+        {/* Near sell-out only the primary sells (mig 20261029100000). */}
+        <LastCallBadge eventId={event.id} />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
