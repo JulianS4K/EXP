@@ -39,6 +39,14 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   'event-published': { event: event(), marketing: false },
   'inventory-low': { event: event(), tier: { id: TIER, name: 'GA <early>', capacity: 10, sold: 9, remaining: 1 }, marketing: false },
   'inventory-sold-out': { event: event(), tier: { id: TIER, name: 'GA', capacity: 10, sold: 10, remaining: 0 }, marketing: false },
+  'fixed-block-released': {
+    event: event(), platform: 'DICE <x>', released_at: '2026-10-01T00:00:00+00:00', reason: 'scheduled',
+    tiers: [
+      { tier_id: TIER, name: 'GA <early>', kind: 'standard', party_size: null, block: 120, sold: 23, pending: 2, returned: 95 },
+      { tier_id: EV2, name: 'Booth', kind: 'table', party_size: 6, block: 4, sold: 3, pending: 0, returned: 1 },
+    ],
+    total_returned: 96, total_pending: 2, marketing: false,
+  },
   'payout-sent': { org, amount_cents: 123456, currency: 'usd', period: 'Sep 1-15, 2026', reference: 'po_<1>', marketing: false },
   'payout-pending': { org, amount_cents: 50000, currency: 'eur', period: 'Sep 16-30', reference: null, marketing: false },
   'fee-free-ending': { org, fee_free_until: '2026-10-12T00:00:00+00:00', stage: '14d', days_left: 14, fee_bps: 300, marketing: false },
@@ -195,6 +203,20 @@ describe('renderTemplate', () => {
     expect(ok('inventory-low').html).toContain(`href="${APP}/edit-event/${EV}"`);
     expect(ok('inventory-sold-out').subject).toBe('Sold out: GA for Show <One> & "Friends"');
     expect(ok('event-published').html).toContain(`href="${APP}/dashboard/event/${EV}/promote"`);
+  });
+
+  it('fixed-block-released: what to put back on the other platform, per type', () => {
+    const r = ok('fixed-block-released');
+    expect(r.subject).toBe('Put 96 tickets back on DICE <x>: Show <One> & "Friends"');
+    expect(r.html).toContain('Put these back on sale on <strong>DICE &lt;x&gt;</strong>');
+    expect(r.html).toContain('GA &lt;early&gt;</td><td style="padding:2px 12px 2px 0;text-align:right"><strong>95 tickets</strong>');
+    expect(r.html).toContain('<strong>1 table of 6</strong>');
+    expect(r.html).toContain('sold 23 of 120 on Exos');
+    expect(r.html).toContain('2 more are still in a checkout or on a marketplace');
+    expect(r.html).toContain(`href="${APP}/dashboard/event/${EV}"`);
+    const none = ok('fixed-block-released', { ...PAYLOADS['fixed-block-released'], total_returned: 1, total_pending: 0 });
+    expect(none.subject).toBe('Put 1 ticket back on DICE <x>: Show <One> & "Friends"');
+    expect(none.html).not.toContain('still in a checkout');
   });
 
   it('dispute mails: amount, reason, deadline, links; no buyer data; recovery wording', () => {

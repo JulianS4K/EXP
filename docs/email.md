@@ -74,6 +74,7 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `event-published` | Event status → `published` (trigger); first date of a series only | O | T | per event + person | TS |
 | `inventory-low` | Cron: a tier on a published, upcoming event has ≤ 10% (min 1) left | O | T | per tier + capacity + person | TS |
 | `inventory-sold-out` | Cron: a tier has none left | O | T | per tier + capacity + person (raising capacity re-arms it) | TS |
+| `fixed-block-released` | A fixed block handed back to its platform (mig 20261029160000): the release cron `exos_release_fixed_blocks` or **Release now** | O | T | per event + person | TS: per ticket type the count to put back on that platform (and sold of the block), how many were still pending, a link to the event dashboard. Counts only |
 | `marketplace-attention` | A marketplace order needs a person | O | T | per order + reason | SQL |
 | `payout-sent`, `payout-pending` | `exos_queue_payout_mail(org, amount_cents, currency, period, status, reference)`, for the payout ledger to call | O + finance | T | per org + status + reference (or period) + person | TS |
 | `fee-free-ending` | Cron: 14 days and 1 day before `exos_org_billing.fee_free_until` | O + finance | T | per org + end date + stage + person | TS |
