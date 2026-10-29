@@ -1,6 +1,14 @@
 // exos-mail-drain's last-mile render (supabase/functions/_shared/mail-render.ts).
 import { describe, it, expect } from 'vitest';
-import { normalizeAppUrl, renderMail } from '../../supabase/functions/_shared/mail-render.ts';
+import { fillAppUrl, normalizeAppUrl, renderMail } from '../../supabase/functions/_shared/mail-render.ts';
+
+describe('fillAppUrl (texts)', () => {
+  it('fills the app URL, leaves plain texts alone, holds a link text without a URL', () => {
+    expect(fillAppUrl('Report: {{app_url}}/orgs/x/channels', 'https://exos.example/bridge')).toBe('Report: https://exos.example/bridge/orgs/x/channels');
+    expect(fillAppUrl('No link here', null)).toBe('No link here');
+    expect(fillAppUrl('Report: {{app_url}}/x', null)).toBeNull();
+  });
+});
 
 describe('normalizeAppUrl', () => {
   it('accepts https (and http on localhost) and drops trailing slashes', () => {

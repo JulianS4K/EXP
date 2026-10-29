@@ -219,6 +219,42 @@ partner's newsletter). Each link has a name, a channel, a **limit** (tickets), a
 It opens your event with the code already applied; when the limit is reached or it expires, the code stops working.
 Visits and redemptions show per link, and sales are attributed to the channel under *Sales by source*.
 
+### Tracking links and the weekly channel report
+
+**Promo links → Make a link per channel** lists one tracking link per channel (Instagram, Facebook, TikTok, X,
+email, text, WhatsApp, partner sites, flyer / QR, Meta and Google ads), with an optional campaign name. A
+tracking link is the event page tagged with `utm_source` / `utm_medium`: no code, no limit, and guests can buy
+without signing in (a promo link's code needs an account). Use a promo link when you want a deal or a cap.
+
+**Event report → Overview → Channels** shows every ticket by where it sold, for the last full week (Monday to
+Sunday, UTC) and to date (mig `20261029120000`, `exos_event_channel_report`). Owner, manager and finance only.
+
+| Channel | Where the count comes from | Gross / fees / net |
+|---|---|---|
+| Your Exos links | Paid orders: the promo link's channel, else the `utm_source` (aliases merged: `ig` → Instagram), else the promoter code, the AI assistant, the ad click id (gclid → Google, fbclid → Meta); otherwise **Direct / unknown**. Free claims: the `utm_source` they came with, else the promoter | Gross is what the buyer paid less refunds. Channel fees = card processing; the Exos fee is its own column (none in your free months). Older orders without the fee split: fees "not reported" |
+| Box office | Tickets staff minted with a price | Gross = price, no fees |
+| Marketplaces (StubHub, SeatGeek, Vivid, …) | Marketplace orders (cancelled ones left out) | The listed price, the marketplace's fee and the payout, as the marketplace reports them (some report only the payout) |
+| Eventbrite, Luma, pretix, hi.events | The attendees their syncs bring to the door list; without a sync, the sold count from the ticket-type link (no dates, so "to date" only) | Not reported: those syncs don't read prices or fees |
+| Comps (not sales) | Comp batches, free staff issues, referral rewards, guest-list entries (+ plus-ones) | — |
+| Imported lists (not sales) | CSV door imports (Posh and others): other-platform attendees; the file has no prices | — |
+
+Exos never estimates a platform's fee: where a channel doesn't report one, the cell says **not reported** and net
+stays blank. Totals add the figures that were reported and say how many tickets were left out. Fee rules you pass
+on or absorb (`exos_order_fees`) aren't in the report yet; they join when that change lands.
+
+**The Monday email** (`org-channel-report`) has the same numbers for every event that started in the last 7 days
+or starts in the next 60: per event, each channel's tickets this week and to date with gross, fees and net, plus
+totals. It goes to the owner and managers; anyone can unsubscribe from the footer (it's a follow-up mail), and the
+owner can turn it off for the org at **`/orgs/:orgId/channels`** (Dashboard → Channels), which also shows any
+earlier week. It replaces that week's *Your week on Exos* summary for the people it reaches. **Weekly text:** with
+Twilio or Telnyx connected, the owner can add a mobile number for a short summary with a link, sent from your own
+number between 9:00 and 20:00 New York time; replying STOP turns it off for good: that number can't be saved
+again until it texts START to your number. (Not built yet: confirming the number with a code when it's saved.)
+Because anyone can put anything in a link's `utm_source`, the email and the text only use Exos' fixed channel
+names: promoter codes show as *Promoters*, and any source Exos doesn't know shows as *Other* (the Channels card
+shows its cleaned name beside it). Each org gets one report per week however
+often the job runs. The operator turns the job on (see `docs/email.md`).
+
 ### Text messages
 
 Fans opt in from their ticket ("Get texts about … next events"), with the consent words stored. To send:
