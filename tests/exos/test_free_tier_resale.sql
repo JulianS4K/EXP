@@ -17,6 +17,8 @@
 --      fall back; the old resale_min_capacity key is gone
 --   T8 the fee: 0 on the free tier (free_tier_fee_bps), 3% over it after the
 --      free months; marketplace sale and POS settlement use the event's rate
+--   T8b a bypass voucher selling past 150 ends the free tier (fee terms say
+--       paid, sold + the order's quantity counted); resale then needs the opt-in
 --   T9 RLS on exos_resale_consents; grants (nothing anon; helpers service only)
 --   T10 deleting an opted-in event still works
 -- Self-contained (c9 prefix), rolled back. The harness turns the rules off for
@@ -291,6 +293,39 @@ BEGIN
   ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e2')) ->> 'fee_bps')::int = 300, 'T8: POS 3%';
 END $$;
 
+-- T8b. Selling past the cap ends the free tier: capped at 150, 148 sold, a
+-- bypass_capacity voucher order of 5 goes through (153 sold). The fee terms
+-- then say paid tier, and resale is possible again with the opt-in.
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
+  ('c9000000-0000-0000-0000-0000000000e6','c9000000-0000-0000-0000-000000000001','Packed','published',now() + interval '20 days','Hall',0,148,'{}','America/New_York','{}');
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility,sort_order) VALUES
+  ('c9000000-0000-0000-0000-0000000000da','c9000000-0000-0000-0000-0000000000e6','GA',20,150,148,'public',1);
+DO $$
+DECLARE j jsonb; v uuid; ids uuid[];
+BEGIN
+  ASSERT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: free tier at 148 of 150';
+  j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 2);
+  ASSERT (j ->> 'free_tier')::boolean AND (j ->> 'sold')::int = 148 AND (j ->> 'order_admissions')::int = 2, 'T8b: 150 with the order ' || j::text;
+  j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 3);
+  ASSERT NOT (j ->> 'free_tier')::boolean, 'T8b: 151 with the order is paid ' || j::text;
+  INSERT INTO public.exos_vouchers (event_id, code, tier_id, max_uses, bypass_capacity)
+  VALUES (pg_temp.u('e6'), 'C9PAST', pg_temp.u('da'), 5, true) RETURNING id INTO v;
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, buyer_uid, buyer_email, quantity, amount_cents, status, voucher_id)
+  VALUES ('c9-past', pg_temp.u('e6'), pg_temp.u('da'), 'c9000000-0000-0000-0000-000000000001', pg_temp.u('a0'), 'c9-owner@x.com', 5, 10000, 'pending', v);
+  ids := public.exos_fulfill_checkout('c9-past');
+  ASSERT array_length(ids, 1) = 5, 'T8b: the bypass order went through';
+  ASSERT public.exos_event_sold_count(pg_temp.u('e6')) = 153, 'T8b: 153 sold';
+  ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: no longer the free tier';
+  j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 1);
+  ASSERT NOT (j ->> 'free_tier')::boolean AND (j ->> 'max_capacity')::int = 150 AND (j ->> 'sold')::int = 153, 'T8b: terms ' || j::text;
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e6'), now()) = 300, 'T8b: 3% from here on';
+  ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: resale still needs the opt-in';
+  PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
+  PERFORM pg_temp.optin('e6');
+  ASSERT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: opted in at 153 sold';
+  PERFORM pg_temp.act(NULL);
+END $$;
+
 -- T9. RLS and grants.
 DO $$ BEGIN PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a2'); END $$;
 SET ROLE authenticated;
@@ -325,7 +360,8 @@ BEGIN
                            'public.exos_event_capacity_bounded(uuid)', 'public.exos_event_is_free_tier(uuid)',
                            'public.exos_resale_consent_active(uuid)', 'public._exos_resale_consent_version()',
                            'public._exos_resale_consent_recheck(uuid)', 'public.exos_event_fee_bps(uuid, timestamp with time zone)',
-                           'public.exos_event_fee_terms(uuid)', 'public.exos_resale_unlocked(uuid)', 'public._exos_resale_locked_msg(uuid)',
+                           'public.exos_event_fee_terms(uuid, uuid, integer)', 'public.exos_event_sold_count(uuid)',
+                           'public.exos_event_tier_size(uuid)', 'public.exos_resale_unlocked(uuid)', 'public._exos_resale_locked_msg(uuid)',
                            'public.exos_tg_event_resale_consent()', 'public.exos_tg_tier_resale_resync()'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'T9: service only ' || f;
   END LOOP;

@@ -7,7 +7,8 @@
 --           C: FUNCTION _exos_setting_int, _exos_setting_bool,
 --              exos_free_tier_max_capacity (authenticated: the number only),
 --              exos_free_tier_fee_bps, exos_resale_consent_required,
---              exos_event_capacity_bounded, exos_event_is_free_tier,
+--              exos_event_capacity_bounded, exos_event_sold_count,
+--              exos_event_tier_size, exos_event_is_free_tier,
 --              exos_resale_consent_active, _exos_resale_consent_version,
 --              _exos_resale_consent_recheck, exos_event_fee_bps,
 --              exos_event_fee_terms, exos_tg_event_resale_consent (service role)
@@ -40,6 +41,12 @@
 --      marketplaces are pulled, pools planned to 0, the S4K pool released and
 --      the event's S4K listings dropped.
 --   4. Over 150 the fee stays as it is (3%, the org's first 6 months free).
+--   5. The size these rules read is max(max capacity, tickets already sold)
+--      (exos_event_tier_size): an event capped at 150 that sells past it
+--      (bypass vouchers, comps, box office) is no longer the free tier: the
+--      fee applies to the order that crosses and every one after (checkout
+--      adds the order's quantity), and resale is possible again, opt-in still
+--      required.
 --
 -- Operator settings (exos_platform_settings, service role only; no row = the
 -- default; a malformed value falls back to the default):
@@ -150,10 +157,35 @@ $$;
 REVOKE ALL ON FUNCTION public.exos_event_capacity_bounded(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_capacity_bounded(uuid) TO service_role;
 
+-- Tickets actually sold (people: a table counts its party size). The larger
+-- of the house counter and the ticket types' sold counts, so a sale past the
+-- cap (a bypass voucher, a comp, the box office) still counts.
+CREATE OR REPLACE FUNCTION public.exos_event_sold_count(p_event_id uuid)
+RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT greatest(coalesce(e.tickets_sold, 0),
+                  coalesce(sum(greatest(t.sold, 0) * CASE WHEN t.kind = 'table' THEN greatest(coalesce(t.party_size, 1), 1) ELSE 1 END), 0))::int
+    FROM public.exos_events e
+    LEFT JOIN public.exos_ticket_tiers t ON t.event_id = e.id
+   WHERE e.id = p_event_id
+   GROUP BY e.id, e.tickets_sold
+$$;
+REVOKE ALL ON FUNCTION public.exos_event_sold_count(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_event_sold_count(uuid) TO service_role;
+
+-- The size the free-tier rules read: max(max capacity, tickets already sold).
+-- An event that has sold past the cutoff is never the free tier again, so
+-- capping at 150 and selling past it can't dodge the fee.
+CREATE OR REPLACE FUNCTION public.exos_event_tier_size(p_event_id uuid)
+RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT greatest(coalesce(public.exos_event_max_capacity(p_event_id), 0), coalesce(public.exos_event_sold_count(p_event_id), 0))
+$$;
+REVOKE ALL ON FUNCTION public.exos_event_tier_size(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_event_tier_size(uuid) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.exos_event_is_free_tier(p_event_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT coalesce(public.exos_event_capacity_bounded(p_event_id), false)
-     AND coalesce(public.exos_event_max_capacity(p_event_id), 0) <= public.exos_free_tier_max_capacity()
+     AND public.exos_event_tier_size(p_event_id) <= public.exos_free_tier_max_capacity()
 $$;
 REVOKE ALL ON FUNCTION public.exos_event_is_free_tier(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_is_free_tier(uuid) TO service_role;
@@ -212,7 +244,7 @@ RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-  SELECT coalesce(public.exos_event_max_capacity(p_event_id), 0) > public.exos_free_tier_max_capacity()
+  SELECT public.exos_event_tier_size(p_event_id) > public.exos_free_tier_max_capacity()
      AND (NOT public.exos_resale_consent_required() OR public.exos_resale_consent_active(p_event_id))
 $$;
 REVOKE ALL ON FUNCTION public.exos_resale_unlocked(uuid) FROM PUBLIC, anon, authenticated;
@@ -224,10 +256,10 @@ LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT CASE
-    WHEN coalesce(public.exos_event_max_capacity(p_event_id), 0) <= public.exos_free_tier_max_capacity()
+    WHEN public.exos_event_tier_size(p_event_id) <= public.exos_free_tier_max_capacity()
       THEN format('resale marketplaces need a max capacity over %s (events of %s or less are the free tier: no Exos fee, never resold); this event''s is %s',
                   public.exos_free_tier_max_capacity(), public.exos_free_tier_max_capacity(),
-                  coalesce(public.exos_event_max_capacity(p_event_id), 0))
+                  public.exos_event_tier_size(p_event_id))
     ELSE 'resale is off for this event until an owner or manager opts in (Marketplaces, Resale opt-in)'
   END
 $$;
@@ -248,7 +280,7 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF NOT public.exos_resale_consent_active(p_event_id)
-     OR coalesce(public.exos_event_max_capacity(p_event_id), 0) > public.exos_free_tier_max_capacity() THEN
+     OR public.exos_event_tier_size(p_event_id) > public.exos_free_tier_max_capacity() THEN
     RETURN false;
   END IF;
   UPDATE public.exos_resale_consents
@@ -326,6 +358,7 @@ BEGIN
    ORDER BY revoked_at DESC LIMIT 1;
   RETURN jsonb_build_object(
     'max_capacity', v_cap,
+    'sold', public.exos_event_sold_count(p_event_id),
     'capacity_bounded', coalesce(public.exos_event_capacity_bounded(p_event_id), false),
     'free_tier_max_capacity', v_cut,
     'free_tier', public.exos_event_is_free_tier(p_event_id),
@@ -370,7 +403,7 @@ BEGIN
     IF e.status = 'cancelled' THEN
       RAISE EXCEPTION 'exos_set_resale_consent: the event was cancelled' USING ERRCODE = '22023';
     END IF;
-    v_cap := coalesce(public.exos_event_max_capacity(p_event_id), 0);
+    v_cap := public.exos_event_tier_size(p_event_id);
     v_cut := public.exos_free_tier_max_capacity();
     IF v_cap <= v_cut THEN
       RAISE EXCEPTION 'exos_set_resale_consent: %', public._exos_resale_locked_msg(p_event_id) USING ERRCODE = '22023';
@@ -428,18 +461,32 @@ REVOKE ALL ON FUNCTION public.exos_event_fee_bps(uuid, timestamptz) FROM PUBLIC,
 GRANT EXECUTE ON FUNCTION public.exos_event_fee_bps(uuid, timestamptz) TO service_role;
 
 -- What exos-checkout needs to pick the rate (exosFeeBpsForEvent). max_capacity
--- is NULL for an event with no max (not bounded): never the free tier.
-CREATE OR REPLACE FUNCTION public.exos_event_fee_terms(p_event_id uuid)
+-- is NULL for an event with no max (not bounded): never the free tier. sold is
+-- what the event has already sold and order_admissions what this order adds
+-- (a table counts its party size): the order is free tier only while
+-- max(max capacity, sold + order) stays at or under the cutoff.
+CREATE OR REPLACE FUNCTION public.exos_event_fee_terms(p_event_id uuid, p_tier_id uuid DEFAULT NULL, p_quantity integer DEFAULT 0)
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT jsonb_build_object(
-           'max_capacity', CASE WHEN public.exos_event_capacity_bounded(e.id) THEN public.exos_event_max_capacity(e.id) END,
-           'free_tier_max_capacity', public.exos_free_tier_max_capacity(),
+           'max_capacity', CASE WHEN x.bounded THEN x.cap END,
+           'sold', x.sold,
+           'order_admissions', x.adm,
+           'free_tier_max_capacity', x.cut,
            'free_tier_fee_bps', public.exos_free_tier_fee_bps(),
-           'free_tier', public.exos_event_is_free_tier(e.id))
-    FROM public.exos_events e WHERE e.id = p_event_id
+           'free_tier', x.bounded AND greatest(x.cap, x.sold + x.adm) <= x.cut)
+    FROM public.exos_events e
+    CROSS JOIN LATERAL (
+      SELECT coalesce(public.exos_event_capacity_bounded(e.id), false) AS bounded,
+             coalesce(public.exos_event_max_capacity(e.id), 0) AS cap,
+             coalesce(public.exos_event_sold_count(e.id), 0) AS sold,
+             public.exos_free_tier_max_capacity() AS cut,
+             greatest(coalesce(p_quantity, 0), 0)
+               * coalesce((SELECT CASE WHEN t.kind = 'table' THEN greatest(coalesce(t.party_size, 1), 1) ELSE 1 END
+                             FROM public.exos_ticket_tiers t WHERE t.id = p_tier_id AND t.event_id = e.id), 1) AS adm) x
+   WHERE e.id = p_event_id
 $$;
-REVOKE ALL ON FUNCTION public.exos_event_fee_terms(uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_event_fee_terms(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_event_fee_terms(uuid, uuid, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_event_fee_terms(uuid, uuid, integer) TO service_role;
 
 -- A marketplace sale on an event that is the free tier by the time it lands
 -- (a live listing still shrinking) pays the free tier's rate.

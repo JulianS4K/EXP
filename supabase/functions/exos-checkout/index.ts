@@ -363,12 +363,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // The free tier (mig 20261029090000): no Exos fee on an event with a max
   // capacity of 150 or less. Before that migration (no RPC) the event is
   // charged as before.
-  const { data: feeTerms } = await sb.rpc("exos_event_fee_terms", { p_event_id: event_id });
+  // Judged on max(max capacity, sold + this order): selling past the cap
+  // (e.g. a bypass voucher) ends the free tier with the order that crosses.
+  const { data: feeTerms } = await sb.rpc("exos_event_fee_terms", {
+    p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
+  });
   const terms = (feeTerms ?? null) as
-    | { max_capacity?: number | null; free_tier_max_capacity?: number; free_tier_fee_bps?: number }
+    | {
+      max_capacity?: number | null; sold?: number; order_admissions?: number;
+      free_tier_max_capacity?: number; free_tier_fee_bps?: number;
+    }
     | null;
   const feeBps = exosFeeBpsForEvent({
     maxCapacity: terms ? terms.max_capacity ?? null : null,
+    soldCount: terms?.sold ?? 0,
+    orderAdmissions: terms?.order_admissions ?? quantity,
     feeFreeUntil,
     now: feeNow,
     bps: Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),

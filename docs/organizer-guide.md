@@ -43,7 +43,9 @@ paid events can't be sold.**
   *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee.
   **Free tier:** an event with a max capacity of 150 or less (its overall cap, else its capped
   ticket types, a table counting its party size) pays no Exos fee at all, ever; only card
-  processing. It is also never listed on resale marketplaces or S4K. Bigger events: your
+  processing. It is also never listed on resale marketplaces or S4K. An event that sells past 150
+  anyway (a voucher that sells past sold-out, comps, the box office) leaves the free tier: the order
+  that crosses 150 and every one after pay the normal fee. Bigger events: your
   first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
   takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
   a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the

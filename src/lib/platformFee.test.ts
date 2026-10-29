@@ -8,6 +8,7 @@ import {
   checkoutFeeSplit,
   exosFeeBpsAt,
   exosFeeBpsForEvent,
+  freeTierSize,
   isFeeFreeAt,
   isFreeTier,
   exosFeeCents,
@@ -129,6 +130,23 @@ describe('the free tier: max capacity 150 or less pays no Exos fee (operator, 20
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: 50 })).toBe(50);
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: future, now, freeTierFeeBps: 50 })).toBe(0);
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: -5 })).toBe(0);
+  });
+
+  it('ends with the order that sells past 150, and stays ended (bypass vouchers, comps, box office)', () => {
+    expect(freeTierSize(150, 0, 0)).toBe(150);
+    expect(freeTierSize(150, 148, 4)).toBe(152);
+    expect(freeTierSize(null, 10, 2)).toBeNull();
+    const at = (sold: number, qty: number) =>
+      exosFeeBpsForEvent({ maxCapacity: 150, soldCount: sold, orderAdmissions: qty, feeFreeUntil: past, now });
+    expect(at(146, 4)).toBe(0); // 150: still free
+    expect(at(147, 4)).toBe(300); // 151: this order pays
+    expect(at(151, 1)).toBe(300); // already past: every later order pays
+    expect(at(149, 1)).toBe(0);
+    expect(at(150, 1)).toBe(300);
+    // A table order counts its party size (the server sends admissions).
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, soldCount: 140, orderAdmissions: 2 * 6, feeFreeUntil: past, now })).toBe(300);
+    // Free months still win.
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, soldCount: 400, orderAdmissions: 1, feeFreeUntil: future, now })).toBe(0);
   });
 
   it('leaves only the card fee on a free-tier checkout', () => {

@@ -67,19 +67,42 @@ export function isFreeTier(maxCapacity: number | null | undefined, cutoff: numbe
 }
 
 /**
+ * The size the free tier is judged on for one order: the larger of the
+ * event's max capacity and what it will have sold with this order (tickets
+ * already sold + this order's admissions). An event capped at 150 that sells
+ * past it (bypass vouchers, comps, box office) leaves the free tier with the
+ * order that crosses. `null` (no max) stays `null`: never the free tier.
+ */
+export function freeTierSize(
+  maxCapacity: number | null | undefined,
+  soldCount: number | null | undefined = 0,
+  orderAdmissions: number | null | undefined = 0,
+): number | null {
+  if (maxCapacity === null || maxCapacity === undefined || !Number.isFinite(maxCapacity)) return null;
+  const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0);
+  return Math.max(n(maxCapacity), n(soldCount) + n(orderAdmissions));
+}
+
+/**
  * The Exos rate for one event's sale at `now`: 0 in the org's free months,
- * else the free tier's rate (0) when the event is the free tier, else `bps`.
- * Same order as SQL exos_event_fee_bps.
+ * else the free tier's rate (0) while max(max capacity, sold + this order) is
+ * at or under the cutoff, else `bps`. Same rule as SQL exos_event_fee_terms /
+ * exos_event_fee_bps.
  */
 export function exosFeeBpsForEvent(opts: {
   maxCapacity: number | null | undefined;
+  /** Tickets the event has already sold (people; exos_event_fee_terms.sold). */
+  soldCount?: number | null;
+  /** What this order adds (people; exos_event_fee_terms.order_admissions). */
+  orderAdmissions?: number | null;
   feeFreeUntil: string | null | undefined;
   now: Date;
   bps?: number;
 } & FreeTierTerms): number {
   const bps = opts.bps ?? EXOS_FEE_BPS;
   if (exosFeeBpsAt(opts.feeFreeUntil, opts.now, bps) === 0) return 0;
-  if (isFreeTier(opts.maxCapacity, opts.freeTierMaxCapacity ?? FREE_TIER_MAX_CAPACITY)) {
+  const size = freeTierSize(opts.maxCapacity, opts.soldCount, opts.orderAdmissions);
+  if (isFreeTier(size, opts.freeTierMaxCapacity ?? FREE_TIER_MAX_CAPACITY)) {
     const free = opts.freeTierFeeBps ?? FREE_TIER_FEE_BPS;
     return Number.isFinite(free) && free > 0 ? Math.round(free) : 0;
   }
