@@ -8,7 +8,8 @@
 // www.eventbriteapi.com; assertReadonlyMethod throws on anything else. No
 // check-in write-back, no webhook registration, no orders.
 //
-// The token is the organizer's private token, sent only in the Authorization
+// The token is the organizer's private token or OAuth token (the same
+// thing to the API; mig 20261029140000), sent only in the Authorization
 // header (never in a URL, never logged). Error text is Eventbrite's error
 // code, never a response body.
 
@@ -78,7 +79,7 @@ export async function ebGet<T>(
 /** What the organizer sees when a request fails. */
 export function ebErrorMessage(r: { status: number; error?: string }): string {
   if (r.status === 401 || r.error === "INVALID_AUTH" || r.error === "NO_AUTH") {
-    return "Eventbrite rejected the token. Paste a new private token.";
+    return "Eventbrite rejected the token. Disconnect and connect Eventbrite again.";
   }
   if (r.status === 403 || r.error === "NOT_AUTHORIZED") return "This Eventbrite account can't read that event's attendees.";
   if (r.status === 404 || r.error === "NOT_FOUND") return "Eventbrite has no such event for this account.";
