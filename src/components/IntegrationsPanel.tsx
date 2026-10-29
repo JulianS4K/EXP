@@ -5,13 +5,14 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Plug } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import EventbriteConnect from './EventbriteConnect';
 import {
   PROVIDERS, cleanConfig, configError, listIntegrations, removeIntegration, saveIntegration, testIntegration,
   type IntegrationRow, type ProviderGroup, type ProviderInfo,
 } from '../lib/integrations';
 
 const GROUPS: { id: ProviderGroup; label: string; note: string }[] = [
-  { id: 'backend', label: 'Ticket backends', note: 'Sell on another platform; Exos runs the page, marketing and the door. Eventbrite connects from the door app.' },
+  { id: 'backend', label: 'Ticket backends', note: 'Sell on another platform; Exos runs the page, marketing and the door. Each event links to its Eventbrite event on its door tab.' },
   { id: 'sms', label: 'SMS', note: 'Text fans who opted in, from your own number.' },
   { id: 'marketplace', label: 'Resale marketplaces', note: 'Your own seller accounts, for reads. Exos never changes prices or inventory there.' },
 ];
@@ -177,6 +178,7 @@ export default function IntegrationsPanel({ orgId, canEdit }: { orgId: string; c
               <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{g.label}</h3>
               <p className="text-[11px] text-slate-400 mb-2">{g.note}</p>
               <ul className="space-y-3">
+                {g.id === 'backend' && <EventbriteConnect orgId={orgId} />}
                 {PROVIDERS.filter((p) => p.group === g.id).map((p) => (
                   <Fragment key={p.id}>
                     <ProviderCard p={p} row={rows?.find((r) => r.provider === p.id)} orgId={orgId} canEdit={canEdit} onChanged={load} />

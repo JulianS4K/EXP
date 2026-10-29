@@ -296,8 +296,11 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
   - In the **Tickets** tab, a code from another platform is handed to the guest list automatically.
 - **It works offline** like the rest of the door: download the lists first.
 - **Live sync from Eventbrite** (instead of re-importing): in `/door`, open **Eventbrite sync** on the event.
-  - An owner or manager pastes the Eventbrite **private token** once (Eventbrite: Account settings →
-    Developer links → API keys) and picks the Eventbrite event.
+  - An owner or manager clicks **Connect Eventbrite**, signs in on Eventbrite and allows Exos, then picks
+    the Eventbrite event (also in **Org settings → Integrations**). Where this Exos server has no Eventbrite
+    app set up yet, paste the Eventbrite **private token** once instead (Eventbrite: Account settings →
+    Developer links → API keys). **Disconnect** deletes Exos's copy of the token; to also remove Exos on
+    Eventbrite's side, remove the app in your Eventbrite account settings.
   - New buyers reach the door within a couple of minutes on the event day (every 30 minutes before that).
     **Sync now** pulls the latest right away; any door staff can tap it.
   - A ticket refunded or cancelled on Eventbrite stops working: the door says "not valid" for the scan and
