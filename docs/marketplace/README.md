@@ -18,15 +18,28 @@ Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
 (`openapi/`), and a README with the endpoint map.
 
-**Resale needs a max capacity of 250** (operator rule 2026-10-14, mig
-`20261014140000`): the six marketplaces above and the S4K route are off for an
-event whose max capacity (its overall cap, never above what its capped ticket
-types add up to; else the capped types' sum) is under 250. Nothing can be
-allocated, ticked marketplaces make no event rows, the auto split plans
-nothing, S4K can't be chosen and the feed leaves the event out; an event that
-drops below 250 later has its pools planned to 0. Eventbrite isn't resale and
-isn't affected. The number is an operator setting (`exos_platform_settings`
-key `resale_min_capacity`, default 250).
+**Resale is for events over the free tier, opted in** (operator rules
+2026-10-14 and 2026-10-29, migs `20261014140000`, `20261029090000`): an event
+whose max capacity (its overall cap, never above what its capped ticket types
+add up to; else the capped types' sum; a table counts its party size) is 150
+or less is the **free tier** (no Exos fee, never resold). Over 150, resale
+needs an owner or manager's **opt-in for that event** (`exos_resale_consents`,
+`exos_set_resale_consent`), revoked by itself if the max capacity drops back
+to 150 or less. Until both hold, the marketplaces above (and TickPick, Tixel
+later) and the S4K route are off: nothing can be allocated, ticked
+marketplaces make no event rows, the auto split plans nothing, S4K can't be
+chosen and the feed leaves the event out; an event that loses either later
+has its pools planned to 0 and its S4K pool released (withdrawing does it at
+once). Every path asks one function, `exos_resale_unlocked`. Eventbrite and
+Luma aren't resale and aren't affected. The numbers are operator settings
+(`exos_platform_settings`, service role): `free_tier_max_capacity` (default
+150), `free_tier_fee_bps` (0) and `resale_consent_required` (true); the old
+`resale_min_capacity` key is gone.
+
+**Last call** (spec §5, mig `20261029100000`): at 10 tickets left or fewer
+(per event, else the org's, else the `last_call_threshold` setting; 0 = off)
+every pool plans to 0 as when resale is locked, and only the primary
+checkout sells (`exos_event_last_call`, read by every planner).
 
 **Hard Rule #2 applies** (see `CLAUDE.md`): upstream ticketing APIs are
 read-only. Every endpoint is tagged below as **read** or **write**. A write
