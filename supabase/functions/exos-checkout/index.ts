@@ -24,6 +24,8 @@
 //
 // Fee: 3% of every transaction net after Stripe, from the organizer
 // (operator, 2026-09-28): the application fee is 3% + Stripe's card fee.
+// Free tier (max capacity 150 or less, operator 2026-10-29): no Exos fee,
+// only the card fee (exos_event_fee_terms + exosFeeBpsForEvent).
 // TODO(operator) before go-live: confirm the charge model (destination vs
 // direct) and that 'standard' Connect accounts are the right type.
 // Optional: EXOS_STRIPE_FEE_BPS / EXOS_STRIPE_FEE_FIXED_CENTS (default 290 / 30).
@@ -42,7 +44,8 @@ import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import {
-  EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
+  EXOS_FEE_BPS, FREE_TIER_FEE_BPS, FREE_TIER_MAX_CAPACITY, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit,
+  exosFeeBpsForEvent, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
 
@@ -148,6 +151,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const { data: be } = await sb.from("exos_events").select("ticket_backend").eq("id", event_id).maybeSingle();
     const backend = (be as { ticket_backend?: string } | null)?.ticket_backend ?? "exos";
     if (backend !== "exos") return json({ error: "tickets for this event are sold on another site", reason: "external_backend" }, 409);
+  }
+  // Last call (mig 20261029100000): near sell-out only the primary checkout
+  // sells. When that isn't Exos, refuse here, before a voucher could bypass
+  // the (already empty) count. Before the migration (no RPC) nothing changes.
+  {
+    const { data: sale } = await sb.rpc("exos_public_event_sale", { p_event_id: event_id });
+    const row = (Array.isArray(sale) ? sale[0] : sale) as
+      | { last_call?: boolean; sells_on?: string; sells_on_url?: string | null }
+      | null
+      | undefined;
+    if (row?.last_call && row.sells_on && row.sells_on !== "exos") {
+      return json({
+        error: `the last tickets are on sale at ${row.sells_on === "luma" ? "Luma" : "Eventbrite"}`,
+        reason: "last_call", sells_on: row.sells_on, sells_on_url: row.sells_on_url ?? null,
+      }, 409);
+    }
   }
 
   // Voucher (pretix-style access token) — validated server-side. May bypass a
@@ -341,11 +360,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { data: billing } = await sb.from("exos_org_billing").select("fee_free_until").eq("org_id", ev.org_id).maybeSingle();
   const feeFreeUntil = (billing as { fee_free_until?: string } | null)?.fee_free_until;
   const feeNow = new Date();
-  const feeBps = exosFeeBpsAt(
+  // The free tier (mig 20261029090000): no Exos fee on an event with a max
+  // capacity of 150 or less. Before that migration (no RPC) the event is
+  // charged as before.
+  // Judged on max(max capacity, sold + this order): selling past the cap
+  // (e.g. a bypass voucher) ends the free tier with the order that crosses.
+  const { data: feeTerms } = await sb.rpc("exos_event_fee_terms", {
+    p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
+  });
+  const terms = (feeTerms ?? null) as
+    | {
+      max_capacity?: number | null; sold?: number; order_admissions?: number;
+      free_tier_max_capacity?: number; free_tier_fee_bps?: number;
+    }
+    | null;
+  const feeBps = exosFeeBpsForEvent({
+    maxCapacity: terms ? terms.max_capacity ?? null : null,
+    soldCount: terms?.sold ?? 0,
+    orderAdmissions: terms?.order_admissions ?? quantity,
     feeFreeUntil,
-    feeNow,
-    Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
-  );
+    now: feeNow,
+    bps: Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
+    freeTierMaxCapacity: terms?.free_tier_max_capacity ?? FREE_TIER_MAX_CAPACITY,
+    freeTierFeeBps: terms?.free_tier_fee_bps ?? FREE_TIER_FEE_BPS,
+  });
   const cardFee = {
     bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
     fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
