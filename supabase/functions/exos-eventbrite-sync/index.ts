@@ -14,8 +14,15 @@
 // Routes (under /functions/v1/exos-eventbrite-sync), JSON in and out:
 //   POST /connect    {org, token}   owner / manager. Checks the private token
 //        with GET /users/me/, then stores it in Vault (exos_eventbrite_connect).
-//        Answers {connected, account_name}.
-//   POST /disconnect {org}          owner / manager. Token deleted, links removed.
+//        Answers {connected, account_name}. The pasted-token path: it stays
+//        for installs without an Eventbrite OAuth app (and for the pilot);
+//        "Connect Eventbrite" (exos-eventbrite-oauth, mig 20261029140000)
+//        stores its OAuth token in the same Vault secret.
+//   POST /disconnect {org}          owner / manager. Token deleted, links removed,
+//        imported guests and the connection log kept (mig 20261029140000).
+//        Local only: Eventbrite documents no token revocation endpoint, so
+//        nothing is sent there (the organizer can also remove the app on
+//        Eventbrite; docs/eventbrite-app.md).
 //   GET  /events?org=<org id>       owner / manager. The account's current and
 //        future events (GET /users/me/organizations/ + /organizations/{id}/events/).
 //   POST /link       {event, eb_event}  owner / manager. Reads the Eventbrite

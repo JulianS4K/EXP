@@ -111,7 +111,8 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261029140000_exos_eventbrite_oauth; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
@@ -243,7 +244,8 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261029140000_exos_eventbrite_oauth; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -279,3 +281,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_white_lab
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_mirrors.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_day_keys.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_online_event_followups.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_oauth.sql"
