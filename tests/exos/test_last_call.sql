@@ -349,9 +349,9 @@ END $$;
 RESET ROLE;
 
 \echo 'test_last_call: all passed'
--- L10. A free claim can't pose as a paid or marketplace sale: a reserved
--- channel passed to exos_claim_free_tickets is stored as 'vibepass', so the
--- last-call trigger (and anything else reading channel_source) can't be fooled.
+-- L10. A free claim can't pose as a paid, marketplace or system sale: the
+-- caller's channel is stored as 'link:<slug>' (or 'vibepass'), so the last-call
+-- trigger and anything else reading channel_source can't be fooled.
 DO $$
 DECLARE v_ch text; r record;
 BEGIN
@@ -366,10 +366,19 @@ BEGIN
                                            1, NULL, r.ch, NULL);
   END LOOP;
   PERFORM set_config('app.uid', '', true);
-  SELECT string_agg(DISTINCT channel_source, ',') INTO v_ch FROM public.exos_tickets
+  SELECT string_agg(DISTINCT channel_source, ',' ORDER BY channel_source) INTO v_ch FROM public.exos_tickets
    WHERE event_id = 'd7000000-0000-0000-0000-0000000000ea';
-  ASSERT v_ch = 'vibepass', 'L10: reserved channel kept by a free claim: ' || coalesce(v_ch, 'none');
-  RAISE NOTICE 'OK  L10 a free claim can''t take a reserved channel';
+  ASSERT v_ch = 'link:automatiq,link:s4k,link:stripe,link:stubhub',
+    'L10: a free claim kept a system channel: ' || coalesce(v_ch, 'none');
+  -- Not a slug, empty or 'vibepass' itself: plain 'vibepass'; comps still can't be claimed.
+  PERFORM set_config('app.uid', 'd7000000-0000-0000-0000-0000000000a4', true);
+  PERFORM public.exos_claim_free_tickets('d7000000-0000-0000-0000-0000000000ea','d7000000-0000-0000-0000-0000000000fa',1,NULL,'x y',NULL);
+  PERFORM public.exos_claim_free_tickets('d7000000-0000-0000-0000-0000000000ea','d7000000-0000-0000-0000-0000000000fa',1,NULL,'comp',NULL);
+  PERFORM public.exos_claim_free_tickets('d7000000-0000-0000-0000-0000000000ea','d7000000-0000-0000-0000-0000000000fa',1,NULL,NULL,NULL);
+  PERFORM set_config('app.uid', '', true);
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = 'd7000000-0000-0000-0000-0000000000ea'
+            AND channel_source = 'vibepass') = 3, 'L10: non-slug / comp / empty channel not mapped to vibepass';
+  RAISE NOTICE 'OK  L10 a free claim''s channel is namespaced (link:)';
 END $$;
 
 ROLLBACK;

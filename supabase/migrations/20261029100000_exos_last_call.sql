@@ -395,21 +395,22 @@ REVOKE ALL ON FUNCTION public.exos_set_org_last_call_threshold(uuid, integer) FR
 GRANT EXECUTE ON FUNCTION public.exos_set_org_last_call_threshold(uuid, integer) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- 8. A free claim can't pose as a paid or marketplace sale.
+-- 8. A free claim can't pose as a paid, marketplace or system sale.
 --    exos_tickets_last_call (above) lets 'stripe' and the marketplace channels
---    through, and other code reads channel_source too. exos_claim_free_tickets
---    is client-callable and took p_channel from the caller, mapping only
---    'comp' / 'boxoffice' to 'vibepass'; any reserved channel now maps to
---    'vibepass' as well (a branch ahead of that one, so 20260925021000's own
---    re-run marker still matches).
+--    through, and other code reads channel_source too (the guest-checkout
+--    trigger on 'stripe', analytics, the attendee lookup). exos_claim_free_tickets
+--    is client-callable and stored the caller's p_channel (the page's
+--    utm_source) as channel_source, mapping only 'comp' / 'boxoffice'. A
+--    deny-list of reserved names can't keep up with new channels, so the
+--    caller's value is now namespaced: a slug becomes 'link:<slug>', anything
+--    else 'vibepass'. No system channel starts with 'link:'.
 -- ---------------------------------------------------------------------------
 SELECT pg_temp.exos_patch_n('public.exos_claim_free_tickets(uuid, uuid, integer, text, text, text)',
-  'reserved channels (mig 20261029100000)',
-  $o$CASE WHEN lower(btrim(coalesce(p_channel, ''))) IN ('comp', 'boxoffice')$o$,
-  $n$CASE WHEN lower(btrim(coalesce(p_channel, ''))) IN ('stripe', 's4k', 'stubhub', 'seatgeek', 'gametime', 'vivid',
-                'gotickets', 'tickpick', 'evo', 'automatiq', 'eventbrite', 'luma', 'pos') /* reserved channels (mig 20261029100000) */
-             THEN 'vibepass'
-           WHEN lower(btrim(coalesce(p_channel, ''))) IN ('comp', 'boxoffice')$n$, 1);
+  'link: namespace (mig 20261029100000)',
+  $o$ELSE coalesce(nullif(p_channel, ''), 'vibepass') END, nullif(p_promoter_id, '')$o$,
+  $n$WHEN lower(btrim(coalesce(p_channel, ''))) ~ '^[a-z0-9_-]{1,40}$' AND lower(btrim(p_channel)) <> 'vibepass'
+             THEN 'link:' || lower(btrim(p_channel)) /* link: namespace (mig 20261029100000) */
+           ELSE 'vibepass' END, nullif(p_promoter_id, '')$n$, 1);
 
 -- ROLLBACK (manual): re-create _exos_primary_hold from 20261019090000 and the
 -- five patched functions from their earlier sources; DROP VIEW
