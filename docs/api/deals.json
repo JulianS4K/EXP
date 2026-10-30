@@ -1,0 +1,592 @@
+{
+  "file": "deals",
+  "name": "Deals",
+  "order": 67,
+  "description": "Sales and fundraising opportunities (sponsorships, rentals, donors): the organization-level counterpart of Opendate's admin deals. A deal has a stage, an amount, a probability, an owner and a contact, and can point at an offer or a show. Reads need `booking:read`, writes `booking:write`.",
+  "endpoints": [
+    {
+      "id": "list-deals",
+      "method": "GET",
+      "path": "/v1/deals",
+      "summary": "List deals",
+      "description": "Newest first, discarded ones left out.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status.",
+          "enum": [
+            "open",
+            "won",
+            "lost"
+          ],
+          "example": "open"
+        },
+        {
+          "name": "deal_type",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this type.",
+          "enum": [
+            "sales",
+            "fundraising"
+          ],
+          "example": "sales"
+        },
+        {
+          "name": "include_discarded",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "true to include discarded deals.",
+          "example": false
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Sponsor: Brewery",
+                "deal_type": "sales",
+                "stage": "proposal",
+                "status": "open",
+                "amount_cents": 500000,
+                "currency": "USD",
+                "probability": 60,
+                "expected_close_on": "2026-12-01",
+                "owner_user_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "contact_name": "Beer Buyer",
+                "contact_email": "buyer@brew.example",
+                "company": "Brewery",
+                "offer_id": null,
+                "event_id": null,
+                "notes": "",
+                "discarded_at": null,
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-deal",
+      "method": "POST",
+      "path": "/v1/deals",
+      "summary": "Create a deal",
+      "description": "At most 5,000 open per organization.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-150 characters.",
+          "example": "Sponsor: Brewery"
+        },
+        {
+          "name": "deal_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default sales.",
+          "enum": [
+            "sales",
+            "fundraising"
+          ],
+          "example": "sales"
+        },
+        {
+          "name": "stage",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "sales: lead, qualified, proposal, negotiation, closed_won, closed_lost (default lead); fundraising: identification, qualification, cultivation, solicitation, stewardship, closed_won, closed_lost, not_a_prospect. status (open, won, lost) follows.",
+          "example": "proposal"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "0 or more.",
+          "example": 500000
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217 (default USD).",
+          "example": "USD"
+        },
+        {
+          "name": "probability",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-100.",
+          "example": 60
+        },
+        {
+          "name": "expected_close_on",
+          "location": "body",
+          "type": "string (date) or null",
+          "required": false,
+          "description": "YYYY-MM-DD.",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "owner_user_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A member of your organization.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "contact_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Beer Buyer"
+        },
+        {
+          "name": "contact_email",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An email address.",
+          "example": "buyer@brew.example"
+        },
+        {
+          "name": "company",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Brewery"
+        },
+        {
+          "name": "offer_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "An offer it relates to."
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A show it relates to."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 4,000 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Sponsor: Brewery",
+              "deal_type": "sales",
+              "stage": "proposal",
+              "status": "open",
+              "amount_cents": 500000,
+              "currency": "USD",
+              "probability": 60,
+              "expected_close_on": "2026-12-01",
+              "owner_user_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "contact_name": "Beer Buyer",
+              "contact_email": "buyer@brew.example",
+              "company": "Brewery",
+              "offer_id": null,
+              "event_id": null,
+              "notes": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-deal",
+      "method": "GET",
+      "path": "/v1/deals/:id",
+      "summary": "Get a deal",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The deal id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Sponsor: Brewery",
+              "deal_type": "sales",
+              "stage": "proposal",
+              "status": "open",
+              "amount_cents": 500000,
+              "currency": "USD",
+              "probability": 60,
+              "expected_close_on": "2026-12-01",
+              "owner_user_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "contact_name": "Beer Buyer",
+              "contact_email": "buyer@brew.example",
+              "company": "Brewery",
+              "offer_id": null,
+              "event_id": null,
+              "notes": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-deal",
+      "method": "PATCH",
+      "path": "/v1/deals/:id",
+      "summary": "Update a deal",
+      "description": "The fields of create; a discarded deal is not found.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The deal id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-150 characters.",
+          "example": "Sponsor: Brewery"
+        },
+        {
+          "name": "deal_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default sales.",
+          "enum": [
+            "sales",
+            "fundraising"
+          ],
+          "example": "sales"
+        },
+        {
+          "name": "stage",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "sales: lead, qualified, proposal, negotiation, closed_won, closed_lost (default lead); fundraising: identification, qualification, cultivation, solicitation, stewardship, closed_won, closed_lost, not_a_prospect. status (open, won, lost) follows.",
+          "example": "proposal"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "0 or more.",
+          "example": 500000
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217 (default USD).",
+          "example": "USD"
+        },
+        {
+          "name": "probability",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-100.",
+          "example": 60
+        },
+        {
+          "name": "expected_close_on",
+          "location": "body",
+          "type": "string (date) or null",
+          "required": false,
+          "description": "YYYY-MM-DD.",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "owner_user_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A member of your organization.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "contact_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Beer Buyer"
+        },
+        {
+          "name": "contact_email",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An email address.",
+          "example": "buyer@brew.example"
+        },
+        {
+          "name": "company",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Brewery"
+        },
+        {
+          "name": "offer_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "An offer it relates to."
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A show it relates to."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 4,000 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Sponsor: Brewery",
+              "deal_type": "sales",
+              "stage": "proposal",
+              "status": "open",
+              "amount_cents": 500000,
+              "currency": "USD",
+              "probability": 60,
+              "expected_close_on": "2026-12-01",
+              "owner_user_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "contact_name": "Beer Buyer",
+              "contact_email": "buyer@brew.example",
+              "company": "Brewery",
+              "offer_id": null,
+              "event_id": null,
+              "notes": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-deal",
+      "method": "DELETE",
+      "path": "/v1/deals/:id",
+      "summary": "Discard a deal",
+      "description": "Soft: it stays readable with include_discarded.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The deal id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "discarded": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

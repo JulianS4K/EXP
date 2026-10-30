@@ -13,8 +13,10 @@ with a `:write` scope or `org:admin`), plus a public listing feed for listing si
   (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page, `booking.ts` the booking
   bodies). Pure TypeScript, so vitest imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap), `20261030100000` (booking), `20261030110000` (artists, lineups, listing feed). SQL harnesses:
-  `tests/exos/test_api_scopes.sql`, `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`.
+  the 10-key cap), `20261030100000` (booking), `20261030110000` (artists, lineups, listing feed),
+  `20261031100000` / `20261031100500` (offers, budgets, pools, deals, finance, settlements, P&L, ticket counts;
+  `docs/offers-settlements.md`). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_booking.sql`,
+  `tests/exos/test_artists_feed.sql`, `tests/exos/test_offers_settlements.sql`.
 - **Deploy:** `exos-api` takes an API key, not a Supabase JWT, so it is deployed with `--no-verify-jwt`.
 
 ## Auth and scopes
@@ -55,7 +57,10 @@ booking tables are written as rows and their triggers and checks validate them. 
 `bookingDbError()` (`_shared/api/booking.ts`) and `rpcError()`: `22023` → 400, `42501` → 403, `P0002` → 404,
 `23505` / `55000` / `54000` → 409.
 Opendate-style spellings answer the same routes through `aliases` in `routes.ts` (`/holds/:id/convert_to_confirm`,
-`/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`).
+`/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`, `/v3_offers…`, `/v3_offer_pools`,
+`/confirms/:id/settlements/summary`, `/confirms/:id/finance_items`, `/general_ledger_codes`). Offer, budget, finance and
+settlement routes live in `exos-api/finance.ts` (bodies in `_shared/api/finance.ts`); the offer and settlement PDFs
+and the P&L CSV are the only non-JSON answers (the handler returns a `Response`).
 
 ## Adding a route
 

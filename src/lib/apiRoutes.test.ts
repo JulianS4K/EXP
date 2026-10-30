@@ -57,7 +57,7 @@ describe('matchRoute', () => {
     expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
     for (const r of ROUTES) {
       for (const a of r.aliases ?? []) {
-        expect(a).toMatch(/^(\/([a-z_]+|:[a-z]+))+$/);
+        expect(a).toMatch(/^(\/([a-z][a-z0-9_-]*|:[a-z]+))+$/);
         expect(matchRoute(r.method, a.replace(/:[a-z]+/g, 'x'))?.route.id, a).toBe(r.id);
       }
     }
@@ -137,5 +137,30 @@ describe('paging', () => {
     expect(pageEnvelope(['a', 'b'], p, 5)).toEqual({ data: ['a', 'b'], meta: { page: 1, per_page: 2, total: 5, total_pages: 3 } });
     expect(pageEnvelope([], p, 0).meta.total_pages).toBe(1);
     expect(pageEnvelope(['a'], p, null).meta.total).toBe(1);
+  });
+});
+
+describe('offers and finance routes', () => {
+  it("answers Opendate's v3 and snake_case spellings", () => {
+    expect(matchRoute('POST', '/v3_offers')?.route.id).toBe('create-offer');
+    expect(matchRoute('POST', '/v3_offers/o1/send_offer')?.route.id).toBe('send-offer');
+    expect(matchRoute('POST', '/v3_offers/o1/accept')?.params).toEqual({ id: 'o1' });
+    expect(matchRoute('POST', '/v3_offer_templates/t1/apply_template')?.route.id).toBe('apply-offer-template');
+    expect(matchRoute('PATCH', '/v3_budget_line_items/l1')?.route.id).toBe('update-budget-line');
+    expect(matchRoute('GET', '/v3_offer_pools/p1')?.route.id).toBe('get-offer-pool');
+    expect(matchRoute('POST', '/offer_imports')?.route.id).toBe('create-offer-import');
+    expect(matchRoute('GET', '/confirms/e1/settlements/summary')?.route.id).toBe('get-settlement');
+    expect(matchRoute('GET', '/confirms/e1/finance_items')?.route.id).toBe('list-finance-items');
+    expect(matchRoute('PATCH', '/confirms/e1/finance_items/i1')?.params).toEqual({ eid: 'e1', id: 'i1' });
+    expect(matchRoute('GET', '/general_ledger_codes')?.route.id).toBe('list-gl-codes');
+  });
+
+  it('keeps money behind the finance scopes and offers behind booking', () => {
+    expect(matchRoute('GET', '/events/e1/settlement')?.route.scope).toBe('finance:read');
+    expect(matchRoute('POST', '/events/e1/settlement/finalize')?.route.scope).toBe('finance:write');
+    expect(matchRoute('GET', '/profit-and-loss')?.route.scope).toBe('finance:read');
+    expect(matchRoute('POST', '/offers/o1/send')?.route.scope).toBe('booking:write');
+    expect(allowedMethods('/events/e1/settlement')).toEqual(['GET', 'PATCH']);
+    expect(allowedMethods('/offers/o1')).toEqual(['GET', 'PATCH', 'DELETE']);
   });
 });

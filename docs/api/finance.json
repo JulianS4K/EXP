@@ -1,0 +1,1030 @@
+{
+  "file": "finance",
+  "name": "Finance categories, ledger codes and items",
+  "order": 65,
+  "description": "Your finance categories (each with a general ledger code from your chart of accounts) and each show's income and expense lines, which the settlement and the P&L read. Money is in cents. Reads need `finance:read`, writes `finance:write`.",
+  "endpoints": [
+    {
+      "id": "list-finance-categories",
+      "method": "GET",
+      "path": "/v1/finance-categories",
+      "summary": "List finance categories",
+      "description": "By position. The defaults are created on first use: Talent, Production, Marketing, Hospitality, Venue rental, Staff, Bar/F&B income, Merch income, Other. Talent, Venue rental, Merch income and Other are built in (system: true): the maths reads them.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "key": "production",
+                "name": "Production",
+                "kind": "expense",
+                "system": false,
+                "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "position": 20,
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-finance-category",
+      "method": "POST",
+      "path": "/v1/finance-categories",
+      "summary": "Create a finance category",
+      "description": "At most 50 per organization.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-60 characters.",
+          "example": "Security"
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default expense.",
+          "enum": [
+            "income",
+            "expense",
+            "both"
+          ],
+          "example": "expense"
+        },
+        {
+          "name": "gl_code_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your ledger codes.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "position",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "0-1000.",
+          "example": 100
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "key": "production",
+              "name": "Production",
+              "kind": "expense",
+              "system": false,
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "position": 20,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-finance-category",
+      "method": "GET",
+      "path": "/v1/finance-categories/:id",
+      "summary": "Get a finance category",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The category id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "key": "production",
+              "name": "Production",
+              "kind": "expense",
+              "system": false,
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "position": 20,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-finance-category",
+      "method": "PATCH",
+      "path": "/v1/finance-categories/:id",
+      "summary": "Update a finance category",
+      "description": "A built-in category can be renamed, moved and coded, not re-kinded.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The category id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-60 characters.",
+          "example": "Production"
+        },
+        {
+          "name": "gl_code_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your ledger codes.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "key": "production",
+              "name": "Production",
+              "kind": "expense",
+              "system": false,
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "position": 20,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A built-in category keeps its kind.",
+          "example": {
+            "error": "a built-in category can be renamed and coded, not re-keyed or re-kinded"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-finance-category",
+      "method": "DELETE",
+      "path": "/v1/finance-categories/:id",
+      "summary": "Delete a finance category",
+      "description": "Custom categories only; lines in it become uncategorized.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The category id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A built-in category.",
+          "example": {
+            "error": "A built-in category can be renamed and coded, not deleted."
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-gl-codes",
+      "method": "GET",
+      "path": "/v1/gl-codes",
+      "summary": "List ledger codes",
+      "description": "Your chart of accounts, by code (Opendate: general_ledger_codes). Each finance category carries one.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "include_discarded",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "true to include discarded codes.",
+          "example": false
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "code": "5200",
+                "name": "Production costs",
+                "kind": "expense",
+                "description": "",
+                "discarded_at": null,
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-gl-code",
+      "method": "POST",
+      "path": "/v1/gl-codes",
+      "summary": "Create a ledger code",
+      "description": "A live code is unique in your organization (case-insensitive). At most 500.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "code",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Letters, digits, dots and dashes, up to 24.",
+          "example": "5200"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-100 characters.",
+          "example": "Production costs"
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default expense.",
+          "enum": [
+            "income",
+            "expense",
+            "asset",
+            "liability",
+            "equity"
+          ],
+          "example": "expense"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 500 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "code": "5200",
+              "name": "Production costs",
+              "kind": "expense",
+              "description": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The code is in use.",
+          "example": {
+            "error": "That conflicts with an existing record (e.g. a permalink in use or a second doors row)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-gl-code",
+      "method": "GET",
+      "path": "/v1/gl-codes/:id",
+      "summary": "Get a ledger code",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ledger code id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "code": "5200",
+              "name": "Production costs",
+              "kind": "expense",
+              "description": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-gl-code",
+      "method": "PATCH",
+      "path": "/v1/gl-codes/:id",
+      "summary": "Rename or renumber a ledger code",
+      "description": "The fields of create.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ledger code id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters.",
+          "example": "Production"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "code": "5200",
+              "name": "Production costs",
+              "kind": "expense",
+              "description": "",
+              "discarded_at": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-gl-code",
+      "method": "DELETE",
+      "path": "/v1/gl-codes/:id",
+      "summary": "Discard a ledger code",
+      "description": "Soft: categories using it lose their code; the code can be reused.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ledger code id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "discarded": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-finance-items",
+      "method": "GET",
+      "path": "/v1/events/:id/finance-items",
+      "summary": "List a show's finance items",
+      "description": "Income and expense lines of a show. The settlement counts each at actual_cents, else amount_cents. A rented room's rental is added once as auto: venue-rental (deleting it sticks). Also /confirms/:id/finance_items.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "kind": "expense",
+                "label": "Sound",
+                "amount_cents": 200000,
+                "forecast_cents": 180000,
+                "estimate_cents": null,
+                "actual_cents": 195000,
+                "notes": "",
+                "auto": null,
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-finance-item",
+      "method": "POST",
+      "path": "/v1/events/:id/finance-items",
+      "summary": "Add a finance item",
+      "description": "At most 200 per show.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-120 characters (Opendate: name).",
+          "example": "Sound"
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default expense.",
+          "enum": [
+            "income",
+            "expense"
+          ],
+          "example": "expense"
+        },
+        {
+          "name": "category_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A finance category of a kind that fits.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "What it is.",
+          "example": 200000
+        },
+        {
+          "name": "forecast_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "In the P&L forecast column (replaces the budget lines of its category).",
+          "example": 180000
+        },
+        {
+          "name": "estimate_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "In the P&L estimate column."
+        },
+        {
+          "name": "actual_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "What it came to; the settlement uses it.",
+          "example": 195000
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 1,000 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "expense",
+              "label": "Sound",
+              "amount_cents": 200000,
+              "forecast_cents": 180000,
+              "estimate_cents": null,
+              "actual_cents": 195000,
+              "notes": "",
+              "auto": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-finance-item",
+      "method": "GET",
+      "path": "/v1/finance-items/:id",
+      "summary": "Get a finance item",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The finance item id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "expense",
+              "label": "Sound",
+              "amount_cents": 200000,
+              "forecast_cents": 180000,
+              "estimate_cents": null,
+              "actual_cents": 195000,
+              "notes": "",
+              "auto": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-finance-item",
+      "method": "PATCH",
+      "path": "/v1/finance-items/:id",
+      "summary": "Update a finance item",
+      "description": "The fields of create. Also /confirms/{event}/finance_items/:id.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The finance item id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "actual_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "What it came to.",
+          "example": 195000
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "expense",
+              "label": "Sound",
+              "amount_cents": 200000,
+              "forecast_cents": 180000,
+              "estimate_cents": null,
+              "actual_cents": 195000,
+              "notes": "",
+              "auto": null,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-finance-item",
+      "method": "DELETE",
+      "path": "/v1/finance-items/:id",
+      "summary": "Delete a finance item",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The finance item id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

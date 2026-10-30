@@ -31,7 +31,12 @@
 //   GET /artists/:id/events, GET/PUT /events/:id/lineup;
 //   GET/POST /listing-keys, DELETE /listing-keys/:id;
 //   booking: /venues, /rooms, /holds, /calendar, /events/:id/show-activities,
-//   /events/:id/notes, /events/:id/contacts, /notes, /event-contacts.
+//   /events/:id/notes, /events/:id/contacts, /notes, /event-contacts;
+//   offers and finance (./finance.ts, docs/offers-settlements.md): /offers,
+//   /offer-templates, /budgets, /budget-lines, /offer-pools, /offer-imports,
+//   /deals, /finance-categories, /gl-codes, /events/:id/finance-items,
+//   /finance-items, /events/:id/settlement[/finalize|/reopen|/pdf],
+//   /events/:id/profit-and-loss, /profit-and-loss, /events/:id/ticket-counts.
 //
 // Public listing feed (docs/listing-feed.md): GET /public/events[/:id] and the
 // Opendate-named alias /public/confirms[/:id], authenticated with a shared key
@@ -52,6 +57,7 @@ import {
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
+import { type FinDeps, handleFinance } from "./finance.ts";
 import {
   ACTIVITY_COLS, bookingDbError, BodyError, clearBody, CONTACT_COLS, convertBody, holdBody, isIsoDate, isUuid,
   NOTE_COLS, parseActivity, parseContact, parseHoldFilters, parseNote, parseRoom, parseVenue, ROOM_COLS, VENUE_COLS,
@@ -177,6 +183,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       body: method === "POST" || method === "PUT" || method === "PATCH" ? await readBody(req) : {},
     };
     const out = await handle(match.route, ctx);
+    if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Created) return json(out.body, 201);
     return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
@@ -706,8 +713,19 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       return { data: { id, deleted: true } };
     }
   }
+  // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
+  const fin = await handleFinance(route.id, c, FIN_DEPS);
+  if (fin !== undefined) return fin;
   throw new ApiError(404, "not found");
 }
+
+const FIN_DEPS: FinDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
 
 /** A path parameter as a UUID; anything else is simply not found. */
 function uuidParam(c: Ctx, name: string, what: string): string {

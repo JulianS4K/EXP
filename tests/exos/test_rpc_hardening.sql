@@ -128,6 +128,9 @@ BEGIN
        'exos_promo_link_hit',
        -- published events' lineups for the event page / widget (mig 20261030110000)
        'exos_public_lineups',
+       -- 64-hex link tokens: the agent's offer page, the settlement contacts'
+       -- page, the ticket-count opt-out (migs 20261031100000 / 20261031100500)
+       'exos_offer_public', 'exos_offer_respond', 'exos_settlement_public', 'exos_ticket_counts_optout',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
