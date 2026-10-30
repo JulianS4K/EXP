@@ -100,6 +100,7 @@ import { rescheduleEvent } from '../lib/reschedule';
 import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
 import { utcToOccursAtLocal } from '../lib/datetime';
 import FeeRulesEditor from '../components/FeeRulesEditor';
+import EventBookingPanels from '../components/booking/EventBookingPanels';
 import { useOrganization } from '../context/OrganizationContext';
 
 export default function EditEvent() {
@@ -1568,6 +1569,21 @@ export default function EditEvent() {
             canEdit={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
             tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id))
               .map((t) => ({ id: t.id, name: t.name, price: Number(t.price) || 0, priceSchedule: t.priceSchedule }))}
+          />
+        )}
+
+        {/* Booking: venue link, show schedule (its doors row is doors open),
+            staff notes and contacts (mig 20261030100000). Self-contained. */}
+        {eventId && eventData.orgId && (
+          <EventBookingPanels
+            eventId={eventId}
+            canEditVenue={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            canEdit={isAdmin || ['owner', 'manager', 'content'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            authorName={user?.displayName || user?.email || 'Staff'}
+            onDoorsChange={(iso) => setEventData((d) => ({
+              ...d,
+              timing: { ...(d.timing ?? {}), doorsOpen: iso ? Timestamp.fromDate(new Date(iso)) : null },
+            }) as typeof d)}
           />
         )}
 
