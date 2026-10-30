@@ -8,6 +8,7 @@
 // minimal cut — owners can rename an org's name freely; slug renaming
 // is deferred until the white-label sprint.
 
+import PaymentMethodsPanel from '../components/PaymentMethodsPanel';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -646,6 +647,7 @@ export default function OrgSettings() {
                     >
                       {paymentsBusy ? 'Opening Stripe…' : label}
                     </button>
+                    <PaymentMethodsPanel orgId={org.id} canEdit={canEdit} />
                   </>
                 );
               })() : (

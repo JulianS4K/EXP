@@ -425,6 +425,23 @@ export default function MyTickets() {
                         RECEIPTS
                       </button>
                     </div>
+                    {(() => {
+                      // Split with friends: an order of 2+ tickets this buyer
+                      // paid for through checkout (mig 20261031220000).
+                      const counts = new Map<string, number>();
+                      for (const tk of eventTickets) {
+                        if (tk.orderId && /^(cs|pp)_/.test(tk.orderId)) counts.set(tk.orderId, (counts.get(tk.orderId) ?? 0) + 1);
+                      }
+                      const order = [...counts].find(([, n]) => n >= 2)?.[0];
+                      return order ? (
+                        <Link
+                          to={`/split/${encodeURIComponent(order)}`}
+                          className="disp block text-center mt-3 border border-white/20 text-white/60 py-3 text-base tracking-wide hover:border-white hover:text-white transition-colors"
+                        >
+                          SPLIT WITH FRIENDS
+                        </Link>
+                      ) : null;
+                    })()}
                     <TicketWallets tickets={eventTickets} viewerId={user.uid} />
                   </div>
 

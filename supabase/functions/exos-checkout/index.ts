@@ -41,6 +41,28 @@
 // absorbed, is stored in exos_checkout_fee_snapshots (not on the buyer-readable
 // session row) and copied to
 // exos_order_fees at fulfillment. Not the Exos platform fee above.
+//
+// PayPal / Venmo (mig 20261031220000; operator approval 2026-10-30): a body
+// with processor: 'paypal' runs everything above unchanged (price, voucher,
+// limits, fee rules, tax, the hold, the session row, the price disclosure)
+// and creates a PayPal Orders v2 order on the PLATFORM's PayPal account
+// instead of a Stripe session. The order's items are mapped from the same
+// charge lines as Stripe's line_items (_shared/chargeLines.ts), so the two
+// can't charge different totals. Returns { processor: 'paypal', session_id,
+// paypal_order_id, approve_url? }; the buyer approves on the PayPal page
+// (/pay/paypal, no Stripe on it: docs/pci.md) and exos-paypal captures.
+// Needs the org's opt-in (exos_org_payment_methods.paypal_enabled) and
+// PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox unless EXOS_PAYPAL_ENV=live,
+// _shared/paypal/client.ts). The fee split uses PayPal's rate in the card-fee
+// slot (EXOS_PAYPAL_FEE_BPS / EXOS_PAYPAL_FEE_FIXED_CENTS, default 349 / 49).
+// paypal_flow: 'redirect' adds PayPal's return/cancel URLs (success_url /
+// cancel_url) and returns approve_url; the default ('buttons') is for the
+// JS SDK buttons, which also offer Venmo.
+//
+// Cash App Pay (Stripe): offered next to cards when EXOS_STRIPE_CASHAPP=on,
+// the org switched it on (exos_org_payment_methods.cashapp_enabled) and the
+// event is in USD. It settles at once like a card, so the webhook and the
+// 30-minute hold work unchanged.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -56,6 +78,10 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
+import { chargeTotalCents, stripeLineItems, type ChargeLine } from "../_shared/chargeLines.ts";
+import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
+import { approveUrl, newPayPalSessionId, PAYPAL_CURRENCIES, paypalOrderBody } from "../_shared/paypal/model.ts";
+import { PAYPAL_FEE } from "../_shared/platformFee.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -87,6 +113,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Ad click ids + browser ids (mig 20260929131000) and marketing consent.
     ad_ids?: Record<string, unknown>;
     consent?: string;
+    // 'paypal' -> a PayPal / Venmo order instead of a Stripe session.
+    processor?: string;
+    paypal_flow?: string;
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
@@ -96,6 +125,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
   const { event_id, tier_id, success_url, cancel_url } = p;
   const embedded = p.ui_mode === "embedded";
+  const usePayPal = p.processor === "paypal";
+  if (p.processor !== undefined && p.processor !== "stripe" && !usePayPal) return json({ error: "unknown processor" }, 400);
+  // The PayPal page is its own page, never the embed (docs/pci.md).
+  if (usePayPal && embedded) return json({ error: "PayPal isn't available in the embedded checkout" }, 400);
   const returnUrl = p.return_url;
   const quantity = p.quantity ?? 1;
   const addonReq = Array.isArray(p.addons) ? p.addons : [];
@@ -238,12 +271,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: secrets } = await sb.from("exos_org_secrets").select("payments").eq("org_id", ev.org_id).maybeSingle();
   const payments = (secrets?.payments ?? {}) as { connectedAccountId?: string; chargesEnabled?: boolean };
+  // Extra methods the org switched on (mig 20261031220000). Missing table or
+  // row: neither.
+  let orgMethods = { paypal: false, cashapp: false };
+  {
+    const { data: pm } = await sb.from("exos_org_payment_methods").select("paypal_enabled, cashapp_enabled")
+      .eq("org_id", ev.org_id).maybeSingle();
+    const row = pm as { paypal_enabled?: boolean; cashapp_enabled?: boolean } | null;
+    orgMethods = { paypal: row?.paypal_enabled === true, cashapp: row?.cashapp_enabled === true };
+  }
+  const ppCfg = usePayPal ? paypalConfig((k) => Deno.env.get(k)) : null;
 
   const currency = (ev.currency ?? "usd").toLowerCase();
   // Amounts below are minor units = major x 100: two-decimal currencies only
   // (a zero-decimal JPY price would be charged 100 times over).
   if (!isCheckoutCurrency(currency)) {
     return json({ error: `tickets can't be sold in ${currency.toUpperCase()} yet: pick another currency for this event` }, 409);
+  }
+  if (usePayPal) {
+    if (!orgMethods.paypal) return json({ error: "this organizer doesn't take PayPal" }, 409);
+    if (!PAYPAL_CURRENCIES.has(currency)) return json({ error: `PayPal can't take ${currency.toUpperCase()}` }, 409);
   }
   // The event's fee rules in effect (org rules unless opted out, then the
   // event's own). Before the migration the view is missing: no rules, as
@@ -405,10 +452,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     feeNow,
     Number(Deno.env.get("EXOS_PLATFORM_FEE_BPS") ?? String(EXOS_FEE_BPS)),
   );
-  const cardFee = {
-    bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
-    fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
-  };
+  // PayPal's rate sits in the card-fee slot for a PayPal order: the
+  // organizer's share is worked out exactly as for a Stripe sale.
+  const cardFee = usePayPal
+    ? {
+      bps: Number(Deno.env.get("EXOS_PAYPAL_FEE_BPS") ?? String(PAYPAL_FEE.bps)),
+      fixedCents: Number(Deno.env.get("EXOS_PAYPAL_FEE_FIXED_CENTS") ?? String(PAYPAL_FEE.fixedCents)),
+    }
+    : {
+      bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
+      fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
+    };
   const applicationFee = checkoutApplicationFeeCents(amountCents, { bps: feeBps, card: cardFee });
   // The same fee, broken down for the order record (mig 20260929131000).
   // Recorded only, never sent to Stripe: application_fee_amount stays
@@ -427,7 +481,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Only PAID line items go to Stripe ($0 lines are rejected in payment mode), so
   // a free tier + paid add-ons charges just the add-ons. Ticket quantity is still
   // recorded on the session for minting regardless of the tier's price.
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+  // One list for both processors (_shared/chargeLines.ts): Stripe's
+  // line_items and PayPal's items are mapped from it.
+  const chargeLines: ChargeLine[] = [];
   // All-in: one line per product at its all-in unit price; the passed-on fees
   // and the tax inside it are disclosed in the line description instead of
   // appearing as extra lines.
@@ -442,27 +498,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return parts.length ? { description: `Includes ${parts.join(" and ")} per item` } : {};
   };
   if (ticketAllIn > 0) {
-    lineItems.push({
-      quantity,
-      price_data: {
-        currency, unit_amount: ticketAllIn,
-        product_data: {
-          name: `${ev.name} — ${tier.name}`,
-          ...taxNote(ticketAllIn - unitAmount - ticketUnitFee, ticketUnitFee, feeNames(ticketFees, unitAmount)),
-        },
-      },
+    chargeLines.push({
+      quantity, unitCents: ticketAllIn,
+      name: `${ev.name} — ${tier.name}`,
+      ...taxNote(ticketAllIn - unitAmount - ticketUnitFee, ticketUnitFee, feeNames(ticketFees, unitAmount)),
     });
   }
   for (const a of addonLines) {
     if (a.unit_all_in > 0) {
-      lineItems.push({
-        quantity: a.quantity,
-        price_data: {
-          currency, unit_amount: a.unit_all_in,
-          product_data: { name: `${ev.name} — ${a.name}`, ...taxNote(a.unit_tax, a.unit_fee, feeNames(addonFees, a.unit_face)) },
-        },
+      chargeLines.push({
+        quantity: a.quantity, unitCents: a.unit_all_in,
+        name: `${ev.name} — ${a.name}`, ...taxNote(a.unit_tax, a.unit_fee, feeNames(addonFees, a.unit_face)),
       });
     }
+  }
+  const lineItems = stripeLineItems(chargeLines, currency) as Stripe.Checkout.SessionCreateParams.LineItem[];
+  if (chargeTotalCents(chargeLines) !== amountCents) {
+    console.error("exos-checkout: charge lines != order total", chargeTotalCents(chargeLines), amountCents);
+    return json({ error: "could not price the order, try again" }, 503);
   }
   // Free: signed-in buyers use the app's free-claim path; a guest claims here
   // with just an email (below), through the same guest hold and limits.
@@ -471,7 +524,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
   }
   if (!freeGuest) {
-    if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
+    if (usePayPal) {
+      if (!ppCfg) return json({ error: "PayPal is switched off" }, 503);
+    } else if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
+    // PayPal money lands on the platform, but the organizer still has to be
+    // a verified (Stripe Connect) organizer before Exos sells for them.
     if (!payments.connectedAccountId || !payments.chargesEnabled) {
       return json({ error: "organizer has not completed payment setup" }, 409);
     }
@@ -555,7 +612,91 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ free: true, issued, email: buyerEmail });
   }
 
+  // Price-disclosure record (mig 20260926070000): what the buyer is shown on
+  // Stripe's page, per line, so the charged amount can be checked against it
+  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee; fee_cents is the
+  // organizer's passed-on fees inside each line (fee rules). Non-fatal: the
+  // sale is already recorded; a missing record is visible in the export.
+  const recordDisclosure = async (sid: string) => {
+  const { error: pdErr } = await sb.rpc("exos_record_price_disclosure", {
+    p_session_id: sid,
+    p_currency: currency,
+    p_lines: [
+      {
+        kind: "ticket", item_id: tier_id, name: tier.name, quantity,
+        face_unit_cents: unitAmount, tax_cents: ticketLineTax,
+        tax_included: tierRule?.price_includes_tax === true,
+        fee_cents: ticketUnitFee * quantity, unit_all_in_cents: ticketAllIn,
+      },
+      ...addonLines.map((a) => ({
+        kind: "addon", item_id: a.id, name: a.name, quantity: a.quantity,
+        face_unit_cents: a.unit_face, tax_cents: a.line_tax, tax_included: a.tax_included,
+        fee_cents: a.unit_fee * a.quantity, unit_all_in_cents: a.unit_all_in,
+      })),
+    ],
+  });
+  if (pdErr) console.error("exos-checkout: price disclosure record failed (non-fatal)", pdErr);
+  };
+
+  // PayPal / Venmo: the same priced order, as a PayPal order.
+  if (usePayPal) {
+    const sessionId = newPayPalSessionId();
+    const redirect = p.paypal_flow === "redirect";
+    let order: Record<string, unknown>;
+    try {
+      const pp = createPayPalClient(ppCfg!);
+      order = await pp.createOrder(paypalOrderBody({
+        sessionId, currency, amountCents, lines: chargeLines,
+        brandName: Deno.env.get("EXOS_PAYPAL_BRAND_NAME") ?? "Exos",
+        description: ev.name,
+        ...(redirect ? { returnUrl: success_url, cancelUrl: cancel_url } : {}),
+      }), sessionId);
+    } catch (e) {
+      console.error("exos-checkout: paypal order create failed", e);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not start PayPal checkout" }, 502);
+    }
+    const orderId = typeof order.id === "string" ? order.id : "";
+    const ppRow: Record<string, unknown> = {
+      session_id: sessionId,
+      event_id, tier_id, org_id: ev.org_id,
+      buyer_uid: buyerUid, buyer_email: buyerEmail,
+      ...(buyerUid ? {} : { guest: true }),
+      quantity, amount_cents: amountCents, currency, status: "pending",
+      processor: "paypal", paypal_order_id: orderId,
+      addons: addonsForSession.length > 0 ? addonsForSession : null,
+      voucher_id: voucherId,
+      tax_cents: recordedTax > 0 ? recordedTax : null,
+      promoter_id: promoterId ?? null,
+      attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
+      ...checkoutRecord,
+      ...feeRecord,
+      ...feeRecord0,
+    };
+    // A PayPal row without its processor columns would read as Stripe: fail
+    // instead (the migration must be applied before PayPal is switched on).
+    const ppErr = /^[A-Z0-9]{8,40}$/.test(orderId)
+      ? await insertSessionRow(sb, ppRow, { strict: true })
+      : { message: "PayPal returned no order id" };
+    if (ppErr) {
+      console.error("exos-checkout: paypal session not recorded", ppErr);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not record session" }, 500);
+    }
+    if (holdId) {
+      const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
+      if (linkErr) console.error("exos-checkout: hold link failed (non-fatal)", linkErr);
+    }
+    await recordDisclosure(sessionId);
+    return json({
+      processor: "paypal", session_id: sessionId, paypal_order_id: orderId,
+      ...(redirect ? { approve_url: approveUrl(order as { links?: { rel?: string; href?: string }[] }) } : {}),
+    });
+  }
+
   const stripe = new Stripe(stripeKey!, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  // Cash App Pay next to cards: platform switch + org opt-in + USD.
+  const cashApp = Deno.env.get("EXOS_STRIPE_CASHAPP") === "on" && orgMethods.cashapp && currency === "usd";
 
   let session: Stripe.Checkout.Session;
   try {
@@ -564,7 +705,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Cards only (Apple Pay and Google Pay come with them). Bank debits and
       // other delayed methods would complete "unpaid", outlive the 30-minute
       // hold and settle days later into seats that may be gone.
-      payment_method_types: ["card"],
+      // Cash App Pay (mig 20261031220000) settles at once too; USD only.
+      payment_method_types: cashApp ? ["card", "cashapp"] : ["card"],
       line_items: lineItems,
       payment_intent_data: {
         application_fee_amount: applicationFee,
@@ -621,29 +763,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (linkErr) console.error("exos-checkout: hold link failed (non-fatal)", linkErr);
   }
 
-  // Price-disclosure record (mig 20260926070000): what the buyer is shown on
-  // Stripe's page, per line, so the charged amount can be checked against it
-  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee; fee_cents is the
-  // organizer's passed-on fees inside each line (fee rules). Non-fatal: the
-  // sale is already recorded; a missing record is visible in the export.
-  const { error: pdErr } = await sb.rpc("exos_record_price_disclosure", {
-    p_session_id: session.id,
-    p_currency: currency,
-    p_lines: [
-      {
-        kind: "ticket", item_id: tier_id, name: tier.name, quantity,
-        face_unit_cents: unitAmount, tax_cents: ticketLineTax,
-        tax_included: tierRule?.price_includes_tax === true,
-        fee_cents: ticketUnitFee * quantity, unit_all_in_cents: ticketAllIn,
-      },
-      ...addonLines.map((a) => ({
-        kind: "addon", item_id: a.id, name: a.name, quantity: a.quantity,
-        face_unit_cents: a.unit_face, tax_cents: a.line_tax, tax_included: a.tax_included,
-        fee_cents: a.unit_fee * a.quantity, unit_all_in_cents: a.unit_all_in,
-      })),
-    ],
-  });
-  if (pdErr) console.error("exos-checkout: price disclosure record failed (non-fatal)", pdErr);
+  await recordDisclosure(session.id);
 
   if (embedded) return json({ client_secret: session.client_secret, session_id: session.id });
   return json({ url: session.url, session_id: session.id });
@@ -661,14 +781,20 @@ const RECORD_COLUMNS = [
 // checkout: first without the checkout-record columns (mig 20260929131000;
 // also on a CHECK violation from one of them), then without attribution
 // (mig 20260924223000). Returns the final error, if any.
-// deno-lint-ignore no-explicit-any
-async function insertSessionRow(sb: SupabaseClient<any, any, any>, row: Record<string, unknown>) {
+async function insertSessionRow(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>,
+  row: Record<string, unknown>,
+  // strict: no fallbacks (a PayPal row must keep every column it was given).
+  opts: { strict?: boolean } = {},
+) {
   const missingColumn = (e: { code?: string } | null) => !!e && (e.code === "42703" || e.code === "PGRST204");
   // The fee lines (absorbed ones included) go to their own service-role-only
   // table, not the session row the buyer can read (mig 20261027100000).
   const feeLines = row.fee_breakdown;
   delete row.fee_breakdown;
   let { error } = await sb.from("exos_checkout_sessions").insert(row);
+  if (error && opts.strict) return error;
   if (error && (missingColumn(error) || error.code === "23514") && RECORD_COLUMNS.some((k) => k in row)) {
     console.error("exos-checkout: checkout-record columns refused (apply 20260929131000?); recording without them", error.message);
     for (const k of RECORD_COLUMNS) delete row[k];
