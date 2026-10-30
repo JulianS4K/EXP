@@ -40,6 +40,14 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-invoices', method: 'GET', path: '/invoices', scope: 'orders:read', paged: true },
   { id: 'list-refunds', method: 'GET', path: '/refunds', scope: 'orders:read', paged: true },
   { id: 'list-webhooks', method: 'GET', path: '/webhooks', scope: 'webhooks:read', paged: false },
+  // Series, collections, timed entry (mig 20261030150000, docs/series-timed-entry.md).
+  { id: 'list-series', method: 'GET', path: '/series', scope: 'events:read', paged: true },
+  { id: 'get-series', method: 'GET', path: '/series/:id', scope: 'events:read', paged: false },
+  { id: 'list-series-dates', method: 'GET', path: '/series/:id/dates', scope: 'events:read', paged: true },
+  { id: 'list-collections', method: 'GET', path: '/collections', scope: 'events:read', paged: true },
+  { id: 'get-collection', method: 'GET', path: '/collections/:id', scope: 'events:read', paged: false },
+  { id: 'get-timed-entry', method: 'GET', path: '/events/:id/timed-entry', scope: 'events:read', paged: false },
+  { id: 'list-slots', method: 'GET', path: '/events/:id/slots', scope: 'tickets:read', paged: false },
 ];
 
 export interface RouteMatch {

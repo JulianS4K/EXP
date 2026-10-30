@@ -50,6 +50,8 @@ export async function startCheckout(input: {
   attribution?: Attribution;
   /** Signed out: pay as a guest; tickets go to this email. */
   guestEmail?: string;
+  /** Timed entry: the chosen slot ('YYYYMMDDTHHMM', mig 20261030150000). */
+  slotId?: string | null;
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -62,6 +64,7 @@ export async function startCheckout(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
+      slot_id: input.slotId || undefined,
       ...recordBody(input),
     },
   });
@@ -82,6 +85,9 @@ export async function claimFreeAsGuest(input: {
   cancelUrl: string;
   voucherCode?: string;
   attribution?: Attribution;
+  /** Timed entry: the chosen slot. Signed-in buyers of a free timed ticket
+   *  come this way too (the account wins over guestEmail server-side). */
+  slotId?: string | null;
 } & CheckoutRecordInput): Promise<{ issued: number; email: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -93,6 +99,7 @@ export async function claimFreeAsGuest(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail.trim().toLowerCase(),
+      slot_id: input.slotId || undefined,
       ...recordBody(input),
     },
   });

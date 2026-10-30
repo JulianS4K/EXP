@@ -8,7 +8,7 @@
 
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Plus, Settings, Users, Check, Megaphone, ChevronRight } from 'lucide-react';
+import { Plus, Settings, Users, Check, Megaphone, Layers, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 
@@ -148,6 +148,14 @@ export default function Orgs() {
                       title="Promote"
                     >
                       <Megaphone size={16} />
+                    </button>
+                    {/* Series and collections (mig 20261030150000). */}
+                    <button
+                      onClick={() => navigate(`/orgs/${org.id}/collections`)}
+                      className="p-2 rounded border border-slate-200 text-slate-500 hover:border-tm-blue hover:text-tm-blue transition-colors"
+                      title="Series and collections"
+                    >
+                      <Layers size={16} />
                     </button>
                     {membership.role === 'owner' && (
                       <>
