@@ -571,12 +571,39 @@ function importMapping(raw: unknown, header: string[]): SalesMapping {
   return out;
 }
 
+/**
+ * The body as text, refused with 413 once it passes `max` bytes. Counts while
+ * streaming, so a chunked body without Content-Length can't be read in full.
+ */
+async function readCapped(req: Request, max: number): Promise<string> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      throw new ApiError(413, "request body too large.");
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    buf.set(c, off);
+    off += c.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 async function readJson(req: Request): Promise<Record<string, unknown>> {
   if (Number(req.headers.get("content-length") ?? "0") > MAX_BODY_BYTES) throw new ApiError(413, "request body too large.");
   const ct = (req.headers.get("content-type") ?? "").toLowerCase();
   if (!ct.startsWith("application/json")) throw new ApiError(415, "send a JSON body (Content-Type: application/json).");
-  const text = await req.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) throw new ApiError(413, "request body too large.");
+  const text = await readCapped(req, MAX_BODY_BYTES);
   let v: unknown;
   try {
     v = JSON.parse(text || "{}");
