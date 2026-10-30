@@ -79,6 +79,45 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     totals: [{ currency: 'usd', orders: 3, tickets: 5, gross_cents: 40000 }],
     checkins: 12, upcoming: [{ id: EV2, name: 'Next <Show>', starts_at: '2026-10-05T00:00:00+00:00', timezone: 'UTC', sold: 40, capacity: 100 }],
   },
+  // As exos_send_channel_reports queues it (mig 20261029120000).
+  'org-channel-report': {
+    org, from: '2026-10-19T00:00:00+00:00', to: '2026-10-26T00:00:00+00:00', iso_week: '2026-W43',
+    marketing: true, unsubscribe_token: TOKEN, more_events: 2,
+    events: [{
+      id: EV, name: 'Show <One>', starts_at: '2026-11-01T01:00:00+00:00', timezone: 'America/New_York', currency: 'usd', capacity: 200,
+      channels: [
+        { channel: 'instagram', label: 'Instagram', group: 'exos', kind: 'sale', currency: 'usd', fees: 'reported', dated: true,
+          week: [2, 5000, 100, 150, 4750], to_date: [3, 7500, 150, 225, 7125] },
+        { channel: 'eventbrite', label: 'Eventbrite', group: 'eventbrite', kind: 'sale', currency: 'usd', fees: 'not_reported', dated: true,
+          week: [1, null, null, 0, null], to_date: [4, null, null, 0, null] },
+        { channel: 'luma', label: 'Luma', group: 'luma', kind: 'sale', currency: 'usd', fees: 'not_reported', dated: false,
+          week: null, to_date: [5, null, null, 0, null] },
+        { channel: 'promoter-x', label: 'Promoters', detail: 'x', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'promoter-dj-kay', label: 'Promoters', detail: 'dj-kay', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        // utm_source "evil.com", "+1 212 555 0100", "<b>x</b>" as the SQL hands them over (C8).
+        { channel: 'evil', label: 'Other', detail: 'evil', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: '1-212-555-0100', label: 'Other', detail: '1-212-555-0100', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'b-x-b', label: 'Other', detail: 'b-x-b', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [2, 0, 0, 0, 0] },
+        { channel: 'comp', label: 'Comps', group: 'comp', kind: 'comp', currency: 'usd', fees: 'none', dated: true,
+          week: [2, null, 0, 0, null], to_date: [6, null, 0, 0, null] },
+        { channel: 'import-posh', label: 'Imported list (Posh)', detail: null, group: 'imported', kind: 'attendee', currency: 'usd', fees: 'none', dated: true,
+          week: [0, null, null, null, null], to_date: [3, null, null, null, null] },
+      ],
+      totals: {
+        week: [{ currency: 'usd', tickets: 3, gross_cents: 5000, fee_cents: 100, exos_fee_cents: 150, net_cents: 4750, gross_not_reported: 1, net_not_reported: 1 }],
+        to_date: [{ currency: 'usd', tickets: 13, gross_cents: 7500, fee_cents: 150, exos_fee_cents: 225, net_cents: 7125, gross_not_reported: 9, net_not_reported: 9 }],
+      },
+    }],
+    totals: {
+      week: [{ currency: 'usd', tickets: 3, gross_cents: 5000, fee_cents: 100, exos_fee_cents: 150, net_cents: 4750, gross_not_reported: 1, net_not_reported: 1 }],
+      to_date: [{ currency: 'usd', tickets: 13, gross_cents: 7500, fee_cents: 150, exos_fee_cents: 225, net_cents: 7125, gross_not_reported: 9, net_not_reported: 9 }],
+    },
+  },
 };
 
 function ok(template: string, payload: unknown = PAYLOADS[template], app: string | null = APP) {
@@ -189,6 +228,39 @@ describe('renderTemplate', () => {
     expect(w.html).toContain(`href="${APP}/dashboard/event/${EV2}">Next &lt;Show&gt;</a>, Monday, October 5 at 12:00 AM UTC: 40 of 100 sold`);
     const empty = ok('org-weekly-summary', { ...PAYLOADS['org-weekly-summary'], events: [], totals: [], checkins: 0, upcoming: [] });
     expect(empty.html).toContain('No sales this week.');
+  });
+
+  it('org-channel-report: tickets by channel, fees only where reported, comps apart', () => {
+    const r = ok('org-channel-report');
+    expect(r.subject).toBe('Org <7f> & Co: 3 tickets by channel, Oct 19 – Oct 25');
+    expect(r.html).toContain('<strong>This week:</strong> 3 tickets, $50.00 gross, $47.50 net');
+    expect(r.html).toContain(`href="${APP}/dashboard/event/${EV}"><strong>Show &lt;One&gt;</strong>`);
+    expect(r.html).toContain(`href="${APP}/orgs/${ORG}/channels"`);
+    // Instagram: week 2, to date 3, gross / fee / net to date.
+    expect(r.html).toMatch(/Instagram<\/td><td[^>]*>2<\/td><td[^>]*>3<\/td><td[^>]*>\$75\.00<\/td><td[^>]*>\$1\.50<\/td><td[^>]*>\$71\.25<\/td>/);
+    // Eventbrite: no prices or fees reported, never estimated.
+    expect(r.html).toMatch(/Eventbrite<\/td><td[^>]*>1<\/td><td[^>]*>4<\/td><td[^>]*>not reported<\/td><td[^>]*>not reported<\/td><td[^>]*>not reported<\/td>/);
+    // Luma: no dates, so no week figure.
+    expect(r.html).toMatch(/Luma<\/td><td[^>]*>–<\/td><td[^>]*>5<\/td>/);
+    expect(r.html).toContain('Luma: counts only, without sale dates');
+    // Free channel: no fees.
+    // Promoter codes are grouped: one row, no code in the mail.
+    expect(r.html).toMatch(/Promoters<\/td><td[^>]*>0<\/td><td[^>]*>2<\/td><td[^>]*>\$0\.00<\/td><td[^>]*>none<\/td>/);
+    expect(r.html).not.toContain('dj-kay');
+    // Buyer-written sources: one "Other" row, last; none of the keys reach the mail.
+    expect(r.html).toMatch(/Other<\/td><td[^>]*>3<\/td><td[^>]*>4<\/td>[^]*<\/table>/);
+    expect(r.html.match(/>Other<\/td>/g)).toHaveLength(1);
+    for (const bad of ['evil', '0100', '212', 'b-x-b', '&lt;b&gt;']) expect(r.html).not.toContain(bad);
+    expect(r.html).toContain('Exos fee to date: $2.25');
+    expect(r.html).toContain('Not sales: 6 comps, 3 imported attendees from other lists.');
+    expect(r.html).not.toMatch(/Comps<\/td>/);
+    expect(r.html).toContain('9 tickets came through channels that don&#39;t report prices or fees to Exos');
+    expect(r.html).toContain('And 2 more events on your dashboard.');
+    expect(r.html).toContain(`href="${APP}/unsubscribe?t=${TOKEN}"`);
+    const none = ok('org-channel-report', { ...PAYLOADS['org-channel-report'], events: [], more_events: 0, totals: { week: [], to_date: [] } });
+    expect(none.subject).toBe('Org <7f> & Co: 0 tickets by channel, Oct 19 – Oct 25');
+    expect(none.html).toContain('<strong>This week:</strong> no tickets');
+    expect(renderTemplate('org-channel-report', { ...PAYLOADS['org-channel-report'], events: [{ ...(PAYLOADS['org-channel-report'].events as object[])[0], id: 'javascript:x' }] }, APP).ok).toBe(false);
   });
 
   it('fee-free-ending: 14 days out and the last day', () => {

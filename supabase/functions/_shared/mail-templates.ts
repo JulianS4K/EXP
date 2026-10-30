@@ -1,9 +1,14 @@
 // Payload-rendered Exos mail (mig 20260929071000), used by exos-mail-drain.
 //
 // Rows queued by exos_mail_enqueue carry a JSON payload and an empty html;
-// the drain calls renderTemplate() to build the subject and body. Pure and
-// import-free, so Deno and EXP's vitest (src/lib/mailTemplates.test.ts) both
-// load it.
+// the drain calls renderTemplate() to build the subject and body. Pure (its
+// one import, channelReport.ts, is pure too), so Deno and EXP's vitest
+// (src/lib/mailTemplates.test.ts) both load it.
+
+import {
+  type ChannelRow, type EventChannels, feeText, messageRows, money, notReportedNote, parseChannelReport, plural, sideCounts,
+  sumTickets, totalsText, weekLabel,
+} from "./channelReport.ts";
 //
 // Rules every template follows:
 //   * Every payload value is escaped before it lands in HTML (event names,
@@ -256,6 +261,47 @@ function disputeView(ctx: Ctx): DisputeView {
 function disputeLinks(ctx: Ctx, v: DisputeView): string {
   return (v.ev ? button(ctx, `/dashboard/event/${v.ev.id}`, "See it in the event's Money") : button(ctx, "/dashboard", "Your dashboard")) +
     `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in Stripe</a>.</p>`;
+}
+
+// Weekly sales by channel (mig 20261029120000). The SPA's Channels card and
+// /orgs/:id/channels read the same document (channelReport.ts). The mail shows
+// labels only (fixed list, SQL _exos_channel_label), one row per label
+// (messageRows): utm_source is buyer-controlled, so no key reaches the mail.
+function channelTable(e: EventChannels): string {
+  const rows = messageRows(e.sales);
+  if (rows.length === 0) return `<p style="color:#666">No sales yet.</p>`;
+  const td = `style="padding:2px 10px 2px 0;text-align:right;white-space:nowrap"`;
+  const head = `<tr style="color:#666;font-size:12px"><td style="padding:2px 10px 2px 0">Channel</td><td ${td}>This week</td>` +
+    `<td ${td}>To date</td><td ${td}>Gross</td><td ${td}>Channel fees</td><td ${td}>Net to you</td></tr>`;
+  const row = (r: ChannelRow) =>
+    `<tr><td style="padding:2px 10px 2px 0">${esc(r.label)}</td>` +
+    `<td ${td}>${r.week ? r.week.tickets : "–"}</td><td ${td}>${r.toDate.tickets}</td>` +
+    `<td ${td}>${esc(money(r.toDate.grossCents, r.currency))}</td>` +
+    `<td ${td}>${esc(feeText(r.toDate, r.fees, r.currency))}</td>` +
+    `<td ${td}>${esc(money(r.toDate.netCents, r.currency))}</td></tr>`;
+  return `<table style="border-collapse:collapse;font-size:14px">${head}${rows.map(row).join("")}</table>`;
+}
+
+function channelEvent(ctx: Ctx, e: EventChannels): string {
+  const when = e.startsAt ? formatWhen(e.startsAt, e.timezone) : "";
+  const exos = e.sales.reduce((k, r) => k + (r.toDate.exosFeeCents ?? 0), 0);
+  const side = sideCounts(e, "toDate");
+  const undated = messageRows(e.sales).filter((r) => !r.dated).map((r) => r.label);
+  const extra = [
+    side.comps ? plural(side.comps, "comp") : "",
+    side.attendees ? `${plural(side.attendees, "imported attendee")} from other lists` : "",
+  ].filter(Boolean);
+  const note = notReportedNote(e.totals.toDate);
+  return `<p style="margin-top:20px"><a href="${href(ctx, `/dashboard/event/${uuid({ id: e.id }, "id")}`)}"><strong>${esc(e.name)}</strong></a>` +
+    `${when ? `<br><span style="color:#666">${esc(when)}</span>` : ""}</p>` +
+    channelTable(e) +
+    `<p style="font-size:13px">This week: ${esc(totalsText(e.totals.week))}. To date: ${esc(totalsText(e.totals.toDate))}.` +
+    (exos > 0 ? ` Exos fee to date: ${esc(money(exos, e.currency))} (already taken out of net).` : "") + `</p>` +
+    (extra.length ? `<p style="font-size:13px;color:#666">Not sales: ${esc(extra.join(", "))}.</p>` : "") +
+    (undated.length
+      ? `<p style="font-size:13px;color:#666">${esc(undated.join(", "))}: counts only, without sale dates, so ${undated.length === 1 ? "it's" : "they're"} in "to date" and not in the week.</p>`
+      : "") +
+    (note ? `<p style="font-size:13px;color:#666">${esc(note)}</p>` : "");
 }
 
 const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
@@ -675,6 +721,26 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
         (checkins > 0 ? `<p>${checkins} check-in${checkins === 1 ? "" : "s"} at the door.</p>` : "") +
         (up ? `<p>Coming up in the next two weeks:</p><ul>${up}</ul>` : "") +
         button(ctx, "/dashboard", "Your dashboard"),
+    };
+  },
+
+  "org-channel-report": (ctx) => {
+    const o = org(ctx.p);
+    const rep = parseChannelReport(ctx.p);
+    if (!rep) throw new PayloadError("report missing");
+    const week = weekLabel(str(ctx.p, "from"), str(ctx.p, "to"));
+    const t = sumTickets(rep.totals.week);
+    return {
+      audience: "organizer",
+      orgName: o.name,
+      subject: `${o.name}: ${plural(t, "ticket")} by channel, ${week}`,
+      body:
+        `<p>${esc(o.name)}: where your tickets sold ${esc(week)} (UTC) and to date, for events from the last week and the next 60 days.</p>` +
+        `<p><strong>This week:</strong> ${esc(totalsText(rep.totals.week))}<br><strong>To date:</strong> ${esc(totalsText(rep.totals.toDate))}</p>` +
+        rep.events.map((e) => channelEvent(ctx, e)).join("") +
+        (rep.moreEvents > 0 ? `<p>And ${plural(rep.moreEvents, "more event")} on your dashboard.</p>` : "") +
+        `<p style="font-size:13px;color:#666">Net to you is after each channel's fees and the Exos fee. Comps and imported lists aren't sales and aren't in the totals.</p>` +
+        button(ctx, `/orgs/${o.id}/channels`, "All channels"),
     };
   },
 };

@@ -98,7 +98,7 @@ export default function SmsPanel({ orgId, orgName, eventId, canSend, canView }: 
             <li key={c.id} className="py-2">
               <p className="text-slate-800">{c.body}</p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                {c.audience === 'org' ? 'Everyone' : 'Ticket holders'} · {c.status}
+                {c.audience === 'org' ? 'Everyone' : c.audience === 'staff_report' ? 'Weekly report to you' : 'Ticket holders'} · {c.status}
                 {` · ${c.sent} sent`}{c.dryRun ? ` · ${c.dryRun} dry run (sending is off on this install)` : ''}{c.failed ? ` · ${c.failed} failed` : ''}
                 {` · ${c.sendAfter.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
                 {canSend && (c.status === 'queued' || c.status === 'sending') && (

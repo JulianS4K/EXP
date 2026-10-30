@@ -15,11 +15,14 @@
 //        org's webhook public key from Integrations).
 // Deploy with --no-verify-jwt.
 //
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, EXOS_SMS_LIVE.
+// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, EXOS_SMS_LIVE,
+// EXOS_APP_URL (fills {{app_url}} in texts that link into the app, like the
+// weekly channel report; such a text fails rather than going out without it).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
+import { fillAppUrl, normalizeAppUrl } from "../_shared/mail-render.ts";
 import { safeEqual, sendSms, type SmsConfig, telnyxInbound, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -76,6 +79,7 @@ async function config(sb: SupabaseClient, org: string, provider: string): Promis
 
 async function drain(sb: SupabaseClient) {
   const live = Deno.env.get("EXOS_SMS_LIVE") === "on";
+  const appUrl = normalizeAppUrl(Deno.env.get("EXOS_APP_URL"));
   const deadline = Date.now() + BUDGET_MS;
   const { data, error } = await sb.rpc("exos_sms_claim", { p_limit: 100 });
   if (error) {
@@ -102,7 +106,14 @@ async function drain(sb: SupabaseClient) {
       failed++;
       continue;
     }
-    const r = await sendSms(fetch, cfg, m.phone, m.body);
+    // The weekly channel report text links into the app ({{app_url}}, mig 20261029120000).
+    const body = fillAppUrl(m.body, appUrl);
+    if (body === null) {
+      await sb.rpc("exos_sms_mark", { p_id: m.id, p_status: "failed", p_error: "EXOS_APP_URL unset; the text links into the app" });
+      failed++;
+      continue;
+    }
+    const r = await sendSms(fetch, cfg, m.phone, body);
     // `in` narrows the union whether or not strictNullChecks is on (CI's deno check has it off).
     if ("id" in r) {
       await sb.rpc("exos_sms_mark", { p_id: m.id, p_status: "sent", p_provider_id: r.id });
