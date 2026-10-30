@@ -140,8 +140,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   let body: unknown = undefined;
   if (req.method === "POST" || req.method === "PATCH") {
-    const raw = await req.text();
-    if (raw.length > MAX_BODY_BYTES) return json({ error: "request body too large" }, 413);
+    const raw = await readCapped(req, MAX_BODY_BYTES);
+    if (raw === null) return json({ error: "request body too large" }, 413);
     if (raw.trim()) {
       try { body = JSON.parse(raw); }
       catch { return json({ error: "the body must be JSON" }, 400); }
@@ -718,4 +718,32 @@ async function sha256Hex(s: string): Promise<string> {
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...extra } });
+}
+
+/**
+ * The body as text, or null once it passes `max` bytes. Counts while
+ * streaming, so a chunked body without Content-Length can't be read in full.
+ */
+async function readCapped(req: Request, max: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    buf.set(c, off);
+    off += c.byteLength;
+  }
+  return new TextDecoder().decode(buf);
 }
