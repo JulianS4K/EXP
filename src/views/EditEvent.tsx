@@ -1,5 +1,5 @@
 import { geocodeEvent } from '../lib/geo';
-import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
 import { uploadEventImage } from '../lib/storage';
@@ -87,6 +87,7 @@ import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import StoreContentEditor from '../components/StoreContentEditor';
+import LineupEditor, { type LineupEditorHandle } from '../components/LineupEditor';
 import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import OnlineEventEditor from '../components/OnlineEventEditor';
 import {
@@ -125,6 +126,10 @@ export default function EditEvent() {
   // sets it only when the row has the column). Its own draft state, seeded on load.
   const storeSupported = eventData.lineup !== undefined;
   const [store, setStore] = useState<StoreDraft>(blankStore());
+  // Structured lineup (mig 20261030110000): while it has acts, the free-text
+  // performers are derived from it and hidden here.
+  const lineupRef = useRef<LineupEditorHandle>(null);
+  const [hasLineup, setHasLineup] = useState(false);
   // Online / hybrid (mig 20261005090000): keyed on `format`, which the mapper
   // sets only when the row has the column. The private join link loads
   // separately (staff RPC); `linkLoaded` guards against overwriting a link
@@ -652,8 +657,9 @@ export default function EditEvent() {
         venueName: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
         venueLocation: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
         venueAddress: ed.address as any,
-        primaryPerformerName: ed.performers?.[0],
-        performerNames: ed.performers,
+        // With a lineup, performer_names is written by exos_lineup_save, not here.
+        primaryPerformerName: hasLineup ? undefined : ed.performers?.[0],
+        performerNames: hasLineup ? undefined : ed.performers,
         // Always send the array (never undefined) so clearing every link
         // persists as `[]` — updateEvent skips undefined fields, which would
         // otherwise leave stale links in place on removal.
@@ -719,6 +725,18 @@ export default function EditEvent() {
             console.error('join link save failed:', linkErr);
             toast({ kind: 'error', message: 'Changes saved, but the join link did not save. Check it and save again.' });
           }
+        }
+      }
+
+      // 4. The lineup (its own RPC), after the event: a failure leaves the
+      //    event saved and says so, and keeps the page open to retry.
+      if (lineupRef.current?.dirty()) {
+        try {
+          await lineupRef.current.save();
+        } catch (lineupErr) {
+          console.error('lineup save failed:', lineupErr);
+          toast({ kind: 'error', message: `Changes saved, but the lineup did not save: ${(lineupErr as Error).message}` });
+          return;
         }
       }
 
@@ -953,6 +971,11 @@ export default function EditEvent() {
                   + reminder emails. Max 10 entries × 80 chars each;
                   validated client-side and by the firestore rule's
                   list-size cap on isValidEvent. */}
+              {eventId && eventData.orgId && (
+                <LineupEditor ref={lineupRef} eventId={eventId} orgId={eventData.orgId} uploaderUid={user?.uid}
+                  onHasLineup={setHasLineup} />
+              )}
+              {!hasLineup && (<>
               <div className="space-y-2 md:col-span-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
                 <input
@@ -985,6 +1008,7 @@ export default function EditEvent() {
                   onChange={(artistLinks) => setEventData({ ...eventData, artistLinks })}
                 />
               </div>
+              </>)}
            </div>
 
            {/* With the store-page columns, the markdown "About" below replaces this. */}

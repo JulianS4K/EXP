@@ -37,6 +37,10 @@ export const WEBHOOK_EVENT_TYPES = [
   'hold.created',
   'hold.updated',
   'hold.converted',
+  'offer.sent',
+  'offer.accepted',
+  'offer.declined',
+  'settlement.finalized',
 ] as const;
 
 /** At most this many active (unrevoked) keys per org (mig 20261027090000). */

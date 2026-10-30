@@ -46,12 +46,14 @@ import AttendeeLookup from '../components/AttendeeLookup';
 import SmsPanel from '../components/SmsPanel';
 import PromoLinksPanel from '../components/PromoLinksPanel';
 import RefundAsksPanel from '../components/RefundAsksPanel';
+import ShowFinancePanel from '../components/finance/ShowFinancePanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
-type ReportTab = 'overview' | 'attendees' | 'door' | 'marketing' | 'settings';
+type ReportTab = 'overview' | 'settlement' | 'attendees' | 'door' | 'marketing' | 'settings';
 const REPORT_TABS: { key: ReportTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  { key: 'settlement', label: 'Settlement & P&L' },
   { key: 'attendees', label: 'Attendees & refunds' },
   { key: 'door', label: 'Tables & guest lists' },
   { key: 'marketing', label: 'Marketing' },
@@ -519,6 +521,13 @@ export default function OrganizerEventReport() {
         {/* Waitlist — demand captured after sell-out; release spots to notify. */}
         <WaitlistPanel eventId={eventId!} />
         </>)}
+
+        {tab === 'settlement' && (
+          // Offers' settlement, finance items, P&L and ticket-count emails
+          // (owner / manager / finance; docs/offers-settlements.md).
+          <ShowFinancePanel eventId={eventId!} orgId={event.orgId} orgName={activeOrg?.name ?? ''}
+            canView={canSeeMoney(activeRole, isAdmin)} canManage={canAct} />
+        )}
 
         {tab === 'settings' && (<>
         {/* Scheduled pricing — time-based price steps per tier (owner/manager). */}

@@ -48,10 +48,11 @@ interface SpecEndpoint {
   path: string;
   summary: string;
   description?: string;
-  auth: 'api_key';
+  auth: 'api_key' | 'shared_key';
   scope: string | null;
   parameters: SpecParam[];
   responses: SpecResponse[];
+  request_example?: unknown;
 }
 
 interface SpecCategory {
@@ -121,13 +122,21 @@ function samplePath(e: SpecEndpoint): string {
 
 function curlFor(e: SpecEndpoint, base: string): string {
   const query = e.parameters
-    .filter((p) => p.location === 'query' && p.example !== undefined && p.name !== 'page')
+    .filter((p) => p.location === 'query' && p.example !== undefined && p.name !== 'page' && p.name !== 'shared_key')
     .slice(0, 2)
     .map((p) => `${encodeURIComponent(p.name)}=${encodeURIComponent(String(p.example))}`)
     .join('&');
+  // The listing feed takes a shared key in the query string, not a bearer key.
+  if (e.auth === 'shared_key') {
+    const q = ['shared_key=$EXOS_SHARED_KEY', query].filter(Boolean).join('&');
+    return `curl "${base}${samplePath(e)}?${q}"`;
+  }
   return [
     `curl${e.method === 'GET' ? '' : ` -X ${e.method}`} "${base}${samplePath(e)}${query ? `?${query}` : ''}"`,
     '  -H "Authorization: Bearer $EXOS_API_KEY"',
+    ...(e.request_example !== undefined
+      ? ['  -H "Content-Type: application/json"', `  -d '${JSON.stringify(e.request_example).replace(/'/g, "'\\''")}'`]
+      : []),
   ].join(' \\\n');
 }
 
@@ -232,7 +241,8 @@ function ParamTable({ params }: { params: SpecParam[] }) {
   );
 }
 
-function ScopeBadge({ scope }: { scope: string | null }) {
+function ScopeBadge({ scope, auth }: { scope: string | null; auth?: SpecEndpoint['auth'] }) {
+  if (auth === 'shared_key') return <span className="text-xs text-white/60">Listing-feed shared key (no API key)</span>;
   return scope
     ? <span className="text-xs text-white/60">Scope <Code>{scope}</Code></span>
     : <span className="text-xs text-white/60">Any valid key (no scope needed)</span>;
@@ -249,7 +259,7 @@ function EndpointBlock({ e, base }: { e: SpecEndpoint; base: string }) {
         <Pill tone={e.method === 'GET' ? 'green' : 'blue'}>{e.method}</Pill>
         <code className="font-mono text-[13px] text-white break-all">{e.path}</code>
       </div>
-      <div className="mb-4"><ScopeBadge scope={e.scope} /></div>
+      <div className="mb-4"><ScopeBadge scope={e.scope} auth={e.auth} /></div>
       {e.description ? <p className="text-sm text-white/70 leading-relaxed max-w-3xl">{e.description}</p> : null}
 
       {e.parameters.length ? (<><SubHeading>Parameters</SubHeading><ParamTable params={e.parameters} /></>) : null}

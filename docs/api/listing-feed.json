@@ -1,0 +1,1027 @@
+{
+  "file": "listing-feed",
+  "name": "Listing feed",
+  "order": 14,
+  "description": "A public, read-only feed of one organization's events and lineups for listing sites (Bandsintown, JamBase, Songkick) and a venue's own website, shaped like Opendate's public listing. Partners authenticate with a shared key, one per partner, which an org owner mints in Org settings → Listing feed or with POST /v1/listing-keys (`org:admin`). The feed answers any origin and is cacheable with an ETag. Guide: docs/listing-feed.md.",
+  "endpoints": [
+    {
+      "id": "public-list-events",
+      "method": "GET",
+      "path": "/v1/public/events",
+      "summary": "List public events",
+      "description": "The key's organization's public events: published, listed (not link-only), not hidden from search (noindex), starting at or after q[start_time_gteq] (default now), with their lineup. Opendate's public listing shape and paging, so a partner already reading Opendate needs a new base URL and key only. Times are ISO 8601 with the offset of the event's time zone. ticket_url is the event page tagged utm_source=<partner type> (listing for other), utm_medium=listing, utm_campaign=listing_feed. price_min / price_max are all-in (passed-on fees and tax included) over the public ticket types, in major units. on_sale is false when sold out or no public ticket type is inside its sale window. A secret-location event shows only its public area label as venue_name; venue_id, venue_permalink, city, region and country are null and the address never appears. An online-only event has online: true and no venue. performers is the lineup in running order: performer_id (also under the deprecated alias id) is the slot, artist_id and everything under artist belong to the artist; spotify_id, spotify_uri and spotify_url are all set or all null; canonical_artist_id is set when the artist was merged into another. name, permalink, image_url and image_thumb_url_for_json are deprecated flat copies of the artist block for older readers. An event with only free-text performer names lists them with artist_id null. Cached 60 seconds; poll at most once a minute.",
+      "auth": "shared_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "The partner's shared key (sh_live_…). The X-Shared-Key header works too; from a browser use the query parameter (a custom header needs a CORS preflight).",
+          "example": "sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number (1-based). Anything but a positive integer is a 400; a page past the end has an empty collection.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 30,
+          "description": "Entries per page (default 30); values above 250 are treated as 250.",
+          "example": 30
+        },
+        {
+          "name": "genre",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only events with one of these genres or subgenres (case-insensitive). Comma-separated or repeated; genre[] works too.",
+          "example": "house,techno"
+        },
+        {
+          "name": "exclude_genre",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Leave out events with any of these genres.",
+          "example": "comedy"
+        },
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only events at this venue (venue_id in the entries).",
+          "example": "the-loft"
+        },
+        {
+          "name": "artist_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only events with this artist on the bill (an artist merged into it counts).",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        },
+        {
+          "name": "q[start_time_gteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Events starting at or after this date or time; default now. start_time_gteq works too. Pass an early date for past events.",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "q[start_time_lteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Events starting at or before this date or time. start_time_lteq works too.",
+          "example": "2027-03-01"
+        },
+        {
+          "name": "q[s]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "default": "start_time asc",
+          "description": "Sort: start_time asc (default), start_time desc, published_at asc or published_at desc.",
+          "enum": [
+            "start_time asc",
+            "start_time desc",
+            "published_at asc",
+            "published_at desc"
+          ],
+          "example": "published_at desc"
+        },
+        {
+          "name": "tag_id",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Not supported: Exos events have no tags, so a tag_id is a 400 rather than an unfiltered answer.",
+          "example": 3
+        },
+        {
+          "name": "If-None-Match",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "The ETag of the last response; an unchanged answer is 304 with no body.",
+          "example": "\"q3L0f2kD8xV1bN7cT5rW9yZ4aE6\""
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "current_page": 1,
+            "per_page": 30,
+            "total_entries": 2,
+            "total_pages": 1,
+            "collection": [
+              {
+                "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "title": "Warehouse Night",
+                "start_time": "2026-12-04T22:00:00-05:00",
+                "end_time": "2026-12-05T03:00:00-05:00",
+                "doors_time": "2026-12-04T21:30:00-05:00",
+                "timezone": "America/New_York",
+                "venue_id": null,
+                "venue_permalink": "the-loft",
+                "venue_name": "The Loft",
+                "city": "Brooklyn",
+                "region": "NY",
+                "country": "US",
+                "online": false,
+                "ticket_url": "https://tickets.example.com/bridge/e/warehouse-night?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "price_min": 16.5,
+                "price_max": 27.5,
+                "currency": "USD",
+                "on_sale": true,
+                "sold_out": false,
+                "published_at": "2026-10-01T15:12:09.120Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "performers": [
+                  {
+                    "performer_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                    "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                    "act_type": "headline",
+                    "position": 1,
+                    "set_time": "2026-12-05T04:30:00.000Z",
+                    "updated_at": "2026-10-22T18:05:00.000Z",
+                    "artist": {
+                      "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                      "name": "Lumen",
+                      "permalink": "lumen",
+                      "updated_at": "2026-10-22T18:02:11.904Z",
+                      "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                      "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                      "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                      "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                      "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                      "canonical_artist_id": null
+                    },
+                    "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                    "name": "Lumen",
+                    "permalink": "lumen",
+                    "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                    "image_thumb_url_for_json": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+                  },
+                  {
+                    "performer_id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                    "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                    "act_type": "opener",
+                    "position": 2,
+                    "set_time": null,
+                    "updated_at": "2026-10-22T18:05:00.000Z",
+                    "artist": {
+                      "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                      "name": "Nova Echo",
+                      "permalink": "nova-echo",
+                      "updated_at": "2026-10-22T18:02:11.904Z",
+                      "image_url": null,
+                      "image_thumb_url": null,
+                      "spotify_id": null,
+                      "spotify_uri": null,
+                      "spotify_url": null,
+                      "canonical_artist_id": null
+                    },
+                    "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                    "name": "Nova Echo",
+                    "permalink": "nova-echo",
+                    "image_url": null,
+                    "image_thumb_url_for_json": null
+                  }
+                ]
+              },
+              {
+                "id": "4a7c3d2f-9b5e-4f1a-8c6d-1e2f3a4b5c6d",
+                "title": "Rooftop Secret Session",
+                "start_time": "2026-12-04T22:00:00-05:00",
+                "end_time": "2026-12-05T03:00:00-05:00",
+                "doors_time": "2026-12-04T21:30:00-05:00",
+                "timezone": "America/New_York",
+                "venue_id": null,
+                "venue_permalink": null,
+                "venue_name": "Williamsburg, Brooklyn",
+                "city": null,
+                "region": null,
+                "country": null,
+                "online": false,
+                "ticket_url": "https://tickets.example.com/bridge/event/4a7c3d2f-9b5e-4f1a-8c6d-1e2f3a4b5c6d?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "price_min": 16.5,
+                "price_max": 27.5,
+                "currency": "USD",
+                "on_sale": true,
+                "sold_out": false,
+                "published_at": "2026-10-01T15:12:09.120Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "performers": []
+              }
+            ]
+          },
+          "headers": {
+            "Cache-Control": "public, max-age=60",
+            "ETag": "A strong ETag of the body; send it back as If-None-Match.",
+            "Access-Control-Allow-Origin": "*",
+            "Vary": "X-Shared-Key"
+          }
+        },
+        {
+          "status": 304,
+          "description": "Not modified: If-None-Match names the current ETag. No body.",
+          "headers": {
+            "ETag": "The same ETag."
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad parameter (never cached).",
+          "example": {
+            "error": "tag_id is not supported: Exos events have no tags. Filter with genre, venue_id or artist_id."
+          }
+        },
+        {
+          "status": 401,
+          "description": "A missing, unknown or revoked shared key (never cached). An API key is not a shared key.",
+          "example": {
+            "error": "invalid or revoked shared_key"
+          }
+        },
+        {
+          "status": 429,
+          "description": "Over 120 requests this minute for this key; wait Retry-After seconds.",
+          "example": {
+            "error": "rate limit exceeded",
+            "limit_per_minute": 120
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-get-event",
+      "method": "GET",
+      "path": "/v1/public/events/:id",
+      "summary": "Get a public event",
+      "description": "One entry of the feed, in the same shape; any start time (past events too). Anything not in the key's feed is the same 404.",
+      "auth": "shared_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "The partner's shared key (sh_live_…). The X-Shared-Key header works too; from a browser use the query parameter (a custom header needs a CORS preflight).",
+          "example": "sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "title": "Warehouse Night",
+            "start_time": "2026-12-04T22:00:00-05:00",
+            "end_time": "2026-12-05T03:00:00-05:00",
+            "doors_time": "2026-12-04T21:30:00-05:00",
+            "timezone": "America/New_York",
+            "venue_id": null,
+            "venue_permalink": "the-loft",
+            "venue_name": "The Loft",
+            "city": "Brooklyn",
+            "region": "NY",
+            "country": "US",
+            "online": false,
+            "ticket_url": "https://tickets.example.com/bridge/e/warehouse-night?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+            "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+            "genres": [
+              "House",
+              "Disco"
+            ],
+            "price_min": 16.5,
+            "price_max": 27.5,
+            "currency": "USD",
+            "on_sale": true,
+            "sold_out": false,
+            "published_at": "2026-10-01T15:12:09.120Z",
+            "updated_at": "2026-10-22T18:05:00.000Z",
+            "performers": [
+              {
+                "performer_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "act_type": "headline",
+                "position": 1,
+                "set_time": "2026-12-05T04:30:00.000Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "artist": {
+                  "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                  "name": "Lumen",
+                  "permalink": "lumen",
+                  "updated_at": "2026-10-22T18:02:11.904Z",
+                  "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                  "canonical_artist_id": null
+                },
+                "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "name": "Lumen",
+                "permalink": "lumen",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "image_thumb_url_for_json": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+              },
+              {
+                "performer_id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                "act_type": "opener",
+                "position": 2,
+                "set_time": null,
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "artist": {
+                  "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                  "name": "Nova Echo",
+                  "permalink": "nova-echo",
+                  "updated_at": "2026-10-22T18:02:11.904Z",
+                  "image_url": null,
+                  "image_thumb_url": null,
+                  "spotify_id": null,
+                  "spotify_uri": null,
+                  "spotify_url": null,
+                  "canonical_artist_id": null
+                },
+                "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "name": "Nova Echo",
+                "permalink": "nova-echo",
+                "image_url": null,
+                "image_thumb_url_for_json": null
+              }
+            ]
+          },
+          "headers": {
+            "Cache-Control": "public, max-age=60",
+            "ETag": "A strong ETag of the body; send it back as If-None-Match.",
+            "Access-Control-Allow-Origin": "*",
+            "Vary": "X-Shared-Key"
+          }
+        },
+        {
+          "status": 304,
+          "description": "Not modified: If-None-Match names the current ETag. No body.",
+          "headers": {
+            "ETag": "The same ETag."
+          }
+        },
+        {
+          "status": 401,
+          "description": "A missing, unknown or revoked shared key.",
+          "example": {
+            "error": "invalid or revoked shared_key"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not in the feed: another organization's event, a draft, a link-only event, or no such id.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-list-confirms",
+      "method": "GET",
+      "path": "/v1/public/confirms",
+      "summary": "List public events (Opendate path)",
+      "description": "The same feed as GET /v1/public/events under Opendate's path name, for partners that already read Opendate's public confirms and only change the base URL and key.",
+      "auth": "shared_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "The partner's shared key (sh_live_…). The X-Shared-Key header works too; from a browser use the query parameter (a custom header needs a CORS preflight).",
+          "example": "sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number (1-based). Anything but a positive integer is a 400; a page past the end has an empty collection.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 30,
+          "description": "Entries per page (default 30); values above 250 are treated as 250.",
+          "example": 30
+        },
+        {
+          "name": "genre",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only events with one of these genres or subgenres (case-insensitive). Comma-separated or repeated; genre[] works too.",
+          "example": "house,techno"
+        },
+        {
+          "name": "exclude_genre",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Leave out events with any of these genres.",
+          "example": "comedy"
+        },
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only events at this venue (venue_id in the entries).",
+          "example": "the-loft"
+        },
+        {
+          "name": "artist_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only events with this artist on the bill (an artist merged into it counts).",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        },
+        {
+          "name": "q[start_time_gteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Events starting at or after this date or time; default now. start_time_gteq works too. Pass an early date for past events.",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "q[start_time_lteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Events starting at or before this date or time. start_time_lteq works too.",
+          "example": "2027-03-01"
+        },
+        {
+          "name": "q[s]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "default": "start_time asc",
+          "description": "Sort: start_time asc (default), start_time desc, published_at asc or published_at desc.",
+          "enum": [
+            "start_time asc",
+            "start_time desc",
+            "published_at asc",
+            "published_at desc"
+          ],
+          "example": "published_at desc"
+        },
+        {
+          "name": "tag_id",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Not supported: Exos events have no tags, so a tag_id is a 400 rather than an unfiltered answer.",
+          "example": 3
+        },
+        {
+          "name": "If-None-Match",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "The ETag of the last response; an unchanged answer is 304 with no body.",
+          "example": "\"q3L0f2kD8xV1bN7cT5rW9yZ4aE6\""
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "current_page": 1,
+            "per_page": 30,
+            "total_entries": 2,
+            "total_pages": 1,
+            "collection": [
+              {
+                "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "title": "Warehouse Night",
+                "start_time": "2026-12-04T22:00:00-05:00",
+                "end_time": "2026-12-05T03:00:00-05:00",
+                "doors_time": "2026-12-04T21:30:00-05:00",
+                "timezone": "America/New_York",
+                "venue_id": null,
+                "venue_permalink": "the-loft",
+                "venue_name": "The Loft",
+                "city": "Brooklyn",
+                "region": "NY",
+                "country": "US",
+                "online": false,
+                "ticket_url": "https://tickets.example.com/bridge/e/warehouse-night?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "price_min": 16.5,
+                "price_max": 27.5,
+                "currency": "USD",
+                "on_sale": true,
+                "sold_out": false,
+                "published_at": "2026-10-01T15:12:09.120Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "performers": [
+                  {
+                    "performer_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                    "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                    "act_type": "headline",
+                    "position": 1,
+                    "set_time": "2026-12-05T04:30:00.000Z",
+                    "updated_at": "2026-10-22T18:05:00.000Z",
+                    "artist": {
+                      "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                      "name": "Lumen",
+                      "permalink": "lumen",
+                      "updated_at": "2026-10-22T18:02:11.904Z",
+                      "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                      "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                      "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                      "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                      "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                      "canonical_artist_id": null
+                    },
+                    "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                    "name": "Lumen",
+                    "permalink": "lumen",
+                    "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                    "image_thumb_url_for_json": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+                  },
+                  {
+                    "performer_id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                    "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                    "act_type": "opener",
+                    "position": 2,
+                    "set_time": null,
+                    "updated_at": "2026-10-22T18:05:00.000Z",
+                    "artist": {
+                      "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                      "name": "Nova Echo",
+                      "permalink": "nova-echo",
+                      "updated_at": "2026-10-22T18:02:11.904Z",
+                      "image_url": null,
+                      "image_thumb_url": null,
+                      "spotify_id": null,
+                      "spotify_uri": null,
+                      "spotify_url": null,
+                      "canonical_artist_id": null
+                    },
+                    "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                    "name": "Nova Echo",
+                    "permalink": "nova-echo",
+                    "image_url": null,
+                    "image_thumb_url_for_json": null
+                  }
+                ]
+              },
+              {
+                "id": "4a7c3d2f-9b5e-4f1a-8c6d-1e2f3a4b5c6d",
+                "title": "Rooftop Secret Session",
+                "start_time": "2026-12-04T22:00:00-05:00",
+                "end_time": "2026-12-05T03:00:00-05:00",
+                "doors_time": "2026-12-04T21:30:00-05:00",
+                "timezone": "America/New_York",
+                "venue_id": null,
+                "venue_permalink": null,
+                "venue_name": "Williamsburg, Brooklyn",
+                "city": null,
+                "region": null,
+                "country": null,
+                "online": false,
+                "ticket_url": "https://tickets.example.com/bridge/event/4a7c3d2f-9b5e-4f1a-8c6d-1e2f3a4b5c6d?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "price_min": 16.5,
+                "price_max": 27.5,
+                "currency": "USD",
+                "on_sale": true,
+                "sold_out": false,
+                "published_at": "2026-10-01T15:12:09.120Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "performers": []
+              }
+            ]
+          },
+          "headers": {
+            "Cache-Control": "public, max-age=60",
+            "ETag": "A strong ETag of the body; send it back as If-None-Match.",
+            "Access-Control-Allow-Origin": "*",
+            "Vary": "X-Shared-Key"
+          }
+        },
+        {
+          "status": 304,
+          "description": "Not modified: If-None-Match names the current ETag. No body.",
+          "headers": {
+            "ETag": "The same ETag."
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad parameter (never cached).",
+          "example": {
+            "error": "tag_id is not supported: Exos events have no tags. Filter with genre, venue_id or artist_id."
+          }
+        },
+        {
+          "status": 401,
+          "description": "A missing, unknown or revoked shared key (never cached). An API key is not a shared key.",
+          "example": {
+            "error": "invalid or revoked shared_key"
+          }
+        },
+        {
+          "status": 429,
+          "description": "Over 120 requests this minute for this key; wait Retry-After seconds.",
+          "example": {
+            "error": "rate limit exceeded",
+            "limit_per_minute": 120
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-get-confirm",
+      "method": "GET",
+      "path": "/v1/public/confirms/:id",
+      "summary": "Get a public event (Opendate path)",
+      "description": "The same as GET /v1/public/events/:id.",
+      "auth": "shared_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "The partner's shared key (sh_live_…). The X-Shared-Key header works too; from a browser use the query parameter (a custom header needs a CORS preflight).",
+          "example": "sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "title": "Warehouse Night",
+            "start_time": "2026-12-04T22:00:00-05:00",
+            "end_time": "2026-12-05T03:00:00-05:00",
+            "doors_time": "2026-12-04T21:30:00-05:00",
+            "timezone": "America/New_York",
+            "venue_id": null,
+            "venue_permalink": "the-loft",
+            "venue_name": "The Loft",
+            "city": "Brooklyn",
+            "region": "NY",
+            "country": "US",
+            "online": false,
+            "ticket_url": "https://tickets.example.com/bridge/e/warehouse-night?utm_source=bandsintown&utm_medium=listing&utm_campaign=listing_feed",
+            "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/poster.jpg",
+            "genres": [
+              "House",
+              "Disco"
+            ],
+            "price_min": 16.5,
+            "price_max": 27.5,
+            "currency": "USD",
+            "on_sale": true,
+            "sold_out": false,
+            "published_at": "2026-10-01T15:12:09.120Z",
+            "updated_at": "2026-10-22T18:05:00.000Z",
+            "performers": [
+              {
+                "performer_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "act_type": "headline",
+                "position": 1,
+                "set_time": "2026-12-05T04:30:00.000Z",
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "artist": {
+                  "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                  "name": "Lumen",
+                  "permalink": "lumen",
+                  "updated_at": "2026-10-22T18:02:11.904Z",
+                  "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                  "canonical_artist_id": null
+                },
+                "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "name": "Lumen",
+                "permalink": "lumen",
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "image_thumb_url_for_json": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+              },
+              {
+                "performer_id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                "act_type": "opener",
+                "position": 2,
+                "set_time": null,
+                "updated_at": "2026-10-22T18:05:00.000Z",
+                "artist": {
+                  "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                  "name": "Nova Echo",
+                  "permalink": "nova-echo",
+                  "updated_at": "2026-10-22T18:02:11.904Z",
+                  "image_url": null,
+                  "image_thumb_url": null,
+                  "spotify_id": null,
+                  "spotify_uri": null,
+                  "spotify_url": null,
+                  "canonical_artist_id": null
+                },
+                "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "name": "Nova Echo",
+                "permalink": "nova-echo",
+                "image_url": null,
+                "image_thumb_url_for_json": null
+              }
+            ]
+          },
+          "headers": {
+            "Cache-Control": "public, max-age=60",
+            "ETag": "A strong ETag of the body; send it back as If-None-Match.",
+            "Access-Control-Allow-Origin": "*",
+            "Vary": "X-Shared-Key"
+          }
+        },
+        {
+          "status": 304,
+          "description": "Not modified: If-None-Match names the current ETag. No body.",
+          "headers": {
+            "ETag": "The same ETag."
+          }
+        },
+        {
+          "status": 401,
+          "description": "A missing, unknown or revoked shared key.",
+          "example": {
+            "error": "invalid or revoked shared_key"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not in the feed: another organization's event, a draft, a link-only event, or no such id.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-listing-keys",
+      "method": "GET",
+      "path": "/v1/listing-keys",
+      "summary": "List shared keys",
+      "description": "The organization's listing-feed shared keys, revoked ones included, oldest first. Never the key itself: only its prefix.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "e3f4a5b6-c7d8-4e9f-a0b1-2c3d4e5f6071",
+                "label": "Bandsintown",
+                "partner_type": "bandsintown",
+                "key_prefix": "sh_live_9f2c4e6a",
+                "created_at": "2026-10-23T10:00:00+00:00",
+                "last_used_at": "2026-10-23T10:05:12+00:00",
+                "revoked_at": null
+              }
+            ],
+            "partner_types": [
+              "bandsintown",
+              "jambase",
+              "songkick",
+              "website",
+              "other"
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-listing-key",
+      "method": "POST",
+      "path": "/v1/listing-keys",
+      "summary": "Create a shared key",
+      "description": "Mints a shared key for one partner and returns it, with a ready feed URL, this once; only its SHA-256 hash is kept. At most 20 active keys per organization. Owner rule: the API key must have been created by someone who is an active owner of the organization now; otherwise 403. A shared key minted over the API is revoked with the API key that minted it.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "partner_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "default": "other",
+          "description": "Who reads it; tags ticket links with utm_source.",
+          "enum": [
+            "bandsintown",
+            "jambase",
+            "songkick",
+            "website",
+            "other"
+          ],
+          "example": "bandsintown"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 80 characters; defaults to the partner type.",
+          "example": "Bandsintown"
+        }
+      ],
+      "request_example": {
+        "partner_type": "bandsintown",
+        "label": "Bandsintown"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created. key is shown only here.",
+          "example": {
+            "data": {
+              "id": "e3f4a5b6-c7d8-4e9f-a0b1-2c3d4e5f6071",
+              "label": "Bandsintown",
+              "partner_type": "bandsintown",
+              "key_prefix": "sh_live_9f2c4e6a",
+              "created_at": "2026-10-23T10:00:00+00:00",
+              "key": "sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5",
+              "feed_url": "https://<project-ref>.supabase.co/functions/v1/exos-api/v1/public/events?shared_key=sh_live_9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c2e4b6d8f0a1c3e5"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "An unknown partner type or a long label.",
+          "example": {
+            "error": "listing key: partner_type must be bandsintown, jambase, songkick, website or other"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The API key's creator is not an owner of the organization (now).",
+          "example": {
+            "error": "listing key: only an API key created by an owner of the organization can manage shared keys"
+          }
+        },
+        {
+          "status": 409,
+          "description": "20 active keys already.",
+          "example": {
+            "error": "listing key: at most 20 active shared keys per organization; revoke one first"
+          }
+        }
+      ]
+    },
+    {
+      "id": "revoke-listing-key",
+      "method": "DELETE",
+      "path": "/v1/listing-keys/:id",
+      "summary": "Revoke a shared key",
+      "description": "The key stops working at once. Revoking a revoked key is fine. Owner rule: the API key must have been created by someone who is an active owner of the organization now; otherwise 403. A shared key minted over the API is revoked with the API key that minted it.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The shared key's id.",
+          "example": "e3f4a5b6-c7d8-4e9f-a0b1-2c3d4e5f6071"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "e3f4a5b6-c7d8-4e9f-a0b1-2c3d4e5f6071",
+              "revoked": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The API key's creator is not an owner of the organization (now).",
+          "example": {
+            "error": "listing key: only an API key created by an owner of the organization can manage shared keys"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such key in the key's organization.",
+          "example": {
+            "error": "shared key not found"
+          }
+        }
+      ]
+    }
+  ]
+}

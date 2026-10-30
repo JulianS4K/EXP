@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedMethods, apiPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
+import { allowedMethods, apiPath, isSharedKeyPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
 import { effectiveScopes, hasScope, READ_SCOPES, SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 import { PagingError, pageEnvelope, parsePage } from '../../supabase/functions/_shared/api/paging.ts';
 
@@ -27,6 +27,7 @@ describe('matchRoute', () => {
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
     expect(matchRoute('POST', '/events')).toBeNull();
+    expect(matchRoute('DELETE', '/artists/x')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -42,19 +43,21 @@ describe('matchRoute', () => {
       if (r.scope !== null) expect(SCOPES).toContain(r.scope);
       expect(matchRoute(r.method, r.path.replace(/:[a-z]+/g, 'x'))?.route.id).toBe(r.id);
     }
-    // Only GET /me is reachable without a scope.
-    expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // Reads need a :read scope, writes a :write scope (booking, mig 20261030100000).
-    for (const r of ROUTES) {
-      if (r.scope === null) continue;
-      expect(r.scope.endsWith(r.method === 'GET' ? ':read' : ':write'), `${r.id} ${r.scope}`).toBe(true);
+    // Of the API-key routes only GET /me is reachable without a scope; the
+    // shared-key routes (the public listing feed) take no scope at all.
+    expect(ROUTES.filter((r) => r.auth === 'api_key' && r.scope === null).map((r) => r.id)).toEqual(['me']);
+    expect(ROUTES.filter((r) => r.auth === 'shared_key').every((r) => r.scope === null && r.method === 'GET')).toBe(true);
+    // Every write needs a write scope; every read a read scope (or org:admin).
+    for (const r of ROUTES.filter((x) => x.auth === 'api_key' && x.scope)) {
+      if (r.method === 'GET') expect(r.scope!.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
+      else expect(r.scope!.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
     }
     // Aliases are unique across the table and point at their own route only.
     const aliasKeys = ROUTES.flatMap((r) => (r.aliases ?? []).map((a) => `${r.method} ${a}`));
     expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
     for (const r of ROUTES) {
       for (const a of r.aliases ?? []) {
-        expect(a).toMatch(/^(\/([a-z_]+|:[a-z]+))+$/);
+        expect(a).toMatch(/^(\/([a-z][a-z0-9_-]*|:[a-z]+))+$/);
         expect(matchRoute(r.method, a.replace(/:[a-z]+/g, 'x'))?.route.id, a).toBe(r.id);
       }
     }
@@ -79,6 +82,21 @@ describe('booking routes', () => {
     expect(allowedMethods('/events')).toEqual(['GET']);
     expect(allowedMethods('/nope')).toEqual([]);
     expect(matchRoute('PUT', '/holds/h1')).toBeNull();
+  });
+});
+
+describe('artist and feed routes', () => {
+  it('routes the artist, lineup, key and feed paths', () => {
+    expect(matchRoute('POST', '/artists')?.route.id).toBe('create-artist');
+    expect(matchRoute('PATCH', '/artists/a1')?.params).toEqual({ id: 'a1' });
+    expect(matchRoute('POST', '/artists/a1/merge')?.route.id).toBe('merge-artist');
+    expect(matchRoute('PUT', '/events/e1/lineup')?.route.id).toBe('set-lineup');
+    expect(matchRoute('DELETE', '/listing-keys/k1')?.route.id).toBe('revoke-listing-key');
+    expect(matchRoute('GET', apiPath('/functions/v1/exos-api/v1/public/events'))?.route.auth).toBe('shared_key');
+    expect(matchRoute('GET', '/public/confirms/e1')?.route.id).toBe('public-get-confirm');
+    expect(isSharedKeyPath('/public/events')).toBe(true);
+    expect(isSharedKeyPath('/publicity')).toBe(false);
+    expect(isSharedKeyPath('/events')).toBe(false);
   });
 });
 
@@ -119,5 +137,30 @@ describe('paging', () => {
     expect(pageEnvelope(['a', 'b'], p, 5)).toEqual({ data: ['a', 'b'], meta: { page: 1, per_page: 2, total: 5, total_pages: 3 } });
     expect(pageEnvelope([], p, 0).meta.total_pages).toBe(1);
     expect(pageEnvelope(['a'], p, null).meta.total).toBe(1);
+  });
+});
+
+describe('offers and finance routes', () => {
+  it("answers Opendate's v3 and snake_case spellings", () => {
+    expect(matchRoute('POST', '/v3_offers')?.route.id).toBe('create-offer');
+    expect(matchRoute('POST', '/v3_offers/o1/send_offer')?.route.id).toBe('send-offer');
+    expect(matchRoute('POST', '/v3_offers/o1/accept')?.params).toEqual({ id: 'o1' });
+    expect(matchRoute('POST', '/v3_offer_templates/t1/apply_template')?.route.id).toBe('apply-offer-template');
+    expect(matchRoute('PATCH', '/v3_budget_line_items/l1')?.route.id).toBe('update-budget-line');
+    expect(matchRoute('GET', '/v3_offer_pools/p1')?.route.id).toBe('get-offer-pool');
+    expect(matchRoute('POST', '/offer_imports')?.route.id).toBe('create-offer-import');
+    expect(matchRoute('GET', '/confirms/e1/settlements/summary')?.route.id).toBe('get-settlement');
+    expect(matchRoute('GET', '/confirms/e1/finance_items')?.route.id).toBe('list-finance-items');
+    expect(matchRoute('PATCH', '/confirms/e1/finance_items/i1')?.params).toEqual({ eid: 'e1', id: 'i1' });
+    expect(matchRoute('GET', '/general_ledger_codes')?.route.id).toBe('list-gl-codes');
+  });
+
+  it('keeps money behind the finance scopes and offers behind booking', () => {
+    expect(matchRoute('GET', '/events/e1/settlement')?.route.scope).toBe('finance:read');
+    expect(matchRoute('POST', '/events/e1/settlement/finalize')?.route.scope).toBe('finance:write');
+    expect(matchRoute('GET', '/profit-and-loss')?.route.scope).toBe('finance:read');
+    expect(matchRoute('POST', '/offers/o1/send')?.route.scope).toBe('booking:write');
+    expect(allowedMethods('/events/e1/settlement')).toEqual(['GET', 'PATCH']);
+    expect(allowedMethods('/offers/o1')).toEqual(['GET', 'PATCH', 'DELETE']);
   });
 });

@@ -22,6 +22,7 @@ const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
+const OrgArtists = lazy(() => import('./views/OrgArtists'));
 const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
 const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
@@ -59,6 +60,12 @@ const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
+const OrgOffers = lazy(() => import('./views/OrgOffers'));
+const OfferEditor = lazy(() => import('./views/OfferEditor'));
+const OrgFinance = lazy(() => import('./views/OrgFinance'));
+const OfferRespond = lazy(() => import('./views/OfferRespond'));
+const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
+const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const Notifications = lazy(() => import('./views/Notifications'));
 const ResetPassword = lazy(() => import('./views/ResetPassword'));
@@ -144,11 +151,15 @@ export default function App() {
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/offer/:offerId" element={<OfferRespond />} />
+                    <Route path="/settlement/:eventId" element={<SettlementPublic />} />
+                    <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
                     <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
+                    <Route path="/orgs/:orgId/artists" element={<OrgArtists />} />
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />
@@ -181,6 +192,9 @@ export default function App() {
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
                     <Route path="/orgs/:orgId/calendar" element={<BookingCalendar />} />
+                    <Route path="/orgs/:orgId/offers" element={<OrgOffers />} />
+                    <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
+                    <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />
