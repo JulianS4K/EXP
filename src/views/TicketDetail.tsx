@@ -29,6 +29,7 @@ import RescheduleNotice from '../components/RescheduleNotice';
 import ReferralProgress from '../components/ReferralProgress';
 import TicketOnlineAccess from '../components/TicketOnlineAccess';
 import { useT } from '../context/LanguageContext';
+import TicketSeats from '../components/seating/TicketSeats';
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -305,6 +306,7 @@ export default function TicketDetail() {
                     <div>
                       <p className="disp text-lg tracking-wide leading-none">PASS {currentIndex + 1} OF {tickets.length}</p>
                       <p className="type text-[11px] uppercase tracking-[0.2em] mt-1 opacity-60">{currentTicket.tierName}</p>
+                      <TicketSeats ticketIds={[currentTicket.id]} className="mt-1 text-black/80" />
                     </div>
                     <span className="w-2 h-2 bg-black rounded-full animate-pulse"></span>
                  </div>

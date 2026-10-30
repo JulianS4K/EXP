@@ -52,6 +52,8 @@ import { useT } from '../context/LanguageContext';
 import { paymentsEnabled } from '../lib/payments';
 import SubscribeCalendar from '../components/SubscribeCalendar';
 import { venueFeedLinks, venueKey } from '../lib/calendar';
+import SeatPicker from '../components/seating/SeatPicker';
+import { getSeatedTierIds } from '../lib/seatingApi';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -78,6 +80,17 @@ export default function EventDetails() {
   // The literal code that's currently applied — needed so we can pass it
   // through to the Stripe metadata and the post-purchase usage increment.
   const [quantity, setQuantity] = useState(1);
+  // Reserved seating (mig 20261030140000): a seated tier is bought by picking
+  // seats; the quantity is the number of seats picked.
+  const [seatedTierIds, setSeatedTierIds] = useState<string[]>([]);
+  const [seatSel, setSeatSel] = useState<string[]>([]);
+  const [seatReload, setSeatReload] = useState(0);
+  useEffect(() => {
+    if (!id) return undefined;
+    let live = true;
+    getSeatedTierIds(id).then((ids) => { if (live) setSeatedTierIds(ids); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [id]);
   // Optional per-ticket attendee names, index-aligned with quantity. Stamped
   // onto the minted tickets after a free claim (best-effort, owner RPC).
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
@@ -229,6 +242,16 @@ export default function EventDetails() {
   });
 
   const selectedTier = visibleTiers.find((t) => t.id === selectedTierId);
+  const seatedSelected = !!selectedTier && seatedTierIds.includes(selectedTier.id);
+  useEffect(() => {
+    if (seatedSelected) setQuantity(Math.max(1, seatSel.length));
+  }, [seatedSelected, seatSel.length]);
+  // Checkout said a seat was taken: reload availability, drop the selection.
+  const seatTaken = (err: any) => {
+    if (!/taken|seat/i.test(String(err?.message ?? ''))) return;
+    setSeatSel([]);
+    setSeatReload((n) => n + 1);
+  };
 
   /** Returns null if the tier is currently on sale, otherwise an
    *  explanation string ("Sales open at..." / "Sales ended"). */
@@ -337,6 +360,7 @@ export default function EventDetails() {
         tierId,
         quantity,
         guestEmail,
+        seatIds: seatedSelected ? seatSel : undefined,
         successUrl: publicUrl('my-tickets'),
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
@@ -353,6 +377,7 @@ export default function EventDetails() {
       });
     } catch (err: any) {
       console.error('Guest free claim failed:', err);
+      seatTaken(err);
       toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
     } finally {
       setPurchasing(false);
@@ -373,6 +398,7 @@ export default function EventDetails() {
         successUrl: publicUrl(`my-tickets?checkout=success${guestEmail ? '&guest=1' : ''}&session_id={CHECKOUT_SESSION_ID}`),
         cancelUrl: publicUrl(`event/${event.id}`),
         addons: addonSel.items,
+        seatIds: seatedSelected ? seatSel : undefined,
         voucherCode: voucher?.code,
         attribution,
         guestEmail,
@@ -402,6 +428,7 @@ export default function EventDetails() {
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
       console.error('Checkout failed:', err);
+      seatTaken(err);
       toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
       setPurchasing(false);
     }
@@ -409,6 +436,10 @@ export default function EventDetails() {
 
   const handlePurchase = async () => {
     if (!event) return;
+    if (seatedSelected && seatSel.length === 0) {
+      toast({ kind: 'info', message: 'Pick your seats on the map first.' });
+      return;
+    }
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
     if (paidNotOnSale) {
       toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
@@ -449,10 +480,12 @@ export default function EventDetails() {
     // discount is redeemed server-side there, not via the free path). We
     // therefore route on the nominal prices, never on a discounted total —
     // discount codes are org-secret + not yet server-validated.
-    const needsCheckout = unitPrice > 0 || addonSel.totalCents > 0;
+    // Reserved seating: free seats are issued by exos-checkout too (the free
+    // claim can't hold seats).
+    const needsCheckout = unitPrice > 0 || addonSel.totalCents > 0 || seatedSelected;
 
     if (needsCheckout) {
-      if (!stripeEnabled) {
+      if (!stripeEnabled && !(seatedSelected && unitPrice === 0 && addonSel.totalCents === 0)) {
         toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
         return;
       }
@@ -1066,7 +1099,23 @@ export default function EventDetails() {
                   </div>
                 )}
 
-                {(!soldOut || voucher?.canBypass) && (
+                {seatedSelected && (
+                <div className="mb-8">
+                  <SeatPicker
+                    eventId={event.id}
+                    tiers={visibleTiers.filter((x) => seatedTierIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name, price: buyerTierPrice(x) }))}
+                    selectedTierId={selectedTierId}
+                    onSelectTier={(tid) => setSelectedTierId(tid)}
+                    maxPerOrder={Math.min(maxPerOrder, 10)}
+                    formatPrice={(n) => formatCurrency(n, event.currency)}
+                    selection={seatSel}
+                    onSelectionChange={(ids) => setSeatSel(ids)}
+                    reloadKey={seatReload}
+                  />
+                </div>
+                )}
+
+                {(!soldOut || voucher?.canBypass) && !seatedSelected && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
