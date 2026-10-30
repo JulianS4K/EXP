@@ -39,10 +39,19 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   'event-published': { event: event(), marketing: false },
   'inventory-low': { event: event(), tier: { id: TIER, name: 'GA <early>', capacity: 10, sold: 9, remaining: 1 }, marketing: false },
   'inventory-sold-out': { event: event(), tier: { id: TIER, name: 'GA', capacity: 10, sold: 10, remaining: 0 }, marketing: false },
+  'fixed-block-released': {
+    event: event(), platform: 'DICE <x>', released_at: '2026-10-01T00:00:00+00:00', reason: 'scheduled',
+    tiers: [
+      { tier_id: TIER, name: 'GA <early>', kind: 'standard', party_size: null, block: 120, sold: 23, pending: 2, returned: 95 },
+      { tier_id: EV2, name: 'Booth', kind: 'table', party_size: 6, block: 4, sold: 3, pending: 0, returned: 1 },
+    ],
+    total_returned: 96, total_pending: 2, marketing: false,
+  },
   'payout-sent': { org, amount_cents: 123456, currency: 'usd', period: 'Sep 1-15, 2026', reference: 'po_<1>', marketing: false },
   'payout-pending': { org, amount_cents: 50000, currency: 'eur', period: 'Sep 16-30', reference: null, marketing: false },
   'fee-free-ending': { org, fee_free_until: '2026-10-12T00:00:00+00:00', stage: '14d', days_left: 14, fee_bps: 300, marketing: false },
   'org-welcome': { org, fee_free_until: '2027-03-28T00:00:00+00:00', has_event: false, marketing: false },
+  'signup-confirm': { org, form_title: 'Join <the> list', token: TOKEN, email_requested: true, sms_requested: true, marketing: false },
   'org-first-event': { org, has_event: false, marketing: true, unsubscribe_token: TOKEN },
   'org-connect-stripe': { org, has_event: true, marketing: true, unsubscribe_token: TOKEN },
   'org-sales-digest': {
@@ -70,6 +79,57 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     events: [{ id: EV, name: 'Show', currency: 'usd', orders: 3, tickets: 5, gross_cents: 40000 }],
     totals: [{ currency: 'usd', orders: 3, tickets: 5, gross_cents: 40000 }],
     checkins: 12, upcoming: [{ id: EV2, name: 'Next <Show>', starts_at: '2026-10-05T00:00:00+00:00', timezone: 'UTC', sold: 40, capacity: 100 }],
+  },
+  // As exos_send_channel_reports queues it (mig 20261029120000).
+  'org-channel-report': {
+    org, from: '2026-10-19T00:00:00+00:00', to: '2026-10-26T00:00:00+00:00', iso_week: '2026-W43',
+    marketing: true, unsubscribe_token: TOKEN, more_events: 2,
+    events: [{
+      id: EV, name: 'Show <One>', starts_at: '2026-11-01T01:00:00+00:00', timezone: 'America/New_York', currency: 'usd', capacity: 200,
+      channels: [
+        { channel: 'instagram', label: 'Instagram', group: 'exos', kind: 'sale', currency: 'usd', fees: 'reported', dated: true,
+          week: [2, 5000, 100, 150, 4750], to_date: [3, 7500, 150, 225, 7125] },
+        { channel: 'eventbrite', label: 'Eventbrite', group: 'eventbrite', kind: 'sale', currency: 'usd', fees: 'not_reported', dated: true,
+          week: [1, null, null, 0, null], to_date: [4, null, null, 0, null] },
+        { channel: 'luma', label: 'Luma', group: 'luma', kind: 'sale', currency: 'usd', fees: 'not_reported', dated: false,
+          week: null, to_date: [5, null, null, 0, null] },
+        { channel: 'promoter-x', label: 'Promoters', detail: 'x', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'promoter-dj-kay', label: 'Promoters', detail: 'dj-kay', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [0, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        // utm_source "evil.com", "+1 212 555 0100", "<b>x</b>" as the SQL hands them over (C8).
+        { channel: 'evil', label: 'Other', detail: 'evil', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: '1-212-555-0100', label: 'Other', detail: '1-212-555-0100', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [1, 0, 0, 0, 0] },
+        { channel: 'b-x-b', label: 'Other', detail: 'b-x-b', group: 'exos', kind: 'sale', currency: 'usd', fees: 'none', dated: true,
+          week: [1, 0, 0, 0, 0], to_date: [2, 0, 0, 0, 0] },
+        { channel: 'comp', label: 'Comps', group: 'comp', kind: 'comp', currency: 'usd', fees: 'none', dated: true,
+          week: [2, null, 0, 0, null], to_date: [6, null, 0, 0, null] },
+        { channel: 'import-posh', label: 'Imported list (Posh)', detail: null, group: 'imported', kind: 'attendee', currency: 'usd', fees: 'none', dated: true,
+          week: [0, null, null, null, null], to_date: [3, null, null, null, null] },
+      ],
+      totals: {
+        week: [{ currency: 'usd', tickets: 3, gross_cents: 5000, fee_cents: 100, exos_fee_cents: 150, net_cents: 4750, gross_not_reported: 1, net_not_reported: 1 }],
+        to_date: [{ currency: 'usd', tickets: 13, gross_cents: 7500, fee_cents: 150, exos_fee_cents: 225, net_cents: 7125, gross_not_reported: 9, net_not_reported: 9 }],
+      },
+    }],
+    totals: {
+      week: [{ currency: 'usd', tickets: 3, gross_cents: 5000, fee_cents: 100, exos_fee_cents: 150, net_cents: 4750, gross_not_reported: 1, net_not_reported: 1 }],
+      to_date: [{ currency: 'usd', tickets: 13, gross_cents: 7500, fee_cents: 150, exos_fee_cents: 225, net_cents: 7125, gross_not_reported: 9, net_not_reported: 9 }],
+    },
+  },
+  'offer-sent': {
+    org, token: TOKEN, marketing: false,
+    offer: { id: EV2, title: 'Night <One>', artist_name: 'Band <x>', dates: ['2026-11-19'], venue: 'Club <1>', currency: 'USD',
+      terms: { deal_type: 'versus', guarantee_cents: 100000, percentage: 85, bonuses: [{ sold: 400, amount_cents: 25000 }], deposit_cents: 50000 },
+      expires_at: '2026-11-07T15:00:00+00:00', agent_name: 'Ann <7f>' },
+  },
+  'settlement-finalized': { org, event: event(), token: TOKEN, marketing: false },
+  'ticket-counts': {
+    org, recipient_name: 'Ann <7f>', optout_token: TOKEN, marketing: false,
+    counts: { event: event(), currency: 'USD', tiers: [{ name: 'GA <early>', paid: 300, comps: 10, gross_cents: 600000 }], paid_sold: 300,
+      comps: 10, sold_last_24h: 12, gross_cents: 600000, capacity: 500, attendance_percent: 64, sold_elsewhere: [{ currency: 'USD', sold: 20, gross_cents: 40000 }] },
   },
 };
 
@@ -183,6 +243,39 @@ describe('renderTemplate', () => {
     expect(empty.html).toContain('No sales this week.');
   });
 
+  it('org-channel-report: tickets by channel, fees only where reported, comps apart', () => {
+    const r = ok('org-channel-report');
+    expect(r.subject).toBe('Org <7f> & Co: 3 tickets by channel, Oct 19 – Oct 25');
+    expect(r.html).toContain('<strong>This week:</strong> 3 tickets, $50.00 gross, $47.50 net');
+    expect(r.html).toContain(`href="${APP}/dashboard/event/${EV}"><strong>Show &lt;One&gt;</strong>`);
+    expect(r.html).toContain(`href="${APP}/orgs/${ORG}/channels"`);
+    // Instagram: week 2, to date 3, gross / fee / net to date.
+    expect(r.html).toMatch(/Instagram<\/td><td[^>]*>2<\/td><td[^>]*>3<\/td><td[^>]*>\$75\.00<\/td><td[^>]*>\$1\.50<\/td><td[^>]*>\$71\.25<\/td>/);
+    // Eventbrite: no prices or fees reported, never estimated.
+    expect(r.html).toMatch(/Eventbrite<\/td><td[^>]*>1<\/td><td[^>]*>4<\/td><td[^>]*>not reported<\/td><td[^>]*>not reported<\/td><td[^>]*>not reported<\/td>/);
+    // Luma: no dates, so no week figure.
+    expect(r.html).toMatch(/Luma<\/td><td[^>]*>–<\/td><td[^>]*>5<\/td>/);
+    expect(r.html).toContain('Luma: counts only, without sale dates');
+    // Free channel: no fees.
+    // Promoter codes are grouped: one row, no code in the mail.
+    expect(r.html).toMatch(/Promoters<\/td><td[^>]*>0<\/td><td[^>]*>2<\/td><td[^>]*>\$0\.00<\/td><td[^>]*>none<\/td>/);
+    expect(r.html).not.toContain('dj-kay');
+    // Buyer-written sources: one "Other" row, last; none of the keys reach the mail.
+    expect(r.html).toMatch(/Other<\/td><td[^>]*>3<\/td><td[^>]*>4<\/td>[^]*<\/table>/);
+    expect(r.html.match(/>Other<\/td>/g)).toHaveLength(1);
+    for (const bad of ['evil', '0100', '212', 'b-x-b', '&lt;b&gt;']) expect(r.html).not.toContain(bad);
+    expect(r.html).toContain('Exos fee to date: $2.25');
+    expect(r.html).toContain('Not sales: 6 comps, 3 imported attendees from other lists.');
+    expect(r.html).not.toMatch(/Comps<\/td>/);
+    expect(r.html).toContain('9 tickets came through channels that don&#39;t report prices or fees to Exos');
+    expect(r.html).toContain('And 2 more events on your dashboard.');
+    expect(r.html).toContain(`href="${APP}/unsubscribe?t=${TOKEN}"`);
+    const none = ok('org-channel-report', { ...PAYLOADS['org-channel-report'], events: [], more_events: 0, totals: { week: [], to_date: [] } });
+    expect(none.subject).toBe('Org <7f> & Co: 0 tickets by channel, Oct 19 – Oct 25');
+    expect(none.html).toContain('<strong>This week:</strong> no tickets');
+    expect(renderTemplate('org-channel-report', { ...PAYLOADS['org-channel-report'], events: [{ ...(PAYLOADS['org-channel-report'].events as object[])[0], id: 'javascript:x' }] }, APP).ok).toBe(false);
+  });
+
   it('fee-free-ending: 14 days out and the last day', () => {
     expect(ok('fee-free-ending').subject).toBe('Your Exos free months end in 14 days');
     const last = ok('fee-free-ending', { ...PAYLOADS['fee-free-ending'], stage: '1d', days_left: 1 });
@@ -195,6 +288,20 @@ describe('renderTemplate', () => {
     expect(ok('inventory-low').html).toContain(`href="${APP}/edit-event/${EV}"`);
     expect(ok('inventory-sold-out').subject).toBe('Sold out: GA for Show <One> & "Friends"');
     expect(ok('event-published').html).toContain(`href="${APP}/dashboard/event/${EV}/promote"`);
+  });
+
+  it('fixed-block-released: what to put back on the other platform, per type', () => {
+    const r = ok('fixed-block-released');
+    expect(r.subject).toBe('Put 96 tickets back on DICE <x>: Show <One> & "Friends"');
+    expect(r.html).toContain('Put these back on sale on <strong>DICE &lt;x&gt;</strong>');
+    expect(r.html).toContain('GA &lt;early&gt;</td><td style="padding:2px 12px 2px 0;text-align:right"><strong>95 tickets</strong>');
+    expect(r.html).toContain('<strong>1 table of 6</strong>');
+    expect(r.html).toContain('sold 23 of 120 on Exos');
+    expect(r.html).toContain('2 more are still in a checkout or on a marketplace');
+    expect(r.html).toContain(`href="${APP}/dashboard/event/${EV}"`);
+    const none = ok('fixed-block-released', { ...PAYLOADS['fixed-block-released'], total_returned: 1, total_pending: 0 });
+    expect(none.subject).toBe('Put 1 ticket back on DICE <x>: Show <One> & "Friends"');
+    expect(none.html).not.toContain('still in a checkout');
   });
 
   it('dispute mails: amount, reason, deadline, links; no buyer data; recovery wording', () => {
@@ -237,6 +344,19 @@ describe('renderTemplate', () => {
     });
   });
 
+  it('signup-confirm: the confirm link carries the token, nothing else of the fan', () => {
+    const r = ok('signup-confirm');
+    expect(r.subject).toBe('Confirm: Org <7f> & Co emails and texts');
+    expect(r.html).toContain(`${APP}/signup/confirm?t=${TOKEN}`);
+    expect(r.html).toContain('Join &lt;the&gt; list');
+    expect(r.html).toContain('signed in to Exos');
+    expect(r.html).not.toContain('Unsubscribe');
+    expect(ok('signup-confirm', { ...PAYLOADS['signup-confirm'], sms_requested: false }).subject).toBe('Confirm: Org <7f> & Co emails');
+    expect(renderTemplate('signup-confirm', { ...PAYLOADS['signup-confirm'], token: '"><x>' }, APP)).toEqual({
+      ok: false, error: 'signup-confirm: token missing',
+    });
+  });
+
   it('refuses rows it cannot render safely', () => {
     expect(renderTemplate('org-welcome', PAYLOADS['org-welcome'], null)).toEqual({
       ok: false, error: 'EXOS_APP_URL unset or invalid; mail links into the app',
@@ -254,5 +374,28 @@ describe('renderTemplate', () => {
     const r = ok('post-event');
     const m = renderMail(r.html, `{{app_url}}/unsubscribe?t=${TOKEN}`, APP);
     expect(m).toEqual({ ok: true, html: r.html, headers: { 'List-Unsubscribe': `<${APP}/unsubscribe?t=${TOKEN}>` } });
+  });
+});
+
+describe('offers, settlements and ticket counts', () => {
+  it('offer-sent: the terms in words and a token link to the offer', () => {
+    const r = ok('offer-sent');
+    expect(r.subject).toBe('Offer from Org <7f> & Co: Band <x>, Thursday, November 19');
+    expect(r.html).toContain('$1,000.00 versus 85% of net after expenses');
+    expect(r.html).toContain(`${APP}/offer/${EV2}?t=${TOKEN}`);
+    expect(r.html).toContain('through Exos');
+    expect(renderTemplate('offer-sent', { ...PAYLOADS['offer-sent'], token: 'short' }, APP).ok).toBe(false);
+  });
+
+  it('settlement-finalized: a token link to the settlement', () => {
+    expect(ok('settlement-finalized').html).toContain(`/settlement/${EV}?t=${TOKEN}`);
+  });
+
+  it('ticket-counts: numbers, capacity, sold elsewhere and the opt-out link', () => {
+    const r = ok('ticket-counts');
+    expect(r.subject).toMatch(/\(300 sold\)$/);
+    expect(r.html).toContain('64% of 500 capacity');
+    expect(r.html).toContain('20 sold elsewhere');
+    expect(r.html).toContain(`/ticket-counts/opt-out?t=${TOKEN}`);
   });
 });

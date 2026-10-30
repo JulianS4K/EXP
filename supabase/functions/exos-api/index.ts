@@ -1,146 +1,451 @@
-// exos-api — read-only, org-scoped partner REST API for Exos.
+// exos-api — org-scoped partner REST API for Exos, plus the public listing feed
+// and the Opendate partner contract for distribution partners.
 // Reference: docs/api-reference.md and /developers (built from docs/api/*.json).
+//
+// Credentials (Authorization: Bearer …), docs/developer-platform.md:
+//   sk_live_…    an org API key (mig 20260616200000): its SHA-256 is looked up
+//                in exos_api_keys, which yields the org and the key's scopes.
+//   exos_pat_…   a personal access token: a user, pinned to one org.
+//   exos_oat_…   an OAuth access token: a user in one org, for one app.
+// The two user tokens act as their user: every request reads the user's LIVE
+// role (exos_api_token_auth, mig 20261031130500), narrows the token's scopes to
+// it, and refuses a user who is no longer an active member (403). Every
+// request is scoped to the credential's org.
 //
 // Auth: `Authorization: Bearer sk_live_...`. The key is never stored in plaintext
 // (migration 20260616200000) — we SHA-256 the presented key and look up the
 // matching non-revoked row in exos_api_keys, which yields the org_id every query
-// is then scoped to, and the key's scopes. Read-only: no endpoint mutates anything.
+// is then scoped to, and the key's scopes. Reads everywhere; writes behind a
+// `:write` scope: the sales counts (tickets sold on other platforms, mig
+// 20261030120000), whose POST / PUT / DELETE go through service-role RPCs that
+// re-check the event / row belongs to the key's org, and booking (venues,
+// rooms, holds, show schedule, notes, contacts; mig 20261030100000). Hold
+// writes go through the _exos_hold_* SQL functions (levels, promotion and
+// convert in one transaction, hold.* webhooks); the rest are plain rows whose
+// triggers and checks validate them. Every query names the key's org: this
+// function runs with the service role, so RLS does not scope it.
+// Artists, lineups and listing-feed shared keys (mig 20261030110000) write
+// through service-role SQL functions that take the key's org explicitly.
+// Offers, budgets, deals, finance items, settlements and P&L (migs
+// 20261031100000 / 100500) are handled in ./finance.ts (handleFinance).
+// The core API (events, ticket types, add-ons, promo codes, the door, comps,
+// refunds, guest lists, POS; mig 20261031110000, ./core.ts) writes through
+// exos_api_write, which runs as the member who created the key and calls the
+// dashboard's own SQL, so a write there behaves exactly like the same write in
+// the dashboard.
+// Fan contacts and tags (mig 20261031120000) write through service-role SQL
+// functions that take the key's org explicitly and never touch consent.
 //
 // Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
 // (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
 // which covers every `:read` scope. Missing scope → 403 + WWW-Authenticate.
+// Writes go through service-role SQL functions that take the org explicitly.
 //
-// Rate limit: 120 requests per key per minute; over it → 429 with Retry-After.
+// Rate limit: 120 requests per credential per minute; over it → 429 with Retry-After.
 //
 // Lists are paged: ?page=1&per_page=50 (max 200) → { data, meta }.
 //
-// Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
+// The partner contract (docs/partner-sales.md, mig 20261031130000): /public/…
+// authenticated with a distribution partner's key (dk_live_…, ?shared_key=,
+// X-Shared-Key or Bearer), with Opendate's paths, parameters and shapes.
+// Partners call us; nothing here calls a marketplace.
 //
-// Endpoints (all GET, all scoped to the key's org; each also under /v1):
-//   /me, /events, /events/:id, /events/:id/{ticket-types, add-ons, promo-codes,
-//   attendees, check-ins, check-in-lists, guest-lists, waitlist}, /orders,
-//   /orders/:id, /invoices, /refunds, /webhooks
+// Endpoints (all scoped to the key's org; each also under /v1): the table in
+// _shared/api/routes.ts. GET /me, /events…, /events/:id/{seats,
+// seat-reconciliation, sales-counts, timed-entry, slots}, /orders…,
+// /invoices, /refunds, /webhooks, /sales-counts, /eventbrite-events/:id,
+// /series, /series/:id, /series/:id/dates, /collections, /collections/:id;
+// sales-count writes (POST /sales-counts, PUT + DELETE /sales-counts/:id, POST
+// /events/:id/sales-counts/import); booking: /venues, /rooms, /holds,
+// /calendar, /events/:id/show-activities, /events/:id/notes,
+// /events/:id/contacts, /notes, /event-contacts (GET / POST / PATCH / DELETE
+// as listed there).
+//   Artists: GET/POST /artists, GET/PATCH /artists/:id, POST
+//   /artists/:id/merge, GET /artists/:id/events, GET/PUT /events/:id/lineup;
+//   GET/POST /listing-keys, DELETE /listing-keys/:id.
+//   offers and finance (./finance.ts, docs/offers-settlements.md): /offers,
+//   /offer-templates, /budgets, /budget-lines, /offer-pools, /offer-imports,
+//   /deals, /finance-categories, /gl-codes, /events/:id/finance-items,
+//   /finance-items, /events/:id/settlement[/finalize|/reopen|/pdf],
+//   /events/:id/profit-and-loss, /profit-and-loss, /events/:id/ticket-counts.
+//   the core API (./core.ts): event create / update / publish (+ publish
+//   blockers), ticket types, add-ons, promo codes, tickets and check-in,
+//   offline check-ins, comps, refunds (Idempotency-Key required), guest lists,
+//   disputes, payouts, POS items and devices, the write log.
+//   fans (docs/fans.md):
+//   GET/POST /fans, GET /fans/lookup, GET/PATCH/DELETE /fans/:id,
+//   GET /signup-forms, GET/POST /tags, GET/PATCH/DELETE /tags/:id,
+//   GET/POST /tagged-items, GET/DELETE /tagged-items/:id, GET /canonical-tags,
+//   GET /refund-requests (docs/fans.md). A fan's tags also need fans:read /
+//   fans:write on top of the route's events:* scope.
+//
+// Writes take a JSON body (or form-encoded), at most MAX_BODY_BYTES (2 MB +
+// 256 KB for the sales-count CSV import), read capped while streaming; an
+// Idempotency-Key header makes a core-API write safe to resend (the first
+// answer is replayed). Refunds need STRIPE_SECRET_KEY (optional
+// EXOS_REFUND_KEEP_PLATFORM_FEE), like exos-refund.
+//
+// commerce:read (migs 20261030130000 / 130500): /gift-card-products,
+// /gift-cards[/:id], /giving-campaigns[/:id], /donations,
+// /membership-products[/:id], /memberships[/:id], /pass-products, /passes,
+// /events/:id/member-presale. Never a gift card code (only its last 4) or a
+// gift claim token.
+//
+//   distribution partners, organizer reservations, the team (members, invitations,
+//   roles), /me/memberships, DELETE /personal-access-tokens/current
+//   (docs/partner-sales.md, docs/developer-platform.md).
+//
+// The partner contract (docs/partner-sales.md, mig 20261031130000): /public/…
+// routes whose auth is partner_key, authenticated with a distribution
+// partner's key (dk_live_…, ?shared_key=, X-Shared-Key or Bearer), with
+// Opendate's paths, parameters and shapes. Partners call us; nothing here calls
+// a marketplace. A /public/… request goes to the listing feed or to the partner
+// contract by the auth of the route that answers its path (publicAuthAt).
+//
+// Public listing feed (docs/listing-feed.md): GET /public/events[/:id] and the
+// Opendate-named alias /public/confirms[/:id], authenticated with a shared key
+// (?shared_key=sh_live_… or X-Shared-Key) instead of an API key. Read-only,
+// CORS-open, cacheable 60 s with an ETag (If-None-Match → 304), 120 requests a
+// minute per key (exos_rate_hit). Optional secret: EXOS_APP_BASE_URL (public
+// app base, for ticket_url).
+// Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. Optional:
+// EXOS_APP_BASE_URL (public app base, e.g. https://…/bridge: live-ticket and
+// invitation links).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { apiPath, matchRoute, type ApiRoute } from "../_shared/api/routes.ts";
-import { effectiveScopes, hasScope } from "../_shared/api/scopes.ts";
+import {
+  allowedMethods, API_METHODS, apiPath, isSharedKeyPath, matchRoute, publicAuthAt, type ApiMethod, type ApiRoute,
+} from "../_shared/api/routes.ts";
+import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import { effectiveScopes, hasScope, type Scope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
+import { parseCsv } from "../_shared/csvParse.ts";
+import {
+  isPlatform, MAX_IMPORT_BYTES, planSalesImport, SALES_FIELDS, salesTotals, suggestSalesMapping,
+  type SalesCountRow, type SalesField, type SalesMapping,
+} from "../_shared/salesCounts.ts";
+import {
+  ACTIVITY_COLS, bookingDbError, BodyError, clearBody, CONTACT_COLS, convertBody, holdBody, isIsoDate, isUuid,
+  NOTE_COLS, parseActivity, parseContact, parseHoldFilters, parseNote, parseRoom, parseVenue, ROOM_COLS, VENUE_COLS,
+  venueView,
+} from "../_shared/api/booking.ts";
+import { parseSpotifyArtist, PARTNER_TYPES, spotifyLinks } from "../_shared/artists.ts";
+import {
+  buildFeedPage, etagMatches, FEED_MAX_AGE, feedEntry, FeedParamError, parseFeedQuery, SHARED_KEY_RE,
+  type FeedSource, type SourceEvent,
+} from "../_shared/listingFeed/feed.ts";
+import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
+import { clientIp, hashIp } from "../_shared/guest.ts";
+import { type FinDeps, handleFinance } from "./finance.ts";
+import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
+import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
+import {
+  opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
+  reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
+} from "../_shared/partners/sales.ts";
 
-const RATE_LIMIT = 120; // requests per key per minute
+const RATE_LIMIT = 120; // requests per credential per minute
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 
 const EVENT_LIST_COLS = "id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at";
 const EVENT_COLS =
   "id, name, slug, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_location, " +
-  "tickets_sold, total_tickets, created_at";
+  "exos_venue_id, exos_room_id, hold_id, tickets_sold, total_tickets, created_at";
+// Routes that answer 201 Created.
+const CREATED = new Set([
+  "create-venue", "create-room", "create-hold", "convert-hold", "create-show-activity", "create-event-note",
+  "create-event-contact",
+]);
 const TIER_COLS =
   "id, name, description, price, capacity, sold, ticket_type, visibility, sales_start, sales_end, sort_order";
+// Reserved seating (mig 20261030140000): extra columns, dropped again on a
+// database without them (42703) so the API keeps answering.
+const TIER_SEAT_COLS = ", seated";
+const TICKET_SEAT_COLS = ", seat_id, seat_label, seat_section, seat_row, seat_number";
+const SEAT_STATUSES = new Set(["available", "held", "sold", "blocked"]);
 const ORDER_COLS =
   "session_id, event_id, status, quantity, amount_cents, tax_cents, currency, buyer_email, created_at, fulfilled_at";
+const PARTNER_COLS = "id, label, partner_type, key_prefix, scopes, active, created_at, last_used_at, revoked_at";
+const RESERVATION_COLS =
+  "id, token, status, channel, channel_source, partner_id, quantity, currency, subtotal_cents, fees_cents, tax_cents, " +
+  "total_cents, cash_paid_cents, first_name, last_name, email, external_id, expires_at, completed_at, cancelled_at, created_at";
+const MEMBER_ROLES = new Set(["manager", "finance", "content", "scanner"]);
+// Distribution partner types (#74); PARTNER_TYPES (artists.ts) is the listing feed's.
+const DIST_PARTNER_TYPES = ["automatiq", "stubhub", "vivid", "seatgeek", "ticketnetwork", "victorylive", "other"];
 
 const EVENT_STATUSES = new Set(["draft", "published", "cancelled"]);
+const SALES_COLS =
+  "id, event_id, kind, platform, label, sold, gross_cents, currency, capacity, tiers, note, file_name, row_count, " +
+  "created_at, updated_at";
+// The CSV import's body may carry a 2 MB file as a string; every other write
+// body is at most MAX_BODY_BYTES (_shared/api/body.ts).
+const MAX_IMPORT_BODY_BYTES = MAX_IMPORT_BYTES + 256 * 1024;
+const ARTIST_COLS =
+  "id, name, permalink, bio, genres, links, image_url, image_thumb_url, spotify_id, canonical_artist_id, created_at, updated_at";
+const ARTIST_SORTS: Record<string, [string, boolean]> = {
+  "name asc": ["name", true], "name desc": ["name", false],
+  "created_at asc": ["created_at", true], "created_at desc": ["created_at", false],
+  "updated_at asc": ["updated_at", true], "updated_at desc": ["updated_at", false],
+};
+const FEED_RATE_LIMIT = 120; // listing-feed requests per shared key (or per network without one) per minute
+
+const GIFT_CARD_COLS =
+  "id, last4, currency, initial_cents, balance_cents, status, source, payment_method, product_id, recipient_email, " +
+  "issued_by, pos_drawer_id, expires_at, created_at";
+const CAMPAIGN_COLS =
+  "id, name, slug, description, currency, goal_cents, starts_at, ends_at, active, checkout_add_on, round_up, " +
+  "suggested_cents, created_at";
+const MEMBERSHIP_PRODUCT_COLS =
+  "id, name, price_cents, currency, billing, duration_days, discount_percent, presale, free_tickets_per_period, " +
+  "guest_allowance, household_seats, giftable, active, created_at";
+const MEMBERSHIP_COLS =
+  "id, product_id, product_name, billing, holder_email, status, current_period_start, current_period_end, " +
+  "cancel_at_period_end, source, benefits, created_at";
+const MEMBERSHIP_STATUSES = new Set(["pending", "active", "past_due", "cancelled", "expired"]);
+const TAG_COLS = "id, name, scope, color, canonical_tag_id, created_at, updated_at";
+const TAGGED_COLS = "id, tag_id, taggable_type, taggable_id, created_at";
+const TAGGABLE = new Set(["event", "fan", "artist"]);
+const FAN_SORTS = new Set(["created_at", "updated_at", "last_order_at", "email"]);
+const ASK_STATUSES = new Set(["open", "refunded", "declined", "withdrawn"]);
 
 class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  extra: Record<string, unknown>;
+  constructor(status: number, message: string, extra: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
+    this.extra = extra;
   }
+}
+
+/** Who is calling: an org API key, or a user through a personal / OAuth token. */
+interface Credential {
+  kind: "api_key" | "pat" | "oauth";
+  id: string;
+  name: string | null;
+  key_prefix: string | null;
+  /** What the credential may do now (user tokens: narrowed to the live role). */
+  scopes: string[];
+  userId: string | null;
+  role: string | null;
+  clientId: string | null;
 }
 
 interface Ctx {
   sb: SupabaseClient;
   orgId: string;
-  key: { id: string; name: string | null; key_prefix: string; scopes: string[] };
+  cred: Credential;
+  /** The credential as the first release's `key` (an API key's own id; for a
+   *  user token, its token id: only GETs and PLATFORM_ROUTES see one). */
+  key: { id: string; name: string | null; key_prefix: string | null; scopes: string[] };
   params: Record<string, string>;
   q: URLSearchParams;
   page: Page;
+  /** The body of a POST / PUT / PATCH ({} when empty, or for GET / DELETE). */
+  body: Record<string, unknown>;
+  idempotencyKey: string | null;
 }
 
+const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+const appBase = () => (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, "") || null;
+
 Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method !== "GET") return json({ error: "method not allowed" }, 405, { allow: "GET" });
+  const url = new URL(req.url);
+  const path = apiPath(url.pathname);
+  // /public/…: the listing feed (shared key) or the partner contract (partner
+  // key), by the auth of the route that answers this path.
+  if (isSharedKeyPath(path)) {
+    return publicAuthAt(path) === "partner_key" ? partnerApi(req, url, path) : listingFeed(req, url, path);
+  }
+  const method = req.method.toUpperCase() as ApiMethod;
+  if (!API_METHODS.includes(method)) return json({ error: "method not allowed" }, 405, { allow: API_METHODS.join(", ") });
 
   const auth = req.headers.get("Authorization") ?? "";
-  const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-  if (!key) return json({ error: "missing bearer API key" }, 401);
+  const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json({ error: "missing bearer API key" }, 401);
 
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const sb = service();
+  const resolved = await resolveCredential(sb, token);
+  if (resolved === "membership") {
+    return json({ error: "this token's user is no longer a member of the organization" }, 403);
+  }
+  if (!resolved) return json({ error: "invalid or revoked API key" }, 401);
+  const { cred, orgId } = resolved;
 
-  const keyHash = await sha256Hex(key);
-  const { data: keyRow } = await sb
-    .from("exos_api_keys")
-    .select("id, org_id, name, key_prefix, scopes, revoked_at")
-    .eq("key_hash", keyHash)
-    .is("revoked_at", null)
-    .maybeSingle();
-  if (!keyRow) return json({ error: "invalid or revoked API key" }, 401);
-  const orgId = keyRow.org_id as string;
-
-  // Per-key rate limit: RATE_LIMIT requests per clock minute (fixed window,
-  // exos_api_rate_hit, mig 20260925020000). Over the limit → 429 + Retry-After
-  // (seconds to the next window). If the counter itself errors the request is
+  // Per-credential rate limit: RATE_LIMIT requests per clock minute (fixed
+  // window). API keys use exos_api_rate_hit (mig 20260925020000), user tokens
+  // exos_rate_hit with their own bucket. If the counter errors the request is
   // refused (503): the API returns attendee PII, so no limiter, no answer.
-  const { data: allowed, error: rlErr } = await sb.rpc("exos_api_rate_hit", {
-    p_key_id: keyRow.id, p_limit: RATE_LIMIT,
-  });
+  const { data: allowed, error: rlErr } = cred.kind === "api_key"
+    ? await sb.rpc("exos_api_rate_hit", { p_key_id: cred.id, p_limit: RATE_LIMIT })
+    : await sb.rpc("exos_rate_hit", { p_bucket: `api:${cred.kind}:${cred.id}`, p_limit: RATE_LIMIT });
   if (rlErr) {
     console.error("exos-api: rate limiter error (refusing request)", rlErr.message);
     return json({ error: "temporarily unavailable" }, 503, { "retry-after": "30" });
   }
-  if (allowed === false) {
-    const retryAfter = Math.max(1, 60 - new Date().getUTCSeconds());
-    return json({ error: "rate limit exceeded", limit_per_minute: RATE_LIMIT }, 429, {
-      "retry-after": String(retryAfter),
-    });
+  if (allowed === false) return rateLimited();
+
+  if (cred.kind === "api_key") {
+    // Best-effort last-used stamp — awaited so it actually lands before the
+    // serverless invocation returns (don't fail the request if it doesn't write).
+    try {
+      await sb.from("exos_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", cred.id);
+    } catch { /* best-effort */ }
   }
 
-  // Best-effort last-used stamp — awaited so it actually lands before the
-  // serverless invocation returns (don't fail the request if it doesn't write).
-  try {
-    await sb.from("exos_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRow.id);
-  } catch { /* best-effort */ }
-
-  const url = new URL(req.url);
-  const match = matchRoute("GET", apiPath(url.pathname));
-  if (!match) {
+  const match = matchRoute(method, path);
+  if (!match || match.route.auth !== "api_key") {
+    const allow = allowedMethods(path);
+    if (!match && allow.length) return json({ error: "method not allowed" }, 405, { allow: allow.join(", ") });
     return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
   }
-  const scopes = (keyRow.scopes ?? []) as string[];
-  if (match.route.scope && !hasScope(scopes, match.route.scope)) {
+  if (match.route.scope && !hasScope(cred.scopes, match.route.scope)) {
     return json({ error: "insufficient scope", required_scope: match.route.scope }, 403, {
       "www-authenticate": `Bearer error="insufficient_scope", scope="${match.route.scope}"`,
     });
   }
+  // Personal and OAuth tokens (#74) may call every GET and the platform routes.
+  // Every other write records or checks an org API key id (exos_api_write,
+  // booking, offers, listing keys), so it needs one.
+  if (cred.kind !== "api_key" && method !== "GET" && !PLATFORM_ROUTES.has(match.route.id)) {
+    return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
+  }
 
   try {
     const ctx: Ctx = {
-      sb, orgId,
-      key: { id: keyRow.id, name: keyRow.name, key_prefix: keyRow.key_prefix, scopes },
+      sb, orgId, cred,
+      key: { id: cred.id, name: cred.name, key_prefix: cred.key_prefix, scopes: cred.scopes },
       params: match.params,
       q: url.searchParams,
       // Only lists read ?page / ?per_page; elsewhere they are ignored.
       page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
+      body: method === "POST" || method === "PUT" || method === "PATCH"
+        ? await readBody(req, match.route.id === "import-sales-counts" ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES,
+          PLATFORM_ROUTES.has(match.route.id) ? "rails" : "flat")
+        : {},
+      idempotencyKey: method === "GET" ? null : idempotencyKey(req),
     };
-    return json(await handle(match.route, ctx));
+    const out = await handle(match.route, ctx);
+    if (out instanceof Response) return out; // PDFs and CSV exports
+    if (out instanceof Answer) return json(out.body, out.status);
+    if (out instanceof Created) return json(out.body, 201);
+    return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
-    if (e instanceof PagingError) return json({ error: e.message }, 400);
-    if (e instanceof ApiError) return json({ error: e.message }, e.status);
+    if (e instanceof PagingError || e instanceof BodyError || e instanceof ParamError) return json({ error: e.message }, 400);
+    if (e instanceof ScopeError) {
+      return json({ error: "insufficient scope", required_scope: e.scope }, 403, {
+        "www-authenticate": `Bearer error="insufficient_scope", scope="${e.scope}"`,
+      });
+    }
+    if (e instanceof ApiError) return json({ error: e.message, ...e.extra }, e.status);
+    // Distribution partners, the team and tokens (#74) answer as on their branch.
+    if (PLATFORM_ROUTES.has(match.route.id)) return errorResponse(e, "exos-api");
+    if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status);
+    // Core-API writes (exos_api_write) map with sqlError; sales-count RPCs
+    // prefix their messages "sales counts:"; booking's are "exos_<fn>:" and use
+    // more codes; the artist / lineup / key functions raise the codes in
+    // RPC_STATUS.
+    // Fan and tag routes answer with rpcError alone, as on #73.
+    const db = CORE_ROUTES.has(match.route.id) ? sqlError(e)
+      : FAN_ROUTES.has(match.route.id) ? rpcError(e)
+      : (match.route.id.includes("sales-count") ? dbError(e) : null) ??
+        bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
+    if (db) return json({ error: db.message }, db.status);
     console.error("exos-api error:", e);
     return json({ error: "internal error" }, 500);
   }
 });
 
-async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
+/** A 201 answer from handle(). */
+class Created {
+  constructor(public body: unknown) {}
+}
+
+/** A request that needs a second scope (a fan's tags need fans:*). */
+class ScopeError extends Error {
+  constructor(public scope: Scope) {
+    super("insufficient scope");
+  }
+}
+
+// Fans, tags, signup forms, refund requests (mig 20261031120000).
+const FAN_ROUTES = new Set([
+  "list-fans", "lookup-fans", "get-fan", "create-fan", "update-fan", "discard-fan", "list-signup-forms",
+  "list-tags", "get-tag", "create-tag", "update-tag", "delete-tag", "list-tagged-items", "get-tagged-item",
+  "create-tagged-item", "delete-tagged-item", "list-canonical-tags", "list-refund-requests",
+]);
+
+/** The credential behind a bearer string and its org, "membership" for a user who left, else null. */
+async function resolveCredential(
+  sb: SupabaseClient, token: string,
+): Promise<{ cred: Credential; orgId: string } | "membership" | null> {
+  const kind = bearerKind(token);
+  if (!kind) return null;
+  const hash = await sha256Hex(token);
+  if (kind === "api_key") {
+    const { data: k } = await sb.from("exos_api_keys")
+      .select("id, org_id, name, key_prefix, scopes, revoked_at")
+      .eq("key_hash", hash).is("revoked_at", null).maybeSingle();
+    if (!k) return null;
+    return {
+      orgId: k.org_id as string,
+      cred: {
+        kind, id: k.id as string, name: k.name as string | null, key_prefix: k.key_prefix as string,
+        scopes: (k.scopes ?? []) as string[], userId: null, role: null, clientId: null,
+      },
+    };
+  }
+  const { data, error } = await sb.rpc("exos_api_token_auth", { p_hash: hash, p_kind: kind });
+  if (error) {
+    console.error("exos-api: token lookup failed", error.message);
+    return null;
+  }
+  const t = data as Record<string, unknown> | null;
+  if (!t) return null;
+  if (t.error === "membership") return "membership";
+  return {
+    orgId: String(t.org_id),
+    cred: {
+      kind, id: String(t.credential_id), name: (t.name as string | null) ?? null,
+      key_prefix: (t.key_prefix as string | null) ?? null, scopes: (t.scopes ?? []) as string[],
+      userId: String(t.user_id), role: String(t.role), clientId: (t.client_id as string | null) ?? null,
+    },
+  };
+}
+
+// Routes of the developer platform and partner sales (#74, migs 20261031130000 /
+// 130500). A personal or OAuth token may call these and every GET; any other
+// write needs an org API key, since those writes record or check an API key id
+// (exos_api_write, booking, offers, listing keys).
+const PLATFORM_ROUTES = new Set([
+  "list-distribution-partners", "create-distribution-partner", "update-distribution-partner",
+  "revoke-distribution-partner", "get-event-distribution", "set-event-distribution", "list-ticket-reservations",
+  "get-ticket-reservation", "build-organizer-reservation", "create-organizer-reservation",
+  "update-organizer-reservation", "cancel-organizer-reservation", "complete-organizer-reservation", "get-team",
+  "update-team", "list-team-members", "update-team-member", "remove-team-member", "list-team-invitations",
+  "create-team-invitation", "cancel-team-invitation", "list-team-roles", "list-my-memberships",
+  "revoke-current-token",
+]);
+
+async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  if (CORE_ROUTES.has(route.id)) {
+    return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
   switch (route.id) {
     case "me": {
       const { data: org } = await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
       return {
         data: {
           org,
-          key: { id: c.key.id, name: c.key.name, key_prefix: c.key.key_prefix, scopes: c.key.scopes },
-          effective_scopes: effectiveScopes(c.key.scopes),
+          // `key` keeps its first-release shape for API keys; user tokens fill it too.
+          key: { id: c.cred.id, name: c.cred.name, key_prefix: c.cred.key_prefix, scopes: c.cred.scopes },
+          credential: { kind: c.cred.kind, user_id: c.cred.userId, role: c.cred.role, client_id: c.cred.clientId },
+          effective_scopes: effectiveScopes(c.cred.scopes),
         },
       };
     }
@@ -156,6 +461,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
       if (after) q = q.gte("starts_at", after);
       const before = isoParam(c.q, "starts_before");
       if (before) q = q.lt("starts_at", before);
+      const tagId = c.q.get("tag_id");
+      if (tagId !== null) q = q.in("id", await taggedIds(c, "event", tagId));
       return paged(await q.order("starts_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
@@ -183,26 +490,51 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
     case "list-promo-codes": {
       const id = await ownEvent(c);
       // Never reserved_email: a promo code's holder is not the partner's business.
-      return paged(await sb.from("exos_vouchers")
+      let q = sb.from("exos_vouchers")
         .select("id, code, tier_id, max_uses, used_count, discount_percent, discount_amount, price_override, " +
           "valid_until, link_label, link_channel, link_clicks, created_at", { count: "exact" })
-        .eq("event_id", id).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+        .eq("event_id", id);
+      // ?code=: look one code up by name (any case), as at checkout.
+      const code = c.q.get("code");
+      if (code !== null) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(code)) throw new ApiError(400, "code is invalid.");
+        q = q.ilike("code", code.replace(/_/g, "\\_"));
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
     case "list-attendees": {
       const id = await ownEvent(c);
       // Never barcode_secret.
-      let q = sb.from("exos_tickets")
-        .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
-          "order_ref, channel_source, created_at", { count: "exact" })
-        .eq("event_id", id).eq("org_id", orgId);
       const status = c.q.get("status");
-      if (status !== null) {
-        if (!/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
-        q = q.eq("status", status);
-      }
-      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+      if (status !== null && !/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
+      return paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
+        let q = sb.from("exos_tickets")
+          .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
+            "order_ref, channel_source, created_at" + extra, { count: "exact" })
+          .eq("event_id", id).eq("org_id", orgId);
+        if (status !== null) q = q.eq("status", status);
+        return q.order("created_at", { ascending: false }).order("id").range(page.from, page.to);
+      }), page);
     }
+
+    case "list-seats": {
+      // Every seat of the event's map with its status (available / held /
+      // sold / blocked), the ticket on a sold seat, and the tier it sells as.
+      // An event without a seat map answers an empty list.
+      const id = await ownEvent(c);
+      const status = c.q.get("status");
+      if (status !== null && !SEAT_STATUSES.has(status)) throw new ApiError(400, "status is invalid.");
+      const { data, error } = await sb.rpc("exos_event_seat_status", { p_event_id: id });
+      if (error) throw error;
+      const seats = ((data ?? []) as { status: string }[]).filter((s) => status === null || s.status === status);
+      return { data: seats };
+    }
+
+    case "get-seat-reconciliation":
+      // Sold seats without a live ticket, live seated tickets without their
+      // seat, and held seats of dead holds (Opendate's seat_reconciliation).
+      return rows(await sb.rpc("exos_seat_reconciliation", { p_event_id: await ownEvent(c) }));
 
     case "list-check-ins": {
       const id = await ownEvent(c);
@@ -258,8 +590,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
       if (error) throw error;
       if (!order) throw new ApiError(404, "order not found");
       const [tickets, addons, refunds] = await Promise.all([
-        sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at")
-          .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
+        withoutMissing(TICKET_SEAT_COLS, (extra) =>
+          sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at" + extra)
+            .eq("org_id", orgId).eq("order_ref", sid).order("created_at")),
         sb.from("exos_order_addons").select("id, addon_id, addon_name, quantity, unit_price_paid, status")
           .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
         sb.from("exos_order_refunds").select("id, amount_cents, currency, status, reason, is_partial, created_at")
@@ -283,13 +616,1646 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
         .select("id, session_id, amount_cents, currency, status, reason, is_partial, created_at", { count: "exact" })
         .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
 
+    // --- Gift cards, giving, memberships, passes (commerce:read) -------------
+    case "list-gift-card-products":
+      return rows(await sb.from("exos_gift_card_products")
+        .select("id, name, description, currency, amount_type, amounts_cents, min_cents, max_cents, image_url, expiry_months, active, created_at")
+        .eq("org_id", orgId).order("created_at"));
+
+    case "list-gift-cards":
+      // Never code_hash.
+      return paged(await sb.from("exos_gift_cards").select(GIFT_CARD_COLS, { count: "exact" })
+        .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    case "get-gift-card": {
+      const id = idParam(c, "gift card not found");
+      const { data: card, error } = await sb.from("exos_gift_cards").select(GIFT_CARD_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!card) throw new ApiError(404, "gift card not found");
+      const ledger = await sb.from("exos_gift_card_ledger").select("kind, amount_cents, balance_after, session_id, created_at")
+        .eq("card_id", id).order("id");
+      if (ledger.error) throw ledger.error;
+      return { data: { ...(card as unknown as Record<string, unknown>), ledger: ledger.data ?? [] } };
+    }
+
+    case "list-giving-campaigns":
+    case "get-giving-campaign": {
+      let q = sb.from("exos_giving_campaigns").select(CAMPAIGN_COLS).eq("org_id", orgId);
+      if (route.id === "get-giving-campaign") q = q.eq("id", idParam(c, "campaign not found"));
+      const { data, error } = await q.order("created_at");
+      if (error) throw error;
+      const list = (data ?? []) as unknown as { id: string }[];
+      const ids = list.map((x) => x.id);
+      const totals = new Map<string, { raised_cents: number; donation_count: number }>();
+      if (ids.length > 0) {
+        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents")
+          .eq("org_id", orgId).eq("status", "received").in("campaign_id", ids);
+        if (dErr) throw dErr;
+        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number }[]) {
+          const t = totals.get(d.campaign_id) ?? { raised_cents: 0, donation_count: 0 };
+          t.raised_cents += d.amount_cents;
+          t.donation_count += 1;
+          totals.set(d.campaign_id, t);
+        }
+      }
+      const out = list.map((x) => ({ ...x, ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }) }));
+      if (route.id === "get-giving-campaign") {
+        if (out.length === 0) throw new ApiError(404, "campaign not found");
+        return { data: out[0] };
+      }
+      return { data: out };
+    }
+
+    case "list-donations": {
+      let q = sb.from("exos_donations")
+        .select("id, campaign_id, amount_cents, cover_fees_cents, total_cents, currency, method, donor_name, donor_email, " +
+          "anonymous, session_id, event_id, status, receipt_number, created_at", { count: "exact" })
+        .eq("org_id", orgId);
+      const camp = c.q.get("campaign_id");
+      if (camp !== null) {
+        if (!UUID_RE.test(camp)) throw new ApiError(400, "campaign_id must be a UUID.");
+        q = q.eq("campaign_id", camp);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-membership-products":
+      return rows(await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId).order("created_at"));
+
+    case "get-membership-product": {
+      const { data, error } = await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS)
+        .eq("org_id", orgId).eq("id", idParam(c, "membership product not found")).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "membership product not found");
+      return { data };
+    }
+
+    case "list-memberships": {
+      // Never gift_token_hash or the Stripe ids.
+      let q = sb.from("exos_fan_memberships").select(MEMBERSHIP_COLS, { count: "exact" }).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!MEMBERSHIP_STATUSES.has(status)) throw new ApiError(400, "status is invalid.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-membership": {
+      const id = idParam(c, "membership not found");
+      const { data, error } = await sb.from("exos_fan_memberships").select(MEMBERSHIP_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "membership not found");
+      const hh = await sb.from("exos_membership_household").select("email").eq("membership_id", id).order("email");
+      if (hh.error) throw hh.error;
+      return { data: { ...(data as unknown as Record<string, unknown>), household: (hh.data ?? []).map((h: { email: string }) => h.email) } };
+    }
+
+    case "list-pass-products":
+      return rows(await sb.from("exos_pass_products")
+        .select("id, kind, name, price_cents, currency, credits, per_event_limit, event_ids, date_from, date_to, tier_ids, " +
+          "valid_until, max_sold, sold, active, created_at")
+        .eq("org_id", orgId).order("created_at"));
+
+    case "list-passes":
+      return paged(await sb.from("exos_passes")
+        .select("id, product_id, kind, name, holder_email, credits_total, credits_used, per_event_limit, valid_until, status, created_at",
+          { count: "exact" })
+        .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    case "get-event-member-presale": {
+      const id = await ownEvent(c);
+      const { data, error } = await sb.from("exos_member_presales").select("event_id, starts_at, ends_at, tier_ids, product_ids")
+        .eq("event_id", id).maybeSingle();
+      if (error) throw error;
+      return { data: data ?? null };
+    }
+
     case "list-webhooks":
       // Never the signing secret.
       return rows(await sb.from("exos_webhooks")
         .select("id, url, event_types, enabled, description, created_at")
         .eq("org_id", orgId).order("created_at", { ascending: true }));
+
+    // -- Sales counts: tickets sold on other platforms (mig 20261030120000) --
+
+    case "list-sales-counts": {
+      let q = sb.from("exos_sales_counts").select(SALES_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!UUID_RE.test(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      const kind = c.q.get("kind");
+      if (kind !== null) {
+        if (kind !== "manual" && kind !== "import") throw new ApiError(400, "kind must be manual or import.");
+        q = q.eq("kind", kind);
+      }
+      const r = await q.order("updated_at", { ascending: false }).order("id").range(page.from, page.to);
+      return paged({ ...r, data: r.data ? (r.data as unknown as SalesCountRow[]).map(salesView) : r.data }, page);
+    }
+
+    case "get-sales-count":
+      return { data: salesView(await salesRow(c)) };
+
+    case "list-event-sales-counts": {
+      const id = await ownEvent(c);
+      const { data, error } = await sb.from("exos_sales_counts").select(SALES_COLS)
+        .eq("org_id", orgId).eq("event_id", id).order("updated_at", { ascending: false });
+      if (error) throw error;
+      const list = (data ?? []) as unknown as SalesCountRow[];
+      return {
+        data: list.map(salesView),
+        totals: salesTotals(list).map((t) => ({ currency: t.currency, sold: t.sold, gross_cents: t.grossCents })),
+        sold: list.reduce((n, r) => n + r.sold, 0),
+      };
+    }
+
+    case "create-sales-count": {
+      const b = c.body;
+      const evId = str(b.event_id, "event_id");
+      if (!evId || !UUID_RE.test(evId)) throw new ApiError(400, "event_id (a UUID) is required.");
+      const { data: ev, error } = await sb.from("exos_events").select("id, currency")
+        .eq("org_id", orgId).eq("id", evId).maybeSingle();
+      if (error) throw error;
+      if (!ev) throw new ApiError(404, "event not found");
+      const sold = int(b.sold, "sold");
+      if (sold === null) throw new ApiError(400, "sold is required.");
+      const out = await put(c, {
+        p_event_id: evId, p_id: null, p_kind: "manual", p_label: str(b.label, "label"), p_platform: null,
+        p_sold: sold, p_gross_cents: grossOf(b, sold) ?? 0,
+        p_currency: str(b.currency, "currency") ?? (ev as { currency: string | null }).currency ?? "USD",
+        p_capacity: capacityOf(b, sold), p_tiers: tiersOf(b), p_note: str(b.note, "note") ?? "",
+      });
+      return json({ data: salesView(out) }, out.status === "created" ? 201 : 200);
+    }
+
+    case "update-sales-count": {
+      const b = c.body;
+      const row = await salesRow(c);
+      const tiers = tiersOf(b);
+      const sold = int(b.sold, "sold");
+      const gross = grossOf(b, sold ?? row.sold);
+      if (tiers === null && row.tiers.length > 0 && (sold !== null || gross !== null)) {
+        throw new ApiError(409, "This entry has ticket types: send tiers, or import the file again.");
+      }
+      const out = await put(c, {
+        p_event_id: null, p_id: row.id, p_kind: null, p_label: str(b.label, "label"), p_platform: null,
+        p_sold: sold, p_gross_cents: gross, p_currency: str(b.currency, "currency"),
+        p_capacity: capacityOf(b, sold ?? row.sold), p_tiers: tiers,
+        // Left out: kept. null or "": cleared.
+        p_note: b.note === null || b.note === "" ? "" : str(b.note, "note"),
+      });
+      return { data: salesView(out) };
+    }
+
+    case "delete-sales-count": {
+      const id = c.params.id;
+      if (!UUID_RE.test(id)) throw new ApiError(404, "sales count not found");
+      const { data, error } = await sb.rpc("exos_api_sales_count_delete", { p_org_id: orgId, p_id: id });
+      if (error) throw error;
+      if (data !== true) throw new ApiError(404, "sales count not found");
+      return { data: { id, deleted: true } };
+    }
+
+    case "import-sales-counts": {
+      const id = await ownEvent(c);
+      const b = c.body;
+      const platform = str(b.platform, "platform")?.toLowerCase();
+      if (!isPlatform(platform)) throw new ApiError(400, "platform is required (one of the listed platforms).");
+      const table = importTable(b);
+      const header = table[0] ?? [];
+      const mapping = importMapping(b.mapping, header);
+      const { data: ev } = await sb.from("exos_events").select("currency").eq("id", id).maybeSingle();
+      const plan = planSalesImport(table, mapping, {
+        currency: str(b.currency, "currency") ?? (ev as { currency: string | null } | null)?.currency ?? "USD",
+        event: str(b.event, "event"),
+      });
+      const summary = {
+        platform, currency: plan.currency, sold: plan.sold, gross_cents: plan.grossCents, capacity: plan.capacity,
+        tiers: plan.tiers, rows: plan.rows, other_event_rows: plan.otherEvents, voided_rows: plan.voided,
+        mapping: Object.fromEntries(Object.entries(mapping).map(([f, i]) => [f, header[i as number] ?? null])),
+        warnings: plan.warnings,
+      };
+      if (plan.errors.length) {
+        return json({ error: "the file has errors; nothing was imported", errors: plan.errors, import: summary }, 422);
+      }
+      if (b.dry_run === true) return { data: null, import: { ...summary, dry_run: true } };
+      const out = await put(c, {
+        p_event_id: id, p_id: null, p_kind: "import", p_label: null, p_platform: platform,
+        p_sold: plan.sold, p_gross_cents: plan.grossCents, p_currency: plan.currency, p_capacity: plan.capacity,
+        p_tiers: plan.tiers, p_note: "", p_file_name: str(b.file_name, "file_name"), p_row_count: plan.rows,
+      });
+      return json({ data: salesView(out), status: out.status, import: summary }, out.status === "created" ? 201 : 200);
+    }
+
+    case "find-eventbrite-event": {
+      // Opendate's find_confirm: our event for an Eventbrite event id (the
+      // link Exos Door's Eventbrite sync made, mig 20261013100000).
+      const ebId = c.params.id;
+      if (!/^[0-9]{1,24}$/.test(ebId)) throw new ApiError(404, "no event is linked to that Eventbrite event");
+      const { data: link, error } = await sb.from("exos_eventbrite_links")
+        .select("event_id, eb_event_id, eb_event_name, linked_at, last_synced_at")
+        .eq("org_id", orgId).eq("eb_event_id", ebId).maybeSingle();
+      if (error) throw error;
+      if (!link) throw new ApiError(404, "no event is linked to that Eventbrite event");
+      const l = link as { event_id: string; eb_event_id: string; eb_event_name: string | null; linked_at: string; last_synced_at: string | null };
+      const { data: ev, error: evErr } = await sb.from("exos_events").select(EVENT_LIST_COLS)
+        .eq("org_id", orgId).eq("id", l.event_id).maybeSingle();
+      if (evErr) throw evErr;
+      if (!ev) throw new ApiError(404, "no event is linked to that Eventbrite event");
+      return {
+        data: {
+          ...(ev as unknown as Record<string, unknown>),
+          eventbrite: { id: l.eb_event_id, name: l.eb_event_name, linked_at: l.linked_at, last_synced_at: l.last_synced_at },
+        },
+      };
+    }
+
+    // -- Fans (mig 20261031120000). Consent is shown, never set. ---------------
+    case "list-fans": {
+      const sortRaw = (c.q.get("order_by") ?? "created_at").trim().toLowerCase();
+      if (!FAN_SORTS.has(sortRaw)) throw new ApiError(400, "order_by must be created_at, updated_at, last_order_at or email.");
+      const dir = (c.q.get("order") ?? "desc").trim().toLowerCase();
+      if (dir !== "asc" && dir !== "desc") throw new ApiError(400, "order must be asc or desc.");
+      const search = (c.q.get("q") ?? c.q.get("q[email_cont]") ?? c.q.get("q[first_name_cont]") ?? "").trim();
+      if (search.length > 100) throw new ApiError(400, "q is at most 100 characters.");
+      const email = c.q.get("email");
+      const tag = c.q.get("tag_id");
+      if (tag !== null && !UUID_RE.test(tag)) throw new ApiError(400, "tag_id must be a UUID.");
+      const r = await rpc(sb, "_exos_fans_page", {
+        p_org_id: orgId, p_search: search || null, p_email: email, p_tag_ids: tag ? [tag] : null,
+        p_updated_after: isoParam(c.q, "updated_after"), p_sort: `${sortRaw} ${dir}`,
+        p_limit: page.perPage, p_offset: page.from,
+      }) as { total?: number; rows?: unknown[] } | null;
+      return pageEnvelope(r?.rows ?? [], page, r?.total ?? 0);
+    }
+
+    case "lookup-fans": {
+      // Narrow and fixed: each given field matches partially (AND), at most 3, by id.
+      const fields: [string, string][] = [];
+      for (const f of ["first_name", "last_name", "email"]) {
+        const v = (c.q.get(f) ?? "").trim();
+        if (v.length > 100) throw new ApiError(400, `${f} is at most 100 characters.`);
+        if (v) fields.push([f, v]);
+      }
+      if (fields.length === 0) throw new ApiError(400, "give first_name, last_name or email.");
+      let q = sb.from("exos_fans").select("id, email, first_name, last_name")
+        .eq("org_id", orgId).is("discarded_at", null);
+      for (const [f, v] of fields) q = q.ilike(f, `%${escapeLike(v)}%`);
+      return rows(await q.order("id").limit(3));
+    }
+
+    case "get-fan": {
+      const d = await rpc(sb, "_exos_fan_detail", { p_org_id: orgId, p_fan_id: fanId(c) });
+      if (!d) throw new ApiError(404, "fan not found");
+      return { data: d };
+    }
+
+    case "create-fan":
+      return new Created({
+        data: await rpc(sb, "_exos_fan_save", { p_org_id: orgId, p_fan_id: null, p_fields: unwrap(c.body, "fan"), p_source: "api" }),
+      });
+
+    case "update-fan":
+      return { data: await rpc(sb, "_exos_fan_save", { p_org_id: orgId, p_fan_id: fanId(c), p_fields: unwrap(c.body, "fan"), p_source: "api" }) };
+
+    case "discard-fan": {
+      const id = fanId(c);
+      await rpc(sb, "_exos_fan_discard", { p_org_id: orgId, p_fan_id: id });
+      return { data: { id, discarded: true } };
+    }
+
+    case "list-signup-forms":
+      return rows(await sb.from("exos_signup_forms")
+        .select("id, name, title, intro, button_label, ask_name, offer_sms, default_tag_ids, status, created_at, updated_at")
+        .eq("org_id", orgId).neq("status", "archived").order("created_at", { ascending: false }));
+
+    // -- Tags ----------------------------------------------------------------------
+    case "list-tags": {
+      let q = sb.from("exos_tags").select(TAG_COLS).eq("org_id", orgId);
+      const scope = c.q.get("scope");
+      if (scope !== null) {
+        const s = normTaggable(scope);
+        if (!s) throw new ApiError(400, "scope must be event, fan or artist.");
+        q = q.or(`scope.is.null,scope.eq.${s}`);
+      }
+      return rows(await q.order("name").order("id"));
+    }
+
+    case "get-tag": {
+      const { data, error } = await sb.from("exos_tags").select(TAG_COLS).eq("org_id", orgId).eq("id", tagId(c)).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "tag not found");
+      return { data };
+    }
+
+    case "create-tag":
+      return new Created({ data: await rpc(sb, "_exos_tag_save", { p_org_id: orgId, p_tag_id: null, p_fields: tagFields(c.body), p_actor: null }) });
+
+    case "update-tag":
+      return { data: await rpc(sb, "_exos_tag_save", { p_org_id: orgId, p_tag_id: tagId(c), p_fields: tagFields(c.body), p_actor: null }) };
+
+    case "delete-tag": {
+      const id = tagId(c);
+      await rpc(sb, "_exos_tag_delete", { p_org_id: orgId, p_tag_id: id });
+      return { data: { id, deleted: true } };
+    }
+
+    case "list-tagged-items": {
+      let q = sb.from("exos_tagged_items").select(TAGGED_COLS, { count: "exact" }).eq("org_id", orgId);
+      const typeRaw = c.q.get("taggable_type");
+      const type = typeRaw === null ? null : normTaggable(typeRaw);
+      if (typeRaw !== null && !type) throw new ApiError(400, "taggable_type must be event, fan or artist.");
+      // Without fans:read a fan's tags are left out (asking for fans is refused).
+      if (!hasScope(c.key.scopes, "fans:read")) {
+        if (type === "fan") throw new ScopeError("fans:read");
+        q = q.neq("taggable_type", "fan");
+      }
+      if (type) q = q.eq("taggable_type", type);
+      const tid = c.q.get("taggable_id");
+      if (tid !== null) {
+        if (!UUID_RE.test(tid)) throw new ApiError(400, "taggable_id must be a UUID.");
+        q = q.eq("taggable_id", tid);
+      }
+      const tag = c.q.get("tag_id");
+      if (tag !== null) {
+        if (!UUID_RE.test(tag)) throw new ApiError(400, "tag_id must be a UUID.");
+        q = q.eq("tag_id", tag);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-tagged-item": {
+      const item = await ownTaggedItem(c);
+      if (item.taggable_type === "fan") needScope(c, "fans:read");
+      return { data: item };
+    }
+
+    case "create-tagged-item": {
+      const b = unwrap(c.body, "tagged_item");
+      const type = normTaggable(String(b.taggable_type ?? ""));
+      if (!type) throw new ApiError(400, "taggable_type must be event, fan or artist.");
+      if (type === "fan") needScope(c, "fans:write");
+      const id = String(b.taggable_id ?? "");
+      if (!UUID_RE.test(id)) throw new ApiError(400, "taggable_id must be a UUID.");
+      const attrs = b.tag_attributes && typeof b.tag_attributes === "object" ? b.tag_attributes as Record<string, unknown> : {};
+      const tag = b.tag_id ?? null;
+      const name = attrs.name ?? b.tag_name ?? null;
+      if (tag !== null && (typeof tag !== "string" || !UUID_RE.test(tag))) throw new ApiError(400, "tag_id must be a UUID.");
+      if (name !== null && typeof name !== "string") throw new ApiError(400, "tag_attributes[name] must be text.");
+      if (tag === null && !name) throw new ApiError(400, "give tag_id or tag_attributes[name].");
+      const out = await rpc(sb, "_exos_tag_apply", {
+        p_org_id: orgId, p_tag_id: tag, p_tag_name: name, p_type: type, p_id: id, p_actor: null,
+      }) as Record<string, unknown>;
+      return out.created ? new Created({ data: out }) : { data: out };
+    }
+
+    case "delete-tagged-item": {
+      const item = await ownTaggedItem(c);
+      if (item.taggable_type === "fan") needScope(c, "fans:write");
+      await rpc(sb, "_exos_tagged_item_delete", { p_org_id: orgId, p_item_id: item.id });
+      return { data: { id: item.id, deleted: true } };
+    }
+
+    case "list-canonical-tags": {
+      let q = sb.from("exos_canonical_tags").select("id, category, name");
+      const name = (c.q.get("q") ?? c.q.get("q[name_cont]") ?? "").trim();
+      if (name.length > 40) throw new ApiError(400, "q is at most 40 characters.");
+      if (name) q = q.ilike("name", `%${escapeLike(name)}%`);
+      const cat = c.q.get("category");
+      if (cat !== null) q = q.eq("category", cat);
+      return rows(await q.order("category").order("sort_order").order("id"));
+    }
+
+    // -- Refund requests (the buyer asks; the dashboard decides) -------------------
+    case "list-refund-requests": {
+      const status = c.q.get("status");
+      if (status !== null && !ASK_STATUSES.has(status)) throw new ApiError(400, "status must be open, refunded, declined or withdrawn.");
+      const ev = c.q.get("event_id");
+      if (ev !== null && !UUID_RE.test(ev)) throw new ApiError(400, "event_id must be a UUID.");
+      const r = await rpc(sb, "exos_api_refund_asks", {
+        p_org_id: orgId, p_status: status, p_event_id: ev, p_limit: page.perPage, p_offset: page.from,
+      }) as { total?: number; rows?: unknown[] } | null;
+      return pageEnvelope(r?.rows ?? [], page, r?.total ?? 0);
+    }
+
+    // -- Distribution partners (mig 20261031130000) -----------------------------
+    case "list-distribution-partners": {
+      const r = rows(await sb.from("exos_distribution_partners").select(PARTNER_COLS)
+        .eq("org_id", orgId).order("created_at", { ascending: true }));
+      return { ...r, partner_types: DIST_PARTNER_TYPES, scopes: ["inventory", "comps"] };
+    }
+
+    case "create-distribution-partner": {
+      const b = unwrap(c.body, "distribution_partner");
+      const scopes = b.scopes === undefined ? null : stringList(b.scopes, "scopes");
+      return new Created({
+        data: await rpc(sb, "_exos_dist_partner_create", {
+          p_org_id: orgId, p_label: optString(b.label ?? b.name, "label", 80),
+          p_partner_type: optString(b.partner_type ?? b.partnerType, "partner_type", 40) ?? "other",
+          p_scopes: scopes, p_actor: c.cred.userId, p_api_key_id: apiKeyId(c),
+        }),
+      });
+    }
+
+    case "update-distribution-partner": {
+      const id = uuidOf(c.params.id, "partner not found");
+      const b = unwrap(c.body, "distribution_partner");
+      const patch: Record<string, unknown> = {};
+      for (const k of ["label", "active", "scopes"]) if (b[k] !== undefined) patch[k] = b[k];
+      if (Object.keys(patch).length === 0) throw new ApiError(400, "send label, active or scopes.");
+      return { data: await rpc(sb, "_exos_dist_partner_update", { p_org_id: orgId, p_id: id, p_patch: patch, p_api_key_id: apiKeyId(c) }) };
+    }
+
+    case "revoke-distribution-partner": {
+      const id = uuidOf(c.params.id, "partner not found");
+      return { data: await rpc(sb, "_exos_dist_partner_revoke", { p_org_id: orgId, p_id: id, p_api_key_id: apiKeyId(c) }) };
+    }
+
+    case "get-event-distribution": {
+      const id = await ownEvent(c);
+      return { data: await rpc(sb, "_exos_event_distribution_json", { p_event_id: id }) };
+    }
+
+    case "set-event-distribution": {
+      const id = await ownEvent(c);
+      // A content token may edit events but not partner settings: owners and managers only.
+      requireRole(c, ["owner", "manager"]);
+      const tiers = Array.isArray(c.body) ? c.body : c.body.tiers;
+      if (!Array.isArray(tiers)) throw new ApiError(400, "tiers must be a list of { tier_id, enabled, partner_ids?, paused? }.");
+      return {
+        data: await rpc(sb, "_exos_tier_distribution_set", {
+          p_org_id: orgId, p_event_id: id, p_tiers: tiers, p_actor: c.cred.userId,
+        }),
+      };
+    }
+
+    // -- Reservations of an event; organizer reservations --------------------
+    case "list-ticket-reservations": {
+      const id = await ownEvent(c);
+      let q = sb.from("exos_partner_reservations").select(RESERVATION_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", id);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!["active", "completed", "cancelled", "expired"].includes(status)) {
+          throw new ApiError(400, "status must be active, completed, cancelled or expired.");
+        }
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-ticket-reservation": {
+      const id = await ownEvent(c);
+      const token = tokenParam(c.params.token);
+      const { data, error } = await sb.from("exos_partner_reservations").select(RESERVATION_COLS + ", lines, ticket_ids")
+        .eq("org_id", orgId).eq("event_id", id).eq("token", token).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "reservation not found");
+      return { data };
+    }
+
+    case "build-organizer-reservation": {
+      const id = await ownEvent(c);
+      const p = unwrapParams(c.body, "ticket_reservation");
+      return {
+        data: await rpc(sb, "_exos_partner_reserve", {
+          p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
+          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items), p_attrs: {}, p_comp: false, p_dry_run: true,
+        }),
+      };
+    }
+
+    case "create-organizer-reservation": {
+      const id = await ownEvent(c);
+      const p = unwrapParams(c.body, "ticket_reservation");
+      return new Created({
+        data: await rpc(sb, "_exos_partner_reserve", {
+          p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
+          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items), p_attrs: reservationAttrs(p),
+          p_comp: false, p_dry_run: false,
+        }),
+      });
+    }
+
+    case "update-organizer-reservation": {
+      const token = await ownReservation(c, null);
+      const r = await rpc(sb, "_exos_partner_reservation_update", {
+        p_org_id: orgId, p_partner_id: null, p_token: token,
+        p_attrs: reservationAttrs(unwrapParams(c.body, "ticket_reservation")),
+      }) as Record<string, unknown>;
+      if (r?.status === "expired") throw new ApiError(410, "this reservation expired; reserve again", { reason: "expired" });
+      return { data: r };
+    }
+
+    case "cancel-organizer-reservation": {
+      const token = await ownReservation(c, null);
+      return { data: await rpc(sb, "_exos_partner_reservation_cancel", { p_org_id: orgId, p_partner_id: null, p_token: token }) };
+    }
+
+    case "complete-organizer-reservation": {
+      const token = await ownReservation(c, null);
+      const out = await rpc(sb, "_exos_partner_reservation_complete", {
+        p_org_id: orgId, p_partner_id: null, p_token: token,
+        p_attrs: reservationAttrs(unwrapParams(c.body, "ticket_reservation")), p_app_base: appBase(),
+      }) as Record<string, unknown>;
+      if (out.status === "expired") throw new ApiError(410, "this reservation expired; nothing was sold", { reason: "expired" });
+      return out.fresh ? new Created({ data: out.order }) : { data: out.order };
+    }
+
+    // -- The team ----------------------------------------------------------------
+    case "get-team": {
+      await requireOwner(c);
+      const { data, error } = await sb.from("exos_orgs").select("id, name, slug, created_at").eq("id", orgId).maybeSingle();
+      if (error) throw error;
+      return { data };
+    }
+
+    case "update-team": {
+      await requireOwner(c);
+      const b = unwrap(c.body, "team");
+      const name = optString(b.name, "name", 80);
+      if (!name) throw new ApiError(400, "send a name (1-80 characters).");
+      const { data, error } = await sb.from("exos_orgs").update({ name }).eq("id", orgId)
+        .select("id, name, slug, created_at").maybeSingle();
+      if (error) throw error;
+      return { data };
+    }
+
+    case "list-team-members": {
+      await requireOwner(c);
+      const { data, error } = await sb.from("exos_org_memberships").select("user_id, role, disabled")
+        .eq("org_id", orgId).order("role").limit(500);
+      if (error) throw error;
+      const members = (data ?? []) as { user_id: string; role: string; disabled: boolean }[];
+      const emails = await Promise.all(members.slice(0, 200).map(async (m) => {
+        const { data: u } = await sb.auth.admin.getUserById(m.user_id);
+        return u?.user?.email ?? null;
+      }));
+      return { data: members.map((m, i) => ({ id: m.user_id, user_id: m.user_id, email: emails[i] ?? null, role: m.role, disabled: m.disabled })) };
+    }
+
+    case "update-team-member": {
+      await requireOwner(c);
+      const uid = uuidOf(c.params.id, "member not found");
+      const member = await nonOwnerMember(c, uid);
+      const b = unwrap(c.body, "team_membership");
+      const patch: Record<string, unknown> = {};
+      if (b.role !== undefined) {
+        if (typeof b.role !== "string" || !MEMBER_ROLES.has(b.role)) {
+          throw new ApiError(400, "role must be manager, finance, content or scanner (ownership is changed in the dashboard).");
+        }
+        patch.role = b.role;
+      }
+      if (b.disabled !== undefined) {
+        if (typeof b.disabled !== "boolean") throw new ApiError(400, "disabled must be true or false.");
+        patch.disabled = b.disabled;
+      }
+      if (Object.keys(patch).length === 0) throw new ApiError(400, "send role or disabled.");
+      // The offboarding trigger revokes the member's keys and tokens on a
+      // demotion below manager or when disabled.
+      const { data, error } = await sb.from("exos_org_memberships").update(patch)
+        .eq("org_id", orgId).eq("user_id", member).select("user_id, role, disabled").maybeSingle();
+      if (error) throw error;
+      return { data: { id: data?.user_id, ...data } };
+    }
+
+    case "remove-team-member": {
+      await requireOwner(c);
+      const uid = uuidOf(c.params.id, "member not found");
+      const member = await nonOwnerMember(c, uid);
+      const { error } = await sb.from("exos_org_memberships").delete().eq("org_id", orgId).eq("user_id", member);
+      if (error) throw error;
+      return { data: { id: member, removed: true } };
+    }
+
+    case "list-team-invitations": {
+      await requireOwner(c);
+      return rowsWithIds(await sb.from("exos_org_invites").select("token, email, role, status, expires_at, created_at")
+        .eq("org_id", orgId).order("created_at", { ascending: false }).limit(200));
+    }
+
+    case "create-team-invitation": {
+      const actor = await requireOwner(c);
+      const b = unwrap(c.body, "invitation");
+      const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+      if (!EMAIL_RE.test(email) || email.length > 254) throw new ApiError(400, "email is not a valid address.");
+      const role = typeof b.role === "string" ? b.role : "";
+      if (!MEMBER_ROLES.has(role)) throw new ApiError(400, "role must be manager, finance, content or scanner.");
+      const { data, error } = await sb.from("exos_org_invites").insert({
+        org_id: orgId, email, role, created_by: actor, status: "pending",
+        expires_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+      }).select("token, email, role, status, expires_at, created_at").single();
+      if (error) throw error;
+      const base = appBase();
+      return new Created({ data: { id: data.token, ...data, invite_url: base ? `${base}/invite/${data.token}` : null } });
+    }
+
+    case "cancel-team-invitation": {
+      await requireOwner(c);
+      const token = uuidOf(c.params.id, "invitation not found");
+      const { data, error } = await sb.from("exos_org_invites").update({ status: "cancelled" })
+        .eq("org_id", orgId).eq("token", token).eq("status", "pending").select("token").maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "invitation not found");
+      return { data: { id: token, status: "cancelled" } };
+    }
+
+    case "list-team-roles":
+      return {
+        data: ORG_ROLES.map((r) => ({ id: r, name: r, description: ROLE_INFO[r], token_scopes: ROLE_SCOPES[r] })),
+      };
+
+    case "list-my-memberships": {
+      if (!c.cred.userId) throw new ApiError(400, "an organization API key belongs to one organization; use GET /v1/me");
+      const { data, error } = await sb.from("exos_org_memberships").select("org_id, role, disabled, exos_orgs(name, slug)")
+        .eq("user_id", c.cred.userId).eq("disabled", false);
+      if (error) throw error;
+      // deno-lint-ignore no-explicit-any
+      return { data: (data ?? []).map((m: any) => ({
+        org_id: m.org_id, name: m.exos_orgs?.name ?? null, slug: m.exos_orgs?.slug ?? null, role: m.role,
+        current: m.org_id === orgId,
+      })) };
+    }
+
+    case "revoke-current-token": {
+      if (c.cred.kind !== "pat") {
+        throw new ApiError(400, c.cred.kind === "oauth"
+          ? "revoke an OAuth token at the authorization server's /revoke"
+          : "API keys are revoked in Org settings");
+      }
+      await rpc(sb, "_exos_pat_revoke_self", { p_id: c.cred.id });
+      return { data: { id: c.cred.id, revoked: true } };
+    }
+  }
+  return await handleBooking(route, c);
+}
+
+// -- Booking (mig 20261030100000, docs/booking.md) ------------------------------------
+
+async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
+  const { sb, orgId, page } = c;
+  switch (route.id) {
+    // Venues ------------------------------------------------------------------
+    case "list-venues": {
+      let q = sb.from("exos_venues").select(VENUE_COLS, { count: "exact" }).eq("org_id", orgId);
+      const name = search(c.q, "q", "q[name_cont]");
+      if (name) q = q.ilike("name", `%${name}%`);
+      const rel = c.q.get("relationship");
+      if (rel !== null) {
+        if (!["owned", "rented", "partner"].includes(rel)) throw new ApiError(400, "relationship must be owned, rented or partner.");
+        q = q.eq("relationship", rel);
+      }
+      return pagedMap(await q.order("name").order("id").range(page.from, page.to), page, venueView);
+    }
+    case "create-venue": {
+      const row = parseVenue(c.body, false);
+      return { data: venueView(await single(sb.from("exos_venues").insert({ ...row, org_id: orgId }).select(VENUE_COLS).single())) };
+    }
+    case "get-venue":
+      return {
+        data: venueView(await found(sb.from("exos_venues").select(VENUE_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "venue")).maybeSingle(), "venue")),
+      };
+    case "update-venue": {
+      const id = uuidParam(c, "id", "venue");
+      const row = parseVenue(c.body, true);
+      return {
+        data: venueView(await found(sb.from("exos_venues").update(row).eq("org_id", orgId).eq("id", id)
+          .select(VENUE_COLS).maybeSingle(), "venue")),
+      };
+    }
+    case "delete-venue": {
+      const id = uuidParam(c, "id", "venue");
+      await found(sb.from("exos_venues").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "venue");
+      return { data: { id, deleted: true } };
+    }
+
+    // Rooms -------------------------------------------------------------------
+    case "list-venue-rooms": {
+      const venue = await ownVenue(c);
+      return rows(await sb.from("exos_venue_rooms").select(ROOM_COLS).eq("org_id", orgId).eq("venue_id", venue)
+        .order("sort_order").order("name").order("id"));
+    }
+    case "create-room": {
+      const venue = await ownVenue(c);
+      const row = parseRoom(c.body, false);
+      return {
+        data: await single(sb.from("exos_venue_rooms").insert({ ...row, venue_id: venue, org_id: orgId })
+          .select(ROOM_COLS).single()),
+      };
+    }
+    case "list-rooms": {
+      let q = sb.from("exos_venue_rooms").select(ROOM_COLS, { count: "exact" }).eq("org_id", orgId);
+      const venue = c.q.get("venue_id") ?? c.q.get("q[venue_ownership_id_eq]");
+      if (venue !== null) {
+        if (!isUuid(venue)) throw new ApiError(400, "venue_id must be a UUID.");
+        q = q.eq("venue_id", venue);
+      }
+      const name = search(c.q, "q", "q[name_cont]");
+      if (name) q = q.ilike("name", `%${name}%`);
+      return paged(await q.order("venue_id").order("sort_order").order("name").order("id").range(page.from, page.to), page);
+    }
+    case "get-room":
+      return {
+        data: await found(roomOfVenue(c, sb.from("exos_venue_rooms").select(ROOM_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "room"))).maybeSingle(), "room"),
+      };
+    case "update-room": {
+      const id = uuidParam(c, "id", "room");
+      const row = parseRoom(c.body, true);
+      return {
+        data: await found(roomOfVenue(c, sb.from("exos_venue_rooms").update(row).eq("org_id", orgId).eq("id", id))
+          .select(ROOM_COLS).maybeSingle(), "room"),
+      };
+    }
+    case "delete-room": {
+      const id = uuidParam(c, "id", "room");
+      await found(roomOfVenue(c, sb.from("exos_venue_rooms").delete().eq("org_id", orgId).eq("id", id))
+        .select("id").maybeSingle(), "room");
+      return { data: { id, deleted: true } };
+    }
+
+    // Holds (every write through the SQL functions) -------------------------------
+    case "list-holds": {
+      const f = parseHoldFilters(c.q);
+      const out = await rpc(sb, "_exos_holds_page", {
+        p_org: orgId, p_from: f.from, p_to: f.to, p_venue: f.venueId, p_room: f.roomId, p_status: f.status, p_q: f.q,
+        p_limit: page.perPage, p_offset: page.from,
+      }) as { total: number; data: unknown[] };
+      return pageEnvelope(out.data ?? [], page, out.total ?? 0);
+    }
+    case "create-hold":
+      return {
+        data: await rpc(sb, "_exos_hold_create", {
+          p_org: orgId, p_actor: null, p_via: "api", p_api_key: c.key.id, p: holdBody(c.body, false),
+        }),
+      };
+    case "get-hold": {
+      const id = await ownHold(c);
+      return { data: await rpc(sb, "_exos_hold_json", { p_hold_id: id }) };
+    }
+    case "update-hold": {
+      const id = holdParam(c);
+      return { data: await rpc(sb, "_exos_hold_update", { p_org: orgId, p_hold_id: id, p: holdBody(c.body, true) }) };
+    }
+    case "clear-hold": {
+      const id = holdParam(c);
+      return { data: await rpc(sb, "_exos_hold_clear", { p_org: orgId, p_hold_id: id, p_position_ids: clearBody(c.body) }) };
+    }
+    case "convert-hold": {
+      const id = holdParam(c);
+      const out = await rpc(sb, "_exos_hold_convert", {
+        p_org: orgId, p_actor: null, p_via: "api", p_api_key: c.key.id, p_hold_id: id, p: convertBody(c.body),
+      }) as { hold: unknown; position_id: string; event_id: string };
+      const event = await single(sb.from("exos_events").select(EVENT_COLS).eq("org_id", orgId).eq("id", out.event_id).single());
+      return {
+        data: {
+          hold: out.hold,
+          position_id: out.position_id,
+          event: { ...(event as Record<string, unknown>), tiers: await tiers(sb, out.event_id) },
+        },
+      };
+    }
+    case "get-calendar": {
+      const from = c.q.get("from");
+      const to = c.q.get("to");
+      if (!isIsoDate(from) || !isIsoDate(to)) throw new ApiError(400, "from and to are required, written YYYY-MM-DD.");
+      const venue = c.q.get("venue_id");
+      if (venue !== null && !isUuid(venue)) throw new ApiError(400, "venue_id must be a UUID.");
+      return { data: await rpc(sb, "_exos_booking_calendar", { p_org: orgId, p_from: from, p_to: to, p_venue: venue }) };
+    }
+
+    // Show schedule -------------------------------------------------------------------
+    case "list-show-activities": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_show_activities").select(ACTIVITY_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("starts_at").order("id").range(page.from, page.to), page);
+    }
+    case "create-show-activity": {
+      const ev = await ownEvent(c);
+      const row = parseActivity(c.body, false);
+      return {
+        data: await single(sb.from("exos_show_activities").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(ACTIVITY_COLS).single()),
+      };
+    }
+    case "get-show-activity": {
+      const ev = await ownEvent(c);
+      return {
+        data: await found(sb.from("exos_show_activities").select(ACTIVITY_COLS).eq("org_id", orgId).eq("event_id", ev)
+          .eq("id", uuidParam(c, "aid", "show activity")).maybeSingle(), "show activity"),
+      };
+    }
+    case "update-show-activity": {
+      const ev = await ownEvent(c);
+      const id = uuidParam(c, "aid", "show activity");
+      const row = parseActivity(c.body, true);
+      return {
+        data: await found(sb.from("exos_show_activities").update(row).eq("org_id", orgId).eq("event_id", ev).eq("id", id)
+          .select(ACTIVITY_COLS).maybeSingle(), "show activity"),
+      };
+    }
+    case "delete-show-activity": {
+      const ev = await ownEvent(c);
+      const id = uuidParam(c, "aid", "show activity");
+      await found(sb.from("exos_show_activities").delete().eq("org_id", orgId).eq("event_id", ev).eq("id", id)
+        .select("id").maybeSingle(), "show activity");
+      return { data: { id, deleted: true } };
+    }
+
+    // Notes -----------------------------------------------------------------------------
+    case "list-event-notes": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_event_notes").select(NOTE_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("created_at").order("id").range(page.from, page.to), page);
+    }
+    case "create-event-note": {
+      const ev = await ownEvent(c);
+      const row = parseNote(c.body, false);
+      return {
+        data: await single(sb.from("exos_event_notes").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(NOTE_COLS).single()),
+      };
+    }
+    case "list-notes": {
+      let q = sb.from("exos_event_notes").select(NOTE_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!isUuid(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+    case "get-note":
+      return {
+        data: await found(sb.from("exos_event_notes").select(NOTE_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "note")).maybeSingle(), "note"),
+      };
+    case "update-note": {
+      const id = uuidParam(c, "id", "note");
+      const row = parseNote(c.body, true);
+      return {
+        data: await found(sb.from("exos_event_notes").update(row).eq("org_id", orgId).eq("id", id)
+          .select(NOTE_COLS).maybeSingle(), "note"),
+      };
+    }
+    case "delete-note": {
+      const id = uuidParam(c, "id", "note");
+      await found(sb.from("exos_event_notes").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "note");
+      return { data: { id, deleted: true } };
+    }
+
+    // Contacts --------------------------------------------------------------------------
+    case "list-event-contacts": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_event_contacts").select(CONTACT_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("role").order("name").order("id").range(page.from, page.to), page);
+    }
+    case "create-event-contact": {
+      const ev = await ownEvent(c);
+      const row = parseContact(c.body, false);
+      return {
+        data: await single(sb.from("exos_event_contacts").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(CONTACT_COLS).single()),
+      };
+    }
+    case "list-contacts": {
+      let q = sb.from("exos_event_contacts").select(CONTACT_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!isUuid(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+    case "get-contact":
+      return {
+        data: await found(sb.from("exos_event_contacts").select(CONTACT_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "contact")).maybeSingle(), "contact"),
+      };
+    case "update-contact": {
+      const id = uuidParam(c, "id", "contact");
+      const row = parseContact(c.body, true);
+      return {
+        data: await found(sb.from("exos_event_contacts").update(row).eq("org_id", orgId).eq("id", id)
+          .select(CONTACT_COLS).maybeSingle(), "contact"),
+      };
+    }
+    case "delete-contact": {
+      const id = uuidParam(c, "id", "contact");
+      await found(sb.from("exos_event_contacts").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "contact");
+      return { data: { id, deleted: true } };
+    }
+
+    // -- Series, collections, timed entry (mig 20261030150000) --------------
+    case "list-series": {
+      let q = sb.from("exos_event_series").select(SERIES_COLS, { count: "exact" }).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!SERIES_STATUSES.has(status)) throw new ApiError(400, "status must be active, archived or cancelled.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-series": {
+      const id = idParam(c, "series not found");
+      const { data: s, error } = await sb.from("exos_event_series").select(SERIES_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!s) throw new ApiError(404, "series not found");
+      const [occ, evs] = await Promise.all([
+        sb.from("exos_series_occurrences").select(OCCURRENCE_COLS).eq("series_id", id).order("occ_date").limit(500),
+        sb.from("exos_events").select("id, status, tickets_sold, total_tickets").eq("series_id", id).eq("org_id", orgId),
+      ]);
+      for (const r of [occ, evs]) if (r.error) throw r.error;
+      const events = (evs.data ?? []) as { id: string; status: string; tickets_sold: number; total_tickets: number }[];
+      const ids = events.map((e) => e.id);
+      let gross = 0;
+      if (ids.length > 0) {
+        const { data: orders, error: oErr } = await sb.from("exos_checkout_sessions").select("amount_cents")
+          .eq("org_id", orgId).eq("status", "fulfilled").in("event_id", ids);
+        if (oErr) throw oErr;
+        gross = (orders ?? []).reduce((n, o) => n + Number((o as { amount_cents: number }).amount_cents ?? 0), 0);
+      }
+      const capped = events.filter((e) => e.total_tickets > 0);
+      return {
+        data: {
+          ...(s as unknown as Record<string, unknown>),
+          summary_stats: {
+            events_in_series: events.length,
+            events_cancelled: events.filter((e) => e.status === "cancelled").length,
+            tickets_sold: events.reduce((n, e) => n + (e.tickets_sold ?? 0), 0),
+            gross_cents: gross,
+            average_capacity_sold: capped.length
+              ? Math.round((capped.reduce((n, e) => n + e.tickets_sold / e.total_tickets, 0) / capped.length) * 1000) / 1000
+              : null,
+          },
+          schedule: occ.data ?? [],
+        },
+      };
+    }
+
+    case "list-series-dates": {
+      const id = idParam(c, "series not found");
+      const { data: s, error } = await sb.from("exos_event_series").select("id").eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!s) throw new ApiError(404, "series not found");
+      return paged(await sb.from("exos_series_occurrences").select(OCCURRENCE_COLS, { count: "exact" })
+        .eq("series_id", id).order("occ_date").range(page.from, page.to), page);
+    }
+
+    case "list-collections":
+      return paged(await sb.from("exos_collections").select(COLLECTION_COLS, { count: "exact" })
+        .eq("org_id", orgId).order("sort_order").order("created_at").order("id").range(page.from, page.to), page);
+
+    case "get-collection": {
+      const id = idParam(c, "collection not found");
+      const { data: col, error } = await sb.from("exos_collections").select(COLLECTION_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!col) throw new ApiError(404, "collection not found");
+      // Membership resolved in SQL (manual list or rule), drafts included.
+      const { data: memberIds, error: mErr } = await sb.rpc("_exos_collection_event_ids", { p_collection_id: id, p_public: false });
+      if (mErr) throw mErr;
+      const ids = ((memberIds ?? []) as unknown[]).map((x) => String(typeof x === "object" && x ? Object.values(x)[0] : x));
+      const { data: evs, error: eErr } = ids.length
+        ? await sb.from("exos_events").select(EVENT_LIST_COLS).eq("org_id", orgId).in("id", ids).order("starts_at")
+        : { data: [], error: null };
+      if (eErr) throw eErr;
+      return { data: { ...(col as unknown as Record<string, unknown>), events: evs ?? [] } };
+    }
+
+    case "get-timed-entry": {
+      const id = await ownEvent(c);
+      const { data: te, error } = await sb.from("exos_timed_entry")
+        .select("event_id, tier_ids, slot_minutes, capacity, tier_capacity, entry_window_minutes, early_entry_minutes, " +
+          "hours, start_date, end_date, closed_dates, version, updated_at")
+        .eq("event_id", id).maybeSingle();
+      if (error) throw error;
+      if (!te) throw new ApiError(404, "this event has no timed entry");
+      return { data: te };
+    }
+
+    case "list-slots": {
+      const id = await ownEvent(c);
+      const from = dateParam(c.q, "from");
+      const to = dateParam(c.q, "to");
+      const { data, error } = await sb.rpc("_exos_slot_report", { p_event_id: id, p_from: from, p_to: to });
+      if (error) throw error;
+      return { data: data ?? [] };
+    }
+
+    // -- Artists and lineups (mig 20261030110000) ------------------------------
+    case "list-artists": {
+      let q = sb.from("exos_artists").select(ARTIST_COLS, { count: "exact" }).eq("org_id", orgId);
+      const name = (c.q.get("q") ?? c.q.get("q[name_cont]") ?? "").trim();
+      if (name) {
+        if (name.length > 100) throw new ApiError(400, "q is at most 100 characters.");
+        q = q.ilike("name", `%${escapeLike(name)}%`);
+      }
+      if (c.q.get("include_merged") !== "true") q = q.is("canonical_artist_id", null);
+      const sp = c.q.get("spotify_id");
+      if (sp !== null) {
+        const parsed = parseSpotifyArtist(sp);
+        if (!parsed.ok || !parsed.id) throw new ApiError(400, "spotify_id must be a Spotify artist link, URI or id.");
+        q = q.eq("spotify_id", parsed.id);
+      }
+      const sortRaw = (c.q.get("q[s]") ?? c.q.get("sort") ?? "name asc").trim().toLowerCase().replace(/\s+/g, " ");
+      const sort = ARTIST_SORTS[sortRaw] ?? ARTIST_SORTS[`${sortRaw} asc`];
+      if (!sort) throw new ApiError(400, "sort must be name, created_at or updated_at, then asc or desc.");
+      const r = paged(await q.order(sort[0], { ascending: sort[1] }).order("id").range(page.from, page.to), page);
+      return { ...r, data: (r.data as Record<string, unknown>[]).map(artistView) };
+    }
+
+    case "get-artist":
+      return { data: await ownArtist(c) };
+
+    case "create-artist":
+      return new Created({
+        data: await rpc(sb, "_exos_artist_save", {
+          p_org_id: orgId, p_artist_id: null, p_fields: unwrap(c.body, "artist"), p_actor: null,
+        }),
+      });
+
+    case "update-artist":
+      return {
+        data: await rpc(sb, "_exos_artist_save", {
+          p_org_id: orgId, p_artist_id: artistId(c), p_fields: unwrap(c.body, "artist"), p_actor: null,
+        }),
+      };
+
+    case "merge-artist": {
+      const id = artistId(c);
+      const target = String(c.body.target_artist_id ?? c.body.targetArtistId ?? "");
+      if (!UUID_RE.test(target)) throw new ApiError(400, "target_artist_id must be an artist id.");
+      return { data: await rpc(sb, "_exos_artist_merge", { p_org_id: orgId, p_source: id, p_target: target }) };
+    }
+
+    case "list-artist-events": {
+      await ownArtist(c);
+      const r = await rpc(sb, "exos_api_artist_events", {
+        p_org_id: orgId, p_artist_id: c.params.id, p_limit: page.perPage, p_offset: page.from,
+      }) as { total?: number; rows?: unknown[] } | null;
+      return pageEnvelope(r?.rows ?? [], page, r?.total ?? 0);
+    }
+
+    case "get-lineup": {
+      const id = await ownEvent(c);
+      return { data: await rpc(sb, "_exos_lineup_json", { p_event_id: id }) };
+    }
+
+    case "set-lineup": {
+      const id = await ownEvent(c);
+      const slots = Array.isArray(c.body) ? c.body : (c.body.lineup ?? c.body.performers);
+      if (!Array.isArray(slots)) throw new ApiError(400, "lineup must be a list of { artist_id, act_type?, set_time? }.");
+      return { data: await rpc(sb, "_exos_lineup_save", { p_org_id: orgId, p_event_id: id, p_slots: slots }) };
+    }
+
+    // -- Listing-feed shared keys ---------------------------------------------------
+    case "list-listing-keys": {
+      const r = rows(await sb.from("exos_listing_keys")
+        .select("id, label, partner_type, key_prefix, created_at, last_used_at, revoked_at")
+        .eq("org_id", orgId).order("created_at", { ascending: true }));
+      return { ...r, partner_types: PARTNER_TYPES };
+    }
+
+    case "create-listing-key": {
+      const b = unwrap(c.body, "listing_key");
+      const label = b.label ?? b.name ?? null;
+      if (label !== null && typeof label !== "string") throw new ApiError(400, "label must be a string.");
+      const partner = b.partner_type ?? b.partnerType ?? null;
+      if (partner !== null && typeof partner !== "string") throw new ApiError(400, "partner_type must be a string.");
+      const created = await rpc(sb, "_exos_listing_key_create", {
+        p_org_id: orgId, p_label: label, p_partner_type: partner, p_actor: null, p_api_key_id: c.key.id,
+      }) as Record<string, unknown>;
+      return new Created({ data: { ...created, feed_url: feedUrl(String(created.key)) } });
+    }
+
+    case "revoke-listing-key": {
+      const id = c.params.id;
+      if (!UUID_RE.test(id)) throw new ApiError(404, "shared key not found");
+      // The API key's creator must be an owner now, as in the dashboard (SQL checks it).
+      await rpc(sb, "_exos_listing_key_revoke", { p_org_id: orgId, p_key_id: id, p_api_key_id: c.key.id });
+      return { data: { id, revoked: true } };
+    }
+  }
+  // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
+  const fin = await handleFinance(route.id, c, FIN_DEPS);
+  if (fin !== undefined) return fin;
+  throw new ApiError(404, "not found");
+}
+
+const FIN_DEPS: FinDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
+
+/** A path parameter as a UUID; anything else is simply not found. */
+function uuidParam(c: Ctx, name: string, what: string): string {
+  const v = c.params[name];
+  if (!isUuid(v)) throw new ApiError(404, `${what} not found`);
+  return v;
+}
+
+/** Under /venues/:vid/rooms/:id the room must also be that venue's. */
+// deno-lint-ignore no-explicit-any
+function roomOfVenue(c: Ctx, q: any): any {
+  if (c.params.vid === undefined) return q;
+  return q.eq("venue_id", uuidParam(c, "vid", "room"));
+}
+
+function holdParam(c: Ctx): string {
+  return uuidParam(c, "id", "hold");
+}
+
+async function ownVenue(c: Ctx): Promise<string> {
+  const id = uuidParam(c, "id", "venue");
+  await found(c.sb.from("exos_venues").select("id").eq("org_id", c.orgId).eq("id", id).maybeSingle(), "venue");
+  return id;
+}
+
+async function ownHold(c: Ctx): Promise<string> {
+  const id = holdParam(c);
+  await found(c.sb.from("exos_holds").select("id").eq("org_id", c.orgId).eq("id", id).maybeSingle(), "hold");
+  return id;
+}
+
+/** ?q= (or an Opendate-style alias), trimmed, with LIKE wildcards escaped. */
+function search(q: URLSearchParams, ...names: string[]): string | null {
+  for (const n of names) {
+    const v = q.get(n);
+    if (v === null || !v.trim()) continue;
+    if (v.length > 100) throw new ApiError(400, `${n} must be at most 100 characters.`);
+    return v.trim().replace(/[\\%_,()]/g, (ch) => `\\${ch}`);
+  }
+  return null;
+}
+
+
+// deno-lint-ignore no-explicit-any
+async function rpc(sb: SupabaseClient, fn: string, args: Record<string, unknown>): Promise<any> {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function single(p: PromiseLike<{ data: any; error: unknown }>): Promise<any> {
+  const { data, error } = await p;
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function found(p: PromiseLike<{ data: any; error: unknown }>, what: string): Promise<any> {
+  const { data, error } = await p;
+  if (error) throw error;
+  if (!data) throw new ApiError(404, `${what} not found`);
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+function pagedMap(r: { data: any; error: any; count: number | null }, page: Page, fn: (row: any) => unknown) {
+  const out = paged(r, page);
+  return { ...out, data: (out.data as unknown[]).map(fn) };
+}
+
+const SERIES_COLS = "id, name, kind, status, description, image_url, template_event_id, timezone, rule, " +
+  "created_at, updated_at, cancelled_at";
+const SERIES_STATUSES = new Set(["active", "archived", "cancelled"]);
+const OCCURRENCE_COLS = "occ_date, occ_time, starts_at, event_id, status";
+const COLLECTION_COLS = "id, name, slug, description, image_url, mode, event_ids, rule_kind, rule_value, published, " +
+  "sort_order, created_at, updated_at";
+
+/** The :id path parameter as a UUID; anything else is simply not found. */
+function idParam(c: Ctx, notFound: string): string {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, notFound);
+  return id;
+}
+
+function dateParam(q: URLSearchParams, name: string): string | null {
+  const v = q.get(name);
+  if (v === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(v))) throw new ApiError(400, `${name} must be a date (YYYY-MM-DD).`);
+  return v;
+}
+
+// -- The listing feed --------------------------------------------------------------
+
+async function listingFeed(req: Request, url: URL, path: string): Promise<Response> {
+  const cors = { "access-control-allow-origin": "*" };
+  const noStore = { ...cors, "cache-control": "no-store" };
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        ...cors, "access-control-allow-methods": "GET, HEAD, OPTIONS",
+        "access-control-allow-headers": "x-shared-key, if-none-match", "access-control-max-age": "86400",
+      },
+    });
+  }
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return json({ error: "method not allowed" }, 405, { ...noStore, allow: "GET, HEAD" });
+  }
+  const match = matchRoute("GET", path);
+  if (!match || match.route.auth !== "shared_key") return json({ error: "not found" }, 404, noStore);
+
+  const key = (url.searchParams.get("shared_key") ?? req.headers.get("x-shared-key") ?? "").trim();
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const hash = SHARED_KEY_RE.test(key) ? await sha256Hex(key) : null;
+  // A bucket per key; missing or malformed keys share one per network.
+  let bucket = `lfeed:${hash?.slice(0, 24)}`;
+  if (!hash) {
+    const salt = Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    bucket = `lfeed-ip:${(await hashIp(clientIp((h) => req.headers.get(h)), salt)) ?? "unknown"}`;
+  }
+  const { data: allowed, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: bucket, p_limit: FEED_RATE_LIMIT });
+  if (rlErr) {
+    console.error("exos-api feed: rate limiter error (refusing)", rlErr.message);
+    return json({ error: "temporarily unavailable" }, 503, { ...noStore, "retry-after": "30" });
+  }
+  if (allowed === false) {
+    return json({ error: "rate limit exceeded", limit_per_minute: FEED_RATE_LIMIT }, 429, {
+      ...noStore, "retry-after": String(Math.max(1, 60 - new Date().getUTCSeconds())),
+    });
+  }
+  if (!key) return json({ error: "missing shared_key" }, 401, noStore);
+  if (!hash) return json({ error: "invalid or revoked shared_key" }, 401, noStore);
+
+  try {
+    const now = new Date();
+    const one = match.params.id;
+    if (one !== undefined && !UUID_RE.test(one)) return json({ error: "event not found" }, 404, noStore);
+    const q = one === undefined ? parseFeedQuery(url.searchParams, now) : null;
+    const { data, error } = await sb.rpc("exos_listing_feed_source", {
+      p_key_hash: hash, p_event_id: one ?? null, p_since: q ? q.startGte.toISOString() : null,
+    });
+    if (error) throw error;
+    const source = data as FeedSource | null;
+    if (!source) return json({ error: "invalid or revoked shared_key" }, 401, noStore);
+    const events = await withFees(sb, source.events ?? []);
+    const opts = {
+      appBase: (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, ""),
+      partnerType: source.key.partner_type,
+      now,
+    };
+    let body: unknown;
+    if (q) body = buildFeedPage(events, q, opts);
+    else if (events.length) body = feedEntry(events[0], opts);
+    else return json({ error: "event not found" }, 404, noStore);
+
+    const text = JSON.stringify(body);
+    const etag = `"${(await sha256B64(text)).slice(0, 27)}"`;
+    const headers = {
+      ...cors, "cache-control": `public, max-age=${FEED_MAX_AGE}`, etag, vary: "X-Shared-Key",
+      "content-type": "application/json",
+    };
+    if (etagMatches(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
+    return new Response(req.method === "HEAD" ? null : text, { status: 200, headers });
+  } catch (e) {
+    if (e instanceof FeedParamError) return json({ error: e.message }, 400, noStore);
+    console.error("exos-api feed error:", e);
+    return json({ error: "internal error" }, 500, noStore);
+  }
+}
+
+/** Public tiers with their passed-on fees, so prices are all-in like every other feed. */
+async function withFees(sb: SupabaseClient, events: SourceEvent[]): Promise<SourceEvent[]> {
+  const flat = events.flatMap((e) => (e.tiers ?? []).map((t) => ({ ...t, event_id: e.id })));
+  if (!flat.length) return events;
+  const priced = await withPublicTierFees(sb, flat);
+  const byEvent = new Map<string, typeof priced>();
+  for (const t of priced) byEvent.set(t.event_id, [...(byEvent.get(t.event_id) ?? []), t]);
+  return events.map((e) => ({ ...e, tiers: byEvent.get(e.id) ?? [] }));
+}
+
+function feedUrl(key: string): string | null {
+  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  return base ? `${base}/functions/v1/exos-api/v1/public/events?shared_key=${encodeURIComponent(key)}` : null;
+}
+
+// -- Helpers for the artist / lineup / key routes ------------------------------------
+
+/** An artist row as the API shows it: Spotify URI and URL derived, thumbnail falls back to the photo. */
+function artistView(a: Record<string, unknown>): Record<string, unknown> {
+  return { ...a, image_thumb_url: a.image_thumb_url ?? a.image_url ?? null, ...spotifyLinks(a.spotify_id) };
+}
+
+function artistId(c: Ctx): string {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, "artist not found");
+  return id;
+}
+
+async function ownArtist(c: Ctx): Promise<Record<string, unknown>> {
+  const id = artistId(c);
+  const { data, error } = await c.sb.from("exos_artists").select(ARTIST_COLS)
+    .eq("org_id", c.orgId).eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "artist not found");
+  return artistView(data as unknown as Record<string, unknown>);
+}
+
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** Opendate-style bodies wrap the fields ({ artist: { name } }); both forms work. */
+function unwrap(body: Record<string, unknown>, wrapper: string): Record<string, unknown> {
+  const inner = body[wrapper];
+  return inner && typeof inner === "object" && !Array.isArray(inner) ? inner as Record<string, unknown> : body;
+}
+
+/** The SQLSTATEs the artist, lineup and key functions raise, as HTTP answers. */
+const RPC_STATUS: Record<string, number> = {
+  "22023": 400, "42501": 403, "P0002": 404, "23505": 409, "55000": 409, "54000": 409,
+};
+
+function rpcError(e: unknown): { status: number; message: string } | null {
+  const err = e as { code?: unknown; message?: unknown } | null;
+  const code = typeof err?.code === "string" ? err.code : "";
+  if (!(code in RPC_STATUS)) return null;
+  return { status: RPC_STATUS[code], message: String(err?.message ?? "invalid request").slice(0, 300) };
+}
+
+async function sha256B64(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** The credential's own id when it is an org API key (the SQL checks its creator is an owner). */
+function apiKeyId(c: Ctx): string | null {
+  return c.cred.kind === "api_key" ? c.cred.id : null;
+}
+
+/** User tokens: the user's live role must be one of `roles`. API keys pass (their scopes decide). */
+function requireRole(c: Ctx, roles: string[]) {
+  if (c.cred.role !== null && !roles.includes(c.cred.role)) {
+    throw new ApiError(403, `this needs an organization ${roles.join(" or ")}`);
+  }
+}
+
+/**
+ * Team management is the owner's, as in the dashboard: a user token's user is
+ * an owner now, or an API key's creator is. Returns the acting user.
+ */
+async function requireOwner(c: Ctx): Promise<string | null> {
+  if (c.cred.kind !== "api_key") {
+    if (c.cred.role !== "owner") throw new ApiError(403, "only an organization owner can manage the team");
+    return c.cred.userId;
+  }
+  const ok = await rpc(c.sb, "_exos_api_key_owner_ok", { p_org_id: c.orgId, p_api_key_id: c.cred.id });
+  if (ok !== true) throw new ApiError(403, "only a key made by an organization owner can manage the team");
+  const { data } = await c.sb.from("exos_api_keys").select("created_by").eq("id", c.cred.id).maybeSingle();
+  return (data?.created_by as string | null) ?? null;
+}
+
+/** A member of the org who isn't an owner (owners are changed in the dashboard). */
+async function nonOwnerMember(c: Ctx, uid: string): Promise<string> {
+  const { data, error } = await c.sb.from("exos_org_memberships").select("user_id, role")
+    .eq("org_id", c.orgId).eq("user_id", uid).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "member not found");
+  if (data.role === "owner") throw new ApiError(409, "owners are changed in the dashboard, not through the API");
+  return uid;
+}
+
+/** An organizer reservation of this event, by its :token (404 otherwise). */
+async function ownReservation(c: Ctx, partnerId: string | null): Promise<string> {
+  const id = await ownEvent(c);
+  const token = tokenParam(c.params.token);
+  let q = c.sb.from("exos_partner_reservations").select("id").eq("org_id", c.orgId).eq("event_id", id).eq("token", token);
+  q = partnerId ? q.eq("partner_id", partnerId) : q.eq("channel", "organizer");
+  const { data, error } = await q.maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "reservation not found");
+  return token;
+}
+
+// -- The partner contract (/public/…) ------------------------------------------------
+
+async function partnerApi(req: Request, url: URL, path: string): Promise<Response> {
+  const noStore = { "cache-control": "no-store" };
+  const method = req.method.toUpperCase();
+  const match = matchRoute(method, path);
+  if (!match || match.route.auth !== "partner_key") {
+    const allow = allowedMethods(path);
+    if (allow.length) return json({ error: "method not allowed" }, 405, { ...noStore, allow: allow.join(", ") });
+    return json({ error: "not found", hint: "see /developers for the API reference" }, 404, noStore);
+  }
+  const key = presentedPartnerKey(url.searchParams, (h) => req.headers.get(h));
+  if (!key) return json({ error: "Missing shared_key." }, 401, noStore);
+  if (!PARTNER_KEY_RE.test(key)) return json({ error: "Invalid or revoked shared_key." }, 401, noStore);
+
+  const sb = service();
+  const { data: partner, error: authErr } = await sb.rpc("exos_dist_partner_auth", { p_key_hash: await sha256Hex(key) });
+  if (authErr) {
+    console.error("exos-api: partner key lookup failed", authErr.message);
+    return json({ error: "temporarily unavailable" }, 503, { ...noStore, "retry-after": "30" });
+  }
+  if (!partner) return json({ error: "Invalid or revoked shared_key." }, 401, noStore);
+  const p = partner as { id: string; org_id: string; partner_type: string; scopes: string[] };
+
+  const { data: allowed, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: `dist:${p.id}`, p_limit: RATE_LIMIT });
+  if (rlErr) return json({ error: "temporarily unavailable" }, 503, { ...noStore, "retry-after": "30" });
+  if (allowed === false) return rateLimited();
+
+  const needed = match.route.id === "public-create-comp" ? "comps" : "inventory";
+  if (!p.scopes.includes(needed)) {
+    return json({ error: `This key does not have the "${needed}" scope.` }, 403, noStore);
+  }
+
+  try {
+    const body = method === "POST" || method === "PUT" ? await readBody(req, MAX_BODY_BYTES, "rails") : {};
+    const out = await partnerHandle(match.route.id, sb, p, match.params, url.searchParams, body);
+    return out instanceof Created ? json(out.body, 201, noStore) : json(out, 200, noStore);
+  } catch (e) {
+    return errorResponse(e, "exos-api partner", noStore);
+  }
+}
+
+async function partnerHandle(
+  id: string, sb: SupabaseClient, p: { id: string; org_id: string }, params: Record<string, string>,
+  q: URLSearchParams, body: Record<string, unknown>,
+): Promise<unknown> {
+  const org = p.org_id;
+  const eventId = () => uuidOf(params.id, "Event not found.");
+  switch (id) {
+    case "public-list-ticket-types":
+      return await rpc(sb, "_exos_partner_ticket_types", { p_org_id: org, p_partner_id: p.id, p_event_id: eventId() });
+
+    case "public-create-reservation": {
+      const r = unwrapParams(body, "ticket_reservation");
+      if (r.resale_order_items_attributes !== undefined) {
+        throw new ApiError(422, "resale order items are not sold through this API");
+      }
+      return new Created(await rpc(sb, "_exos_partner_reserve", {
+        p_org_id: org, p_event_id: eventId(), p_partner_id: p.id, p_api_key_id: null,
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_comp: false, p_dry_run: false,
+      }));
+    }
+
+    case "public-get-reservation":
+      return await rpc(sb, "_exos_partner_reservation_get", {
+        p_org_id: org, p_partner_id: p.id, p_token: await partnerReservation(sb, p, eventId(), params.token),
+      });
+
+    case "public-update-reservation": {
+      const token = await partnerReservation(sb, p, eventId(), params.token);
+      const r = await rpc(sb, "_exos_partner_reservation_update", {
+        p_org_id: org, p_partner_id: p.id, p_token: token, p_attrs: reservationAttrs(unwrapParams(body, "ticket_reservation")),
+      }) as Record<string, unknown>;
+      if (r?.status === "expired") throw new ApiError(410, "This reservation expired; reserve again.", { reason: "expired" });
+      return r;
+    }
+
+    case "public-cancel-reservation": {
+      const token = await partnerReservation(sb, p, eventId(), params.token);
+      return await rpc(sb, "_exos_partner_reservation_cancel", { p_org_id: org, p_partner_id: p.id, p_token: token });
+    }
+
+    case "public-complete-reservation": {
+      const token = await partnerReservation(sb, p, eventId(), params.token);
+      const r = unwrapParams(body, "ticket_reservation");
+      const out = await rpc(sb, "_exos_partner_reservation_complete", {
+        p_org_id: org, p_partner_id: p.id, p_token: token, p_attrs: reservationAttrs(r), p_app_base: appBase(),
+      }) as Record<string, unknown>;
+      if (out.status === "expired") {
+        throw new ApiError(410, "This reservation expired; nothing was sold and the seats were released.", { reason: "expired" });
+      }
+      const order = withLinks(out.order as Record<string, unknown>, q.get("include_ticket_pdfs") ?? r.include_ticket_pdfs);
+      return out.fresh ? new Created(order) : order;
+    }
+
+    case "public-create-comp": {
+      const r = unwrapParams(body, "comp");
+      return new Created((await rpc(sb, "_exos_partner_comp", {
+        p_org_id: org, p_partner_id: p.id, p_event_id: eventId(),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_app_base: appBase(),
+      }) as Record<string, unknown>).order);
+    }
+
+    case "public-list-orders": {
+      const pg = opendatePage(q);
+      return await rpc(sb, "_exos_partner_orders", {
+        p_org_id: org, p_partner_id: p.id, p_filters: orderFilters(q), p_page: pg.page, p_per_page: pg.perPage,
+        p_app_base: appBase(),
+      });
+    }
+
+    case "public-get-order":
+      return await partnerOrder(sb, p, params.id);
+
+    case "public-list-ticket-links": {
+      const o = await partnerOrder(sb, p, params.id);
+      return { order_id: o.id, ticket_pdfs: ticketLinks(o) };
+    }
+
+    case "public-get-ticket-link": {
+      const o = await partnerOrder(sb, p, params.id);
+      const t = ticketLinks(o).find((x) => x.ticket_id === params.ticket);
+      if (!t) throw new ApiError(404, "Ticket not found.");
+      return t;
+    }
   }
   throw new ApiError(404, "not found");
+}
+
+/** The partner's reservation for this event (404 for any other). */
+async function partnerReservation(sb: SupabaseClient, p: { id: string; org_id: string }, eventId: string, raw: string): Promise<string> {
+  const token = tokenParam(raw);
+  const { data, error } = await sb.from("exos_partner_reservations").select("id")
+    .eq("org_id", p.org_id).eq("partner_id", p.id).eq("event_id", eventId).eq("token", token).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "Reservation not found.");
+  return token;
+}
+
+async function partnerOrder(sb: SupabaseClient, p: { id: string; org_id: string }, raw: string): Promise<Record<string, unknown>> {
+  const id = uuidOf(raw, "Order not found.");
+  const o = await rpc(sb, "_exos_partner_order", { p_org_id: p.org_id, p_partner_id: p.id, p_order_id: id, p_app_base: appBase() });
+  if (!o) throw new ApiError(404, "Order not found.");
+  return o as Record<string, unknown>;
+}
+
+/**
+ * Opendate's ticket_pdfs, Exos-style: each ticket's live link instead of a
+ * PDF (the door code is only on the live ticket; a PDF would be a static
+ * barcode anyone could copy).
+ */
+function ticketLinks(o: Record<string, unknown>) {
+  const tickets = (o.tickets ?? []) as { id: string; product_name?: string; delivery?: { url?: string | null } | null }[];
+  return tickets.map((t) => ({
+    ticket_id: t.id, product_name: t.product_name ?? null, url: t.delivery?.url ?? null,
+    content_type: null, content_base64: null,
+  }));
+}
+
+function withLinks(order: Record<string, unknown>, include: unknown): Record<string, unknown> {
+  const on = include === true || include === "true" || include === "1";
+  return on ? { ...order, ticket_pdfs: ticketLinks(order) } : order;
+}
+
+// -- Helpers -------------------------------------------------------------------------
+
+function rateLimited(): Response {
+  const retryAfter = Math.max(1, 60 - new Date().getUTCSeconds());
+  return json({ error: "rate limit exceeded", limit_per_minute: RATE_LIMIT }, 429, { "retry-after": String(retryAfter) });
+}
+
+function errorResponse(e: unknown, where: string, extra: Record<string, string> = {}): Response {
+  if (e instanceof PagingError || e instanceof ParamError) return json({ error: e.message }, 400, extra);
+  if (e instanceof ApiError) return json({ error: e.message, ...e.extra }, e.status, extra);
+  const err = e as { code?: unknown; message?: unknown } | null;
+  const code = typeof err?.code === "string" ? err.code : "";
+  if (code in RPC_STATUS) {
+    const body: Record<string, unknown> = { error: String(err?.message ?? "invalid request").slice(0, 300) };
+    if (code === "EXSLD") body.reason = "sold_out";
+    if (code === "EX422") body.reason = "not_available";
+    return json(body, RPC_STATUS[code], extra);
+  }
+  console.error(`${where} error:`, e);
+  return json({ error: "internal error" }, 500, extra);
+}
+
+function optString(v: unknown, name: string, max: number): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string" || v.trim().length > max) throw new ApiError(400, `${name} must be at most ${max} characters.`);
+  return v.trim();
+}
+
+function stringList(v: unknown, name: string): string[] {
+  if (!Array.isArray(v) || v.length > 20 || !v.every((x) => typeof x === "string")) {
+    throw new ApiError(400, `${name} must be a list of strings.`);
+  }
+  return v as string[];
+}
+
+function uuidOf(raw: string | undefined, notFound: string): string {
+  if (!raw || !UUID_RE.test(raw)) throw new ApiError(404, notFound);
+  return raw.toLowerCase();
+}
+
+function tokenParam(raw: string | undefined): string {
+  if (!raw || !RESERVATION_TOKEN_RE.test(raw)) throw new ApiError(404, "Reservation not found.");
+  return raw;
+}
+
+// deno-lint-ignore no-explicit-any
+function rowsWithIds(r: { data: any; error: unknown }): { data: unknown[] } {
+  if (r.error) throw r.error;
+  return { data: ((r.data ?? []) as Record<string, unknown>[]).map((x) => ({ id: x.token, ...x })) };
 }
 
 /** The :id path parameter as an event id; anything but a UUID is simply not found. */
@@ -308,11 +2274,215 @@ async function ownEvent(c: Ctx): Promise<string> {
   return id;
 }
 
+// -- Sales counts helpers ------------------------------------------------------
+
+type SalesWrite = SalesCountRow & { status: "created" | "updated" | "unchanged" };
+
+/** The row as the API shows it: `available` = capacity − sold when a capacity is known. */
+function salesView(r: SalesCountRow): Record<string, unknown> {
+  const { status: _status, ...rest } = r as SalesWrite;
+  return { ...rest, available: r.capacity === null || r.capacity === undefined ? null : Math.max(0, r.capacity - r.sold) };
+}
+
+async function salesRow(c: Ctx): Promise<SalesCountRow> {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, "sales count not found");
+  const { data, error } = await c.sb.from("exos_sales_counts").select(SALES_COLS)
+    .eq("org_id", c.orgId).eq("id", id).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "sales count not found");
+  return data as unknown as SalesCountRow;
+}
+
+/** The one writer (exos_api_sales_count_put re-checks the event / row is the key's org's). */
+async function put(c: Ctx, args: Record<string, unknown>): Promise<SalesWrite> {
+  const { data, error } = await c.sb.rpc("exos_api_sales_count_put", {
+    p_file_name: null, p_row_count: null, ...args, p_org_id: c.orgId,
+  });
+  if (error) throw error;
+  return data as SalesWrite;
+}
+
+function str(v: unknown, name: string): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "string") throw new ApiError(400, `${name} must be a string.`);
+  const t = v.trim();
+  return t === "" ? null : t;
+}
+
+function int(v: unknown, name: string): number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) throw new ApiError(400, `${name} must be a whole number, 0 or more.`);
+  return v;
+}
+
+/** gross_cents, else price_cents × sold (a unit price, as Opendate sends). */
+function grossOf(b: Record<string, unknown>, sold: number | null): number | null {
+  const g = int(b.gross_cents, "gross_cents");
+  if (g !== null) return g;
+  const p = int(b.price_cents, "price_cents");
+  return p !== null && sold !== null ? p * sold : null;
+}
+
+/** capacity, else sold + available. */
+function capacityOf(b: Record<string, unknown>, sold: number | null): number | null {
+  const cap = int(b.capacity, "capacity");
+  if (cap !== null) return cap;
+  const avail = int(b.available, "available");
+  return avail !== null && sold !== null ? sold + avail : null;
+}
+
+function tiersOf(b: Record<string, unknown>): unknown[] | null {
+  if (b.tiers === undefined || b.tiers === null) return null;
+  if (!Array.isArray(b.tiers) || b.tiers.length > 50) throw new ApiError(400, "tiers must be an array of at most 50 ticket types.");
+  return b.tiers;
+}
+
+/** The file as rows: `csv` (text), or `rows` (objects keyed by column, or arrays with the header first). */
+function importTable(b: Record<string, unknown>): string[][] {
+  if (typeof b.csv === "string") {
+    if (new TextEncoder().encode(b.csv).length > MAX_IMPORT_BYTES) throw new ApiError(413, "the CSV is larger than 2 MB.");
+    return parseCsv(b.csv);
+  }
+  if (Array.isArray(b.rows) && b.rows.length > 0) {
+    if (b.rows.length > 2001) throw new ApiError(400, "at most 2000 rows; split the file.");
+    const cellOf = (v: unknown) => (v === null || v === undefined || typeof v === "object" ? "" : String(v));
+    if (Array.isArray(b.rows[0])) return (b.rows as unknown[]).map((r) => (Array.isArray(r) ? r.map(cellOf) : []));
+    const header: string[] = [];
+    for (const r of b.rows) {
+      if (!r || typeof r !== "object" || Array.isArray(r)) throw new ApiError(400, "rows must all be objects, or all arrays.");
+      for (const k of Object.keys(r)) if (!header.includes(k)) header.push(k);
+      if (header.length > 100) throw new ApiError(400, "at most 100 columns.");
+    }
+    return [header, ...(b.rows as Record<string, unknown>[]).map((r) => header.map((k) => cellOf(r[k])))];
+  }
+  throw new ApiError(400, "send the file as csv (text) or rows.");
+}
+
+/** mapping: { field: "Column header" }; fields left out are guessed from the headers, null unmaps one. */
+function importMapping(raw: unknown, header: string[]): SalesMapping {
+  const out = suggestSalesMapping(header);
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new ApiError(400, "mapping must be an object of field: column header.");
+  for (const [field, col] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(SALES_FIELDS as readonly string[]).includes(field)) throw new ApiError(400, `mapping: unknown field "${field}".`);
+    if (col === null || col === "") {
+      delete out[field as SalesField];
+      continue;
+    }
+    if (typeof col !== "string") throw new ApiError(400, `mapping.${field} must be a column header.`);
+    const i = header.findIndex((h) => h.trim().toLowerCase() === col.trim().toLowerCase());
+    if (i < 0) throw new ApiError(400, `mapping.${field}: column "${col}" is not in the file.`);
+    out[field as SalesField] = i;
+  }
+  return out;
+}
+
+/**
+ * A JSON body, or a form-encoded one (artist[name]=…&artist[genres][]=…), at
+ * most `max` bytes, counted while streaming (_shared/api/body.ts). Form bodies
+ * are decoded from the capped text (never req.formData(), which reads without
+ * a cap). Any other declared Content-Type is a 415.
+ */
+async function readBody(req: Request, max: number, form: "flat" | "rails" = "flat"): Promise<Record<string, unknown>> {
+  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+  const isForm = ct.includes("application/x-www-form-urlencoded");
+  // The partner contract and the platform routes (#74) take any declared type
+  // and Rails-style nested forms, as on their branch.
+  if (form === "flat" && ct && !isForm && !ct.includes("json")) {
+    throw new ApiError(415, "send a JSON body (Content-Type: application/json) or a form-encoded one.");
+  }
+  const text = await readCapped(req, max);
+  if (text === null) throw new ApiError(413, "request body too large.");
+  if (!text.trim()) return {};
+  if (isForm) return form === "rails" ? railsFormBody(text) : formBody(text);
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    throw new ApiError(400, form === "rails" ? "the body must be JSON or form-encoded" : "the body is not valid JSON.");
+  }
+  // An array passes too: PUT /events/:id/lineup takes a bare list of slots.
+  if (!v || typeof v !== "object") throw new ApiError(400, "the body must be a JSON object.");
+  return v as Record<string, unknown>;
+}
+
+/** A Postgres error raised by a sales-count RPC as an HTTP answer with its own message. */
+function dbError(e: unknown): { status: number; message: string } | null {
+  if (!e || typeof e !== "object") return null;
+  const { code, message } = e as { code?: string; message?: string };
+  const msg = String(message ?? "").replace(/^sales counts:\s*/i, "");
+  if (code === "22023") return { status: 400, message: msg };
+  if (code === "P0002") return { status: 404, message: msg };
+  if (code === "23505") return { status: 409, message: msg };
+  return null;
+}
+
+function fanId(c: Ctx): string {
+  if (!UUID_RE.test(c.params.id)) throw new ApiError(404, "fan not found");
+  return c.params.id;
+}
+
+function tagId(c: Ctx): string {
+  if (!UUID_RE.test(c.params.id)) throw new ApiError(404, "tag not found");
+  return c.params.id;
+}
+
+function needScope(c: Ctx, scope: Scope): void {
+  if (!hasScope(c.key.scopes, scope)) throw new ScopeError(scope);
+}
+
+/** "event" / "Event" / Opendate's "CalendarEvent" / "Fan" / "Artist" → our type. */
+function normTaggable(raw: string): "event" | "fan" | "artist" | null {
+  const t = raw.trim().toLowerCase();
+  const alias: Record<string, string> = { calendarevent: "event", confirm: "event" };
+  const v = alias[t] ?? t;
+  return TAGGABLE.has(v) ? v as "event" | "fan" | "artist" : null;
+}
+
+function tagFields(body: Record<string, unknown>): Record<string, unknown> {
+  const b = unwrap(body, "tag");
+  const out: Record<string, unknown> = {};
+  for (const k of ["name", "color", "canonical_tag_id"]) if (k in b) out[k] = b[k];
+  if ("scope" in b) out.scope = b.scope === null || b.scope === "" ? null : normTaggable(String(b.scope)) ?? String(b.scope);
+  return out;
+}
+
+async function ownTaggedItem(c: Ctx): Promise<{ id: string; taggable_type: string } & Record<string, unknown>> {
+  if (!UUID_RE.test(c.params.id)) throw new ApiError(404, "tagged item not found");
+  const { data, error } = await c.sb.from("exos_tagged_items").select(TAGGED_COLS)
+    .eq("org_id", c.orgId).eq("id", c.params.id).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, "tagged item not found");
+  return data as unknown as { id: string; taggable_type: string } & Record<string, unknown>;
+}
+
+/** Ids of this type carrying the tag (an unknown tag matches nothing). */
+async function taggedIds(c: Ctx, type: string, tag: string): Promise<string[]> {
+  if (!UUID_RE.test(tag)) throw new ApiError(400, "tag_id must be a UUID.");
+  const { data, error } = await c.sb.from("exos_tagged_items").select("taggable_id")
+    .eq("org_id", c.orgId).eq("taggable_type", type).eq("tag_id", tag).limit(10000);
+  if (error) throw error;
+  const ids = ((data ?? []) as { taggable_id: string }[]).map((r) => r.taggable_id);
+  // PostgREST needs a non-empty list; the nil UUID matches nothing.
+  return ids.length ? ids : ["00000000-0000-0000-0000-000000000000"];
+}
+
 async function tiers(sb: SupabaseClient, eventId: string): Promise<unknown[]> {
-  const { data, error } = await sb.from("exos_ticket_tiers").select(TIER_COLS)
-    .eq("event_id", eventId).order("sort_order", { ascending: true });
+  const { data, error } = await withoutMissing(TIER_SEAT_COLS, (extra) =>
+    sb.from("exos_ticket_tiers").select(TIER_COLS + extra)
+      .eq("event_id", eventId).order("sort_order", { ascending: true }));
   if (error) throw error;
   return data ?? [];
+}
+
+/** Runs a query with optional extra columns, and again without them when the
+ *  database doesn't have them yet (undefined column). */
+// deno-lint-ignore no-explicit-any
+async function withoutMissing<R extends { error: any }>(extra: string, run: (extra: string) => PromiseLike<R>): Promise<R> {
+  const r = await run(extra);
+  if (r.error && (r.error.code === "42703" || r.error.code === "PGRST204")) return await run("");
+  return r;
 }
 
 function isoParam(q: URLSearchParams, name: string): string | null {
@@ -342,11 +2512,6 @@ function paged(r: { data: any; error: any; count: number | null }, page: Page) {
     throw r.error;
   }
   return pageEnvelope(r.data ?? [], page, r.count);
-}
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {

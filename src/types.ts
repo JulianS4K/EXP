@@ -364,8 +364,12 @@ export interface Event {
   noindex?: boolean;
   // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
   // organizer's own shop on another platform, linked from the buy button.
-  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma';
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh';
   externalTicketUrl?: string;
+  // Link-out (mig 20261029170000): listed by Exos, sold only on the
+  // organizer's own checkout. The source's status and display-only prices
+  // (exos_public_link_outs); undefined for every other event.
+  linkOut?: import('./lib/linkOut').PublicLinkOut;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

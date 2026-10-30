@@ -5,12 +5,14 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
+import ImportEventsPanel from '../components/ImportEventsPanel';
 import { canSeeMoney } from '../lib/settlement';
+import { soldElsewhereByEvent } from '../lib/salesCounts';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
@@ -19,6 +21,9 @@ export default function OrganizerDashboard() {
   const { orgs, activeOrg, activeRole } = useOrganization();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  // Tickets sold on other platforms per event (mig 20261030120000); empty for
+  // roles that can't read them. Shown beside our counts, never added.
+  const [elsewhere, setElsewhere] = useState<Map<string, number>>(new Map());
   // Search + filter state. Both apply client-side over the loaded
   // event set since we already cap at 200 and an organizer with
   // 200+ events still benefits from a sub-100ms filter loop. When
@@ -52,6 +57,7 @@ export default function OrganizerDashboard() {
           return true;
         });
         setEvents(deduped);
+        void soldElsewhereByEvent(deduped.map((ev) => ev.id)).then(setElsewhere).catch(() => setElsewhere(new Map()));
       } catch (err) {
         console.error('Failed to load events', err);
         setEvents([]);
@@ -137,9 +143,34 @@ export default function OrganizerDashboard() {
                 <Link to={`/orgs/${activeOrg.id}/flags`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                   <Flag className="w-4 h-4" /><span>Limit flags</span>
                 </Link>
+                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/calendar`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Calendar className="w-4 h-4" /><span>Booking calendar</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/offers`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Handshake className="w-4 h-4" /><span>Offers</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/finance`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <PieChart className="w-4 h-4" /><span>Finance & P&L</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/fans`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Heart className="w-4 h-4" /><span>Fans</span>
+                  </Link>
+                )}
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/payouts`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Landmark className="w-4 h-4" /><span>Payouts</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/channels`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Share2 className="w-4 h-4" /><span>Channels</span>
                   </Link>
                 )}
               </>
@@ -162,6 +193,9 @@ export default function OrganizerDashboard() {
             </Link>
           </div>
         </div>
+
+        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170000). */}
+        {activeOrg && (isAdmin || activeRole === 'owner' || activeRole === 'manager') && <ImportEventsPanel orgId={activeOrg.id} />}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
@@ -289,7 +323,7 @@ export default function OrganizerDashboard() {
                       <p className="text-[11px] text-slate-500 truncate">{formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric' })} · {event.location}</p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <EventStatusPill status={event.status} />
-                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event))}</span>
+                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold{elsewhere.get(event.id) ? ` +${elsewhere.get(event.id)} elsewhere` : ''} · {formatCurrency(eventGrossSales(event))}</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
@@ -350,6 +384,9 @@ export default function OrganizerDashboard() {
                            <div className="bg-[#026cdf] h-full" style={{ width: `${event.totalTickets > 0 ? Math.min(100, (event.ticketsSold / event.totalTickets) * 100) : 0}%` }}></div>
                         </div>
                         <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold}{event.totalTickets > 0 ? ` / ${event.totalTickets}` : ''} SOLD</p>
+                        {(elsewhere.get(event.id) ?? 0) > 0 && (
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">+{elsewhere.get(event.id)} sold elsewhere</p>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event))}</p>

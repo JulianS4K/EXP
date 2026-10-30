@@ -28,7 +28,9 @@ import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import ReferralProgress from '../components/ReferralProgress';
 import TicketOnlineAccess from '../components/TicketOnlineAccess';
+import TicketMatchedGroup from '../components/TicketMatchedGroup';
 import { useT } from '../context/LanguageContext';
+import TicketSeats from '../components/seating/TicketSeats';
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -305,6 +307,7 @@ export default function TicketDetail() {
                     <div>
                       <p className="disp text-lg tracking-wide leading-none">PASS {currentIndex + 1} OF {tickets.length}</p>
                       <p className="type text-[11px] uppercase tracking-[0.2em] mt-1 opacity-60">{currentTicket.tierName}</p>
+                      <TicketSeats ticketIds={[currentTicket.id]} className="mt-1 text-black/80" />
                     </div>
                     <span className="w-2 h-2 bg-black rounded-full animate-pulse"></span>
                  </div>
@@ -512,6 +515,12 @@ export default function TicketDetail() {
                  {(currentTicket.status === 'active' || currentTicket.status === 'used')
                    && !(currentTicket as any).pendingTransferId && (
                    <TicketOnlineAccess eventId={event.id} format={event.format} whatToBring={event.whatToBring} />
+                 )}
+
+                 {/* Matched seats (mig 20261031210000): the holder's group, revealed before the event. */}
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used')
+                   && !(currentTicket as any).pendingTransferId && (
+                   <TicketMatchedGroup ticketId={currentTicket.id} />
                  )}
 
                  <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />

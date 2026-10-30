@@ -64,11 +64,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   };
   const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
 
-  // 1. Pending-but-maybe-paid: ask Stripe the source of truth.
+  // 1. Pending-but-maybe-paid: ask Stripe the source of truth. PayPal
+  //    sessions (pp_…, mig 20261031220000) are exos-paypal's reconcile's.
   const { data: pending } = await sb
     .from("exos_checkout_sessions")
     .select("session_id")
     .eq("status", "pending")
+    .not("session_id", "like", "pp\\_%")
     .lt("created_at", cutoff)
     .order("created_at", { ascending: false })
     .limit(BATCH);
@@ -124,6 +126,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .from("exos_checkout_sessions")
     .select("session_id, failure_reason")
     .eq("status", "failed")
+    .not("session_id", "like", "pp\\_%")
     .is("reconcile_done_at", null)
     .lt("created_at", cutoff)
     .or(`reconcile_next_at.is.null,reconcile_next_at.lte.${new Date().toISOString()}`)

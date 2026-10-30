@@ -124,15 +124,42 @@ BEGIN
        -- public by design
        'exos_event_is_published', 'exos_public_promoter', 'exos_public_table_tiers',
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
+       -- matched seats: group sizes + quiz options of published events, no people (mig 20261031210000)
+       'exos_match_public',
        -- counts a promo-link visit, answers nothing (mig 20261016110000)
        'exos_promo_link_hit',
+       -- total sold on other platforms, published events only (mig 20261030120000)
+       'exos_public_sales_count_total',
+       -- a published event's seat layout and per-seat availability only (mig 20261030140000)
+       'exos_public_event_seating', 'exos_public_event_seats',
+       -- published series / collections / timed-entry slots only (mig 20261030150000)
+       'exos_public_series', 'exos_public_org_series', 'exos_public_collection',
+       'exos_public_timed_entry', 'exos_public_event_slots',
+       -- published events' lineups for the event page / widget (mig 20261030110000)
+       'exos_public_lineups',
+       -- 64-hex link tokens: the agent's offer page, the settlement contacts'
+       -- page, the ticket-count opt-out (migs 20261031100000 / 20261031100500)
+       'exos_offer_public', 'exos_offer_respond', 'exos_settlement_public', 'exos_ticket_counts_optout',
+       -- a partner ticket's live link: 256-bit link key (mig 20261031130000)
+       'exos_ticket_link_view',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
+       -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
+       'exos_public_tier_available',
+       -- the public event-sales view calls it as the reader: published events'
+       -- last call and where to buy, nothing else (mig 20261029100000)
+       'exos_public_event_sale',
+       -- the public link-out view calls it as the reader: published link-out
+       -- events' checkout URL, status and display prices (mig 20261029170000)
+       'exos_public_link_out',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',
        'exos_promoter_limit_flags', 'exos_promoter_note_limit_flag', 'exos_promoter_add_guest',
-       'exos_promoter_remove_guest', 'exos_promoter_set_guest_access_needs', 'exos_promoter_set_socials');
+       'exos_promoter_remove_guest', 'exos_promoter_set_guest_access_needs', 'exos_promoter_set_socials',
+       -- signup forms (mig 20261031120000): an active form's public text, and
+       -- the 64-hex confirm / unsubscribe tokens; none returns fan data
+       'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

@@ -1,0 +1,458 @@
+{
+  "file": "distribution-partners",
+  "name": "Distribution partners",
+  "order": 50,
+  "description": "Partner keys for brokers and marketplaces that sell your tickets through the partner contract (Public: Partner sales), and the per-ticket-type switch that decides what they may sell. Minting, changing and revoking keys needs `org:admin` from an owner: an owner's own token, or an API key an owner made. docs/partner-sales.md.",
+  "endpoints": [
+    {
+      "id": "list-distribution-partners",
+      "method": "GET",
+      "path": "/v1/distribution-partners",
+      "summary": "List partner keys",
+      "description": "Every partner key of the organization, revoked ones included, oldest first. The key itself is never returned again; key_prefix identifies it.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+                "label": "StubHub",
+                "partner_type": "stubhub",
+                "key_prefix": "dk_live_4f2a9c1e",
+                "scopes": [
+                  "inventory"
+                ],
+                "active": true,
+                "created_at": "2026-10-31T13:00:00+00:00",
+                "last_used_at": null,
+                "revoked_at": null
+              }
+            ],
+            "partner_types": [
+              "automatiq",
+              "stubhub",
+              "vivid",
+              "seatgeek",
+              "ticketnetwork",
+              "victorylive",
+              "other"
+            ],
+            "scopes": [
+              "inventory",
+              "comps"
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-distribution-partner",
+      "method": "POST",
+      "path": "/v1/distribution-partners",
+      "summary": "Mint a partner key",
+      "description": "At most 25 live keys per organization. Only the key's SHA-256 and a 16-character prefix are stored.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A name for the partner (1-80 characters; default the type).",
+          "example": "StubHub"
+        },
+        {
+          "name": "partner_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Which partner.",
+          "example": "stubhub",
+          "enum": [
+            "automatiq",
+            "stubhub",
+            "vivid",
+            "seatgeek",
+            "ticketnetwork",
+            "victorylive",
+            "other"
+          ]
+        },
+        {
+          "name": "scopes",
+          "location": "body",
+          "type": "array of string",
+          "required": false,
+          "description": "inventory (ticket types, reservations, orders) and / or comps. Default [\"inventory\"].",
+          "example": [
+            "inventory"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created. `key` is shown this once: hand it to the partner.",
+          "example": {
+            "data": {
+              "id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+              "label": "StubHub",
+              "partner_type": "stubhub",
+              "key_prefix": "dk_live_4f2a9c1e",
+              "scopes": [
+                "inventory"
+              ],
+              "active": true,
+              "created_at": "2026-10-31T13:00:00+00:00",
+              "last_used_at": null,
+              "revoked_at": null,
+              "key": "dk_live_4f2a9c1e…"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an owner's credential.",
+          "example": {
+            "error": "only a key made by an organization owner can manage partner keys"
+          }
+        },
+        {
+          "status": 409,
+          "description": "25 live keys already.",
+          "example": {
+            "error": "at most 25 partner keys per organization; revoke one first"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ],
+      "request_example": {
+        "label": "StubHub",
+        "partner_type": "stubhub",
+        "scopes": [
+          "inventory"
+        ]
+      }
+    },
+    {
+      "id": "update-distribution-partner",
+      "method": "PATCH",
+      "path": "/v1/distribution-partners/:id",
+      "summary": "Change a partner key",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The partner id.",
+          "example": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "New name.",
+          "example": "StubHub (US)"
+        },
+        {
+          "name": "active",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "false pauses the key (requests answer 401) without revoking it.",
+          "example": false
+        },
+        {
+          "name": "scopes",
+          "location": "body",
+          "type": "array of string",
+          "required": false,
+          "description": "inventory and / or comps.",
+          "example": [
+            "inventory",
+            "comps"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+              "label": "StubHub",
+              "partner_type": "stubhub",
+              "key_prefix": "dk_live_4f2a9c1e",
+              "scopes": [
+                "inventory"
+              ],
+              "active": false,
+              "created_at": "2026-10-31T13:00:00+00:00",
+              "last_used_at": null,
+              "revoked_at": null
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a partner of this organization.",
+          "example": {
+            "error": "partner not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The key was revoked.",
+          "example": {
+            "error": "this partner key was revoked; mint a new one"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "revoke-distribution-partner",
+      "method": "DELETE",
+      "path": "/v1/distribution-partners/:id",
+      "summary": "Revoke a partner key",
+      "description": "At once: the key stops working and its open reservations are cancelled (their seats go back on sale). Its completed orders stay.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The partner id.",
+          "example": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+              "label": "StubHub",
+              "partner_type": "stubhub",
+              "key_prefix": "dk_live_4f2a9c1e",
+              "scopes": [
+                "inventory"
+              ],
+              "active": false,
+              "created_at": "2026-10-31T13:00:00+00:00",
+              "last_used_at": null,
+              "revoked_at": "2026-11-02T09:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a partner of this organization.",
+          "example": {
+            "error": "partner not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-event-distribution",
+      "method": "GET",
+      "path": "/v1/events/:id/distribution",
+      "summary": "Ticket types partners may sell",
+      "description": "Per ticket type: whether partners may sell it (enabled), which partners (an empty partner_ids means every partner of the organization) and whether it is paused. Off unless switched on; table ticket types are never sold through partners.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "table": false,
+                "enabled": true,
+                "partner_ids": [],
+                "paused": false
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-event-distribution",
+      "method": "PUT",
+      "path": "/v1/events/:id/distribution",
+      "summary": "Switch ticket types on for partners",
+      "description": "Owners and managers (a user token of another role is refused with 403 even with events:write).",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "tiers",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "[{ tier_id, enabled, partner_ids?, paused? }]; ticket types not listed keep their setting.",
+          "example": [
+            {
+              "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "enabled": true,
+              "partner_ids": [],
+              "paused": false
+            }
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "table": false,
+                "enabled": true,
+                "partner_ids": [],
+                "paused": false
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "A tier of another event, a table type, or an unknown partner id.",
+          "example": {
+            "error": "partner b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918 is not a partner of this organization"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "tiers": [
+          {
+            "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "enabled": true,
+            "partner_ids": [
+              "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918"
+            ],
+            "paused": false
+          }
+        ]
+      }
+    }
+  ]
+}

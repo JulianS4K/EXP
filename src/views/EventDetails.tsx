@@ -31,6 +31,8 @@ import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
+import EventArtistLineup from '../components/EventArtistLineup';
+import { getPublicLineups, jsonLdPerformers, type JsonLdPerformer, type LineupSlot } from '../lib/artists';
 import { captureAttribution, type Attribution } from '../lib/attribution';
 import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
 import { getVoucherTier } from '../lib/vouchers';
@@ -44,14 +46,28 @@ import WaitlistCTA from '../components/WaitlistCTA';
 import SaveEventButton from '../components/SaveEventButton';
 import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
+import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from '../lib/marketplace/lastCall';
+import LinkOutBuyCard from '../components/LinkOutBuyCard';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
+import CheckoutExtras, { type CheckoutExtrasValue } from '../components/CheckoutExtras';
+import MemberPassRedeem from '../components/MemberPassRedeem';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
 import { paymentsEnabled } from '../lib/payments';
+import { eventTakesPayPal, stashPayPalCart, venmoPossible } from '../lib/paypal';
 import SubscribeCalendar from '../components/SubscribeCalendar';
 import { venueFeedLinks, venueKey } from '../lib/calendar';
+import SeatPicker from '../components/seating/SeatPicker';
+import { getSeatedTierIds } from '../lib/seatingApi';
+// Timed entry + series dates (mig 20261030150000).
+import SlotPicker from '../components/SlotPicker';
+import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } from '../lib/seriesTimedApi';
+// Matched seats (mig 20261031210000): the optional quiz before checkout.
+import MatchedQuiz from '../components/MatchedQuiz';
+import { getPublicMatchedTiers, saveIntake, type PublicMatchedTier } from '../lib/matchedSeatsApi';
+import { answersBody, EMPTY_ANSWERS, type QuizAnswers } from '../lib/matchedSeats';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -66,22 +82,65 @@ export default function EventDetails() {
   const { toast } = useToast();
   const [event, setEvent] = useState<Event | null>(null);
   const [org, setOrg] = useState<Organization | null>(null);
+  // Structured lineup (mig 20261030110000); empty: the free-text performers show.
+  const [lineup, setLineup] = useState<LineupSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  // "Pay with Venmo / PayPal" (mig 20261031220000): only where the org takes it.
+  const [takesPayPal, setTakesPayPal] = useState(false);
   // Signed-out paid checkout: ask for an email instead of an account.
   const [guestOpen, setGuestOpen] = useState(false);
   const [guestFree, setGuestFree] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
+  // Timed entry: the event's slot config (null = not timed) and the chosen slot.
+  const [timed, setTimed] = useState<PublicTimedEntry | null>(null);
+  const [slotId, setSlotId] = useState<string | null>(null);
+  // Series: this event's other published dates.
+  const [moreDates, setMoreDates] = useState<{ id: string; name: string; startsAt: string }[]>([]);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    getPublicTimedEntry(event.id).then((c) => { if (live) setTimed(c); })
+      .catch((err) => console.warn('timed entry unavailable:', err));
+    if (event.seriesId) {
+      listPublicSeriesDates(event.seriesId, event.id).then((d) => { if (live) setMoreDates(d); })
+        .catch((err) => console.warn('series dates unavailable:', err));
+    }
+    return () => { live = false; };
+  }, [event?.id, event?.seriesId]);
+  const slotTier = !!timed && !!selectedTierId && timed.tierIds.includes(selectedTierId);
+  // Matched seats: which tiers are matched, and the buyer's quiz answers.
+  const [matchedTiers, setMatchedTiers] = useState<PublicMatchedTier[]>([]);
+  const [quiz, setQuiz] = useState<QuizAnswers>(EMPTY_ANSWERS);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    getPublicMatchedTiers(event.id).then((m) => { if (live) setMatchedTiers(m); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [event?.id]);
   // Phone buy bar: shown while the buy card is off screen.
   const buyCardRef = useRef<HTMLDivElement>(null);
   const [buyInView, setBuyInView] = useState(false);
   // The literal code that's currently applied — needed so we can pass it
   // through to the Stripe metadata and the post-purchase usage increment.
   const [quantity, setQuantity] = useState(1);
+  // Reserved seating (mig 20261030140000): a seated tier is bought by picking
+  // seats; the quantity is the number of seats picked.
+  const [seatedTierIds, setSeatedTierIds] = useState<string[]>([]);
+  const [seatSel, setSeatSel] = useState<string[]>([]);
+  const [seatReload, setSeatReload] = useState(0);
+  useEffect(() => {
+    if (!id) return undefined;
+    let live = true;
+    getSeatedTierIds(id).then((ids) => { if (live) setSeatedTierIds(ids); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [id]);
   // Optional per-ticket attendee names, index-aligned with quantity. Stamped
   // onto the minted tickets after a free claim (best-effort, owner RPC).
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
+  // Gift card + add-a-donation (mig 20261030130000).
+  const [extras, setExtras] = useState<CheckoutExtrasValue>({});
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
   // A hidden tier the applied voucher unlocks. The public tier list never
   // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
@@ -110,6 +169,15 @@ export default function EventDetails() {
     if (notes && notes.length > 0) toast({ kind: 'info', message: notes.join(' ') });
   }, [location.state]);
   const [userTicketCount, setUserTicketCount] = useState(0);
+  // Last call (mig 20261029100000): near sell-out only the event's primary
+  // checkout sells; when that isn't Exos, send buyers there.
+  const [sale, setSale] = useState<PublicSale | null>(null);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    fetchPublicSale(event.id).then((s) => { if (live) setSale(s); }, () => undefined);
+    return () => { live = false; };
+  }, [event?.id]);
   // Per-tier sold/capacity, sourced from the events/{id}/tierSales sub-
   // collection. Buyers can no longer mutate the embedded ticketTiers array
   // (the rule lockdown that closed the price-rewrite vulnerability) so the
@@ -143,48 +211,60 @@ export default function EventDetails() {
         // SEO: per-event meta tags (Open Graph, Twitter Card,
         // Schema.org Event). Crawlers that execute JS pick this up;
         // social-card previewers fall back to the index.html defaults.
-        try {
-          const startIso = data.date?.toDate ? data.date.toDate().toISOString() : undefined;
-          const endIso = data.timing?.endTime?.toDate?.()?.toISOString();
-          const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
-          applyMeta({
-            title: data.title,
-            // The organizer's one-line summary when set (mig 20260929120000).
-            description: (data.summary || data.description || '').slice(0, 200),
-            imageUrl: data.image || undefined,
-            canonicalUrl: publicUrl(`event/${data.id}`),
-            // Organizer's "hide from search engines" (mig 20261005090000).
-            noindex: data.noindex === true,
-            event: startIso
-              ? {
-                  name: data.title,
-                  startDate: startIso,
-                  endDate: endIso,
-                  location: {
-                    name: data.location,
-                    streetAddress: data.address?.street,
-                    city: data.address?.city,
-                    region: data.address?.region,
-                    country: data.address?.country,
-                    postal: data.address?.postal,
-                  },
-                  image: data.image,
-                  description: (data.summary || data.description || '').slice(0, 200),
-                  format: data.format,
-                  pageUrl: publicUrl(`event/${data.id}`),
-                  offers: {
-                    price: data.price,
-                    currency: data.currency || 'USD',
-                    availability: remaining > 0 ? 'InStock' : 'SoldOut',
-                    url: publicUrl(`event/${data.id}`),
-                  },
-                }
-              : undefined,
-          });
-        } catch (err) {
-          // Meta-tag failures are non-fatal — they don't block render.
-          console.warn('Meta apply failed:', err);
-        }
+        const applyEventMeta = (performers: JsonLdPerformer[]) => {
+          try {
+            const startIso = data.date?.toDate ? data.date.toDate().toISOString() : undefined;
+            const endIso = data.timing?.endTime?.toDate?.()?.toISOString();
+            const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
+            applyMeta({
+              title: data.title,
+              // The organizer's one-line summary when set (mig 20260929120000).
+              description: (data.summary || data.description || '').slice(0, 200),
+              imageUrl: data.image || undefined,
+              canonicalUrl: publicUrl(`event/${data.id}`),
+              // Organizer's "hide from search engines" (mig 20261005090000).
+              noindex: data.noindex === true,
+              event: startIso
+                ? {
+                    name: data.title,
+                    startDate: startIso,
+                    endDate: endIso,
+                    location: {
+                      name: data.location,
+                      streetAddress: data.address?.street,
+                      city: data.address?.city,
+                      region: data.address?.region,
+                      country: data.address?.country,
+                      postal: data.address?.postal,
+                    },
+                    image: data.image,
+                    description: (data.summary || data.description || '').slice(0, 200),
+                    format: data.format,
+                    pageUrl: publicUrl(`event/${data.id}`),
+                    performers,
+                    offers: {
+                      price: data.price,
+                      currency: data.currency || 'USD',
+                      availability: remaining > 0 ? 'InStock' : 'SoldOut',
+                      url: publicUrl(`event/${data.id}`),
+                    },
+                  }
+                : undefined,
+            });
+          } catch (err) {
+            // Meta-tag failures are non-fatal — they don't block render.
+            console.warn('Meta apply failed:', err);
+          }
+        };
+        // Free-text names first; the lineup (with Spotify sameAs) once it loads.
+        applyEventMeta(jsonLdPerformers(null, data.performers));
+        setLineup([]);
+        getPublicLineups([data.id]).then((m) => {
+          if (!alive) return;
+          const l = m[data.id] ?? [];
+          setLineup(l);
+          if (l.length) applyEventMeta(jsonLdPerformers(l));
+        });
         // Marketing: load the hosting org's pixels (consent-gated) and fire a
         // ViewContent for this event. The public event row carries only
         // orgId, so fetch the public org for its marketing config.
@@ -229,6 +309,16 @@ export default function EventDetails() {
   });
 
   const selectedTier = visibleTiers.find((t) => t.id === selectedTierId);
+  const seatedSelected = !!selectedTier && seatedTierIds.includes(selectedTier.id);
+  useEffect(() => {
+    if (seatedSelected) setQuantity(Math.max(1, seatSel.length));
+  }, [seatedSelected, seatSel.length]);
+  // Checkout said a seat was taken: reload availability, drop the selection.
+  const seatTaken = (err: any) => {
+    if (!/taken|seat/i.test(String(err?.message ?? ''))) return;
+    setSeatSel([]);
+    setSeatReload((n) => n + 1);
+  };
 
   /** Returns null if the tier is currently on sale, otherwise an
    *  explanation string ("Sales open at..." / "Sales ended"). */
@@ -308,7 +398,7 @@ export default function EventDetails() {
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   // Sold on the organizer's own Eventbrite / pretix / hi.events / Luma shop (mig 20261016100000).
   const externalShop = event?.ticketBackend && event.ticketBackend !== 'exos' && event.externalTicketUrl
-    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma' } as const)[event.ticketBackend] }
+    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma', posh: 'Posh' } as const)[event.ticketBackend] }
     : null;
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
@@ -337,12 +427,14 @@ export default function EventDetails() {
         tierId,
         quantity,
         guestEmail,
+        seatIds: seatedSelected ? seatSel : undefined,
         successUrl: publicUrl('my-tickets'),
         cancelUrl: publicUrl(`event/${event.id}`),
         voucherCode: voucher?.code,
         attribution,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
+        slotId: slotTier ? slotId : null,
       });
       clearPrefill(event.id);
       setGuestOpen(false);
@@ -353,10 +445,35 @@ export default function EventDetails() {
       });
     } catch (err: any) {
       console.error('Guest free claim failed:', err);
+      seatTaken(err);
       toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
     } finally {
       setPurchasing(false);
     }
+  };
+
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let alive = true;
+    eventTakesPayPal(event.id).then((ok) => { if (alive) setTakesPayPal(ok); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [event?.id]);
+
+  // PayPal / Venmo: its own page (no Stripe there, docs/pci.md). The server
+  // prices the order exactly as Stripe checkout would.
+  const goToPayPal = () => {
+    if (!event) return;
+    const tier = selectedTier ?? allTiers[0];
+    if (!tier?.id) return;
+    stashPayPalCart({
+      eventId: event.id, tierId: tier.id, quantity, title: event.title,
+      currency: (event.currency || 'USD').toLowerCase(),
+      addons: addonSel.items, voucherCode: voucher?.code, attribution,
+      displayCents: Math.round((priceToDisplay * quantity) * 100) + addonSel.totalCents,
+      at: Date.now(),
+    });
+    // A full page load: the PayPal page has its own CSP (PayPal in, Stripe out).
+    window.location.assign(publicUrl('pay/paypal'));
   };
 
   // Paid checkout (signed in, or as a guest with just an email).
@@ -373,11 +490,15 @@ export default function EventDetails() {
         successUrl: publicUrl(`my-tickets?checkout=success${guestEmail ? '&guest=1' : ''}&session_id={CHECKOUT_SESSION_ID}`),
         cancelUrl: publicUrl(`event/${event.id}`),
         addons: addonSel.items,
+        seatIds: seatedSelected ? seatSel : undefined,
         voucherCode: voucher?.code,
         attribution,
         guestEmail,
+        giftCardCode: extras.giftCardCode,
+        donation: extras.donation,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
+        slotId: slotTier ? slotId : null,
       });
       clearPrefill(event.id);
       if (event.orgId) {
@@ -402,6 +523,7 @@ export default function EventDetails() {
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
       console.error('Checkout failed:', err);
+      seatTaken(err);
       toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
       setPurchasing(false);
     }
@@ -409,9 +531,18 @@ export default function EventDetails() {
 
   const handlePurchase = async () => {
     if (!event) return;
+    if (seatedSelected && seatSel.length === 0) {
+      toast({ kind: 'info', message: 'Pick your seats on the map first.' });
+      return;
+    }
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
     if (paidNotOnSale) {
       toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
+      return;
+    }
+    // Timed entry: a slot first (mig 20261030150000).
+    if (slotTier && !slotId) {
+      toast({ kind: 'info', message: 'Pick a date and time slot first.' });
       return;
     }
     if (!user) {
@@ -441,6 +572,17 @@ export default function EventDetails() {
       toast({ kind: 'error', message: selectedTierId ? 'That ticket type is no longer available. Pick another.' : 'No ticket tier available for this event yet.' });
       return;
     }
+    // Matched seats: save the optional quiz first (per account and tier; copied
+    // onto the tickets when groups form). Nothing answered = nothing saved.
+    const matchedTier = matchedTiers.find((m) => m.tierId === tier.id);
+    if (matchedTier?.quizEnabled && JSON.stringify(quiz) !== JSON.stringify(EMPTY_ANSWERS)) {
+      try {
+        await saveIntake(tier.id, answersBody(quiz, { tags: matchedTier.quizTags, languages: matchedTier.quizLanguages }));
+      } catch (err: any) {
+        toast({ kind: 'error', message: err?.message || 'Check your answers.' });
+        return;
+      }
+    }
     const unitPrice = tier.price ?? event.price ?? 0;
     // A purchase needs Stripe checkout whenever there's anything PRICED — a paid
     // tier OR paid add-ons. The free-claim path (exos_claim_free_tickets /
@@ -449,14 +591,23 @@ export default function EventDetails() {
     // discount is redeemed server-side there, not via the free path). We
     // therefore route on the nominal prices, never on a discounted total —
     // discount codes are org-secret + not yet server-validated.
-    const needsCheckout = unitPrice > 0 || addonSel.totalCents > 0;
+    // Reserved seating: free seats are issued by exos-checkout too (the free
+    // claim can't hold seats).
+    const needsCheckout = unitPrice > 0 || addonSel.totalCents > 0 || seatedSelected;
 
     if (needsCheckout) {
-      if (!stripeEnabled) {
+      if (!stripeEnabled && !(seatedSelected && unitPrice === 0 && addonSel.totalCents === 0)) {
         toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
         return;
       }
       await goToCheckout(tier.id);
+      return;
+    }
+
+    // A free timed ticket: issued through exos-checkout's free path, which
+    // takes the slot (the free-claim RPC can't).
+    if (slotTier) {
+      await claimFreeGuest(tier.id, user.email ?? '');
       return;
     }
 
@@ -705,12 +856,15 @@ export default function EventDetails() {
   // published-only and getEventForEdit is RLS-gated to org staff, so a draft in
   // state means the viewer is authorized — no extra client gate needed.
 
-  const soldOut = selectedTier
+  const elsewhere = sellsElsewhere(sale);
+  const soldOut = elsewhere || (selectedTier
     ? (() => {
         const t = liveTier(selectedTier.id, selectedTier.capacity);
         return t.sold >= t.capacity;
       })()
-    : event.ticketsSold >= event.totalTickets;
+    : event.ticketsSold >= event.totalTickets);
+  // A voucher can't bypass a last call that sells elsewhere (exos-checkout refuses it too).
+  const canBypass = !elsewhere && !!voucher?.canBypass;
 
   const primaryStyle = event.branding?.primaryColor ? { backgroundColor: event.branding.primaryColor } : {};
   const accentStyle = event.branding?.accentColor ? { color: event.branding.accentColor } : {};
@@ -882,7 +1036,9 @@ export default function EventDetails() {
                   headliner (slightly larger). The block sits above
                   genres because at a music event, performer names
                   are usually what the buyer cares about most. */}
-              {event.performers && event.performers.length > 0 ? (
+              {lineup.length > 0 ? (
+                <EventArtistLineup lineup={lineup} timezone={event.timezone} />
+              ) : event.performers && event.performers.length > 0 ? (
                 <div className="p-7 bg-[#111] sm:col-span-2">
                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">performers</p>
                   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
@@ -961,6 +1117,11 @@ export default function EventDetails() {
           <div className="lg:col-span-1">
             <div id="buy" ref={buyCardRef} className="lg:sticky top-24 bg-[#111] border border-white/10 overflow-hidden scroll-mt-24">
               <div className="p-7">
+                {/* Link-out (mig 20261029170000): sold only on the organizer's checkout. */}
+                {event.linkOut ? (
+                  <LinkOutBuyCard event={event} linkOut={event.linkOut}
+                    onBuy={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })} />
+                ) : (<>
                 <div className="mb-8">
                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
                     {/* The order total: tickets plus add-ons (what Stripe will charge). */}
@@ -1066,7 +1227,65 @@ export default function EventDetails() {
                   </div>
                 )}
 
-                {(!soldOut || voucher?.canBypass) && (
+                {/* Matched seats: how it works + the optional quiz (signed in; guests answer on their ticket). */}
+                {(() => {
+                  const m = matchedTiers.find((x) => x.tierId === (selectedTierId ?? allTiers[0]?.id));
+                  if (!m) return null;
+                  return (
+                    <div className="mb-8 border border-white/10 p-4 space-y-3">
+                      <p className="type text-sm text-white/80">
+                        A matched seat: you'll be grouped with {m.groupMin === m.groupMax ? m.groupMax : `${m.groupMin}–${m.groupMax}`} people
+                        {m.spotCount > 1 ? ` at one of ${m.spotCount} spots` : ''}. Tickets in one order sit together.
+                        Where and with whom is revealed {m.revealAt
+                          ? formatInTz(new Date(m.revealAt), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                          : 'before the event'}.
+                      </p>
+                      {m.quizEnabled && m.status === 'open' && (user
+                        ? <MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} />
+                        : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
+                    </div>
+                  );
+                })()}
+
+
+                {/* Timed entry: date + time slot for the chosen ticket type. */}
+                {slotTier && timed && selectedTierId && (
+                  <SlotPicker eventId={event.id} config={timed} tierId={selectedTierId} quantity={seatedSelected ? Math.max(seatSel.length, 1) : quantity}
+                    value={slotId} onChange={setSlotId} />
+                )}
+
+                {/* Series: the other dates of this show. */}
+                {moreDates.length > 0 && (
+                  <div className="mb-8">
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">More dates</p>
+                    <div className="flex flex-wrap gap-2">
+                      {moreDates.slice(0, 8).map((d) => (
+                        <button key={d.id} type="button" onClick={() => navigate(`/event/${d.id}`)}
+                          className="px-3 py-1.5 border border-white/10 hover:border-white/40 text-xs text-white">
+                          {formatInTz(new Date(d.startsAt), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {seatedSelected && (
+                <div className="mb-8">
+                  <SeatPicker
+                    eventId={event.id}
+                    tiers={visibleTiers.filter((x) => seatedTierIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name, price: buyerTierPrice(x) }))}
+                    selectedTierId={selectedTierId}
+                    onSelectTier={(tid) => setSelectedTierId(tid)}
+                    maxPerOrder={Math.min(maxPerOrder, 10)}
+                    formatPrice={(n) => formatCurrency(n, event.currency)}
+                    selection={seatSel}
+                    onSelectionChange={(ids) => setSeatSel(ids)}
+                    reloadKey={seatReload}
+                  />
+                </div>
+                )}
+
+                {(!soldOut || canBypass) && !seatedSelected && (
                 <div className="mb-8">
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
@@ -1160,7 +1379,7 @@ export default function EventDetails() {
                   initialCode={prefill?.coupon ?? promoCode ?? undefined}
                 />
 
-                {(!soldOut || voucher?.canBypass) && (
+                {(!soldOut || canBypass) && (
                   <AddonSelector
                     eventId={event.id}
                     currency={event.currency || 'USD'}
@@ -1169,8 +1388,30 @@ export default function EventDetails() {
                   />
                 )}
 
+                {/* Member price notice, "use my pass" / member free tickets (mig 20261030130500). */}
+                <MemberPassRedeem
+                  orgId={event.orgId}
+                  event={{ id: event.id, starts_at: event.date ? event.date.toDate().toISOString() : null }}
+                  tierId={selectedTierId}
+                  quantity={quantity}
+                  signedIn={!!user}
+                  onIssued={(n) => {
+                    toast({ kind: 'success', message: `${n} ticket${n === 1 ? '' : 's'} added to My Tickets.` });
+                    window.location.href = publicUrl('my-tickets');
+                  }}
+                />
+
+                {(!soldOut || voucher?.canBypass) && (priceToDisplay > 0 || addonSel.totalCents > 0) && (
+                  <CheckoutExtras
+                    orgId={event.orgId}
+                    currency={event.currency || 'USD'}
+                    orderCents={Math.round(priceToDisplay * 100) * quantity + addonSel.totalCents}
+                    onChange={setExtras}
+                  />
+                )}
+
                 <button
-                  disabled={(soldOut && !voucher?.canBypass) || purchasing || paidNotOnSale}
+                  disabled={(soldOut && !canBypass) || purchasing || paidNotOnSale}
                   onClick={handlePurchase}
                   className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide flex items-center justify-center gap-3 hover:scale-[1.01] transition-transform disabled:bg-white/10 disabled:text-white/20 disabled:scale-100"
                 >
@@ -1179,11 +1420,22 @@ export default function EventDetails() {
                   ) : (
                     <>
                       <Ticket className="w-5 h-5" />
-                      <span className="tracking-wide">{(soldOut && !voucher?.canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon')
+                      <span className="tracking-wide">{(soldOut && !canBypass) ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon')
                         : priceToDisplay === 0 && addonSel.totalCents === 0 ? t('event.getFree') : t('event.buy')}</span>
                     </>
                   )}
                 </button>
+                {takesPayPal && stripeEnabled && !soldOut && (priceToDisplay > 0 || addonSel.totalCents > 0)
+                  && (user || guestCheckoutAllowed(event.purchaseLimits)) && !voucher?.canBypass && (
+                  <button
+                    type="button"
+                    disabled={purchasing}
+                    onClick={goToPayPal}
+                    className="disp w-full mt-3 border border-white/30 text-white py-3 text-base tracking-wide hover:border-white transition-colors disabled:opacity-40"
+                  >
+                    {venmoPossible(event.currency) ? 'Pay with Venmo / PayPal' : 'Pay with PayPal'}
+                  </button>
+                )}
                 </>)}
 
                 {paidNotOnSale && !soldOut && (
@@ -1192,7 +1444,21 @@ export default function EventDetails() {
                   </p>
                 )}
 
-                {soldOut && !voucher?.canBypass && (
+                {elsewhere && (
+                  <div role="status" className="mt-3 space-y-2">
+                    <p className="type text-[11px] text-white/70 leading-relaxed">
+                      {t('event.lastCallElsewhere', { platform: PLATFORM_LABEL[sale.sellsOn] })}
+                    </p>
+                    {sale.sellsOnUrl && (
+                      <a href={sale.sellsOnUrl} target="_blank" rel="noopener noreferrer"
+                        className="inline-block border border-white/30 px-4 py-2 text-[11px] uppercase tracking-widest text-white hover:border-brand-primary hover:text-brand-primary">
+                        {t('event.buyOn', { platform: PLATFORM_LABEL[sale.sellsOn] })}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {soldOut && !canBypass && !elsewhere && (
                   <div className="mt-3">
                     <WaitlistCTA
                       eventId={event.id}
@@ -1222,6 +1488,7 @@ export default function EventDetails() {
                     🧪 test mint (admin · bypasses stripe)
                   </button>
                 )}
+                </>)}
 
                 <div className="mt-7 flex flex-col gap-3.5 type text-[11px] uppercase tracking-widest text-white/60">
                   <div className="flex items-center gap-3">

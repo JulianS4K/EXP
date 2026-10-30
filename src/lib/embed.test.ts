@@ -128,7 +128,7 @@ describe('buyableTiers / maxQuantity', () => {
 
 // Runs the real public/embed.js against a tiny fake DOM.
 describe('public/embed.js loader', () => {
-  function load(pageUrl = 'https://venue.com/shows?utm_campaign=fall&evil=1') {
+  function load(pageUrl = 'https://venue.com/shows?utm_campaign=fall&evil=1', attr: [string, string] = ['data-exos-event', EVENT]) {
     const code = readFileSync(new URL('../../public/embed.js', import.meta.url), 'utf8');
     const listeners: Record<string, (e: unknown) => void> = {};
     const makeEl = (tag: string) => {
@@ -144,7 +144,7 @@ describe('public/embed.js loader', () => {
       return el;
     };
     const div = makeEl('div');
-    (div.setAttribute as (k: string, v: string) => void)('data-exos-event', EVENT);
+    (div.setAttribute as (k: string, v: string) => void)(attr[0], attr[1]);
     const bad = makeEl('div');
     (bad.setAttribute as (k: string, v: string) => void)('data-exos-event', '../../x');
     class FakeCustomEvent { type: string; detail: unknown; constructor(t: string, o: { detail: unknown }) { this.type = t; this.detail = o.detail; } }
@@ -196,5 +196,17 @@ describe('public/embed.js loader', () => {
     expect(evs).toHaveLength(1);
     expect(evs[0].type).toBe('exos:checkout-complete');
     expect(evs[0].detail).toEqual({ eventId: EVENT, sessionId: 'cs_test_1' });
+  });
+
+  it('mounts a signup form: no payment permission, resize only', () => {
+    const FORM = '1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a';
+    const { div, iframe, send } = load('https://venue.com/', ['data-exos-signup', FORM]);
+    expect(iframe.src).toBe(`${EXOS}/bridge/embed/signup/${FORM}?host=https%3A%2F%2Fvenue.com`);
+    expect((iframe.getAttribute as (k: string) => string | null)('allow')).toBeNull();
+    expect(iframe.title).toBe('Sign up');
+    send({ origin: EXOS, source: iframe.contentWindow, data: { type: EMBED_COMPLETE, eventId: EVENT } });
+    expect((div.events as unknown[]).length).toBe(0);
+    send({ origin: EXOS, source: iframe.contentWindow, data: { type: EMBED_RESIZE, height: 300 } });
+    expect((iframe.style as Record<string, string>).height).toBe('300px');
   });
 });

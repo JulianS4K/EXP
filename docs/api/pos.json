@@ -1,0 +1,378 @@
+{
+  "file": "pos",
+  "name": "Food and beverage",
+  "order": 45,
+  "description": "The point-of-sale catalog (bar, merch, ticket items) and the registered POS devices. Items belong to the organization, or to one event when event_id is set. Card payments at the bar are not wired yet (docs/pos.md), so there are no sales routes.",
+  "endpoints": [
+    {
+      "auth": "api_key",
+      "id": "list-pos-items",
+      "method": "GET",
+      "path": "/v1/pos/items",
+      "summary": "List POS items",
+      "description": "The organization's POS items, in menu order. price_cents is in cents.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's items.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "category",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this category (ticket, bar, merch).",
+          "example": "bar"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "category": "bar",
+                "name": "House lager",
+                "sku": "BAR-LAGER",
+                "price_cents": 800,
+                "tax_rule_id": null,
+                "tier_id": null,
+                "active": true,
+                "is_86d": false,
+                "inventory_count": null,
+                "sort_order": 0,
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "event_id must be a UUID."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-pos-item",
+      "method": "GET",
+      "path": "/v1/pos/items/:id",
+      "summary": "Get a POS item",
+      "description": "One POS item.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The item's id. One of another organization answers 404.",
+          "example": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "category": "bar",
+              "name": "House lager",
+              "sku": "BAR-LAGER",
+              "price_cents": 800,
+              "tax_rule_id": null,
+              "tier_id": null,
+              "active": true,
+              "is_86d": false,
+              "inventory_count": null,
+              "sort_order": 0,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such item in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "item not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-pos-item",
+      "method": "POST",
+      "path": "/v1/pos/items",
+      "summary": "Create a POS item",
+      "description": "Adds an item. Fields: name (required), category (ticket, bar, merch), price_cents, event_id (an event of the organization), sku (unique in the organization), tax_rule_id and tier_id (of the item's event; a ticket item needs both event_id and tier_id), active, is_86d (sold out), inventory_count, sort_order.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "item",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields (or send them unwrapped).",
+          "example": {
+            "name": "House lager",
+            "category": "bar",
+            "price_cents": 800
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "item": {
+          "name": "House lager",
+          "category": "bar",
+          "price_cents": 800,
+          "sku": "BAR-LAGER",
+          "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "category": "bar",
+              "name": "House lager",
+              "sku": "BAR-LAGER",
+              "price_cents": 800,
+              "tax_rule_id": null,
+              "tier_id": null,
+              "active": true,
+              "is_86d": false,
+              "inventory_count": null,
+              "sort_order": 0,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "an item needs a name"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 409,
+          "description": "The SKU is taken.",
+          "example": {
+            "error": "duplicate key value violates unique constraint \"exos_pos_items_sku_uq\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-pos-item",
+      "method": "PATCH",
+      "path": "/v1/pos/items/:id",
+      "summary": "Update a POS item",
+      "description": "Changes the given fields (same as Create a POS item); is_86d true marks it sold out.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The item's id. One of another organization answers 404.",
+          "example": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d"
+        },
+        {
+          "name": "item",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change.",
+          "example": {
+            "is_86d": true
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "item": {
+          "price_cents": 900,
+          "is_86d": false
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "category": "bar",
+              "name": "House lager",
+              "sku": "BAR-LAGER",
+              "price_cents": 900,
+              "tax_rule_id": null,
+              "tier_id": null,
+              "active": true,
+              "is_86d": false,
+              "inventory_count": null,
+              "sort_order": 0,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such item in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "item not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-pos-devices",
+      "method": "GET",
+      "path": "/v1/pos/devices",
+      "summary": "List POS devices",
+      "description": "The organization's registered POS devices and kiosks (registering one is a pairing step in the dashboard).",
+      "scope": "events:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "8f9a0b1c-2d3e-4f4a-9b5c-6d7e8f9a0b1c",
+                "event_id": null,
+                "name": "Bar 1",
+                "kind": "terminal",
+                "status": "active",
+                "last_seen_at": "2026-10-30T14:05:11.204+00:00",
+                "created_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    }
+  ]
+}

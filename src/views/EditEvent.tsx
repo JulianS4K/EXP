@@ -1,5 +1,5 @@
 import { geocodeEvent } from '../lib/geo';
-import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
 import { uploadEventImage } from '../lib/storage';
@@ -21,7 +21,10 @@ import { EVENT_CATEGORIES, genresFor } from '../lib/eventTaxonomy';
 import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import TicketBackendPanel from '../components/TicketBackendPanel';
+import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
+import PoshPanel from '../components/PoshPanel';
+import TierDistributionPanel from '../components/TierDistributionPanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
@@ -29,6 +32,7 @@ import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import CurrencySelect from '../components/CurrencySelect';
 import TableTierFields from '../components/TableTierFields';
+import EventSeatingPanel from '../components/seating/EventSeatingPanel';
 import { BLANK_TABLE_DRAFT, admissionsForTier, rowToTableDraft, validateTableDraft, type TableTierDraft } from '../lib/tables';
 import { getTierTableRows, saveTierTableConfig } from '../lib/tablesApi';
 import {
@@ -76,17 +80,22 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
-import { eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
+import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
 import ChannelSplitPanel from '../components/ChannelSplitPanel';
 import S4kRoutePanel from '../components/S4kRoutePanel';
+import ResaleConsentPanel from '../components/ResaleConsentPanel';
+import LastCallPanel from '../components/LastCallPanel';
+import FixedBlockPanel from '../components/FixedBlockPanel';
+import type { SalesRules } from '../lib/marketplace/resaleConsent';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import StoreContentEditor from '../components/StoreContentEditor';
+import LineupEditor, { type LineupEditorHandle } from '../components/LineupEditor';
 import { blankStore, storeFromEvent, storeToInput, validateStore, type StoreDraft } from '../lib/storeContent';
 import OnlineEventEditor from '../components/OnlineEventEditor';
 import {
@@ -100,7 +109,9 @@ import { rescheduleEvent } from '../lib/reschedule';
 import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
 import { utcToOccursAtLocal } from '../lib/datetime';
 import FeeRulesEditor from '../components/FeeRulesEditor';
+import EventBookingPanels from '../components/booking/EventBookingPanels';
 import { useOrganization } from '../context/OrganizationContext';
+import { blockersSentence, getPublishBlockers, publishEvent, type PublishBlocker } from '../lib/publishBlockers';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -115,6 +126,8 @@ export default function EditEvent() {
   // The event's StubHub request (queued by the exos_events trigger on publish).
   // StubHub / SeatGeek rows: an event row per marketplace (tier_id null) + an allocation per ticket type.
   const [marketRows, setMarketRows] = useState<MarketplaceRow[]>([]);
+  // The free tier / resale opt-in, as the server has it (mig 20261029090000).
+  const [resaleRules, setResaleRules] = useState<SalesRules | null>(null);
   const eventRow = (ch: AllocationChannel) => marketRows.find((r) => r.channel === ch && !r.tier_id) ?? null;
   const loadMarketRows = (id: string) => getMarketplaceRows(id).then(setMarketRows).catch((err) => console.warn('marketplace rows unavailable:', err));
   // Accessibility fields show (and save) only once the columns exist: the
@@ -124,6 +137,10 @@ export default function EditEvent() {
   // sets it only when the row has the column). Its own draft state, seeded on load.
   const storeSupported = eventData.lineup !== undefined;
   const [store, setStore] = useState<StoreDraft>(blankStore());
+  // Structured lineup (mig 20261030110000): while it has acts, the free-text
+  // performers are derived from it and hidden here.
+  const lineupRef = useRef<LineupEditorHandle>(null);
+  const [hasLineup, setHasLineup] = useState(false);
   // Online / hybrid (mig 20261005090000): keyed on `format`, which the mapper
   // sets only when the row has the column. The private join link loads
   // separately (staff RPC); `linkLoaded` guards against overwriting a link
@@ -142,6 +159,9 @@ export default function EditEvent() {
   // against post-save state to queue 'event-updated' emails listing
   // only the fields that changed. Re-snapshotted on success so the
   // next save's diff is against the just-committed state.
+  // What stops the saved event from going live (exos_event_publish_blockers,
+  // the same list as the partner API's). null: not loaded (or not a draft).
+  const [blockers, setBlockers] = useState<PublishBlocker[] | null>(null);
   const [originalNotifiable, setOriginalNotifiable] = useState<{
     title?: string;
     location?: string;
@@ -203,6 +223,9 @@ export default function EditEvent() {
         return;
       }
       setEventData(data);
+      if (data.status === 'draft') {
+        getPublishBlockers(eventId).then(setBlockers).catch((err) => console.warn('publish blockers unavailable:', err));
+      }
       if (data.lineup !== undefined) setStore(storeFromEvent(data));
       if (data.format !== undefined) {
         setOnline(onlineFromEvent(data));
@@ -631,6 +654,9 @@ export default function EditEvent() {
       const removed = originalTierIds.filter((id) => !currentTierIds.includes(id));
 
       const ed = eventData as Event;
+      // Going live is its own step after the save (exos_publish_event), so it
+      // is checked against the saved event: blockers keep it a draft.
+      const publishing = ed.status === 'published' && originalNotifiable.status === 'draft';
       const tz = ed.timezone || getBrowserTimezone();
       const tsToIso = (ts: any): string | null =>
         ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : null;
@@ -640,7 +666,7 @@ export default function EditEvent() {
       await updateEvent(eventId, {
         name: ed.title,
         description: ed.description,
-        status: ed.status,
+        status: publishing ? 'draft' : ed.status,
         slug: (ed.branding?.customSlug || '').trim() || null,
         startsAt: tsToIso(startTs),
         doorsAt: tsToIso(ed.timing?.doorsOpen),
@@ -651,8 +677,9 @@ export default function EditEvent() {
         venueName: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
         venueLocation: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
         venueAddress: ed.address as any,
-        primaryPerformerName: ed.performers?.[0],
-        performerNames: ed.performers,
+        // With a lineup, performer_names is written by exos_lineup_save, not here.
+        primaryPerformerName: hasLineup ? undefined : ed.performers?.[0],
+        performerNames: hasLineup ? undefined : ed.performers,
         // Always send the array (never undefined) so clearing every link
         // persists as `[]` — updateEvent skips undefined fields, which would
         // otherwise leave stale links in place on removal.
@@ -721,6 +748,18 @@ export default function EditEvent() {
         }
       }
 
+      // 4. The lineup (its own RPC), after the event: a failure leaves the
+      //    event saved and says so, and keeps the page open to retry.
+      if (lineupRef.current?.dirty()) {
+        try {
+          await lineupRef.current.save();
+        } catch (lineupErr) {
+          console.error('lineup save failed:', lineupErr);
+          toast({ kind: 'error', message: `Changes saved, but the lineup did not save: ${(lineupErr as Error).message}` });
+          return;
+        }
+      }
+
       // Discount-code editing + ticket-holder change-notification emails land
       // in phase-2 (codes are checkout-gated; notifications read the tickets
       // table). Slug uniqueness is enforced by updateEvent + the UNIQUE index.
@@ -730,7 +769,16 @@ export default function EditEvent() {
       setOriginalTierIds((ed.ticketTiers || []).map((t) => t.id));
       // Re-pin the venue if its address changed (server skips unchanged, fresh pins).
       if (!onlineSupported || needsVenue(online.format)) void geocodeEvent(eventId);
-      toast({ kind: 'success', message: 'Changes saved.' });
+      if (publishing) {
+        const r = await publishEvent(eventId);
+        if (!r.published) {
+          setBlockers(r.blockers);
+          setEventData((d) => ({ ...d, status: 'draft' }));
+          toast({ kind: 'error', title: 'Saved, but not published yet', message: blockersSentence(r.blockers) });
+          return;
+        }
+      }
+      toast({ kind: 'success', message: publishing ? 'Saved and published.' : 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {
       // The server refused a plain date change (tickets it didn't know about
@@ -868,7 +916,18 @@ export default function EditEvent() {
           <div
             className={`flex items-center justify-between p-4 border mb-8 ${tone}`}
           >
-            <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
+              {status === 'draft' && blockers && blockers.length > 0 && (
+                <div className="mt-2 normal-case">
+                  <p className="text-[11px] font-bold">Before it can go live:</p>
+                  <ul className="mt-1 list-disc pl-4 text-[11px] space-y-0.5">
+                    {blockers.map((b) => <li key={b.code}>{b.message}</li>)}
+                  </ul>
+                  <p className="mt-1 text-[10px] opacity-70">As last saved. Fix these and save; publishing checks again.</p>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() =>
@@ -952,6 +1011,11 @@ export default function EditEvent() {
                   + reminder emails. Max 10 entries × 80 chars each;
                   validated client-side and by the firestore rule's
                   list-size cap on isValidEvent. */}
+              {eventId && eventData.orgId && (
+                <LineupEditor ref={lineupRef} eventId={eventId} orgId={eventData.orgId} uploaderUid={user?.uid}
+                  onHasLineup={setHasLineup} />
+              )}
+              {!hasLineup && (<>
               <div className="space-y-2 md:col-span-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
                 <input
@@ -984,6 +1048,7 @@ export default function EditEvent() {
                   onChange={(artistLinks) => setEventData({ ...eventData, artistLinks })}
                 />
               </div>
+              </>)}
            </div>
 
            {/* With the store-page columns, the markdown "About" below replaces this. */}
@@ -1571,6 +1636,33 @@ export default function EditEvent() {
           />
         )}
 
+        {/* Booking: venue link, show schedule (its doors row is doors open),
+            staff notes and contacts (mig 20261030100000). Self-contained. */}
+        {eventId && eventData.orgId && (
+          <EventBookingPanels
+            eventId={eventId}
+            canEditVenue={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            canEdit={isAdmin || ['owner', 'manager', 'content'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            authorName={user?.displayName || user?.email || 'Staff'}
+            onDoorsChange={(iso) => setEventData((d) => ({
+              ...d,
+              timing: { ...(d.timing ?? {}), doorsOpen: iso ? Timestamp.fromDate(new Date(iso)) : null },
+            }) as typeof d)}
+          />
+        )}
+
+
+        {/* Reserved seating (mig 20261030140000): map + ticket type per section,
+            seat blocks. Self-contained, not part of the form submit. */}
+        {eventId && eventData.orgId && (
+          <EventSeatingPanel
+            eventId={eventId}
+            orgId={eventData.orgId}
+            canEdit={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id))
+              .map((t) => ({ id: t.id, name: t.name, kind: (t as { kind?: string }).kind }))}
+          />
+        )}
 
         {/* Distribution Hub Section (Already present but refined) */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
@@ -1681,9 +1773,27 @@ export default function EditEvent() {
            </div>
         </section>
 
+        {/* Listed from Eventbrite / Luma / Posh: sold only there (mig 20261029170000). */}
+        {eventId && <LinkOutStatusPanel eventId={eventId} />}
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Near sell-out only the primary sells (mig 20261029100000). */}
+        {eventId && <LastCallPanel eventId={eventId} />}
+        {/* Posh: a capped tier fed by Posh's webhooks (mig 20261029150000). */}
+        {eventId && <PoshPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* A fixed block for a platform Exos can't sync (mig 20261029160000): the block is the capacity. */}
+        {eventId && (
+          <FixedBlockPanel
+            eventId={eventId}
+            onBlocks={(caps) => setEventData((d) => ({
+              ...d,
+              ticketTiers: (d.ticketTiers || []).map((t) => (t.id && caps[t.id] !== undefined ? { ...t, capacity: caps[t.id] } : t)),
+            }))}
+          />
+        )}
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Distribution partners per ticket type (mig 20261031130000). */}
+        {eventId && <TierDistributionPanel eventId={eventId} orgId={eventData.orgId} />}
 
         {SHOW_MARKETPLACES && (<>
         {/* Marketplaces: pick them, then seats per ticket type (MarketplaceGrid). */}
@@ -1702,12 +1812,16 @@ export default function EditEvent() {
            </p>
 
            {(() => {
-             // Resale unlocks at a max capacity of 250 (mig 20261014140000).
-             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])));
+             // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
+             const caps = (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id]));
+             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, caps);
              return resaleUnlocked(cap) ? null : (
-               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
+               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
+                 {resaleLockedText(cap, undefined, eventCapacityBounded(Number(eventData.totalTickets) || 0, caps))}
+               </p>
              );
            })()}
+           {eventId && <ResaleConsentPanel eventId={eventId} onRules={setResaleRules} />}
            {eventData.distributionRoute === 's4k' && (
              <p role="status" className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">
                This event is on the S4K network, so S4K lists it on these marketplaces. Switch "Who lists it" below to
@@ -1758,6 +1872,7 @@ export default function EditEvent() {
                route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
                onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
                maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))}
+               optInNeeded={!!resaleRules && !resaleRules.resaleUnlocked && resaleRules.maxCapacity > resaleRules.freeTierMaxCapacity}
              />
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (

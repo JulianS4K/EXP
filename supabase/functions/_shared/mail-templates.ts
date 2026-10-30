@@ -1,9 +1,14 @@
 // Payload-rendered Exos mail (mig 20260929071000), used by exos-mail-drain.
 //
 // Rows queued by exos_mail_enqueue carry a JSON payload and an empty html;
-// the drain calls renderTemplate() to build the subject and body. Pure and
-// import-free, so Deno and EXP's vitest (src/lib/mailTemplates.test.ts) both
-// load it.
+// the drain calls renderTemplate() to build the subject and body. Pure (its
+// one import, channelReport.ts, is pure too), so Deno and EXP's vitest
+// (src/lib/mailTemplates.test.ts) both load it.
+
+import {
+  type ChannelRow, type EventChannels, feeText, messageRows, money, notReportedNote, parseChannelReport, plural, sideCounts,
+  sumTickets, totalsText, weekLabel,
+} from "./channelReport.ts";
 //
 // Rules every template follows:
 //   * Every payload value is escaped before it lands in HTML (event names,
@@ -142,7 +147,7 @@ interface Out {
   subject: string;
   body: string;
   /** who this mail is for: sets the footer */
-  audience: "buyer" | "organizer";
+  audience: "buyer" | "organizer" | "partner";
   orgName?: string;
 }
 
@@ -194,6 +199,29 @@ function totalsLine(totals: Obj[]): { tickets: number; text: string } {
   return { tickets, text: `${tickets} ticket${tickets === 1 ? "" : "s"}${money ? `, ${money}` : ""}` };
 }
 
+// Offers, settlements, ticket counts (migs 20261031100000 / 20261031100500).
+// These go to people outside the org (agents, tour accountants): links carry
+// a 64-hex token and an id that must be a UUID.
+function token(p: Obj, k: string): string {
+  const v = p[k];
+  if (typeof v !== "string" || !TOKEN.test(v)) throw new PayloadError(`${k} missing`);
+  return v;
+}
+/** "$1,000.00 versus 85% of net after expenses" (deal terms as stored). */
+function dealLine(t: Obj, cur: string): string {
+  const g = formatMoney(num(t, "guarantee_cents", 0), cur);
+  const pct = `${num(t, "percentage", 0)}%`;
+  switch (opt(t, "deal_type")) {
+    case "versus": return `${g} versus ${pct} of net after expenses`;
+    case "plus": return `${g} plus ${pct} of net above the split point`;
+    case "door": return num(t, "guarantee_cents", 0) > 0 ? `${pct} of net box office, ${g} minimum` : `${pct} of net box office`;
+    default: return `${g} flat`;
+  }
+}
+function showDay(d: unknown): string {
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? formatDay(`${d}T12:00:00Z`) : "";
+}
+
 // ── templates ───────────────────────────────────────────────────────────────
 
 const REFUND_TEXT: Record<string, (paid: string, refunded: string) => string> = {
@@ -208,7 +236,9 @@ const REFUND_TEXT: Record<string, (paid: string, refunded: string) => string> = 
 // Disputes (mig 20261001101000). The dispute lives on the Exos platform's
 // Stripe account (destination charges), so the one link out of the app is
 // Stripe's own dashboard page for that dispute, built from a checked id.
-const DISPUTE_ID = /^(dp|du)_[A-Za-z0-9]{1,200}$/;
+// PayPal disputes (mig 20261031220000) are 'ppdsp_…' and live in PayPal's
+// Resolution Center on the platform account.
+const DISPUTE_ID = /^(dp|du|ppdsp)_[A-Za-z0-9]{1,200}$/;
 const DISPUTE_REASONS: Record<string, string> = {
   bank_cannot_process: "the bank couldn't process the payment",
   credit_not_processed: "the buyer says a promised refund wasn't made",
@@ -235,6 +265,7 @@ interface DisputeView {
   amount: string;
   fee: string | null;
   stripeUrl: string;
+  processor: "Stripe" | "PayPal";
   eventLine: string;
 }
 function disputeView(ctx: Ctx): DisputeView {
@@ -249,13 +280,57 @@ function disputeView(ctx: Ctx): DisputeView {
     ev,
     amount: formatMoney(num(ctx.p, "amount_cents"), cur),
     fee: feeCents > 0 ? formatMoney(feeCents, cur) : null,
-    stripeUrl: `https://dashboard.stripe.com/${ctx.p.livemode === false ? "test/" : ""}disputes/${id}`,
+    stripeUrl: id.startsWith("ppdsp_")
+      ? `https://www.${ctx.p.livemode === false ? "sandbox." : ""}paypal.com/resolutioncenter`
+      : `https://dashboard.stripe.com/${ctx.p.livemode === false ? "test/" : ""}disputes/${id}`,
+    processor: id.startsWith("ppdsp_") ? "PayPal" : "Stripe",
     eventLine: ev ? eventBlock(ev) : "",
   };
 }
 function disputeLinks(ctx: Ctx, v: DisputeView): string {
   return (v.ev ? button(ctx, `/dashboard/event/${v.ev.id}`, "See it in the event's Money") : button(ctx, "/dashboard", "Your dashboard")) +
-    `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in Stripe</a>.</p>`;
+    `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in ${v.processor}</a>.</p>`;
+}
+
+// Weekly sales by channel (mig 20261029120000). The SPA's Channels card and
+// /orgs/:id/channels read the same document (channelReport.ts). The mail shows
+// labels only (fixed list, SQL _exos_channel_label), one row per label
+// (messageRows): utm_source is buyer-controlled, so no key reaches the mail.
+function channelTable(e: EventChannels): string {
+  const rows = messageRows(e.sales);
+  if (rows.length === 0) return `<p style="color:#666">No sales yet.</p>`;
+  const td = `style="padding:2px 10px 2px 0;text-align:right;white-space:nowrap"`;
+  const head = `<tr style="color:#666;font-size:12px"><td style="padding:2px 10px 2px 0">Channel</td><td ${td}>This week</td>` +
+    `<td ${td}>To date</td><td ${td}>Gross</td><td ${td}>Channel fees</td><td ${td}>Net to you</td></tr>`;
+  const row = (r: ChannelRow) =>
+    `<tr><td style="padding:2px 10px 2px 0">${esc(r.label)}</td>` +
+    `<td ${td}>${r.week ? r.week.tickets : "–"}</td><td ${td}>${r.toDate.tickets}</td>` +
+    `<td ${td}>${esc(money(r.toDate.grossCents, r.currency))}</td>` +
+    `<td ${td}>${esc(feeText(r.toDate, r.fees, r.currency))}</td>` +
+    `<td ${td}>${esc(money(r.toDate.netCents, r.currency))}</td></tr>`;
+  return `<table style="border-collapse:collapse;font-size:14px">${head}${rows.map(row).join("")}</table>`;
+}
+
+function channelEvent(ctx: Ctx, e: EventChannels): string {
+  const when = e.startsAt ? formatWhen(e.startsAt, e.timezone) : "";
+  const exos = e.sales.reduce((k, r) => k + (r.toDate.exosFeeCents ?? 0), 0);
+  const side = sideCounts(e, "toDate");
+  const undated = messageRows(e.sales).filter((r) => !r.dated).map((r) => r.label);
+  const extra = [
+    side.comps ? plural(side.comps, "comp") : "",
+    side.attendees ? `${plural(side.attendees, "imported attendee")} from other lists` : "",
+  ].filter(Boolean);
+  const note = notReportedNote(e.totals.toDate);
+  return `<p style="margin-top:20px"><a href="${href(ctx, `/dashboard/event/${uuid({ id: e.id }, "id")}`)}"><strong>${esc(e.name)}</strong></a>` +
+    `${when ? `<br><span style="color:#666">${esc(when)}</span>` : ""}</p>` +
+    channelTable(e) +
+    `<p style="font-size:13px">This week: ${esc(totalsText(e.totals.week))}. To date: ${esc(totalsText(e.totals.toDate))}.` +
+    (exos > 0 ? ` Exos fee to date: ${esc(money(exos, e.currency))} (already taken out of net).` : "") + `</p>` +
+    (extra.length ? `<p style="font-size:13px;color:#666">Not sales: ${esc(extra.join(", "))}.</p>` : "") +
+    (undated.length
+      ? `<p style="font-size:13px;color:#666">${esc(undated.join(", "))}: counts only, without sale dates, so ${undated.length === 1 ? "it's" : "they're"} in "to date" and not in the week.</p>`
+      : "") +
+    (note ? `<p style="font-size:13px;color:#666">${esc(note)}</p>` : "");
 }
 
 const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
@@ -458,6 +533,43 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // A fixed block handed back to the organizer's primary platform (mig
+  // 20261029160000). Counts only: Exos can't write to that platform, so the
+  // organizer puts these tickets back on sale there.
+  "fixed-block-released": (ctx) => {
+    const ev = event(ctx.p);
+    const platform = str(ctx.p, "platform", "your ticketing platform");
+    const total = num(ctx.p, "total_returned", 0);
+    const pending = num(ctx.p, "total_pending", 0);
+    const unit = (t: Obj, n: number) => {
+      const table = str(t, "kind", "standard") === "table";
+      const party = num(t, "party_size", 1);
+      return table
+        ? `${n} table${n === 1 ? "" : "s"}${party > 1 ? ` of ${party}` : ""}`
+        : `${n} ticket${n === 1 ? "" : "s"}`;
+    };
+    const rows = list(ctx.p, "tiers").map((t) =>
+      `<tr><td style="padding:2px 12px 2px 0">${esc(str(t, "name", "Ticket"))}</td>` +
+      `<td style="padding:2px 12px 2px 0;text-align:right"><strong>${esc(unit(t, num(t, "returned", 0)))}</strong></td>` +
+      `<td style="padding:2px 0;color:#666">sold ${num(t, "sold", 0)} of ${num(t, "block", 0)} on Exos</td></tr>`
+    ).join("");
+    return {
+      audience: "organizer",
+      orgName: str(obj(ctx.p, "event"), "org_name", ""),
+      subject: `Put ${total} ticket${total === 1 ? "" : "s"} back on ${platform}: ${ev.name}`,
+      body:
+        eventBlock(ev) +
+        `<p>Exos has stopped selling its block for this event. Put these back on sale on <strong>${esc(platform)}</strong> ` +
+        `(Exos can't change your listing there):</p>` +
+        (rows ? `<table style="border-collapse:collapse;font-size:14px">${rows}</table>` : "") +
+        (pending > 0
+          ? `<p>${pending} more ${pending === 1 ? "is" : "are"} still in a checkout or on a marketplace. If they don't sell, the event page shows them as "put back".</p>`
+          : "") +
+        `<p>Tickets sold on Exos are on your Exos door list. For the rest, import ${esc(platform)}'s attendee export into a guest list.</p>` +
+        button(ctx, `/dashboard/event/${ev.id}`, "Open the event"),
+    };
+  },
+
   "payout-sent": (ctx) => {
     const o = org(ctx.p);
     const amount = formatMoney(num(ctx.p, "amount_cents"), str(ctx.p, "currency"));
@@ -559,6 +671,28 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // Double opt-in for a signup form (mig 20261031120000). Transactional: the
+  // fan just asked for it. The link carries the 64-hex confirm token; until
+  // it's clicked the address is not on the list.
+  "signup-confirm": (ctx) => {
+    const o = org(ctx.p);
+    const token = ctx.p.token;
+    if (typeof token !== "string" || !TOKEN.test(token)) throw new PayloadError("token missing");
+    const sms = ctx.p.sms_requested === true;
+    const email = ctx.p.email_requested !== false;
+    const what = email && sms ? "emails and texts" : sms ? "texts" : "emails";
+    return {
+      audience: "buyer",
+      subject: `Confirm: ${o.name} ${what}`,
+      body:
+        `<p>Someone, hopefully you, signed this address up for ${esc(what)} from <strong>${esc(o.name)}</strong>` +
+        `${opt(ctx.p, "form_title") ? ` (${esc(str(ctx.p, "form_title"))})` : ""}. Confirm to start getting them:</p>` +
+        button(ctx, `/signup/confirm?t=${token}`, "Confirm") +
+        (sms ? `<p>Texts are switched on from the same page, signed in to Exos.</p>` : "") +
+        `<p style="color:#555">If it wasn't you, ignore this mail: nothing is sent without the click.</p>`,
+    };
+  },
+
   "org-welcome": (ctx) => {
     const o = org(ctx.p);
     const until = opt(ctx.p, "fee_free_until");
@@ -640,12 +774,113 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
         button(ctx, "/dashboard", "Your dashboard"),
     };
   },
+
+  "org-channel-report": (ctx) => {
+    const o = org(ctx.p);
+    const rep = parseChannelReport(ctx.p);
+    if (!rep) throw new PayloadError("report missing");
+    const week = weekLabel(str(ctx.p, "from"), str(ctx.p, "to"));
+    const t = sumTickets(rep.totals.week);
+    return {
+      audience: "organizer",
+      orgName: o.name,
+      subject: `${o.name}: ${plural(t, "ticket")} by channel, ${week}`,
+      body:
+        `<p>${esc(o.name)}: where your tickets sold ${esc(week)} (UTC) and to date, for events from the last week and the next 60 days.</p>` +
+        `<p><strong>This week:</strong> ${esc(totalsText(rep.totals.week))}<br><strong>To date:</strong> ${esc(totalsText(rep.totals.toDate))}</p>` +
+        rep.events.map((e) => channelEvent(ctx, e)).join("") +
+        (rep.moreEvents > 0 ? `<p>And ${plural(rep.moreEvents, "more event")} on your dashboard.</p>` : "") +
+        `<p style="font-size:13px;color:#666">Net to you is after each channel's fees and the Exos fee. Comps and imported lists aren't sales and aren't in the totals.</p>` +
+        button(ctx, `/orgs/${o.id}/channels`, "All channels"),
+    };
+  },
+  "offer-sent": (ctx) => {
+    const o = org(ctx.p);
+    const offer = obj(ctx.p, "offer");
+    const id = uuid(offer, "id");
+    const t = token(ctx.p, "token");
+    const cur = str(offer, "currency", "USD");
+    const terms: Obj = isObj(offer.terms) ? offer.terms : {};
+    const dates = (Array.isArray(offer.dates) ? offer.dates : []).map(showDay).filter(Boolean);
+    const venue = opt(offer, "venue");
+    const expires = opt(offer, "expires_at");
+    const agent = opt(offer, "agent_name");
+    const artist = str(offer, "artist_name", "your artist");
+    const bonuses = list(terms, "bonuses").map((b) => `${formatMoney(num(b, "amount_cents", 0), cur)} at ${num(b, "sold", 0)} tickets`);
+    const rows: [string, string][] = [["Dates", dates.join("; ") || "To be confirmed"]];
+    if (venue) rows.push(["Venue", venue]);
+    rows.push(["Deal", dealLine(terms, cur)]);
+    if (bonuses.length) rows.push(["Bonuses", bonuses.join("; ")]);
+    if (num(terms, "deposit_cents", 0) > 0) rows.push(["Deposit", formatMoney(num(terms, "deposit_cents", 0), cur)]);
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Offer from ${o.name}: ${artist}${dates[0] ? `, ${dates[0]}` : ""}`,
+      body:
+        `<p>${agent ? `${esc(agent)}, ` : ""}${esc(o.name)} sent an offer for ${esc(artist)}.</p>` +
+        `<table style="border-collapse:collapse;font-size:14px">${rows.map(([k, v]) =>
+          `<tr><td style="padding:2px 12px 2px 0;color:#666">${esc(k)}</td><td style="padding:2px 0">${esc(v)}</td></tr>`).join("")}</table>` +
+        `<p>Read the full offer and accept or decline it here (no account needed):</p>` +
+        button(ctx, `/offer/${id}?t=${t}`, "Review the offer") +
+        (expires ? `<p style="color:#666;font-size:13px">The offer expires ${esc(formatWhen(expires))}.</p>` : ""),
+    };
+  },
+
+  "settlement-finalized": (ctx) => {
+    const o = org(ctx.p);
+    const ev = event(ctx.p);
+    const t = token(ctx.p, "token");
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Settlement: ${ev.name}`,
+      body:
+        `<p>${esc(o.name)} finalized the settlement for this show:</p>` + eventBlock(ev) +
+        button(ctx, `/settlement/${ev.id}?t=${t}`, "See the settlement") +
+        `<p style="color:#666;font-size:13px">The page has the box office, each act's deal worked through and the venue's share, with a PDF.</p>`,
+    };
+  },
+
+  "ticket-counts": (ctx) => {
+    const o = org(ctx.p);
+    const c = obj(ctx.p, "counts");
+    const ev = event(c);
+    const cur = str(c, "currency", "USD");
+    const t = token(ctx.p, "optout_token");
+    const tiers = list(c, "tiers").map((r) =>
+      `<tr><td style="padding:2px 12px 2px 0">${esc(str(r, "name", "Tickets"))}</td>` +
+      `<td style="padding:2px 12px 2px 0;text-align:right">${num(r, "paid", 0)}</td>` +
+      `<td style="padding:2px 0;text-align:right">${num(r, "comps", 0)}</td></tr>`).join("");
+    const elsewhere = list(c, "sold_elsewhere").map((x) =>
+      `${num(x, "sold", 0)} sold elsewhere (${esc(formatMoney(num(x, "gross_cents", 0), str(x, "currency", cur)))})`);
+    const pct = c.attendance_percent === null || c.attendance_percent === undefined ? null : num(c, "attendance_percent", 0);
+    const cap = num(c, "capacity", 0);
+    const who = opt(ctx.p, "recipient_name");
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Ticket counts: ${ev.name} (${num(c, "paid_sold", 0)} sold)`,
+      body:
+        `<p>${who ? `${esc(who)}, here` : "Here"} are the latest numbers from ${esc(o.name)}:</p>` +
+        eventBlock(ev) +
+        (tiers ? `<table style="border-collapse:collapse;font-size:14px"><tr><th style="text-align:left;padding:2px 12px 2px 0">Ticket type</th>` +
+          `<th style="text-align:right;padding:2px 12px 2px 0">Sold</th><th style="text-align:right;padding:2px 0">Comps</th></tr>${tiers}</table>` : "") +
+        `<p><strong>${num(c, "paid_sold", 0)} sold</strong>, ${num(c, "comps", 0)} comps, ` +
+        `${esc(formatMoney(num(c, "gross_cents", 0), cur))} gross; ${num(c, "sold_last_24h", 0)} in the last 24 hours.` +
+        (pct !== null && cap > 0 ? ` ${pct}% of ${cap} capacity.` : "") + `</p>` +
+        (elsewhere.length ? `<p>${elsewhere.join("<br>")}</p>` : "") +
+        `<p style="color:#888;font-size:12px"><a href="${href(ctx, `/ticket-counts/opt-out?t=${t}`)}">Stop these emails</a> for this show.</p>`,
+    };
+  },
 };
 
 export const PAYLOAD_TEMPLATES = Object.keys(RENDERERS);
 
 function footer(ctx: Ctx, out: Out): string {
   const lines: string[] = [];
+  if (out.audience === "partner") {
+    lines.push(`You're getting this from ${esc(out.orgName ?? "an organizer")} through Exos.`);
+  }
   if (out.audience === "organizer") {
     lines.push(out.orgName
       ? `You're getting this because you help run ${esc(out.orgName)} on Exos.`

@@ -1,0 +1,874 @@
+{
+  "file": "commerce",
+  "name": "Gift cards, giving, memberships and passes",
+  "order": 40,
+  "description": "Gift cards (products, issued cards and their ledgers), giving campaigns and donations, membership products and members, season passes and flex packs, and member presales. Every route here needs `commerce:read`. Amounts ending in `_cents` are integers in the currency's minor unit. Creating these (selling a gift card at the box office, recording a cash gift, gifting a membership) is done in Org settings for now.",
+  "endpoints": [
+    {
+      "id": "list-gift-card-products",
+      "method": "GET",
+      "path": "/v1/gift-card-products",
+      "summary": "List gift card products",
+      "description": "What the organization sells as gift cards: fixed amounts or an open range, in minor units.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "Holiday gift card",
+                "description": null,
+                "currency": "usd",
+                "amount_type": "fixed",
+                "amounts_cents": [
+                  2500,
+                  5000,
+                  10000
+                ],
+                "min_cents": null,
+                "max_cents": null,
+                "image_url": null,
+                "expiry_months": null,
+                "active": true,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-gift-cards",
+      "method": "GET",
+      "path": "/v1/gift-cards",
+      "summary": "List gift cards",
+      "description": "Issued gift cards, newest first. Only the last 4 characters of a code: the code itself is never stored. `source` is online, box_office, api or dashboard; `issued_by` and `pos_drawer_id` reconcile box-office sales against the till.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "last4": "NPQ9",
+                "currency": "usd",
+                "initial_cents": 5000,
+                "balance_cents": 1500,
+                "status": "active",
+                "source": "box_office",
+                "payment_method": "cash",
+                "product_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "recipient_email": "ann@example.com",
+                "issued_by": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "pos_drawer_id": null,
+                "expires_at": null,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-gift-card",
+      "method": "GET",
+      "path": "/v1/gift-cards/:id",
+      "summary": "Get a gift card",
+      "description": "One gift card with its ledger: every balance change (issue, redeem, release, refund, void, adjust) with the balance after it.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The gift card's id. One of another organization answers 404.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "last4": "NPQ9",
+              "currency": "usd",
+              "initial_cents": 5000,
+              "balance_cents": 1500,
+              "status": "active",
+              "source": "box_office",
+              "payment_method": "cash",
+              "product_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "recipient_email": "ann@example.com",
+              "issued_by": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "pos_drawer_id": null,
+              "expires_at": null,
+              "created_at": "2026-10-30T12:00:00+00:00",
+              "ledger": [
+                {
+                  "kind": "issue",
+                  "amount_cents": 5000,
+                  "balance_after": 5000,
+                  "session_id": null,
+                  "created_at": "2026-10-30T12:00:00+00:00"
+                },
+                {
+                  "kind": "redeem",
+                  "amount_cents": -3500,
+                  "balance_after": 1500,
+                  "session_id": "cs_live_a1B2c3",
+                  "created_at": "2026-11-02T19:30:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such gift card in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "gift card not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-giving-campaigns",
+      "method": "GET",
+      "path": "/v1/giving-campaigns",
+      "summary": "List giving campaigns",
+      "description": "Campaigns with the amount raised and the number of gifts, counted from the donations received (refunded ones excluded).",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "Roof fund",
+                "slug": "roof",
+                "description": "Help us fix the roof.",
+                "currency": "usd",
+                "goal_cents": 1000000,
+                "starts_at": null,
+                "ends_at": null,
+                "active": true,
+                "checkout_add_on": true,
+                "round_up": false,
+                "suggested_cents": [
+                  1000,
+                  2500,
+                  5000,
+                  10000
+                ],
+                "raised_cents": 152500,
+                "donation_count": 41,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-giving-campaign",
+      "method": "GET",
+      "path": "/v1/giving-campaigns/:id",
+      "summary": "Get a giving campaign",
+      "description": "One campaign, with the amount raised.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The campaign's id. One of another organization answers 404.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Roof fund",
+              "slug": "roof",
+              "description": "Help us fix the roof.",
+              "currency": "usd",
+              "goal_cents": 1000000,
+              "starts_at": null,
+              "ends_at": null,
+              "active": true,
+              "checkout_add_on": true,
+              "round_up": false,
+              "suggested_cents": [
+                1000,
+                2500,
+                5000,
+                10000
+              ],
+              "raised_cents": 152500,
+              "donation_count": 41,
+              "created_at": "2026-10-30T12:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such campaign in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "campaign not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-donations",
+      "method": "GET",
+      "path": "/v1/donations",
+      "summary": "List donations",
+      "description": "Donations, newest first: online (card), with a ticket order (checkout), or recorded by staff (cash, check, other). `total_cents` = gift + the cover-the-fees top-up.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "campaign_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only donations to this campaign.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "amount_cents": 2500,
+                "cover_fees_cents": 75,
+                "total_cents": 2575,
+                "currency": "usd",
+                "method": "card",
+                "donor_name": "Bo Lee",
+                "donor_email": "bo@example.com",
+                "anonymous": false,
+                "session_id": "cs_live_x9Y8",
+                "event_id": null,
+                "status": "received",
+                "receipt_number": 12,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-membership-products",
+      "method": "GET",
+      "path": "/v1/membership-products",
+      "summary": "List membership products",
+      "description": "Membership products: price per period (month, year) or for a one-time term, and the benefits a new member gets.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "Member",
+                "price_cents": 1000,
+                "currency": "usd",
+                "billing": "month",
+                "duration_days": 365,
+                "discount_percent": 10,
+                "presale": true,
+                "free_tickets_per_period": 1,
+                "guest_allowance": 1,
+                "household_seats": 1,
+                "giftable": true,
+                "active": true,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-membership-product",
+      "method": "GET",
+      "path": "/v1/membership-products/:id",
+      "summary": "Get a membership product",
+      "description": "One membership product.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The membership product's id. One of another organization answers 404.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "price_cents": 1000,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 10,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "active": true,
+              "created_at": "2026-10-30T12:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such membership product in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "membership product not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-memberships",
+      "method": "GET",
+      "path": "/v1/memberships",
+      "summary": "List memberships",
+      "description": "Members, newest first. `benefits` is what the membership was bought with (editing the product never changes it). A pending membership is a gift not yet claimed.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only memberships in this stored status.",
+          "enum": [
+            "pending",
+            "active",
+            "past_due",
+            "cancelled",
+            "expired"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "product_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "product_name": "Member",
+                "billing": "month",
+                "holder_email": "dana@example.com",
+                "status": "active",
+                "current_period_start": "2026-10-30T12:00:00+00:00",
+                "current_period_end": "2026-11-30T12:00:00+00:00",
+                "cancel_at_period_end": false,
+                "source": "purchase",
+                "benefits": {
+                  "discount_percent": 10,
+                  "presale": true,
+                  "free_tickets_per_period": 1,
+                  "guest_allowance": 1,
+                  "household_seats": 1
+                },
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-membership",
+      "method": "GET",
+      "path": "/v1/memberships/:id",
+      "summary": "Get a membership",
+      "description": "One membership with its household emails.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The membership's id. One of another organization answers 404.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "product_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "product_name": "Member",
+              "billing": "month",
+              "holder_email": "dana@example.com",
+              "status": "active",
+              "current_period_start": "2026-10-30T12:00:00+00:00",
+              "current_period_end": "2026-11-30T12:00:00+00:00",
+              "cancel_at_period_end": false,
+              "source": "purchase",
+              "benefits": {
+                "discount_percent": 10,
+                "presale": true,
+                "free_tickets_per_period": 1,
+                "guest_allowance": 1,
+                "household_seats": 1
+              },
+              "created_at": "2026-10-30T12:00:00+00:00",
+              "household": [
+                "sam@example.com"
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such membership in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "membership not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-pass-products",
+      "method": "GET",
+      "path": "/v1/pass-products",
+      "summary": "List pass products",
+      "description": "Season passes (named events or a date range) and flex packs (N admissions), with how many were sold.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "kind": "flex",
+                "name": "5-pack",
+                "price_cents": 10000,
+                "currency": "usd",
+                "credits": 5,
+                "per_event_limit": null,
+                "event_ids": [],
+                "date_from": null,
+                "date_to": null,
+                "tier_ids": [],
+                "valid_until": null,
+                "max_sold": 200,
+                "sold": 37,
+                "active": true,
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-passes",
+      "method": "GET",
+      "path": "/v1/passes",
+      "summary": "List passes",
+      "description": "Passes sold, newest first, with the admissions used. `credits_total` is null for a season pass over a date range (one admission per event).",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "product_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "kind": "flex",
+                "name": "5-pack",
+                "holder_email": "dana@example.com",
+                "credits_total": 5,
+                "credits_used": 2,
+                "per_event_limit": null,
+                "valid_until": null,
+                "status": "active",
+                "created_at": "2026-10-30T12:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-event-member-presale",
+      "method": "GET",
+      "path": "/v1/events/:id/member-presale",
+      "summary": "Get an event's member presale",
+      "description": "The event's member presale window, the ticket types it covers (all when empty) and the membership products that may buy (any with presale when empty). `data` is null when there is none.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "starts_at": null,
+              "ends_at": "2026-11-05T17:00:00+00:00",
+              "tier_ids": [],
+              "product_ids": [
+                "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -165,10 +165,18 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
 - Lowering the split gives S4K's unsold seats back to pool 1 at once.
   Raising it takes only seats free in pool 1 right now (refused with how many
   are). It can't go below what S4K already sold.
-- Only for events with a max capacity of 250 or more (mig `20261014140000`,
-  `docs/marketplace/README.md`): below that the route can't be chosen, the
-  split refuses, and an S4K event that drops below 250 leaves the feed and
-  its pool is released.
+- Only for events over the free tier (max capacity over 150) whose organizer
+  opted in to resale (migs `20261014140000`, `20261029090000`,
+  `docs/marketplace/README.md`): otherwise the route can't be chosen, the
+  split refuses, and an S4K event that loses either leaves the feed and its
+  pool is released (at once when the opt-in is withdrawn).
+- Last call (mig `20261029100000`): near sell-out the event leaves the feed
+  and its pool plans to 0, so only the primary checkout sells the rest.
+- A released fixed block (mig `20261029160000`) leaves the feed the same way,
+  its pool planned to 0.
+- Link-out events (listed from Eventbrite / Luma / Posh, mig
+  `20261029170000`) are never on the feed: Exos has no inventory to offer,
+  they can't take the S4K route or a marketplace, and resale never unlocks.
 - A ticket type with no split isn't on the feed. Not splittable: free
   ticket types (resale marketplaces don't sell them), table types, types with
   no capacity, and events whose overall cap is below the types' sum.
@@ -203,6 +211,8 @@ Albert reads and pushes on. Exos writes nothing to S4K or Automatiq.
     (buffer max(one pack, L)), so Exos sells the last set.
   - `eventbrite` (needs an Eventbrite link): on ticket types mapped to Eventbrite, the
     last L free seats are held off Exos checkout and Eventbrite's capacity includes them.
+  - `external` (a fixed block for a platform Exos can't sync, mig `20261029160000`):
+    the block's codes are Exos's, so the listing rows say `exos`.
 - **How Albert reads it:** like Terminal-2's N2S feed. The table syncs by diff (a quiet
   minute writes nothing), has `REPLICA IDENTITY FULL` and is in the `supabase_realtime`
   publication. Albert signs in as a dedicated integration user linked to the S4K

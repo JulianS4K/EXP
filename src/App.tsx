@@ -17,11 +17,14 @@ import { isPixelRoute, leavePixelScope } from './lib/pixels';
 import Home from './views/Home';
 const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
+const PayPalCheckout = lazy(() => import('./views/PayPalCheckout'));
+const SplitWithFriends = lazy(() => import('./views/SplitWithFriends'));
 const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
 const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
+const OrgArtists = lazy(() => import('./views/OrgArtists'));
 const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
 const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
@@ -39,6 +42,9 @@ const Privacy = lazy(() => import('./views/Privacy'));
 const Terms = lazy(() => import('./views/Terms'));
 const Status = lazy(() => import('./views/Status'));
 const Developers = lazy(() => import('./views/Developers'));
+const DeveloperApps = lazy(() => import('./views/DeveloperApps'));
+const OAuthAuthorize = lazy(() => import('./views/OAuthAuthorize'));
+const LiveTicketLink = lazy(() => import('./views/LiveTicketLink'));
 const Profile = lazy(() => import('./views/Profile'));
 const OrganizerProfile = lazy(() => import('./views/OrganizerProfile'));
 const SlugRedirect = lazy(() => import('./views/SlugRedirect'));
@@ -47,8 +53,17 @@ const CreateOrg = lazy(() => import('./views/CreateOrg'));
 const OrgSettings = lazy(() => import('./views/OrgSettings'));
 const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgLimitFlags = lazy(() => import('./views/OrgLimitFlags'));
+const ListingQueue = lazy(() => import('./views/ListingQueue'));
 const OrgPayouts = lazy(() => import('./views/OrgPayouts'));
+const OrgChannelReport = lazy(() => import('./views/OrgChannelReport'));
+const OrgSeatMaps = lazy(() => import('./views/OrgSeatMaps'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
+// Gift cards, giving, passes, memberships (migs 20261030130000 / 130500).
+const Shop = lazy(() => import('./views/Shop'));
+const Give = lazy(() => import('./views/Give'));
+const GiftCardBalance = lazy(() => import('./views/GiftCardBalance'));
+const MyMemberships = lazy(() => import('./views/MyMemberships'));
+const ClaimMembership = lazy(() => import('./views/ClaimMembership'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
 const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
@@ -57,8 +72,26 @@ const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
+// Series, collections, timed entry (mig 20261030150000).
+const SeriesEditor = lazy(() => import('./views/SeriesEditor'));
+const SeriesManager = lazy(() => import('./views/SeriesManager'));
+const OrgCollections = lazy(() => import('./views/OrgCollections'));
+const CollectionPage = lazy(() => import('./views/CollectionPage'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
+const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
+const OrgOffers = lazy(() => import('./views/OrgOffers'));
+const OfferEditor = lazy(() => import('./views/OfferEditor'));
+const OrgFinance = lazy(() => import('./views/OrgFinance'));
+const OfferRespond = lazy(() => import('./views/OfferRespond'));
+const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
+const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
+const OrgFans = lazy(() => import('./views/OrgFans'));
+const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
+const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const NotFound = lazy(() => import('./views/NotFound'));
+const MyGroups = lazy(() => import('./views/MyGroups'));
+const GroupChat = lazy(() => import('./views/GroupChat'));
+const OrgGroups = lazy(() => import('./views/OrgGroups'));
 const Notifications = lazy(() => import('./views/Notifications'));
 const ResetPassword = lazy(() => import('./views/ResetPassword'));
 const AuthCallback = lazy(() => import('./views/AuthCallback'));
@@ -142,12 +175,21 @@ export default function App() {
                     <Route path="/event/:id" element={<EventDetails />} />
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
+                    <Route path="/pay/paypal" element={<PayPalCheckout />} />
+                    <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
+                    <Route path="/split/:sessionId" element={<SplitWithFriends />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/offer/:offerId" element={<OfferRespond />} />
+                    <Route path="/settlement/:eventId" element={<SettlementPublic />} />
+                    <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />
+                    <Route path="/signup/confirm" element={<SignupConfirm mode="confirm" />} />
+                    <Route path="/signup/unsubscribe" element={<SignupConfirm mode="unsubscribe" />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
                     <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
+                    <Route path="/orgs/:orgId/artists" element={<OrgArtists />} />
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />
@@ -170,6 +212,10 @@ export default function App() {
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />
+                    <Route path="/dashboard/event/:eventId/recurring" element={<SeriesEditor />} />
+                    <Route path="/dashboard/series/:seriesId" element={<SeriesManager />} />
+                    <Route path="/orgs/:orgId/collections" element={<OrgCollections />} />
+                    <Route path="/c/:orgSlug/:slug" element={<CollectionPage />} />
                     <Route path="/edit-event/:eventId" element={<EditEvent />} />
                     {/* Bridge multi-tenant org views (Sprint 1). */}
                     <Route path="/orgs" element={<Orgs />} />
@@ -177,8 +223,19 @@ export default function App() {
                     <Route path="/orgs/:orgId/settings" element={<OrgSettings />} />
                     <Route path="/orgs/:orgId/members" element={<OrgMembers />} />
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
+                    <Route path="/admin/listings" element={<ListingQueue />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
+                    <Route path="/orgs/:orgId/channels" element={<OrgChannelReport />} />
+                    <Route path="/orgs/:orgId/seat-maps" element={<OrgSeatMaps />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
+                    <Route path="/orgs/:orgId/calendar" element={<BookingCalendar />} />
+                    <Route path="/orgs/:orgId/offers" element={<OrgOffers />} />
+                    <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
+                    <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
+                    <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
+                    <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
+                    <Route path="/groups" element={<MyGroups />} />
+                    <Route path="/groups/:groupId" element={<GroupChat />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />
@@ -186,16 +243,28 @@ export default function App() {
                         /e/:slug (event slug) — /o/:slug resolves to an
                         org's branded landing page with their event list. */}
                     <Route path="/o/:slug" element={<OrgStorefront />} />
+                    <Route path="/shop/:orgSlug" element={<Shop />} />
+                    <Route path="/give/:orgSlug/:campaignSlug" element={<Give />} />
+                    <Route path="/gift-cards/balance" element={<GiftCardBalance />} />
+                    <Route path="/me/memberships" element={<MyMemberships />} />
+                    <Route path="/membership/claim" element={<ClaimMembership />} />
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />
                     <Route path="/embed/org/:slug" element={<EmbedOrg />} />
+                    {/* Signup form (fans, mig 20261031120000): no payment on this page. */}
+                    <Route path="/embed/signup/:formId" element={<EmbedSignup />} />
                     {/* Stripe Embedded Checkout return page, inside the same iframe. */}
                     <Route path="/embed/return" element={<EmbedReturn />} />
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />
                     <Route path="/developers" element={<Developers />} />
+                    {/* Developer platform (mig 20261031130500): OAuth apps and the consent screen. */}
+                    <Route path="/developers/apps" element={<DeveloperApps />} />
+                    <Route path="/oauth/authorize" element={<OAuthAuthorize />} />
+                    {/* A partner ticket's signed live link (mig 20261031130000). */}
+                    <Route path="/t/:ticketId" element={<LiveTicketLink />} />
                     {/* 404 catch-all — punk "off the door list" screen. */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>

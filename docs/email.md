@@ -54,6 +54,7 @@ transactional, **M** follow-up (opt-out). Render: **SQL** (html row) or **TS** (
 | `refund-issued` | A refund row reaches `succeeded` (`exos_order_refunds` trigger; Stripe webhook, organizer refunds, auto-refunds) | T | per refund row | TS: amount, progress for a partial refund, order reference |
 | `waitlist-open` | Waitlist offer (code + hours to use it) | T | per offer | SQL |
 | `event-announcement` | Organizer announcement to holders | T | per announcement | SQL |
+| `signup-confirm` | A signup-form submission (`_exos_signup_submit`, mig 20261031120000; docs/fans.md) | T | per submission (`signup-confirm:<submission id>`); 3 submissions a day per address and org | TS: org name, form title, the confirm link `/signup/confirm?t=<64-hex token>` (only its hash is stored, 7 days). Sent even when the address is already on the list, so the form never tells anyone who is subscribed. No account needed |
 | `checkout-abandoned` | Cron `exos_send_checkout_reminders`: checkout expired 1-24h ago, seats left | M | per buyer + event, forever | SQL |
 | `post-event` | Cron `exos_send_mail_followups`: event ended 12h-3d ago | M | per event + holder | TS: thanks, "follow <org>" (unless following), up to 3 next events |
 
@@ -74,6 +75,7 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `event-published` | Event status → `published` (trigger); first date of a series only | O | T | per event + person | TS |
 | `inventory-low` | Cron: a tier on a published, upcoming event has ≤ 10% (min 1) left | O | T | per tier + capacity + person | TS |
 | `inventory-sold-out` | Cron: a tier has none left | O | T | per tier + capacity + person (raising capacity re-arms it) | TS |
+| `fixed-block-released` | A fixed block handed back to its platform (mig 20261029160000): the release cron `exos_release_fixed_blocks` or **Release now** | O | T | per event + person | TS: per ticket type the count to put back on that platform (and sold of the block), how many were still pending, a link to the event dashboard. Counts only |
 | `marketplace-attention` | A marketplace order needs a person | O | T | per order + reason | SQL |
 | `payout-sent`, `payout-pending` | `exos_queue_payout_mail(org, amount_cents, currency, period, status, reference)`, for the payout ledger to call | O + finance | T | per org + status + reference (or period) + person | TS |
 | `fee-free-ending` | Cron: 14 days and 1 day before `exos_org_billing.fee_free_until` | O + finance | T | per org + end date + stage + person | TS |
@@ -84,6 +86,7 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `org-connect-stripe` | Cron: day 7-14, only while Stripe can't take payments (`exos_org_secrets.payments.chargesEnabled`) | owner | M | per org | TS |
 | `org-sales-digest` | Cron: yesterday (UTC), only orgs that sold something | O | M | per org + day + person | TS: per-event tickets and gross, totals per currency |
 | `org-weekly-summary` | Cron: last Monday-Sunday (UTC); orgs with sales that week or an event in the next 14 days | O | M | per org + week + person | TS: sales, check-ins, next two weeks' events with sold / capacity |
+| `org-channel-report` | Cron `exos_send_channel_reports` (mig 20261029120000): last Monday-Sunday (UTC); orgs with the report on (default) and an event that started in the last 7 days or starts in the next 60 | O | M | per org + ISO week (`exos_channel_reports` PK) and per person; also claims that week's `org-weekly-summary` key for each person it mails | TS (`_shared/channelReport.ts`, shared with the SPA's Channels card): per event, each channel's tickets this week and to date with gross, channel fees, Exos fee and net, "not reported" where a platform doesn't send them; comps and imported lists apart; totals per currency. Optional text to the owner's number (org's own Twilio / Telnyx, `{{app_url}}` filled by `exos-sms-drain`) |
 | `org-invite`, `invite-accepted` | Member invites | invitee / inviter | T | per invite | SQL |
 
 Onboarding stops when done: the day-3 nudge is skipped once the org has an event, the day-7 nudge once Stripe is
@@ -105,6 +108,20 @@ select cron.schedule('exos_send_mail_followups', '23 * * * *',
 
 The other mail crons already exist: `exos-mail-drain-2min` (the sender), `exos_send_event_reminders` (every
 15 min) and `exos_send_checkout_reminders` (hourly at :17).
+
+**Weekly channel report** (`org-channel-report`, mig `20261029120000`). The migration creates the job
+`exos_send_channel_reports` (Mondays 00:07 UTC, ahead of the follow-ups at :23 so it replaces that week's summary)
+**inactive** when pg_cron is present, and leaves an existing job alone. To turn it on:
+
+```sql
+select cron.alter_job((select jobid from cron.job where jobname = 'exos_send_channel_reports'), active := true);
+-- or, where the job doesn't exist yet:
+select cron.schedule('exos_send_channel_reports', '7 0 * * 1',
+  $cron$SELECT public.exos_send_channel_reports();$cron$);
+```
+
+It's once per org and ISO week however often it runs (`exos_channel_reports`). Texts also need `exos-sms-drain`
+deployed with `EXOS_APP_URL`, and stay a dry run until `EXOS_SMS_LIVE=on`.
 
 ## Going live (operator)
 
