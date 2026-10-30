@@ -310,11 +310,13 @@ SELECT pg_temp.exos_patch_n('public.exos_event_last_call(uuid)',
   $n$    SELECT e.status IS DISTINCT FROM 'cancelled'
            AND NOT e.link_out   -- link-out (mig 20261029170000): Exos is no channel$n$, 1);
 
+-- Anchored on the start of the last-call line, not its end: the fixed-block
+-- migration (20261029160000) appends its own line after it.
 SELECT pg_temp.exos_patch_n('public._exos_feed_eligible(uuid)',
   'link-out (mig 20261029170000)',
-  $o$    AND NOT public.exos_event_last_call(p_event_id);   -- last call (mig 20261029100000)$o$,
-  $n$    AND NOT public.exos_event_last_call(p_event_id)   -- last call (mig 20261029100000)
-    AND NOT public.exos_event_is_link_out(p_event_id);   -- link-out (mig 20261029170000): no inventory to offer$n$, 1);
+  $o$    AND NOT public.exos_event_last_call(p_event_id)$o$,
+  $n$    AND NOT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170000): no inventory to offer
+    AND NOT public.exos_event_last_call(p_event_id)$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_set_ticket_backend(uuid, text, text)',
   'link-out (mig 20261029170000)',
