@@ -2,9 +2,9 @@
   "title": "Exos API",
   "version": "1",
   "base_url": "https://<project-ref>.supabase.co/functions/v1/exos-api",
-  "description": "A REST API over one organization's Exos data: events, ticket types, add-ons, promo codes, attendees and tickets, door scans and check-in, guest lists, orders, invoices, refunds, refund requests, comps, disputes, payouts, fans, tags and webhooks (core writes run the same rules as the dashboard: each runs as the member who created the key, needs that member's role in the organization and is logged); tickets sold on other platforms (sales counts), booking (venues, rooms, holds, the show schedule, staff notes and contacts), offers, budgets and offer pools, deals, finance items, settlements, profit and loss and ticket-count emails, artists and lineups to read and write; plus a public listing feed for listing sites. Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, feed Bandsintown or JamBase, run a box office, a door app or booking from your own tools, or build reports. Every request is scoped to the organization of the key that makes it. Reads are GET; writes are POST, PUT, PATCH and DELETE with a JSON (or form-encoded) body and need a `:write` scope (listing-feed shared keys: `org:admin`). Responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers (the listing feed does), and a key in a browser is a key anyone can copy.",
+  "description": "A REST API over one organization's Exos data: events, ticket types, add-ons, promo codes, attendees and tickets, door scans and check-in, guest lists, orders, invoices, refunds, refund requests, comps, disputes, payouts, fans, tags, reservations, the team and webhooks (core writes run the same rules as the dashboard: each runs as the member who created the key, needs that member's role in the organization and is logged); tickets sold on other platforms (sales counts), booking (venues, rooms, holds, the show schedule, staff notes and contacts), offers, budgets and offer pools, deals, finance items, settlements, profit and loss and ticket-count emails, artists and lineups to read and write; plus a public listing feed for listing sites and Opendate's partner contract for distribution partners. Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, feed Bandsintown or JamBase, run a box office, a door app or booking from your own tools, or build reports. Every request is scoped to the organization of the key that makes it. Reads are GET; writes are POST, PUT, PATCH and DELETE with a JSON (or form-encoded) body and need a `:write` scope (listing-feed shared keys: `org:admin`). Responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers (the listing feed does), and a key in a browser is a key anyone can copy.",
   "authentication": {
-    "description": "Send an organization API key as a bearer token. An owner or manager creates keys in Org settings → Developer, choosing the scopes each key gets; the key (sk_live_ plus 48 hex characters) is shown once, and only its SHA-256 hash and a 16-character prefix are stored. An organization has at most 10 active keys. Keys do not expire: they work until revoked, and a key is revoked automatically when the member who created it leaves the organization. A request for anything outside the key's organization answers 404, so ids from other organizations cannot be probed.",
+    "description": "Send an organization API key as a bearer token. An owner or manager creates keys in Org settings → Developer, choosing the scopes each key gets; the key (sk_live_ plus 48 hex characters) is shown once, and only its SHA-256 hash and a 16-character prefix are stored. An organization has at most 10 active keys. Keys do not expire: they work until revoked, and a key is revoked automatically when the member who created it leaves the organization. A request for anything outside the key's organization answers 404, so ids from other organizations cannot be probed. Two user credentials work wherever an API key does: a personal access token (exos_pat_…, made by a member in Profile → Developer, pinned to one organization) and an OAuth access token (exos_oat_…, issued to an app the member approved). Both act as their user: on every request their scopes are narrowed to what the user's current role may do, and they stop working when the user leaves the organization. docs/developer-platform.md.",
     "header": "Authorization",
     "format": "Bearer sk_live_…",
     "token_validity": "API keys do not expire; revoke one in Org settings when it is no longer needed.",
@@ -14,7 +14,7 @@
         "name": "Organization API key",
         "header": "Authorization",
         "format": "Bearer sk_live_…",
-        "description": "Every endpoint except the public listing feed. Held to the scopes chosen when the key was created (an owner or manager can change them later). Keys created before scopes existed carry the legacy `read` scope, which covers every `:read` scope."
+        "description": "Every endpoint except the public listing feed and the partner contract. Held to the scopes chosen when the key was created (an owner or manager can change them later). Keys created before scopes existed carry the legacy `read` scope, which covers every `:read` scope. Personal access tokens (Bearer exos_pat_…) and OAuth access tokens (Bearer exos_oat_…) are accepted the same way, held to their scopes narrowed to the user's live role; they can call every GET and the team, distribution and reservation routes, and other writes need an organization API key."
       },
       {
         "id": "shared_key",
@@ -22,6 +22,13 @@
         "header": "X-Shared-Key",
         "format": "?shared_key=sh_live_… (or the X-Shared-Key header)",
         "description": "The public listing feed only (/v1/public/events and /v1/public/confirms). One key per listing partner (Bandsintown, JamBase, Songkick, your website, other), minted by an org owner in Org settings → Listing feed or with POST /v1/listing-keys. It reads that organization's public events and nothing else, carries no scopes, and tags ticket links with the partner (utm_source). sh_live_ plus 48 hex characters, shown once; only its SHA-256 hash and a 16-character prefix are stored. At most 20 active keys per organization; revoking one takes effect at once."
+      },
+      {
+        "id": "partner_key",
+        "name": "Distribution partner key",
+        "header": "X-Shared-Key",
+        "format": "?shared_key=dk_live_… (or X-Shared-Key, or Bearer)",
+        "description": "Only the Public: Partner sales endpoints (/v1/public/…). One key per partner, minted by an organization owner (Org settings → Distribution partners, or POST /v1/distribution-partners). It sells only the ticket types the organizer opened to that partner, and sees only its own reservations and orders."
       }
     ],
     "scopes_description": "Every API-key endpoint needs one scope, named on the endpoint; GET /v1/me needs none, and the shared-key feed has no scopes. Reads need a `:read` scope and writes a `:write` scope; artists and lineups use `events:read` / `events:write`, listing-feed keys need `org:admin`. A key without the scope gets 403 with WWW-Authenticate: Bearer error=\"insufficient_scope\". A `:write` scope covers the `:read` scope of the same resource, and the legacy `read` scope covers every `:read` scope. The `:write` scopes without routes can already be granted, so a key can be narrowed ahead of the routes that will use them. `refunds:write` is the only scope that can refund, and no other scope implies it. GET /v1/me returns a key's scopes as stored and as they take effect."
@@ -49,8 +56,15 @@
       }
     ],
     "response_format": {
-      "data": ["…"],
-      "meta": { "page": 2, "per_page": 100, "total": 212, "total_pages": 3 }
+      "data": [
+        "…"
+      ],
+      "meta": {
+        "page": 2,
+        "per_page": 100,
+        "total": 212,
+        "total_pages": 3
+      }
     }
   },
   "rate_limiting": {
@@ -65,23 +79,30 @@
   },
   "error_format": {
     "description": "Errors are JSON with a human-readable error message. Some carry a little more: 403 names the scope that was needed, 429 the limit, and 404 for an unknown path a hint.",
-    "example": { "error": "insufficient scope", "required_scope": "orders:read" },
-    "unknown_path_example": { "error": "not found", "hint": "see /developers for the API reference" }
+    "example": {
+      "error": "insufficient scope",
+      "required_scope": "orders:read"
+    },
+    "unknown_path_example": {
+      "error": "not found",
+      "hint": "see /developers for the API reference"
+    }
   },
   "error_codes": [
     { "status": 304, "name": "Not modified", "description": "Listing feed only: the If-None-Match header names the current ETag, so the response has no body." },
     { "status": 400, "name": "Bad request", "description": "A bad page, per_page or filter value, a bad or unknown field in a write body (core writes refuse server-owned fields such as status or sold rather than ignore them), a body that is not JSON, a malformed Idempotency-Key, or an Idempotency-Key already used for another request; the message names it." },
     { "status": 402, "name": "Payment refused", "description": "A refund Stripe refused; nothing was refunded." },
     { "status": 401, "name": "Unauthorized", "description": "No bearer key (\"missing bearer API key\"), or a key that is unknown or revoked (\"invalid or revoked API key\")." },
-    { "status": 403, "name": "Forbidden", "description": "The key lacks the endpoint's scope: the body names it (required_scope) and so does the WWW-Authenticate header: Bearer error=\"insufficient_scope\", scope=\"…\". For a write, also: the member who created the key can't do it in the dashboard (their role), or has left the organization." },
-    { "status": 404, "name": "Not found", "description": "An unknown path, or an event or order that does not exist in the key's organization." },
+    { "status": 403, "name": "Forbidden", "description": "The key lacks the endpoint's scope (a user token: also a user who left the organization, or a write that needs an organization API key): the body names it (required_scope) and so does the WWW-Authenticate header: Bearer error=\"insufficient_scope\", scope=\"…\". For a write, also: the member who created the key can't do it in the dashboard (their role), or has left the organization." },
+    { "status": 404, "name": "Not found", "description": "An unknown path, or an event, order or reservation that does not exist in the credential's organization (or isn't the partner's)." },
     { "status": 405, "name": "Method not allowed", "description": "A method the path does not answer (e.g. DELETE /v1/holds), or one the API does not answer at all (it answers GET, POST, PUT, PATCH and DELETE; the listing feed GET and HEAD). The Allow header lists the ones it does." },
-    { "status": 409, "name": "Conflict", "description": "A write that clashes with existing data: an event with publish blockers (the body lists them), a tag or fan email that already exists, a daily limit, a ticket type or add-on that has sales, a promo code that exists, a full guest list, a guest who already arrived; renaming a sales count to a label its event already has; a booking write that clashes with what is there (the same room and date twice on one hold, a night that is no longer active, a permalink in use, a second doors row, a limit reached, or deleting a venue or room that hold nights point at); a taken artist permalink, merging an artist that was already merged (or into one), or the 20-active-shared-key limit." },
+    { "status": 409, "name": "Conflict", "description": "A write that clashes with existing data: sold out (reason: sold_out; nothing was held), a reservation that was already completed or cancelled; an event with publish blockers (the body lists them), a tag or fan email that already exists, a daily limit, a ticket type or add-on that has sales, a promo code that exists, a full guest list, a guest who already arrived; renaming a sales count to a label its event already has; a booking write that clashes with what is there (the same room and date twice on one hold, a night that is no longer active, a permalink in use, a second doors row, a limit reached, or deleting a venue or room that hold nights point at); a taken artist permalink, merging an artist that was already merged (or into one), or the 20-active-shared-key limit." },
+    { "status": 410, "name": "Gone", "description": "A reservation whose 10 minutes ran out (reason: expired): nothing was sold and the seats were released." },
     { "status": 413, "name": "Payload too large", "description": "A request body over the limit: 64 KB, or 2 MB of CSV for a sales-count import." },
     { "status": 415, "name": "Unsupported media type", "description": "A POST, PUT or PATCH whose Content-Type is neither JSON (application/json) nor form-encoded." },
-    { "status": 422, "name": "Unprocessable", "description": "A CSV import whose file has errors; each is listed with its line and field, and nothing was written." },
+    { "status": 422, "name": "Unprocessable", "description": "A CSV import whose file has errors (each is listed with its line and field, and nothing was written), or a ticket type that isn't offered (switch off, paused, sales window) or an event that can't sell now (reason: not_available)." },
     { "status": 429, "name": "Too many requests", "description": "Over 120 requests this minute for this key; wait Retry-After seconds." },
-    { "status": 500, "name": "Server error", "description": "Unexpected. A read is safe to retry, and so are the sales-count writes (a label or a platform's import replaces, never adds) core writes resent with the same Idempotency-Key, and fan / tag writes (tagging twice is one tag; adding a fan twice answers 409); check any other write with a read before retrying it." },
+    { "status": 500, "name": "Server error", "description": "Unexpected. A read is safe to retry, and so are the sales-count writes (a label or a platform's import replaces, never adds), core writes resent with the same Idempotency-Key, and fan / tag writes (tagging twice is one tag; adding a fan twice answers 409), and completing a reservation; check any other write with a read before retrying it." },
     { "status": 502, "name": "Bad gateway", "description": "A refund Stripe did not answer. Resend it with the same Idempotency-Key: it will not refund twice." },
     { "status": 503, "name": "Unavailable", "description": "The rate limiter could not be reached, so the request was refused (retry after Retry-After seconds); or a refund while payments are switched off." }
   ],
@@ -96,10 +117,22 @@
       "description": "Compute the HMAC over the raw request body (before parsing the JSON), compare in constant time, and reject timestamps more than 5 minutes old. X-Exos-Delivery is the same on every retry of a delivery: dedupe on it."
     },
     "headers": [
-      { "name": "X-Exos-Event", "description": "The event type, e.g. order.fulfilled." },
-      { "name": "X-Exos-Delivery", "description": "The delivery id; the same across retries." },
-      { "name": "X-Exos-Timestamp", "description": "Unix seconds when this attempt was sent." },
-      { "name": "X-Exos-Signature", "description": "sha256=<hex HMAC-SHA256>." }
+      {
+        "name": "X-Exos-Event",
+        "description": "The event type, e.g. order.fulfilled."
+      },
+      {
+        "name": "X-Exos-Delivery",
+        "description": "The delivery id; the same across retries."
+      },
+      {
+        "name": "X-Exos-Timestamp",
+        "description": "Unix seconds when this attempt was sent."
+      },
+      {
+        "name": "X-Exos-Signature",
+        "description": "sha256=<hex HMAC-SHA256>."
+      }
     ],
     "retries": "A delivery that does not get a 2xx is retried with exponential backoff (about 2^attempt minutes, at most 6 hours apart); after 8 attempts it is given up. Redirects are not followed, and only https URLs at public addresses are called."
   }

@@ -1,7 +1,7 @@
 # Partner API (exos-api)
 
 A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
-site, a box office or door app, reporting, booking tools. Reads everywhere. Core writes (events, ticket types,
+site, a box office or door app (organizer reservations), reporting, booking tools, team management. Reads everywhere. Core writes (events, ticket types,
 add-ons, promo codes, the door, comps, refunds, guest lists, POS) run the dashboard's own SQL (see *Writes*
 below); so do the sales counts (tickets sold on other
 platforms), booking (venues, rooms, holds, the show schedule, staff notes and contacts; docs/booking.md),
@@ -10,7 +10,8 @@ offers, budgets, deals, finance, settlements and P&L (docs/offers-settlements.md
 artists, lineups and listing-feed shared keys, which partners can also
 write (a `:write` scope, or `org:admin`
 for shared keys); plus a public listing feed for listing sites under `/v1/public/…` (shared-key auth,
-`docs/listing-feed.md`). The full reference, with every endpoint, parameter and example, is the public page
+`docs/listing-feed.md`), and Opendate's partner contract for distribution partners under the same prefix
+(partner-key auth, docs/partner-sales.md). The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
 - **Base URL:** `https://<project-ref>.supabase.co/functions/v1/exos-api`, paths under `/v1` (`/v1/events`). Each
@@ -19,14 +20,17 @@ for shared keys); plus a public listing feed for listing sites under `/v1/public
   event, ticket-type, add-on and promo-code writes, publish blockers, tickets and check-in, refunds, comps,
   guest lists, disputes, payouts, POS items, the write log), `exos-api/finance.ts` (offers and finance),
   `supabase/functions/_shared/api/` (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts`
-  page/per_page, `body.ts` capped write bodies, `booking.ts` the booking bodies) and `_shared/refundRun.ts` (the
+  page/per_page, `body.ts` capped write bodies, `booking.ts` the booking bodies, `credentials.ts` user tokens),
+  `_shared/partners/sales.ts` (partner request parsing) and `_shared/refundRun.ts` (the
   Stripe half of a refund, shared with `exos-refund`). Pure TypeScript, so vitest imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
   the 10-key cap), `20261030120000` (sales counts), `20261030100000` (booking), `20261030110000` (artists,
   lineups, listing feed), `20261031100000` / `20261031100500` (offers, budgets, pools, deals, finance,
   settlements, P&L, ticket counts; `docs/offers-settlements.md`), `20261031110000` (core writes: `exos_api_write`,
   the write log, publish blockers, `refunds:write`), `20261031120000` (fans, tags, refund requests; `fans:read` /
-  `fans:write`, docs/fans.md). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_fans.sql`,
+  `fans:write`, docs/fans.md), `20261031130000` (partner sales), `20261031130500` (personal access tokens,
+  OAuth apps). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_fans.sql`,
+  `tests/exos/test_partner_sales.sql`, `tests/exos/test_developer_platform.sql`,
   `tests/exos/test_sales_counts.sql`, `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`,
   `tests/exos/test_offers_settlements.sql`, `tests/exos/test_core_api.sql`; by hand: `tests/exos/race_core_api.sh`.
 - **Writes:** reads are GET. The sales counts (`POST /v1/sales-counts`, `PUT` / `DELETE
@@ -41,6 +45,11 @@ for shared keys); plus a public listing feed for listing sites under `/v1/public
 `Authorization: Bearer sk_live_…`. Owners and managers create keys in Org settings → Developer
 (`src/components/DeveloperSettings.tsx`), picking scopes; the key is shown once and stored as a SHA-256 hash.
 At most 10 active keys per org. Keys are revoked automatically when their creator leaves the org.
+
+The same header takes a member's personal access token (`exos_pat_…`) or an app's OAuth access token
+(`exos_oat_…`): both act as their user in one org, with their scopes narrowed on every request to what the
+user's current role allows (docs/developer-platform.md). Partner routes (`auth: 'partner_key'`) take a partner
+key instead (`?shared_key=dk_live_…`, docs/partner-sales.md).
 
 Each route needs one scope (`routes.ts`); a key without it gets `403 { error: "insufficient scope",
 required_scope }` and `WWW-Authenticate: Bearer error="insufficient_scope"`. A `:write` scope covers its own
@@ -77,11 +86,12 @@ dashboard's publish toggle (EditEvent) calls the same function after saving.
 - 120 requests per key per minute; over it, `429` with `Retry-After`. If the limiter fails, `503` (no limiter, no
   answer: the API returns personal data).
 - Errors are `{ "error": "…" }`: `400` bad paging, filter, body field or Idempotency-Key, `401` missing or invalid
-  key, `402` a refund Stripe refused, `403` scope (or, for a core write, the creator's role), `404` unknown path or
+  key, `402` a refund Stripe refused, `403` scope (or, for a core write, the creator's role; or a user token
+  whose user left the org, or that tried a write that needs an org API key), `404` unknown path or
   another org's id, `405` a method the path doesn't answer (`Allow` lists the ones it does), `409` a write
-  conflict (publish blockers, sold items, duplicates such as a tag or fan email, a taken permalink, a merged artist, the shared-key cap),
-  `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body that is neither JSON nor
-  form-encoded, `422` a CSV import with errors, `500`, `502` a refund Stripe didn't answer (resend with the same
+  conflict (sold out, a completed or cancelled reservation, publish blockers, sold items, duplicates such as a tag or fan email, a taken permalink, a merged artist, the shared-key cap),
+  `410` an expired reservation, `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body that is neither JSON nor
+  form-encoded, `422` a CSV import with errors or a ticket type that isn't offered, `500`, `502` a refund Stripe didn't answer (resend with the same
   key), `503`. Core-API SQLSTATEs are mapped in `sqlError()` (`core.ts`).
 - Bodies are read through `_shared/api/body.ts` (`readCapped`: counted while streaming, never read in full past
   the cap).
@@ -112,6 +122,16 @@ The listing feed (`/v1/public/events`, alias `/v1/public/confirms`) is the one r
 `auth: 'shared_key'` in `routes.ts`, its own handler (`listingFeed()`), Opendate's
 `{ current_page, per_page, total_entries, total_pages, collection }` envelope (`paged: 'opendate'`), CORS `*`,
 `Cache-Control: public, max-age=60`, an ETag, and its own 120/min bucket per key.
+
+Credentials: an org API key (`sk_live_…`), a personal access token (`exos_pat_…`) or an OAuth access token
+(`exos_oat_…`), resolved by `resolveCredential()` (mig 20261031130500). User tokens act as their user at the
+user's live role; they may call every GET and the platform routes (distribution partners, organizer
+reservations, the team, tokens: `PLATFORM_ROUTES` in `exos-api/index.ts`). Every other write records or
+checks an org API key id (`exos_api_write`, booking, offers, listing keys) and answers 403 to a user token.
+
+`/v1/public/…` carries two families: the listing feed (`auth: 'shared_key'`) and the partner contract
+(`auth: 'partner_key'`, `partnerApi()`, docs/partner-sales.md). exos-api picks one by the auth of the route
+that answers the path (`publicAuthAt()` in `routes.ts`); an unknown `/public/…` path is the listing feed's 404.
 
 ## Adding a route
 

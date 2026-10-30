@@ -6,6 +6,9 @@
 //   POST /exos-wallet/pass     { ticket_id, kind: "google" } -> { save_url }
 //   POST /exos-wallet/reissue  { ticket_id }                  -> new door code,
 //        the old one stops working (e.g. a screenshot of the pass got around)
+// Link holder (no account; the ticket's signed live link, mig 20261031130000):
+//   POST /exos-wallet/link-pass { ticket_id, link_key, kind } -> as /pass; the
+//        pass is the ticket owner's, checked in SQL by exos_ticket_link_wallet_issue
 // Apple PassKit web service (webServiceURL = <function URL>/apple): register /
 //   unregister a device, list updated serials, fetch the latest pass, log.
 //   Authorization: "ApplePass <authenticationToken>", checked against the
@@ -174,7 +177,7 @@ async function pkpassResponse(p: WalletPayload, a: AppleSetup, token: string, ex
 
 // ── Owner: get a pass ────────────────────────────────────────────────────
 
-async function issue(req: Request): Promise<Response> {
+async function issue(req: Request, byLink = false): Promise<Response> {
   // deno-lint-ignore no-explicit-any
   let body: any;
   try {
@@ -191,17 +194,26 @@ async function issue(req: Request): Promise<Response> {
   const g = kind === "google" ? await google() : null;
   if (!a && !g) return notConfigured();
 
-  const sbUser = userClient(req);
-  const { data: { user } } = await sbUser.auth.getUser();
-  if (!user) return json({ error: "unauthorized" }, 401);
-
   const token = a ? newAuthToken() : null;
-  const { data: issued, error } = await sbUser.rpc("exos_wallet_issue_pass", {
+  const args = {
     p_ticket_id: ticketId,
     p_kind: kind,
     p_token_hash: token ? await hashAuthToken(token) : null,
     p_pass_type: a ? a.identity.passTypeIdentifier : null,
-  });
+  };
+  let res;
+  if (byLink) {
+    // The 256-bit link key stands in for the owner's session (SQL checks it).
+    const linkKey = typeof body?.link_key === "string" ? body.link_key : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(linkKey)) return json({ error: "link_key required" }, 400);
+    res = await service().rpc("exos_ticket_link_wallet_issue", { ...args, p_key: linkKey });
+  } else {
+    const sbUser = userClient(req);
+    const { data: { user } } = await sbUser.auth.getUser();
+    if (!user) return json({ error: "unauthorized" }, 401);
+    res = await sbUser.rpc("exos_wallet_issue_pass", args);
+  }
+  const { data: issued, error } = res;
   if (error) {
     if (error.code === "42501") return json({ error: "not your ticket" }, 403);
     await reportError(FN, error, { phase: "issue" });
@@ -334,6 +346,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return new Response(null, { status: 204, headers: CORS });
       case "issue":
         return await issue(req);
+      case "link-pass":
+        return await issue(req, true);
       case "reissue":
         return await reissue(req);
       case "push":

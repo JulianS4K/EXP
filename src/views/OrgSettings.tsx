@@ -41,6 +41,8 @@ import ListingFeedPanel from '../components/ListingFeedPanel';
 import OrgGiftCardsPanel from '../components/OrgGiftCardsPanel';
 import OrgGivingPanel from '../components/OrgGivingPanel';
 import OrgMembershipsPanel from '../components/OrgMembershipsPanel';
+import DistributionPartnersPanel from '../components/DistributionPartnersPanel';
+import OrgConnectedApps from '../components/OrgConnectedApps';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -671,6 +673,14 @@ export default function OrgSettings() {
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />
+
+            {/* Distribution partners: keys for the partner sales API (mig 20261031130000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+              <DistributionPartnersPanel orgId={org.id} canEdit={activeRole === 'owner'} />
+            )}
+
+            {/* OAuth apps members connected (mig 20261031130500). Owners. */}
+            {activeRole === 'owner' && <OrgConnectedApps orgId={org.id} />}
           </div>
 
           {/* Sidebar */}

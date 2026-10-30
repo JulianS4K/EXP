@@ -27,18 +27,29 @@
 // `scope`). Writes (POST / PUT / PATCH / DELETE) need a `:write` scope
 // (apiRoutes.test.ts) and run through exos_api_write (mig 20261031110000).
 //
+// `auth`: `api_key` is a bearer credential of the organization: an org API
+// key (sk_live_…), a personal access token (exos_pat_…) or an OAuth access
+// token (exos_oat_…), held to `scope` (docs/developer-platform.md).
+// `partner_key` is a distribution partner's key (dk_live_…, ?shared_key= or
+// X-Shared-Key, docs/partner-sales.md): the Opendate partner contract under
+// /public/…, which needs no scope but the partner's own (inventory / comps).
+// `paged`: true for the API's { data, meta } lists, 'opendate' for
+// Opendate's { current_page, per_page, total_entries, total_pages,
+// collection } envelope.
+//
 // Pure TypeScript, imported by vitest.
 
 import type { Scope } from './scopes.ts';
 
 export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type ApiAuth = 'api_key' | 'shared_key' | 'partner_key';
 
 export interface ApiRoute {
   id: string;
   method: ApiMethod;
   path: string;
-  auth: 'api_key' | 'shared_key';
-  /** null: any valid key (GET /me, and every shared-key route). */
+  auth: ApiAuth;
+  /** null: any valid key (GET /me, the team roles, every shared-key and partner-key route). */
   scope: Scope | null;
   paged: boolean | 'opendate';
   /** Other paths answering the same route. */
@@ -47,6 +58,7 @@ export interface ApiRoute {
 
 
 const K = 'api_key' as const;
+const P = 'partner_key' as const;
 
 export const ROUTES: readonly ApiRoute[] = [
   { id: 'me', method: 'GET', auth: K, path: '/me', scope: null, paged: false },
@@ -338,14 +350,72 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'delete-tagged-item', method: 'DELETE', auth: K, path: '/tagged-items/:id', scope: 'events:write', paged: false },
   { id: 'list-canonical-tags', method: 'GET', auth: K, path: '/canonical-tags', scope: 'events:read', paged: false },
   { id: 'list-refund-requests', method: 'GET', auth: K, path: '/refund-requests', scope: 'orders:read', paged: true },
+
+  // Distribution partners and their keys (mig 20261031130000, docs/partner-sales.md).
+  { id: 'list-distribution-partners', method: 'GET', auth: K, path: '/distribution-partners', scope: 'org:admin', paged: false },
+  { id: 'create-distribution-partner', method: 'POST', auth: K, path: '/distribution-partners', scope: 'org:admin', paged: false },
+  { id: 'update-distribution-partner', method: 'PATCH', auth: K, path: '/distribution-partners/:id', scope: 'org:admin', paged: false },
+  { id: 'revoke-distribution-partner', method: 'DELETE', auth: K, path: '/distribution-partners/:id', scope: 'org:admin', paged: false },
+  { id: 'get-event-distribution', method: 'GET', auth: K, path: '/events/:id/distribution', scope: 'events:read', paged: false },
+  { id: 'set-event-distribution', method: 'PUT', auth: K, path: '/events/:id/distribution', scope: 'events:write', paged: false },
+  // Reservations of an event (partner and organizer), and organizer
+  // reservations made with this credential (a box office, a kiosk).
+  { id: 'list-ticket-reservations', method: 'GET', auth: K, path: '/events/:id/ticket-reservations', scope: 'orders:read', paged: true },
+  { id: 'get-ticket-reservation', method: 'GET', auth: K, path: '/events/:id/ticket-reservations/:token', scope: 'orders:read', paged: false },
+  { id: 'build-organizer-reservation', method: 'POST', auth: K, path: '/events/:id/organizer-reservations/build', scope: 'tickets:write', paged: false },
+  { id: 'create-organizer-reservation', method: 'POST', auth: K, path: '/events/:id/organizer-reservations', scope: 'tickets:write', paged: false },
+  { id: 'update-organizer-reservation', method: 'PUT', auth: K, path: '/events/:id/organizer-reservations/:token', scope: 'tickets:write', paged: false },
+  { id: 'cancel-organizer-reservation', method: 'DELETE', auth: K, path: '/events/:id/organizer-reservations/:token', scope: 'tickets:write', paged: false },
+  { id: 'complete-organizer-reservation', method: 'POST', auth: K, path: '/events/:id/organizer-reservations/:token/complete', scope: 'tickets:write', paged: false },
+
+  // The team: the organization, its members, invitations and roles
+  // (mig 20261031130500, docs/developer-platform.md).
+  { id: 'get-team', method: 'GET', auth: K, path: '/team', scope: 'org:admin', paged: false },
+  { id: 'update-team', method: 'PATCH', auth: K, path: '/team', scope: 'org:admin', paged: false },
+  { id: 'list-team-members', method: 'GET', auth: K, path: '/team/members', scope: 'org:admin', paged: false },
+  { id: 'update-team-member', method: 'PATCH', auth: K, path: '/team/members/:id', scope: 'org:admin', paged: false },
+  { id: 'remove-team-member', method: 'DELETE', auth: K, path: '/team/members/:id', scope: 'org:admin', paged: false },
+  { id: 'list-team-invitations', method: 'GET', auth: K, path: '/team/invitations', scope: 'org:admin', paged: false },
+  { id: 'create-team-invitation', method: 'POST', auth: K, path: '/team/invitations', scope: 'org:admin', paged: false },
+  { id: 'cancel-team-invitation', method: 'DELETE', auth: K, path: '/team/invitations/:id', scope: 'org:admin', paged: false },
+  { id: 'list-team-roles', method: 'GET', auth: K, path: '/team/roles', scope: null, paged: false },
+  { id: 'list-my-memberships', method: 'GET', auth: K, path: '/me/memberships', scope: null, paged: false },
+  { id: 'revoke-current-token', method: 'DELETE', auth: K, path: '/personal-access-tokens/current', scope: null, paged: false },
+
+  // The Opendate partner contract (partner key).
+  { id: 'public-list-ticket-types', method: 'GET', auth: P, path: '/public/confirms/:id/ticket_types', scope: null, paged: false },
+  { id: 'public-create-reservation', method: 'POST', auth: P, path: '/public/confirms/:id/ticket_reservations', scope: null, paged: false },
+  { id: 'public-get-reservation', method: 'GET', auth: P, path: '/public/confirms/:id/ticket_reservations/:token', scope: null, paged: false },
+  { id: 'public-update-reservation', method: 'PUT', auth: P, path: '/public/confirms/:id/ticket_reservations/:token', scope: null, paged: false },
+  { id: 'public-cancel-reservation', method: 'DELETE', auth: P, path: '/public/confirms/:id/ticket_reservations/:token', scope: null, paged: false },
+  { id: 'public-complete-reservation', method: 'POST', auth: P, path: '/public/confirms/:id/ticket_reservations/:token/complete', scope: null, paged: false },
+  { id: 'public-create-comp', method: 'POST', auth: P, path: '/public/confirms/:id/comps', scope: null, paged: false },
+  { id: 'public-list-orders', method: 'GET', auth: P, path: '/public/orders', scope: null, paged: 'opendate' },
+  { id: 'public-get-order', method: 'GET', auth: P, path: '/public/orders/:id', scope: null, paged: false },
+  { id: 'public-list-ticket-links', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs', scope: null, paged: false },
+  { id: 'public-get-ticket-link', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs/:ticket', scope: null, paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */
 export const API_METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
-/** True for a path under the shared-key family (/public/…). */
+/** True for a path under /public/… (the listing feed and the partner contract). */
 export function isSharedKeyPath(path: string): boolean {
   return path === '/public' || path.startsWith('/public/');
+}
+
+/**
+ * The auth of the routes answering a /public/… path under any method:
+ * 'shared_key' (the listing feed, #69) or 'partner_key' (the partner
+ * contract, #74); null when no route answers it. exos-api dispatches /public/…
+ * on this, so the two families can share the prefix.
+ */
+export function publicAuthAt(path: string): ApiAuth | null {
+  for (const m of API_METHODS) {
+    const r = matchRoute(m, path);
+    if (r) return r.route.auth;
+  }
+  return null;
 }
 
 export interface RouteMatch {

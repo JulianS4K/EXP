@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedMethods, apiPath, isSharedKeyPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
+import { allowedMethods, apiPath, isSharedKeyPath, matchRoute, publicAuthAt, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
 import { effectiveScopes, hasScope, READ_SCOPES, SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 import { PagingError, pageEnvelope, parsePage } from '../../supabase/functions/_shared/api/paging.ts';
 
@@ -38,6 +38,7 @@ describe('matchRoute', () => {
     expect(matchRoute('DELETE', '/artists/x')).toBeNull();
     expect(matchRoute('PUT', '/events')).toBeNull();
     expect(matchRoute('DELETE', '/events/abc')).toBeNull();
+    expect(matchRoute('PATCH', '/public/orders')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -49,19 +50,25 @@ describe('matchRoute', () => {
     const keys = new Set(ROUTES.map((r) => `${r.method} ${r.path}`));
     expect(keys.size).toBe(ROUTES.length);
     for (const r of ROUTES) {
-      expect(r.path).toMatch(/^(\/([a-z-]+|:[a-z]+))+$/);
+      expect(r.path).toMatch(/^(\/([a-z_-]+|:[a-z]+))+$/);
       if (r.scope !== null) expect(SCOPES).toContain(r.scope);
       expect(matchRoute(r.method, r.path.replace(/:[a-z]+/g, 'x'))?.route.id).toBe(r.id);
     }
     // Of the API-key routes only GET /me is reachable without a scope; the
     // shared-key routes (the public listing feed) take no scope at all.
-    expect(ROUTES.filter((r) => r.auth === 'api_key' && r.scope === null).map((r) => r.id)).toEqual(['me']);
+    // Credential routes without a scope (#74): who am I, the role list, and the
+    // token's own memberships / revocation. Every other api_key route is scoped.
+    expect(ROUTES.filter((r) => r.auth === 'api_key' && r.scope === null).map((r) => r.id))
+      .toEqual(['me', 'list-team-roles', 'list-my-memberships', 'revoke-current-token']);
     expect(ROUTES.filter((r) => r.auth === 'shared_key').every((r) => r.scope === null && r.method === 'GET')).toBe(true);
     // Every write needs a write scope; every read a read scope (or org:admin).
     for (const r of ROUTES.filter((x) => x.auth === 'api_key' && x.scope)) {
       if (r.method === 'GET') expect(r.scope!.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
       else expect(r.scope!.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
     }
+    // /public is the listing feed (shared key) and the partner contract (partner
+    // key), and nothing else; publicAuthAt tells them apart for exos-api.
+    for (const r of ROUTES) expect(isSharedKeyPath(r.path), r.id).toBe(r.auth !== 'api_key');
     // Money: only refunds:write refunds, and nothing else needs it.
     expect(ROUTES.filter((r) => r.scope === 'refunds:write').map((r) => r.id)).toEqual(['create-refund']);
     // Aliases are unique across the table and point at their own route only.
@@ -102,6 +109,18 @@ describe('matchRoute', () => {
     expect(hasScope(['fans:write'], 'fans:read')).toBe(true);
     expect(hasScope(['read'], 'fans:read')).toBe(true);
     expect(hasScope(['read'], 'fans:write')).toBe(false);
+  });
+
+  it('answers the partner contract and its 405s', () => {
+    expect(matchRoute('POST', '/public/confirms/e1/ticket_reservations/rsv_x/complete')?.route.id).toBe('public-complete-reservation');
+    expect(matchRoute('PUT', '/public/confirms/e1/ticket_reservations/rsv_x')?.params).toEqual({ id: 'e1', token: 'rsv_x' });
+    expect(matchRoute('POST', '/events/e1/organizer-reservations/build')?.route.id).toBe('build-organizer-reservation');
+    expect(allowedMethods('/public/confirms/e1/ticket_reservations/rsv_x')).toEqual(['GET', 'PUT', 'DELETE']);
+    expect(allowedMethods('/nope')).toEqual([]);
+    expect(publicAuthAt('/public/confirms/e1/ticket_reservations')).toBe('partner_key');
+    expect(publicAuthAt('/public/confirms/e1')).toBe('shared_key');
+    expect(publicAuthAt('/public/events')).toBe('shared_key');
+    expect(publicAuthAt('/public/nope')).toBeNull();
   });
 });
 

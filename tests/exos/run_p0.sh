@@ -141,6 +141,8 @@ for m in \
          20261031100500_exos_settlements \
          20261031110000_exos_core_api \
          20261031120000_exos_fans \
+         20261031130000_exos_partner_sales \
+         20261031130500_exos_developer_platform \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -317,6 +319,8 @@ for m in \
          20261031100500_exos_settlements \
          20261031110000_exos_core_api \
          20261031120000_exos_fans \
+         20261031130000_exos_partner_sales \
+         20261031130500_exos_developer_platform \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -374,3 +378,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_passes_me
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_offers_settlements.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_core_api.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fans.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_sales.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_developer_platform.sql"

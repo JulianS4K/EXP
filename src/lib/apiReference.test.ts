@@ -58,11 +58,10 @@ describe('API reference covers the route table', () => {
       const names = (e.parameters as any[]).filter((p) => p.location === 'query').map((p) => p.name);
       const pagedDoc = names.includes('page') && names.includes('per_page');
       expect(pagedDoc, `${r.id} paged`).toBe(r.paged !== false);
+      const ok = e.responses.find((x: any) => x.status === 200);
       if (r.paged === true) {
-        const ok = e.responses.find((x: any) => x.status === 200);
         expect(Object.keys(ok.example.meta), `${r.id} meta`).toEqual(['page', 'per_page', 'total', 'total_pages']);
       } else if (r.paged === 'opendate') {
-        const ok = e.responses.find((x: any) => x.status === 200);
         expect(Object.keys(ok.example), `${r.id} envelope`)
           .toEqual(['current_page', 'per_page', 'total_entries', 'total_pages', 'collection']);
       }
@@ -72,9 +71,10 @@ describe('API reference covers the route table', () => {
   it('documents 403 insufficient_scope on every scoped route', () => {
     for (const r of ROUTES) {
       const e = endpoints.find((x) => x.id === r.id);
-      const forbidden = e.responses.find((x: any) => x.status === 403);
-      if (r.scope) expect(forbidden?.example?.required_scope, r.id).toBe(r.scope);
-      else expect(forbidden, r.id).toBeUndefined();
+      // A route may document other 403s too (owner only, the partner's comps scope).
+      const scoped = e.responses.filter((x: any) => x.status === 403 && x.example?.required_scope !== undefined);
+      if (r.scope) expect(scoped.map((x: any) => x.example.required_scope), r.id).toEqual([r.scope]);
+      else expect(scoped, r.id).toEqual([]);
     }
   });
 });

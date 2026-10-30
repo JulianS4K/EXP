@@ -138,6 +138,8 @@ BEGIN
        -- 64-hex link tokens: the agent's offer page, the settlement contacts'
        -- page, the ticket-count opt-out (migs 20261031100000 / 20261031100500)
        'exos_offer_public', 'exos_offer_respond', 'exos_settlement_public', 'exos_ticket_counts_optout',
+       -- a partner ticket's live link: 256-bit link key (mig 20261031130000)
+       'exos_ticket_link_view',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
