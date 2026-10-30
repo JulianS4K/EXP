@@ -40,7 +40,12 @@ paid events can't be sold.**
 - Performers and artist links.
 - **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
-  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee. Your
+  *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee.
+  **Free tier:** an event with a max capacity of 150 or less (its overall cap, else its capped
+  ticket types, a table counting its party size) pays no Exos fee at all, ever; only card
+  processing. It is also never listed on resale marketplaces or S4K. An event that sells past 150
+  anyway (a voucher that sells past sold-out, comps, the box office) leaves the free tier: the order
+  that crosses 150 and every one after pay the normal fee. Bigger events: your
   first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
   takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
   a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
@@ -56,6 +61,13 @@ paid events can't be sold.**
   - **Hidden tiers** can only be bought with a voucher restricted to that tier.
 - **Add-ons**, **tax rules**, and **purchase limits** (per order / per account). Limits apply when
   seats are reserved, not just at payment.
+- **Resale (Edit event → Marketplaces → Resale):** resale marketplaces (StubHub, SeatGeek, Vivid,
+  Gametime, TickPick, GoTickets, Ticket Evolution) and the S4K network are only for events over the
+  free tier (max capacity over 150), and only once an owner or manager **opts in for that event**:
+  read the text, tick the box, **Opt in to resale**. Exos records who opted in, when, the text's
+  version and the max capacity then. **Withdraw** takes it off at once: listings come down, their
+  seats come back to your checkout. If the max capacity later drops to 150 or less the opt-in ends
+  by itself, and you opt in again if it goes back over. Until then marketplaces you tick wait.
 - **Shared capacity (quotas):** one pool several tiers draw from, e.g. a 300-person room split
   into GA and VIP. *There's no screen for this yet; support sets it up in SQL.*
 
@@ -327,6 +339,12 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   server setting must allow it. Until then Exos records what it would send, and nothing changes on Eventbrite.
 - Table ticket types and ones in a shared capacity group stay on Exos.
 - Luma works the same way and is built in, but it is switched off for now (its API needs Luma Plus).
+- **Last call (Edit event → Last call):** when the event has 10 tickets or fewer left (your number; 0 turns it
+  off), only the **primary** keeps selling, so the last tickets go through one checkout and nothing oversells:
+  marketplace and S4K seats come back, and Eventbrite or Luma (when it isn't the primary) is set to sold out,
+  though its sales and refunds still count. If the primary is Eventbrite or Luma, the Exos page shows sold out
+  with a link to buy there. The event dashboard says **Last call: selling only on …** while it is on.
+  Eventbrite can't set a ticket class to 0: one with no sales shows an error asking you to hide or end it there.
 
 ### Selling on another platform (pretix, hi.events, Luma, Eventbrite)
 

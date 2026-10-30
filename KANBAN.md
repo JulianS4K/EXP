@@ -88,13 +88,13 @@ Partner applications (business, no code):
 - [ ] Apple Pass Type ID certificate + Google Wallet issuer account.
 
 Build:
-- [ ] S4K feed id mapping, then one live S4K-route sale on a 250+ event: listed, sold, claimed, scanned, paid out.
+- [ ] S4K feed id mapping, then one live S4K-route sale on an event over 150 (opted in to resale): listed, sold, claimed, scanned, paid out.
 - [ ] Neighborhood pages (7c) and follower lists + "new event" email.
 - [ ] Bandsintown feed in their partner format once the spec arrives (read-only rule: they pull, we never write).
 - [ ] Fix the doc drift above.
 
 Go to market:
-- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if 250+).
+- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if over 150 and opted in).
 - [ ] Submit every Exos event to NYC listings: Hidden City, GUNK, Queer on the Street, coolstuff.nyc, Eddie's List,
       RA (if it takes outside ticket links).
 - [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).

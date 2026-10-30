@@ -165,10 +165,13 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
 - Lowering the split gives S4K's unsold seats back to pool 1 at once.
   Raising it takes only seats free in pool 1 right now (refused with how many
   are). It can't go below what S4K already sold.
-- Only for events with a max capacity of 250 or more (mig `20261014140000`,
-  `docs/marketplace/README.md`): below that the route can't be chosen, the
-  split refuses, and an S4K event that drops below 250 leaves the feed and
-  its pool is released.
+- Only for events over the free tier (max capacity over 150) whose organizer
+  opted in to resale (migs `20261014140000`, `20261029090000`,
+  `docs/marketplace/README.md`): otherwise the route can't be chosen, the
+  split refuses, and an S4K event that loses either leaves the feed and its
+  pool is released (at once when the opt-in is withdrawn).
+- Last call (mig `20261029100000`): near sell-out the event leaves the feed
+  and its pool plans to 0, so only the primary checkout sells the rest.
 - A ticket type with no split isn't on the feed. Not splittable: free
   ticket types (resale marketplaces don't sell them), table types, types with
   no capacity, and events whose overall cap is below the types' sum.

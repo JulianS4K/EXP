@@ -76,12 +76,15 @@ const SLUG_MAX = 80;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
-import { eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
+import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
 import ChannelSplitPanel from '../components/ChannelSplitPanel';
 import S4kRoutePanel from '../components/S4kRoutePanel';
+import ResaleConsentPanel from '../components/ResaleConsentPanel';
+import LastCallPanel from '../components/LastCallPanel';
+import type { SalesRules } from '../lib/marketplace/resaleConsent';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
@@ -115,6 +118,8 @@ export default function EditEvent() {
   // The event's StubHub request (queued by the exos_events trigger on publish).
   // StubHub / SeatGeek rows: an event row per marketplace (tier_id null) + an allocation per ticket type.
   const [marketRows, setMarketRows] = useState<MarketplaceRow[]>([]);
+  // The free tier / resale opt-in, as the server has it (mig 20261029090000).
+  const [resaleRules, setResaleRules] = useState<SalesRules | null>(null);
   const eventRow = (ch: AllocationChannel) => marketRows.find((r) => r.channel === ch && !r.tier_id) ?? null;
   const loadMarketRows = (id: string) => getMarketplaceRows(id).then(setMarketRows).catch((err) => console.warn('marketplace rows unavailable:', err));
   // Accessibility fields show (and save) only once the columns exist: the
@@ -1683,6 +1688,8 @@ export default function EditEvent() {
 
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Near sell-out only the primary sells (mig 20261029100000). */}
+        {eventId && <LastCallPanel eventId={eventId} />}
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
 
         {SHOW_MARKETPLACES && (<>
@@ -1702,12 +1709,16 @@ export default function EditEvent() {
            </p>
 
            {(() => {
-             // Resale unlocks at a max capacity of 250 (mig 20261014140000).
-             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])));
+             // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
+             const caps = (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id]));
+             const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, caps);
              return resaleUnlocked(cap) ? null : (
-               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">{resaleLockedText(cap)}</p>
+               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
+                 {resaleLockedText(cap, undefined, eventCapacityBounded(Number(eventData.totalTickets) || 0, caps))}
+               </p>
              );
            })()}
+           {eventId && <ResaleConsentPanel eventId={eventId} onRules={setResaleRules} />}
            {eventData.distributionRoute === 's4k' && (
              <p role="status" className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">
                This event is on the S4K network, so S4K lists it on these marketplaces. Switch "Who lists it" below to
@@ -1758,6 +1769,7 @@ export default function EditEvent() {
                route={eventData.distributionRoute === 's4k' ? 's4k' : 'direct'}
                onChanged={(r) => setEventData({ ...eventData, distributionRoute: r })}
                maxCapacity={eventMaxCapacity(Number(eventData.totalTickets) || 0, (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id])))}
+               optInNeeded={!!resaleRules && !resaleRules.resaleUnlocked && resaleRules.maxCapacity > resaleRules.freeTierMaxCapacity}
              />
            )}
            {eventId && !eventData.exclusivity?.primaryMarketOnly && eventData.distributionRoute !== 's4k' && (

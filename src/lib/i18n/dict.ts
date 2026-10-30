@@ -38,6 +38,8 @@ export const en = {
   'event.free': 'Free',
   'event.comingSoonTitle': 'Coming soon',
   'event.comingSoon': 'Paid tickets go on sale soon.',
+  'event.lastCallElsewhere': 'The last tickets for this event are on sale at {platform}.',
+  'event.buyOn': 'Buy on {platform}',
   'event.slotsRemaining': '{n} slots remaining',
 
   'addon.title': 'Add-ons',
@@ -163,6 +165,8 @@ export const es: Record<DictKey, string> = {
   'event.free': 'Gratis',
   'event.comingSoonTitle': 'Próximamente',
   'event.comingSoon': 'Las entradas de pago salen a la venta pronto.',
+  'event.lastCallElsewhere': 'Las últimas entradas de este evento están a la venta en {platform}.',
+  'event.buyOn': 'Comprar en {platform}',
   'event.slotsRemaining': '{n} lugares disponibles',
 
   'addon.title': 'Complementos',
