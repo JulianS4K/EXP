@@ -163,6 +163,28 @@ tiers and discount codes, into a series of dates.
   everything else under "Direct / unknown". Switch the grouping to one dimension at a time, and
   export the full breakdown as CSV. Tag your ad links with `utm_source`, `utm_medium` and
   `utm_campaign` so they show up here. Free claims aren't in it.
+- **Sold elsewhere** (Overview tab; owner, manager and finance): tickets you sold outside Exos, so one
+  report covers every channel. Exos lists them beside its own numbers and never adds them in: they
+  are not in "Tickets sold", revenue, payouts or check-ins. The tile under "Tickets sold" shows the
+  "+N sold elsewhere" count, and so does the dashboard. Other staff can't see these counts, and the
+  public event page only ever gets the total for a published event.
+  - **Add a count:** where it sold ("Box office", "Consignment"), tickets, gross, currency, and
+    optionally capacity and a note. Saving the same name again replaces its numbers; it doesn't add
+    to them.
+  - **Import a sales CSV:** pick the export from DICE, RA, Posh, Shotgun, Ticketmaster, AXS or any
+    other platform. Exos guesses the platform and which column is the ticket type, tickets sold,
+    gross (or price each), capacity, currency, event and order status. Change any of them, check the
+    preview, and import. The file can have one row per ticket type or one row per order: rows are
+    added up per ticket type. Rows marked refunded or cancelled are left out. If the file covers
+    several events, choose which one is this event. Any error lists its line, and nothing is saved
+    until the file is clean (2 MB and 2,000 rows at most).
+  - **Importing again replaces** that platform's numbers. It never adds them twice, so re-importing
+    the same file changes nothing. Delete an entry to undo a wrong file.
+  - At most 20 entries per event and 50 ticket types per import. Amounts in different currencies
+    are totalled separately.
+  - Integrations can do all this through the API (`/developers` → Sales counts, `finance:write`).
+  - This is separate from **Import attendees** (below), which brings in people for the door and has
+    no amounts.
 - **Comps:** tickets to a list of emails, with an optional org-wide **comp budget**. People without
   an account get a claim-by-email link. Comps respect capacity, shared quotas and seats held in
   other people's carts; a full tier shows up as "sold-out" for that recipient.

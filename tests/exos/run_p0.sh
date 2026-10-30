@@ -130,6 +130,7 @@ for m in \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
+         20261030120000_exos_sales_counts \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -295,6 +296,7 @@ for m in \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
+         20261030120000_exos_sales_counts \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -342,3 +344,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fixed_blo
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_weekly_channel_report.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_oauth.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_import.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_sales_counts.sql"

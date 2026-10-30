@@ -36,6 +36,7 @@ import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import ChannelSalesPanel from '../components/ChannelSalesPanel';
+import SalesCountsPanel from '../components/SalesCountsPanel';
 import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
@@ -83,6 +84,8 @@ export default function OrganizerEventReport() {
   const [releasingId, setReleasingId] = useState<string | null>(null);
   // Bumped after any mutation on this page so the analytics document refetches.
   const [analyticsKey, setAnalyticsKey] = useState(0);
+  // Tickets sold on other platforms (mig 20261030120000); never added to totalSold.
+  const [soldElsewhere, setSoldElsewhere] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,7 +276,8 @@ export default function OrganizerEventReport() {
         <FixedBlockSummary eventId={event.id} />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
+          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />}
+            note={soldElsewhere > 0 ? `+${soldElsewhere} sold elsewhere` : undefined} />
           <Stat
             label="Ticket sales"
             value={formatCurrency(totalRevenue, currency)}
@@ -310,6 +314,10 @@ export default function OrganizerEventReport() {
         {/* Money: settlement summary + per-order CSV (owner / manager / finance;
             hidden before the money views exist). Read-only. */}
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Sold elsewhere: manual counts + platform CSV imports (owner / manager /
+            finance; hidden before mig 20261030120000). Beside our numbers, never in them. */}
+        <SalesCountsPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)}
+          onTotal={setSoldElsewhere} />
         {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
         <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* Every ticket by channel, week + to date, fees as reported; the same
@@ -561,7 +569,7 @@ export default function OrganizerEventReport() {
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
+function Stat({ label, value, icon, note }: { label: string; value: string; icon: ReactNode; note?: string }) {
   return (
     <div className="bg-white p-5 rounded border border-slate-200 shadow-sm">
       <div className="flex justify-between items-start mb-3">
@@ -569,6 +577,7 @@ function Stat({ label, value, icon }: { label: string; value: string; icon: Reac
         <span className="text-slate-400">{icon}</span>
       </div>
       <p className="disp text-4xl text-slate-900 tracking-tight" style={{ transform: 'skewX(-3deg)' }}>{value}</p>
+      {note && <p className="text-[11px] font-bold text-slate-500 mt-2">{note}</p>}
     </div>
   );
 }
