@@ -382,7 +382,8 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
   - A ticket refunded or cancelled on Eventbrite stops working: the door says "not valid" for the scan and
     the name.
   - Exos only reads from Eventbrite. Check-ins are not sent back to it, and nothing there changes.
-  - Posh, DICE and the others: import their CSV (they have no API we can use yet).
+  - Posh: connect its webhooks instead (*Selling on Posh too*, below); its buyers then arrive on their own.
+  - DICE and the others: import their CSV (they have no API we can use yet).
 - **The trade-off:** an imported code isn't one of Exos's rotating signed codes. Anyone holding a copy of it
   gets in once, as with the other platform's own app.
 
@@ -412,6 +413,42 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   though its sales and refunds still count. If the primary is Eventbrite or Luma, the Exos page shows sold out
   with a link to buy there. The event dashboard says **Last call: selling only on …** while it is on.
   Eventbrite can't set a ticket class to 0: one with no sales shows an error asking you to hide or end it there.
+
+### Selling on Posh too (webhooks + a capped Posh tier)
+
+Posh has no API for organizers, so Exos can't read or change a Posh event. What Posh does have is webhooks, so Posh
+gets a **capped tier**: you decide how many tickets Posh may sell, Exos keeps those seats off its own sales, and
+Posh tells Exos about every sale.
+
+- **Connect once: Org settings → Posh → Make the webhook URL.** Copy it (it is shown once). In Posh open
+  **Organization Settings → API Webhooks** and add it for **Order Created** and **Pending Order Created**. If Posh
+  lets you give each its own URL, you can add `/pending` to the end of the one for Pending Order Created.
+  Lost the URL or worried it leaked? **New URL** makes another; the old one stops working at once.
+- **Link each Posh event to its Exos event** (Org settings → Posh): paste the Posh event's link
+  (`posh.vip/e/…`), its id or its exact name, and pick the Exos event. Orders whose Posh event isn't linked wait
+  under **Unmatched Posh orders**; **Assign** one to its event and that Posh event is linked for the next orders.
+- **Set the Posh cap: Edit event → Posh.** Pick the ticket type and how many of it Posh may sell, then **set the
+  same capacity on Posh by hand**. Those seats come off what Exos, Eventbrite and Luma can sell. The cap can only
+  grow by seats that are free right now, and can't go below what Posh has already sold. Table ticket types and
+  ones in a shared capacity group can't be capped for Posh. Posh is primary ticketing, not resale: the resale
+  rules (the 250-capacity minimum, the pools) don't apply.
+- **Sales**: a completed Posh order takes its tickets out of the Posh cap and shows in the event's counts and on
+  Edit event → Posh. A **pending** order (one waiting for your approval on Posh) is listed but takes no seat and
+  isn't on the door list; when you approve it on Posh, Posh's Order Created for it confirms it.
+- **Oversell**: if Posh sells more than the cap (its capacity there was set higher), Exos flags it on the event
+  ("Oversold: Posh sold N past its cap") until you tap **I've seen it**, notes it on those buyers' door entries, and
+  takes the extra seats from what Exos has free so it stops selling them. If nothing is free, it says how many
+  have no seat. Fix it by lowering the capacity on Posh or raising the cap.
+- **The door**: Posh buyers are on a **Posh** guest list for the event, with the ticket codes from the webhook (scan
+  them like an imported code), or by name with their party when the webhook carries no code.
+- **Refunds**: Posh sends no webhook for a refund. After refunding on Posh, **Cancel** the order under Edit event →
+  Posh: its seats go back to the Posh cap and its door entries stop working.
+- **What isn't verified yet**: Posh doesn't publish its webhook format, and Exos hasn't seen a real delivery.
+  Exos reads the usual field names (order id, event id / link / name, buyer name and email, quantity, ticket codes)
+  and drops anything it can't place. Check the first real order: if a field is missing (no codes at the door, the
+  wrong quantity, unmatched when it shouldn't be), tell support; the delivery is kept for 30 days so it can be
+  replayed once the parser is fixed. Posh documents no signature, so the secret URL is the only check: keep it
+  private. Details: `docs/marketplace/posh.md`.
 
 ### Selling on another platform (pretix, hi.events, Luma, Eventbrite)
 

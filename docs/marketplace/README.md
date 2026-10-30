@@ -13,6 +13,7 @@ Vendor API docs for the secondary marketplaces Exos distributes into (see
 | Ticket Evolution | [`tevo/`](tevo/README.md) | API v9 order-processing HOWTOs (TEvo Integrations wiki) and Inventory create / update / delete, 2026-09-28 |
 | Eventbrite (attendee **source** for Exos Door, not a sales channel) | [`eventbrite/`](eventbrite/README.md) | API v3 public blueprint, 2026-10-13. GET only |
 | S4K network (Exos is the **source**; S4K pulls and lists via Automatiq) | [`s4k-feed.md`](s4k-feed.md) | design 2026-10-13, modeled on S4K's Ticket Desk consumer API |
+| Posh (primary ticketing, **webhooks in only**; a capped Posh tier, not resale) | [`posh.md`](posh.md) | Posh's webhook guides, 2026-10-29. No organizer API; payload format unverified |
 
 Each folder has the vendor PDFs as printed (`pdf/`), a plain-text extraction
 for grep (`text/`), machine-readable specs where the vendor publishes them
