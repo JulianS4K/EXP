@@ -427,7 +427,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
         .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
 
     case "get-gift-card": {
-      const id = uuidParam(c, "gift card");
+      const id = idParam(c, "gift card not found");
       const { data: card, error } = await sb.from("exos_gift_cards").select(GIFT_CARD_COLS)
         .eq("org_id", orgId).eq("id", id).maybeSingle();
       if (error) throw error;
@@ -441,7 +441,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     case "list-giving-campaigns":
     case "get-giving-campaign": {
       let q = sb.from("exos_giving_campaigns").select(CAMPAIGN_COLS).eq("org_id", orgId);
-      if (route.id === "get-giving-campaign") q = q.eq("id", uuidParam(c, "campaign"));
+      if (route.id === "get-giving-campaign") q = q.eq("id", idParam(c, "campaign not found"));
       const { data, error } = await q.order("created_at");
       if (error) throw error;
       const list = (data ?? []) as unknown as { id: string }[];
@@ -484,7 +484,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
 
     case "get-membership-product": {
       const { data, error } = await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS)
-        .eq("org_id", orgId).eq("id", uuidParam(c, "membership product")).maybeSingle();
+        .eq("org_id", orgId).eq("id", idParam(c, "membership product not found")).maybeSingle();
       if (error) throw error;
       if (!data) throw new ApiError(404, "membership product not found");
       return { data };
@@ -502,7 +502,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     }
 
     case "get-membership": {
-      const id = uuidParam(c, "membership");
+      const id = idParam(c, "membership not found");
       const { data, error } = await sb.from("exos_fan_memberships").select(MEMBERSHIP_COLS)
         .eq("org_id", orgId).eq("id", id).maybeSingle();
       if (error) throw error;
@@ -1366,13 +1366,6 @@ async function sha256B64(s: string): Promise<string> {
 function eventId(c: Ctx): string {
   const id = c.params.id;
   if (!UUID_RE.test(id)) throw new ApiError(404, "event not found");
-  return id;
-}
-
-/** A UUID :id path parameter; anything else is simply not found. */
-function uuidParam(c: Ctx, what: string): string {
-  const id = c.params.id;
-  if (!UUID_RE.test(id)) throw new ApiError(404, `${what} not found`);
   return id;
 }
 
