@@ -25,7 +25,8 @@ them there: a subscribed calendar picks up new dates, time changes and cancellat
   Drafts never appear. The single-event feed has no date window.
 - **What's in an entry:** title, start and end (2 hours when the event has no end time), the venue and address
   (`LOCATION`), coordinates (`GEO`, only while the geocode is under 30 days old, per Google's caching terms), the event
-  page (`URL`), and a description: the ticket link, doors time in the venue's zone, the organizer, and the event
+  page (`URL`; for an event sold elsewhere, such as a link-out event listed from Eventbrite / Luma / Posh, the page
+  where tickets are actually sold: `buy_url` from `exos_event_buy_link`, mig `20261029170000`), and a description: the ticket link, doors time in the venue's zone, the organizer, and the event
   description as plain text. In the `/me` feed, events with tickets also link to My Tickets. No ticket, order or buyer
   data is ever in a feed.
 - **Unknown feeds** (no such org / venue / event, a draft, a revoked or unknown token) all return the same `404`.

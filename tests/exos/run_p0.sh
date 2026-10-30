@@ -128,7 +128,8 @@ for m in \
          20261029130000_exos_discovery_publishing \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
-         20261029160000_exos_fixed_block; do
+         20261029160000_exos_fixed_block \
+         20261029170000_exos_event_import; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -291,7 +292,8 @@ for m in \
          20261029130000_exos_discovery_publishing \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
-         20261029160000_exos_fixed_block; do
+         20261029160000_exos_fixed_block \
+         20261029170000_exos_event_import; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -337,3 +339,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_webh
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fixed_block.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_weekly_channel_report.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_oauth.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_import.sql"

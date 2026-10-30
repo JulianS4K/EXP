@@ -10,6 +10,9 @@
 //
 // Every field is already public on the event page. Published events, plus
 // cancelled ones that were on sale and haven't started (as EventCancelled).
+// Where to buy comes from exos_feed_where_to_buy (mig 20261029170000): a
+// link-out event's offers go to the organizer's checkout with the imported
+// prices; before that migration every event sells on Exos, as before.
 // The feed is a snapshot: an event missing from it is removed.
 //
 // Limits: 30 calls a minute per network (exos_rate_hit, mig 20260929060000);
@@ -27,6 +30,7 @@ import {
   type FeedOrg,
   type FeedTierRow,
 } from "../_shared/googleEvents/feed.ts";
+import type { WhereToBuy } from "../_shared/eventImport/linkOut.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { redactError } from "../_shared/log.ts";
@@ -94,14 +98,19 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   if (error) throw new Error(`events: ${error.message}`);
   const events = (evs ?? []) as unknown as FeedEventRow[];
   const ids = events.map((e) => e.id);
-  if (!ids.length) return { events, tiers: [], geo: new Map(), orgs: new Map() };
+  if (!ids.length) return { events, tiers: [], geo: new Map(), orgs: new Map(), buy: new Map() };
 
   const tiers: FeedTierRow[] = [];
   const geo = new Map<string, FeedGeo>();
   const orgIds = [...new Set(events.map((e) => e.org_id))];
   const orgs = new Map<string, FeedOrg>();
+  const buy = new Map<string, WhereToBuy>();
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
+    // Where to buy (mig 20261029170000). Missing function (PGRST202 / 42883): all Exos.
+    const { data: w, error: wErr } = await sb.rpc("exos_feed_where_to_buy", { p_event_ids: chunk });
+    if (wErr && wErr.code !== "PGRST202" && wErr.code !== "42883") throw new Error(`where to buy: ${wErr.message}`);
+    for (const r of (w ?? []) as WhereToBuy[]) buy.set(r.event_id, r);
     // Public ticket types only (hidden ones are unlocked by codes; never listed).
     // exos_public_tiers covers published events (with the tax rate); a
     // cancelled event's tiers come from the table with the same filter.
@@ -134,7 +143,7 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   }
   // Prices are all-in: the organizer's passed-on fees are in them (service
   // role, so a cancelled event's tiers price like they last did).
-  return { events, tiers: await withPublicTierFees(sb, tiers, { serviceRole: true }), geo, orgs };
+  return { events, tiers: await withPublicTierFees(sb, tiers, { serviceRole: true }), geo, orgs, buy };
 }
 
 /** Bearer <service role key>, compared in constant time over the SHA-256 digests. */

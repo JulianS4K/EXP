@@ -519,7 +519,8 @@ there.
 You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.
 
 - **Edit event → Where tickets are sold**: pick Exos, Eventbrite, pretix, hi.events or Luma and paste the link to your
-  ticket page there. The buy button then sends fans to that shop, and Exos doesn't take payment for the event
+  ticket page there. (An event you listed with *List an event you sell elsewhere* keeps the link it was imported
+  with; list it again to change it.) The buy button then sends fans to that shop, and Exos doesn't take payment for the event
   (it can't be switched once tickets have sold on Exos).
 - **The door**: connect the platform once in **Org settings → Integrations**, then link the event:
   - **pretix**: an API token from a team that can only view orders, your pretix address (pretix.eu or your own
@@ -533,6 +534,38 @@ You can keep your ticket shop where it is and use Exos for the event page, marke
   - **Eventbrite**: as above (*Tickets sold somewhere else*).
 - Guests sync every 2 minutes from two days before the event (every 30 minutes before that) into a guest list
   named after the platform. **Sync now** on the panel pulls immediately. Nothing is written back.
+
+### List an event you sell elsewhere (Eventbrite, Luma, Posh)
+
+Already selling on one platform? Exos can list the event without selling it: Exos runs the event page, your
+organizer page, discovery (Google, calendars, catalog feeds, tracking links) and sends every buyer to **your own
+checkout**. Exos sells nothing for these events and charges nothing.
+
+- **Dashboard → List an event you sell elsewhere.**
+  - **From your Eventbrite account** (connect it first in *Tickets sold somewhere else*): Exos shows your live and
+    upcoming Eventbrite events. Tick one or many (up to 25 at a time) and **List on Exos**. Each one becomes a
+    published Exos event with its name, dates, time zone, venue, description, image, category, price range and link.
+    Listing the same Eventbrite event again updates it; it never makes a second event, and your own edits to the
+    page (name, text, image, venue) are kept.
+  - **Paste a link:** an Eventbrite, Luma or Posh event page.
+    - *Eventbrite*: Exos reads it through Eventbrite's API with your connected account (it works for any public
+      event your account can see) and lists it.
+    - *Luma and Posh*: Exos doesn't read their pages yet. Type the details (name, start, venue, price range, image)
+      and Exos saves a **draft**; check it in Edit event and publish it.
+  - Importing straight from a connected Luma account isn't built yet (Exos's Luma client reads one event's guests,
+    not a calendar's list of events); paste the Luma link instead.
+- **The event page** shows the price range and ticket types as listed on the platform, and a **Buy on Eventbrite /
+  Luma / Posh** button. There is no Exos checkout, no free claims, comps, holds, codes, waitlist, resale or
+  marketplaces for it, and no Exos fee. Exos enforces this in the database, not just on the page.
+- **Kept up to date:** Exos re-checks Eventbrite events on a schedule (every 30 minutes in the last two days, every
+  2 hours in the last two weeks, else twice a day) and **Check Eventbrite now** in Edit event re-checks at once:
+  - sold out on Eventbrite → the page and the feeds say sold out;
+  - moved → the Exos event moves (Google is told it was rescheduled);
+  - cancelled → the Exos event is cancelled and leaves the feeds;
+  - over → it stops being checked.
+  Luma and Posh listings aren't re-checked: if one sells out, moves or is cancelled, update or cancel it yourself.
+- With Eventbrite connected, the listed event's Eventbrite attendees also sync to its door list (read only), so you
+  can scan them with the Exos door app.
 
 ### Check-in lists and re-entry
 

@@ -174,6 +174,9 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
   and its pool plans to 0, so only the primary checkout sells the rest.
 - A released fixed block (mig `20261029160000`) leaves the feed the same way,
   its pool planned to 0.
+- Link-out events (listed from Eventbrite / Luma / Posh, mig
+  `20261029170000`) are never on the feed: Exos has no inventory to offer,
+  they can't take the S4K route or a marketplace, and resale never unlocks.
 - A ticket type with no split isn't on the feed. Not splittable: free
   ticket types (resale marketplaces don't sell them), table types, types with
   no capacity, and events whose overall cap is below the types' sum.
