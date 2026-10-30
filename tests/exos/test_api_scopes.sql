@@ -34,14 +34,16 @@ DECLARE
   i       int;
 BEGIN
   -- S1
-  -- 16 since mig 20261031110000 (+ refunds:write).
-  IF cardinality(public.exos_api_scope_names()) <> 16
+  -- 18 since the build-phase integration (mig 20261101000000): + refunds:write
+  -- (mig 20261031110000) and fans:read / fans:write (mig 20261031120000).
+  IF cardinality(public.exos_api_scope_names()) <> 18
      OR (public.exos_api_scope_names())[1] <> 'events:read'
      OR (public.exos_api_scope_names())[4] <> 'refunds:write'
-     OR (public.exos_api_scope_names())[16] <> 'org:admin' THEN
+     OR (public.exos_api_scope_names())[5] <> 'fans:read'
+     OR (public.exos_api_scope_names())[18] <> 'org:admin' THEN
     RAISE EXCEPTION 'S1 FAIL: %', public.exos_api_scope_names();
   END IF;
-  RAISE NOTICE 'S1 ok: 15 scopes';
+  RAISE NOTICE 'S1 ok: % scopes', cardinality(public.exos_api_scope_names());
 
   -- S2
   PERFORM set_config('app.uid', 'a5000000-0000-0000-0000-0000000000a1', true);

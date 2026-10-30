@@ -140,6 +140,7 @@ for m in \
          20261031100000_exos_offers \
          20261031100500_exos_settlements \
          20261031110000_exos_core_api \
+         20261031120000_exos_fans \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -315,6 +316,7 @@ for m in \
          20261031100000_exos_offers \
          20261031100500_exos_settlements \
          20261031110000_exos_core_api \
+         20261031120000_exos_fans \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -371,3 +373,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gift_card
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_passes_memberships.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_offers_settlements.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_core_api.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fans.sql"

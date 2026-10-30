@@ -665,6 +665,28 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // Double opt-in for a signup form (mig 20261031120000). Transactional: the
+  // fan just asked for it. The link carries the 64-hex confirm token; until
+  // it's clicked the address is not on the list.
+  "signup-confirm": (ctx) => {
+    const o = org(ctx.p);
+    const token = ctx.p.token;
+    if (typeof token !== "string" || !TOKEN.test(token)) throw new PayloadError("token missing");
+    const sms = ctx.p.sms_requested === true;
+    const email = ctx.p.email_requested !== false;
+    const what = email && sms ? "emails and texts" : sms ? "texts" : "emails";
+    return {
+      audience: "buyer",
+      subject: `Confirm: ${o.name} ${what}`,
+      body:
+        `<p>Someone, hopefully you, signed this address up for ${esc(what)} from <strong>${esc(o.name)}</strong>` +
+        `${opt(ctx.p, "form_title") ? ` (${esc(str(ctx.p, "form_title"))})` : ""}. Confirm to start getting them:</p>` +
+        button(ctx, `/signup/confirm?t=${token}`, "Confirm") +
+        (sms ? `<p>Texts are switched on from the same page, signed in to Exos.</p>` : "") +
+        `<p style="color:#555">If it wasn't you, ignore this mail: nothing is sent without the click.</p>`,
+    };
+  },
+
   "org-welcome": (ctx) => {
     const o = org(ctx.p);
     const until = opt(ctx.p, "fee_free_until");

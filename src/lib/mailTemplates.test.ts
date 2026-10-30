@@ -51,6 +51,7 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   'payout-pending': { org, amount_cents: 50000, currency: 'eur', period: 'Sep 16-30', reference: null, marketing: false },
   'fee-free-ending': { org, fee_free_until: '2026-10-12T00:00:00+00:00', stage: '14d', days_left: 14, fee_bps: 300, marketing: false },
   'org-welcome': { org, fee_free_until: '2027-03-28T00:00:00+00:00', has_event: false, marketing: false },
+  'signup-confirm': { org, form_title: 'Join <the> list', token: TOKEN, email_requested: true, sms_requested: true, marketing: false },
   'org-first-event': { org, has_event: false, marketing: true, unsubscribe_token: TOKEN },
   'org-connect-stripe': { org, has_event: true, marketing: true, unsubscribe_token: TOKEN },
   'org-sales-digest': {
@@ -340,6 +341,19 @@ describe('renderTemplate', () => {
     });
     expect(renderTemplate('dispute-lost', { ...PAYLOADS['dispute-lost'], amount_cents: undefined }, APP)).toEqual({
       ok: false, error: 'dispute-lost: amount_cents missing',
+    });
+  });
+
+  it('signup-confirm: the confirm link carries the token, nothing else of the fan', () => {
+    const r = ok('signup-confirm');
+    expect(r.subject).toBe('Confirm: Org <7f> & Co emails and texts');
+    expect(r.html).toContain(`${APP}/signup/confirm?t=${TOKEN}`);
+    expect(r.html).toContain('Join &lt;the&gt; list');
+    expect(r.html).toContain('signed in to Exos');
+    expect(r.html).not.toContain('Unsubscribe');
+    expect(ok('signup-confirm', { ...PAYLOADS['signup-confirm'], sms_requested: false }).subject).toBe('Confirm: Org <7f> & Co emails');
+    expect(renderTemplate('signup-confirm', { ...PAYLOADS['signup-confirm'], token: '"><x>' }, APP)).toEqual({
+      ok: false, error: 'signup-confirm: token missing',
     });
   });
 

@@ -316,6 +316,28 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-pos-devices', method: 'GET', auth: K, path: '/pos/devices', scope: 'events:read', paged: false },
   // The API's own write log
   { id: 'list-api-writes', method: 'GET', auth: K, path: '/api-writes', scope: 'org:admin', paged: true },
+
+  // Fans, tags, signup forms, refund requests (mig 20261031120000, docs/fans.md).
+  // /fans/lookup sits before /fans/:id so it isn't read as an id.
+  { id: 'list-fans', method: 'GET', auth: K, path: '/fans', scope: 'fans:read', paged: true },
+  { id: 'lookup-fans', method: 'GET', auth: K, path: '/fans/lookup', scope: 'fans:read', paged: false },
+  { id: 'get-fan', method: 'GET', auth: K, path: '/fans/:id', scope: 'fans:read', paged: false },
+  { id: 'create-fan', method: 'POST', auth: K, path: '/fans', scope: 'fans:write', paged: false },
+  { id: 'update-fan', method: 'PATCH', auth: K, path: '/fans/:id', scope: 'fans:write', paged: false },
+  { id: 'discard-fan', method: 'DELETE', auth: K, path: '/fans/:id', scope: 'fans:write', paged: false },
+  { id: 'list-signup-forms', method: 'GET', auth: K, path: '/signup-forms', scope: 'fans:read', paged: false },
+  // Tags are org metadata (events:*); a fan's tags also need fans:* (checked per request).
+  { id: 'list-tags', method: 'GET', auth: K, path: '/tags', scope: 'events:read', paged: false },
+  { id: 'get-tag', method: 'GET', auth: K, path: '/tags/:id', scope: 'events:read', paged: false },
+  { id: 'create-tag', method: 'POST', auth: K, path: '/tags', scope: 'events:write', paged: false },
+  { id: 'update-tag', method: 'PATCH', auth: K, path: '/tags/:id', scope: 'events:write', paged: false },
+  { id: 'delete-tag', method: 'DELETE', auth: K, path: '/tags/:id', scope: 'events:write', paged: false },
+  { id: 'list-tagged-items', method: 'GET', auth: K, path: '/tagged-items', scope: 'events:read', paged: true },
+  { id: 'get-tagged-item', method: 'GET', auth: K, path: '/tagged-items/:id', scope: 'events:read', paged: false },
+  { id: 'create-tagged-item', method: 'POST', auth: K, path: '/tagged-items', scope: 'events:write', paged: false },
+  { id: 'delete-tagged-item', method: 'DELETE', auth: K, path: '/tagged-items/:id', scope: 'events:write', paged: false },
+  { id: 'list-canonical-tags', method: 'GET', auth: K, path: '/canonical-tags', scope: 'events:read', paged: false },
+  { id: 'list-refund-requests', method: 'GET', auth: K, path: '/refund-requests', scope: 'orders:read', paged: true },
 ];
 
 /** Methods the API answers (anything else is 405). */

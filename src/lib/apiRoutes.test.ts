@@ -87,6 +87,22 @@ describe('matchRoute', () => {
     expect(isSharedKeyPath('/publicity')).toBe(false);
     expect(isSharedKeyPath('/events')).toBe(false);
   });
+
+  it('routes the fan, tag and refund-request paths', () => {
+    expect(matchRoute('GET', '/fans/lookup')?.route.id).toBe('lookup-fans');
+    expect(matchRoute('GET', '/fans/f1')?.params).toEqual({ id: 'f1' });
+    expect(matchRoute('POST', '/fans')?.route.id).toBe('create-fan');
+    expect(matchRoute('PATCH', '/fans/f1')?.route.id).toBe('update-fan');
+    expect(matchRoute('DELETE', '/fans/f1')?.route.id).toBe('discard-fan');
+    expect(matchRoute('PUT', '/fans/f1')).toBeNull();
+    expect(matchRoute('POST', '/tagged-items')?.route.scope).toBe('events:write');
+    expect(matchRoute('GET', '/refund-requests')?.route.scope).toBe('orders:read');
+    // Fan data is its own scope: orders:read doesn't reach it, fans:write covers fans:read.
+    expect(hasScope(['orders:read'], 'fans:read')).toBe(false);
+    expect(hasScope(['fans:write'], 'fans:read')).toBe(true);
+    expect(hasScope(['read'], 'fans:read')).toBe(true);
+    expect(hasScope(['read'], 'fans:write')).toBe(false);
+  });
 });
 
 describe('booking routes', () => {

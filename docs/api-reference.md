@@ -5,7 +5,8 @@ site, a box office or door app, reporting, booking tools. Reads everywhere. Core
 add-ons, promo codes, the door, comps, refunds, guest lists, POS) run the dashboard's own SQL (see *Writes*
 below); so do the sales counts (tickets sold on other
 platforms), booking (venues, rooms, holds, the show schedule, staff notes and contacts; docs/booking.md),
-offers, budgets, deals, finance, settlements and P&L (docs/offers-settlements.md) and
+offers, budgets, deals, finance, settlements and P&L (docs/offers-settlements.md), fan contacts and tags
+(docs/fans.md; never payments or a fan's consent) and
 artists, lineups and listing-feed shared keys, which partners can also
 write (a `:write` scope, or `org:admin`
 for shared keys); plus a public listing feed for listing sites under `/v1/public/…` (shared-key auth,
@@ -24,7 +25,8 @@ for shared keys); plus a public listing feed for listing sites under `/v1/public
   the 10-key cap), `20261030120000` (sales counts), `20261030100000` (booking), `20261030110000` (artists,
   lineups, listing feed), `20261031100000` / `20261031100500` (offers, budgets, pools, deals, finance,
   settlements, P&L, ticket counts; `docs/offers-settlements.md`), `20261031110000` (core writes: `exos_api_write`,
-  the write log, publish blockers, `refunds:write`). SQL harnesses: `tests/exos/test_api_scopes.sql`,
+  the write log, publish blockers, `refunds:write`), `20261031120000` (fans, tags, refund requests; `fans:read` /
+  `fans:write`, docs/fans.md). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_fans.sql`,
   `tests/exos/test_sales_counts.sql`, `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`,
   `tests/exos/test_offers_settlements.sql`, `tests/exos/test_core_api.sql`; by hand: `tests/exos/race_core_api.sh`.
 - **Writes:** reads are GET. The sales counts (`POST /v1/sales-counts`, `PUT` / `DELETE
@@ -77,7 +79,7 @@ dashboard's publish toggle (EditEvent) calls the same function after saving.
 - Errors are `{ "error": "…" }`: `400` bad paging, filter, body field or Idempotency-Key, `401` missing or invalid
   key, `402` a refund Stripe refused, `403` scope (or, for a core write, the creator's role), `404` unknown path or
   another org's id, `405` a method the path doesn't answer (`Allow` lists the ones it does), `409` a write
-  conflict (publish blockers, sold items, duplicates, a taken permalink, a merged artist, the shared-key cap),
+  conflict (publish blockers, sold items, duplicates such as a tag or fan email, a taken permalink, a merged artist, the shared-key cap),
   `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body that is neither JSON nor
   form-encoded, `422` a CSV import with errors, `500`, `502` a refund Stripe didn't answer (resend with the same
   key), `503`. Core-API SQLSTATEs are mapped in `sqlError()` (`core.ts`).
@@ -102,7 +104,9 @@ and the P&L CSV are the only non-JSON answers besides the sales-count handlers (
 
 Artists, lineups and shared keys call service-role SQL functions that take the key's org explicitly
 (`_exos_artist_save`, `_exos_artist_merge`, `_exos_lineup_save`, `_exos_listing_key_create` / `_revoke`); their
-SQLSTATEs map to HTTP in `rpcError()` (after `bookingDbError()`).
+SQLSTATEs map to HTTP in `rpcError()` (after `bookingDbError()`). Fan contacts and tags write the same way and
+map with `rpcError()` alone; they never touch payments or a fan's consent, and a fan's tags also need
+`fans:read` / `fans:write` on top of the route's `events:*` scope.
 
 The listing feed (`/v1/public/events`, alias `/v1/public/confirms`) is the one route family without an API key:
 `auth: 'shared_key'` in `routes.ts`, its own handler (`listingFeed()`), Opendate's

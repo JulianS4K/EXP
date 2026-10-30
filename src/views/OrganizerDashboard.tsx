@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
@@ -156,6 +156,11 @@ export default function OrganizerDashboard() {
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/finance`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <PieChart className="w-4 h-4" /><span>Finance & P&L</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/fans`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Heart className="w-4 h-4" /><span>Fans</span>
                   </Link>
                 )}
                 {canSeeMoney(activeRole, isAdmin) && (

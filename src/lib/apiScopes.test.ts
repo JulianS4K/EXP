@@ -2,6 +2,8 @@
 // supabase/functions/_shared/api/scopes.ts (the edge function, the key UI,
 // /developers) and exos_api_scope_names() (its latest definition; what
 // exos_create_api_key / exos_set_api_key_scopes accept). They must agree.
+// The SQL side is the LATEST migration that (re)defines the function (first
+// 20261027090000; 20261031120000 added fans:read / fans:write).
 
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
