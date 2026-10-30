@@ -49,6 +49,12 @@ const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgLimitFlags = lazy(() => import('./views/OrgLimitFlags'));
 const OrgPayouts = lazy(() => import('./views/OrgPayouts'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
+// Gift cards, giving, passes, memberships (migs 20261030130000 / 130500).
+const Shop = lazy(() => import('./views/Shop'));
+const Give = lazy(() => import('./views/Give'));
+const GiftCardBalance = lazy(() => import('./views/GiftCardBalance'));
+const MyMemberships = lazy(() => import('./views/MyMemberships'));
+const ClaimMembership = lazy(() => import('./views/ClaimMembership'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
 const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
@@ -186,6 +192,11 @@ export default function App() {
                         /e/:slug (event slug) — /o/:slug resolves to an
                         org's branded landing page with their event list. */}
                     <Route path="/o/:slug" element={<OrgStorefront />} />
+                    <Route path="/shop/:orgSlug" element={<Shop />} />
+                    <Route path="/give/:orgSlug/:campaignSlug" element={<Give />} />
+                    <Route path="/gift-cards/balance" element={<GiftCardBalance />} />
+                    <Route path="/me/memberships" element={<MyMemberships />} />
+                    <Route path="/membership/claim" element={<ClaimMembership />} />
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />

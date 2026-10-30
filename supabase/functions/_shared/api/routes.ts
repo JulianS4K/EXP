@@ -40,6 +40,20 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-invoices', method: 'GET', path: '/invoices', scope: 'orders:read', paged: true },
   { id: 'list-refunds', method: 'GET', path: '/refunds', scope: 'orders:read', paged: true },
   { id: 'list-webhooks', method: 'GET', path: '/webhooks', scope: 'webhooks:read', paged: false },
+  // Gift cards, giving, memberships, passes (migs 20261030130000 / 130500).
+  { id: 'list-gift-card-products', method: 'GET', path: '/gift-card-products', scope: 'commerce:read', paged: false },
+  { id: 'list-gift-cards', method: 'GET', path: '/gift-cards', scope: 'commerce:read', paged: true },
+  { id: 'get-gift-card', method: 'GET', path: '/gift-cards/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-giving-campaigns', method: 'GET', path: '/giving-campaigns', scope: 'commerce:read', paged: false },
+  { id: 'get-giving-campaign', method: 'GET', path: '/giving-campaigns/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-donations', method: 'GET', path: '/donations', scope: 'commerce:read', paged: true },
+  { id: 'list-membership-products', method: 'GET', path: '/membership-products', scope: 'commerce:read', paged: false },
+  { id: 'get-membership-product', method: 'GET', path: '/membership-products/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-memberships', method: 'GET', path: '/memberships', scope: 'commerce:read', paged: true },
+  { id: 'get-membership', method: 'GET', path: '/memberships/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-pass-products', method: 'GET', path: '/pass-products', scope: 'commerce:read', paged: false },
+  { id: 'list-passes', method: 'GET', path: '/passes', scope: 'commerce:read', paged: true },
+  { id: 'get-event-member-presale', method: 'GET', path: '/events/:id/member-presale', scope: 'commerce:read', paged: false },
 ];
 
 export interface RouteMatch {

@@ -113,7 +113,9 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
          20261027090000_exos_api_scopes \
-         20261027100000_exos_fee_rules; do
+         20261027100000_exos_fee_rules \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
@@ -247,7 +249,9 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
          20261027090000_exos_api_scopes \
-         20261027100000_exos_fee_rules; do
+         20261027100000_exos_fee_rules \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -285,3 +289,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_day_
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_online_event_followups.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_scopes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fee_rules.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gift_cards_giving.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_passes_memberships.sql"
