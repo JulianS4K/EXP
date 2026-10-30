@@ -50,6 +50,8 @@ import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from
 import LinkOutBuyCard from '../components/LinkOutBuyCard';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
+import CheckoutExtras, { type CheckoutExtrasValue } from '../components/CheckoutExtras';
+import MemberPassRedeem from '../components/MemberPassRedeem';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
@@ -121,6 +123,8 @@ export default function EventDetails() {
   // onto the minted tickets after a free claim (best-effort, owner RPC).
   const [attendeeNames, setAttendeeNames] = useState<string[]>([]);
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
+  // Gift card + add-a-donation (mig 20261030130000).
+  const [extras, setExtras] = useState<CheckoutExtrasValue>({});
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
   // A hidden tier the applied voucher unlocks. The public tier list never
   // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
@@ -450,6 +454,8 @@ export default function EventDetails() {
         voucherCode: voucher?.code,
         attribution,
         guestEmail,
+        giftCardCode: extras.giftCardCode,
+        donation: extras.donation,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
         slotId: slotTier ? slotId : null,
@@ -1307,6 +1313,28 @@ export default function EventDetails() {
                     currency={event.currency || 'USD'}
                     onChange={setAddonSel}
                     initialQty={prefill?.addons}
+                  />
+                )}
+
+                {/* Member price notice, "use my pass" / member free tickets (mig 20261030130500). */}
+                <MemberPassRedeem
+                  orgId={event.orgId}
+                  event={{ id: event.id, starts_at: event.date ? event.date.toDate().toISOString() : null }}
+                  tierId={selectedTierId}
+                  quantity={quantity}
+                  signedIn={!!user}
+                  onIssued={(n) => {
+                    toast({ kind: 'success', message: `${n} ticket${n === 1 ? '' : 's'} added to My Tickets.` });
+                    window.location.href = publicUrl('my-tickets');
+                  }}
+                />
+
+                {(!soldOut || voucher?.canBypass) && (priceToDisplay > 0 || addonSel.totalCents > 0) && (
+                  <CheckoutExtras
+                    orgId={event.orgId}
+                    currency={event.currency || 'USD'}
+                    orderCents={Math.round(priceToDisplay * 100) * quantity + addonSel.totalCents}
+                    onChange={setExtras}
                   />
                 )}
 

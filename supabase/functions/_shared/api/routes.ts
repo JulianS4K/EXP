@@ -156,6 +156,20 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'public-get-event', method: 'GET', auth: 'shared_key', path: '/public/events/:id', scope: null, paged: false },
   { id: 'public-list-confirms', method: 'GET', auth: 'shared_key', path: '/public/confirms', scope: null, paged: 'opendate' },
   { id: 'public-get-confirm', method: 'GET', auth: 'shared_key', path: '/public/confirms/:id', scope: null, paged: false },
+  // Gift cards, giving, memberships, passes (migs 20261030130000 / 130500).
+  { id: 'list-gift-card-products', method: 'GET', auth: K, path: '/gift-card-products', scope: 'commerce:read', paged: false },
+  { id: 'list-gift-cards', method: 'GET', auth: K, path: '/gift-cards', scope: 'commerce:read', paged: true },
+  { id: 'get-gift-card', method: 'GET', auth: K, path: '/gift-cards/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-giving-campaigns', method: 'GET', auth: K, path: '/giving-campaigns', scope: 'commerce:read', paged: false },
+  { id: 'get-giving-campaign', method: 'GET', auth: K, path: '/giving-campaigns/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-donations', method: 'GET', auth: K, path: '/donations', scope: 'commerce:read', paged: true },
+  { id: 'list-membership-products', method: 'GET', auth: K, path: '/membership-products', scope: 'commerce:read', paged: false },
+  { id: 'get-membership-product', method: 'GET', auth: K, path: '/membership-products/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-memberships', method: 'GET', auth: K, path: '/memberships', scope: 'commerce:read', paged: true },
+  { id: 'get-membership', method: 'GET', auth: K, path: '/memberships/:id', scope: 'commerce:read', paged: false },
+  { id: 'list-pass-products', method: 'GET', auth: K, path: '/pass-products', scope: 'commerce:read', paged: false },
+  { id: 'list-passes', method: 'GET', auth: K, path: '/passes', scope: 'commerce:read', paged: true },
+  { id: 'get-event-member-presale', method: 'GET', auth: K, path: '/events/:id/member-presale', scope: 'commerce:read', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

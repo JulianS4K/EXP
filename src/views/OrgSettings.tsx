@@ -38,6 +38,9 @@ import FeeRulesEditor from '../components/FeeRulesEditor';
 import OAuthFinish from '../components/OAuthFinish';
 import { readOAuthReturn, stripOAuthHash, stripOAuthReturn, type OAuthReturn } from '../lib/oauthReturn';
 import ListingFeedPanel from '../components/ListingFeedPanel';
+import OrgGiftCardsPanel from '../components/OrgGiftCardsPanel';
+import OrgGivingPanel from '../components/OrgGivingPanel';
+import OrgMembershipsPanel from '../components/OrgMembershipsPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -646,6 +649,25 @@ export default function OrgSettings() {
 
             {/* Listing feed: per-partner shared keys (mig 20261030110000). Owners only. */}
             {(isAdmin || activeRole === 'owner') && <ListingFeedPanel orgId={org.id} />}
+
+            {/* Gift cards and giving (mig 20261030130000). */}
+            {(isAdmin || ['owner', 'manager', 'finance', 'scanner'].includes(activeRole ?? '')) && (
+              <OrgGiftCardsPanel orgId={org.id}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canSell={isAdmin || ['owner', 'manager', 'scanner'].includes(activeRole ?? '')} />
+            )}
+            {(isAdmin || ['owner', 'manager', 'finance'].includes(activeRole ?? '')) && (
+              <OrgGivingPanel orgId={org.id} orgSlug={org.slug}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canRecord={isAdmin || ['owner', 'manager', 'finance'].includes(activeRole ?? '')} />
+            )}
+
+            {/* Memberships, season passes, flex packs (mig 20261030130500). */}
+            {(isAdmin || ['owner', 'manager', 'finance', 'scanner'].includes(activeRole ?? '')) && (
+              <OrgMembershipsPanel orgId={org.id}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canScan={isAdmin || ['owner', 'manager', 'scanner'].includes(activeRole ?? '')} />
+            )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />

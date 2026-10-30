@@ -54,6 +54,10 @@ export async function startCheckout(input: {
   seatIds?: string[];
   /** Timed entry: the chosen slot ('YYYYMMDDTHHMM', mig 20261030150000). */
   slotId?: string | null;
+  /** Pay (part of) the order with a gift card (mig 20261030130000). */
+  giftCardCode?: string;
+  /** Add-a-donation to a giving campaign (its own line after tax). */
+  donation?: { campaign_id: string; amount_cents: number };
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -68,6 +72,8 @@ export async function startCheckout(input: {
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
       seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
       slot_id: input.slotId || undefined,
+      gift_card_code: input.giftCardCode || undefined,
+      donation: input.donation,
       ...recordBody(input),
     },
   });
@@ -75,6 +81,11 @@ export async function startCheckout(input: {
   // Free seats are issued straight away (no Stripe): go to My Tickets.
   const free = data as { free?: boolean; issued?: number } | null;
   if (free?.free && free.issued) return `/my-tickets?claimed=${free.issued}`;
+  // The gift card covered everything: no Stripe page, the tickets are issued.
+  const paid = data as { paid_with_gift_card?: boolean; session_id?: string } | null;
+  if (paid?.paid_with_gift_card) {
+    return input.successUrl.replace('{CHECKOUT_SESSION_ID}', encodeURIComponent(paid.session_id ?? ''));
+  }
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');
   return url;

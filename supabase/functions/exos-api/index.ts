@@ -40,6 +40,12 @@
 //   /artists/:id/merge, GET /artists/:id/events, GET/PUT /events/:id/lineup;
 //   GET/POST /listing-keys, DELETE /listing-keys/:id.
 //
+// commerce:read (migs 20261030130000 / 130500): /gift-card-products,
+// /gift-cards[/:id], /giving-campaigns[/:id], /donations,
+// /membership-products[/:id], /memberships[/:id], /pass-products, /passes,
+// /events/:id/member-presale. Never a gift card code (only its last 4) or a
+// gift claim token.
+//
 // Public listing feed (docs/listing-feed.md): GET /public/events[/:id] and the
 // Opendate-named alias /public/confirms[/:id], authenticated with a shared key
 // (?shared_key=sh_live_… or X-Shared-Key) instead of an API key. Read-only,
@@ -108,6 +114,20 @@ const ARTIST_SORTS: Record<string, [string, boolean]> = {
   "updated_at asc": ["updated_at", true], "updated_at desc": ["updated_at", false],
 };
 const FEED_RATE_LIMIT = 120; // listing-feed requests per shared key (or per network without one) per minute
+
+const GIFT_CARD_COLS =
+  "id, last4, currency, initial_cents, balance_cents, status, source, payment_method, product_id, recipient_email, " +
+  "issued_by, pos_drawer_id, expires_at, created_at";
+const CAMPAIGN_COLS =
+  "id, name, slug, description, currency, goal_cents, starts_at, ends_at, active, checkout_add_on, round_up, " +
+  "suggested_cents, created_at";
+const MEMBERSHIP_PRODUCT_COLS =
+  "id, name, price_cents, currency, billing, duration_days, discount_percent, presale, free_tickets_per_period, " +
+  "guest_allowance, household_seats, giftable, active, created_at";
+const MEMBERSHIP_COLS =
+  "id, product_id, product_name, billing, holder_email, status, current_period_start, current_period_end, " +
+  "cancel_at_period_end, source, benefits, created_at";
+const MEMBERSHIP_STATUSES = new Set(["pending", "active", "past_due", "cancelled", "expired"]);
 
 class ApiError extends Error {
   status: number;
@@ -394,6 +414,123 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return paged(await sb.from("exos_order_refunds")
         .select("id, session_id, amount_cents, currency, status, reason, is_partial, created_at", { count: "exact" })
         .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    // --- Gift cards, giving, memberships, passes (commerce:read) -------------
+    case "list-gift-card-products":
+      return rows(await sb.from("exos_gift_card_products")
+        .select("id, name, description, currency, amount_type, amounts_cents, min_cents, max_cents, image_url, expiry_months, active, created_at")
+        .eq("org_id", orgId).order("created_at"));
+
+    case "list-gift-cards":
+      // Never code_hash.
+      return paged(await sb.from("exos_gift_cards").select(GIFT_CARD_COLS, { count: "exact" })
+        .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    case "get-gift-card": {
+      const id = uuidParam(c, "gift card");
+      const { data: card, error } = await sb.from("exos_gift_cards").select(GIFT_CARD_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!card) throw new ApiError(404, "gift card not found");
+      const ledger = await sb.from("exos_gift_card_ledger").select("kind, amount_cents, balance_after, session_id, created_at")
+        .eq("card_id", id).order("id");
+      if (ledger.error) throw ledger.error;
+      return { data: { ...(card as unknown as Record<string, unknown>), ledger: ledger.data ?? [] } };
+    }
+
+    case "list-giving-campaigns":
+    case "get-giving-campaign": {
+      let q = sb.from("exos_giving_campaigns").select(CAMPAIGN_COLS).eq("org_id", orgId);
+      if (route.id === "get-giving-campaign") q = q.eq("id", uuidParam(c, "campaign"));
+      const { data, error } = await q.order("created_at");
+      if (error) throw error;
+      const list = (data ?? []) as unknown as { id: string }[];
+      const ids = list.map((x) => x.id);
+      const totals = new Map<string, { raised_cents: number; donation_count: number }>();
+      if (ids.length > 0) {
+        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents")
+          .eq("org_id", orgId).eq("status", "received").in("campaign_id", ids);
+        if (dErr) throw dErr;
+        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number }[]) {
+          const t = totals.get(d.campaign_id) ?? { raised_cents: 0, donation_count: 0 };
+          t.raised_cents += d.amount_cents;
+          t.donation_count += 1;
+          totals.set(d.campaign_id, t);
+        }
+      }
+      const out = list.map((x) => ({ ...x, ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }) }));
+      if (route.id === "get-giving-campaign") {
+        if (out.length === 0) throw new ApiError(404, "campaign not found");
+        return { data: out[0] };
+      }
+      return { data: out };
+    }
+
+    case "list-donations": {
+      let q = sb.from("exos_donations")
+        .select("id, campaign_id, amount_cents, cover_fees_cents, total_cents, currency, method, donor_name, donor_email, " +
+          "anonymous, session_id, event_id, status, receipt_number, created_at", { count: "exact" })
+        .eq("org_id", orgId);
+      const camp = c.q.get("campaign_id");
+      if (camp !== null) {
+        if (!UUID_RE.test(camp)) throw new ApiError(400, "campaign_id must be a UUID.");
+        q = q.eq("campaign_id", camp);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "list-membership-products":
+      return rows(await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId).order("created_at"));
+
+    case "get-membership-product": {
+      const { data, error } = await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS)
+        .eq("org_id", orgId).eq("id", uuidParam(c, "membership product")).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "membership product not found");
+      return { data };
+    }
+
+    case "list-memberships": {
+      // Never gift_token_hash or the Stripe ids.
+      let q = sb.from("exos_fan_memberships").select(MEMBERSHIP_COLS, { count: "exact" }).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!MEMBERSHIP_STATUSES.has(status)) throw new ApiError(400, "status is invalid.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-membership": {
+      const id = uuidParam(c, "membership");
+      const { data, error } = await sb.from("exos_fan_memberships").select(MEMBERSHIP_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ApiError(404, "membership not found");
+      const hh = await sb.from("exos_membership_household").select("email").eq("membership_id", id).order("email");
+      if (hh.error) throw hh.error;
+      return { data: { ...(data as unknown as Record<string, unknown>), household: (hh.data ?? []).map((h: { email: string }) => h.email) } };
+    }
+
+    case "list-pass-products":
+      return rows(await sb.from("exos_pass_products")
+        .select("id, kind, name, price_cents, currency, credits, per_event_limit, event_ids, date_from, date_to, tier_ids, " +
+          "valid_until, max_sold, sold, active, created_at")
+        .eq("org_id", orgId).order("created_at"));
+
+    case "list-passes":
+      return paged(await sb.from("exos_passes")
+        .select("id, product_id, kind, name, holder_email, credits_total, credits_used, per_event_limit, valid_until, status, created_at",
+          { count: "exact" })
+        .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+
+    case "get-event-member-presale": {
+      const id = await ownEvent(c);
+      const { data, error } = await sb.from("exos_member_presales").select("event_id, starts_at, ends_at, tier_ids, product_ids")
+        .eq("event_id", id).maybeSingle();
+      if (error) throw error;
+      return { data: data ?? null };
+    }
 
     case "list-webhooks":
       // Never the signing secret.
@@ -1229,6 +1366,13 @@ async function sha256B64(s: string): Promise<string> {
 function eventId(c: Ctx): string {
   const id = c.params.id;
   if (!UUID_RE.test(id)) throw new ApiError(404, "event not found");
+  return id;
+}
+
+/** A UUID :id path parameter; anything else is simply not found. */
+function uuidParam(c: Ctx, what: string): string {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, `${what} not found`);
   return id;
 }
 

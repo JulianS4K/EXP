@@ -133,6 +133,8 @@ for m in \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships \
          20261030140000_exos_seating \
          20261030150000_exos_series_timed_entry \
          20261101000000_exos_integration; do
@@ -303,6 +305,8 @@ for m in \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships \
          20261030140000_exos_seating \
          20261030150000_exos_series_timed_entry \
          20261101000000_exos_integration; do
@@ -357,3 +361,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_seating.s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_booking.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_series_timed_entry.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_artists_feed.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gift_cards_giving.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_passes_memberships.sql"
