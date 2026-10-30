@@ -9,7 +9,7 @@
 // is deferred until the white-label sprint.
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -35,6 +35,8 @@ import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
 import FeeRulesEditor from '../components/FeeRulesEditor';
+import OAuthFinish from '../components/OAuthFinish';
+import { readOAuthReturn, stripOAuthHash, stripOAuthReturn, type OAuthReturn } from '../lib/oauthReturn';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -74,6 +76,18 @@ export default function OrgSettings() {
   const { activeRole } = useOrganization();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Back from Google / Eventbrite (mig 20261029140000): keep the state and the
+  // finish token in memory and take them out of the address bar at once; the
+  // confirm screen (OAuthFinish) sends them only when the user clicks Confirm.
+  const [oauthRet, setOauthRet] = useState<OAuthReturn | null>(() => readOAuthReturn(location.search, location.hash));
+  useEffect(() => {
+    if (!oauthRet) return;
+    navigate({ pathname: location.pathname, search: stripOAuthReturn(location.search), hash: stripOAuthHash(location.hash) },
+      { replace: true });
+    // eslint-disable-next-line
+  }, []);
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [name, setName] = useState('');
@@ -132,6 +146,9 @@ export default function OrgSettings() {
         </div>
       </div>
     );
+  }
+  if (oauthRet) {
+    return <OAuthFinish ret={oauthRet} orgName={org?.name ?? null} onClose={() => setOauthRet(null)} />;
   }
   if (!org) {
     return (

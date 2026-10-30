@@ -4,21 +4,17 @@
 // Owner / manager only; the RPCs enforce it too. The token is never read
 // back: a saved one shows as "•••• saved" and a blank field keeps it.
 // Google Ads has no token field: "Connect Google Ads" runs the Google sign-in
-// (exos-oauth-google) and the refresh token goes straight to Vault; Google
-// sends the browser back here with ?google_ads=finish|error, handled below.
+// (exos-oauth-google) and the refresh token goes straight to Vault. Google
+// sends the browser back to the settings page, where OAuthFinish asks the
+// user to confirm before anything is saved (mig 20261029140000).
 
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import {
   AD_PLATFORMS, type AdCredential, type AdPlatform, type AdPlatformInfo, TEST_CODE_RE,
-  finishGoogleAdsConnect, listAdCredentials, saveAdCredential, startGoogleAdsConnect, validateAdConfig,
+  listAdCredentials, saveAdCredential, startGoogleAdsConnect, validateAdConfig,
 } from '../lib/adCredentials';
-import { googleAdsErrorMessage, readGoogleAdsReturn, stripGoogleAdsReturn } from '../lib/googleAdsConnect';
-
-// States already sent to /finish in this page load (StrictMode runs effects twice;
-// a second POST would burn nothing but show a false "expired" error).
-const finishedStates = new Set<string>();
+import { googleAdsErrorMessage } from '../lib/googleAdsConnect';
 
 const LBL = 'text-[10px] text-slate-400 uppercase tracking-widest';
 const FLD =
@@ -48,8 +44,6 @@ export default function AdConversionsSettings({ orgId, canEdit }: { orgId: strin
   const [busy, setBusy] = useState<AdPlatform | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
-  const location = useLocation();
-  const navigate = useNavigate();
 
   const reload = async () => {
     try {
@@ -64,33 +58,6 @@ export default function AdConversionsSettings({ orgId, canEdit }: { orgId: strin
     }
   };
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [orgId]);
-
-  // Back from Google's consent page.
-  useEffect(() => {
-    const ret = readGoogleAdsReturn(location.search);
-    if (!ret) return;
-    navigate({ pathname: location.pathname, search: stripGoogleAdsReturn(location.search), hash: location.hash }, { replace: true });
-    setOpen('google_ads');
-    if (ret.kind === 'error') {
-      toast({ kind: 'error', message: googleAdsErrorMessage(ret.reason) });
-      return;
-    }
-    if (ret.kind === 'connected') {
-      toast({ kind: 'success', message: 'Google Ads connected.' });
-      return;
-    }
-    if (finishedStates.has(ret.state)) return;
-    finishedStates.add(ret.state);
-    setConnecting(true);
-    finishGoogleAdsConnect(ret.state)
-      .then(async () => {
-        toast({ kind: 'success', message: 'Google Ads connected. Add the customer id and conversion action, then turn it on.' });
-        await reload();
-      })
-      .catch((e: any) => toast({ kind: 'error', message: googleAdsErrorMessage(e?.reason ?? 'unknown') }))
-      .finally(() => setConnecting(false));
-    // eslint-disable-next-line
-  }, [location.search]);
 
   const connectGoogle = async () => {
     setConnecting(true);

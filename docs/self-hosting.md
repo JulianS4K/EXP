@@ -40,7 +40,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
 `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
-`exos-channel-sync`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
+`exos-channel-sync`, `exos-eventbrite-oauth`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
 `exos-marketplace-sales`, `exos-mcp`, `exos-posh-webhook`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
 `exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
 
@@ -57,6 +57,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `RESEND_API_KEY`, `EXOS_MAIL_FROM` | ticket / transfer / refund mail | without them the mail drain answers 500 and nothing sends |
 | `GOOGLE_MAPS_SERVER_KEY` | geocoding | optional |
 | `EXOS_GUEST_IP_SALT` | guest checkout | any long random string |
+| `EXOS_EVENTBRITE_CLIENT_ID`, `EXOS_EVENTBRITE_CLIENT_SECRET` | "Connect Eventbrite" (OAuth) | your Eventbrite app's API key and client secret (`docs/eventbrite-app.md`). Unset: the button is hidden and organizers paste a private token. Optional `EXOS_EVENTBRITE_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-eventbrite-oauth/callback`) |
 | `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync + event mirroring | `on` to allow; each org also switches it on |
 | `EXOS_LUMA_ENABLED` | Luma at all | `on` to let Exos call Luma's API (needs the organizer's Luma Plus). Off: Luma is plugged in but never called |
 | `EXOS_LUMA_WRITES` | Luma event mirroring + capacity + comps | `on` to allow; each org also switches it on |
@@ -64,7 +65,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
-Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite). They're stored in
+Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
 Vault (`exos_integration:<org>:<provider>`), read only by edge functions, never shown again.
 
 ## 4. The web app

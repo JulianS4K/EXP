@@ -126,6 +126,7 @@ for m in \
          20261029100000_exos_last_call \
          20261029120000_exos_weekly_channel_report \
          20261029130000_exos_discovery_publishing \
+         20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block; do
   $PSQL -f "$MIG/$m.sql"
@@ -288,6 +289,7 @@ for m in \
          20261029100000_exos_last_call \
          20261029120000_exos_weekly_channel_report \
          20261029130000_exos_discovery_publishing \
+         20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block; do
   $PSQL -f "$MIG/$m.sql"
@@ -334,3 +336,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discovery
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_webhooks.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fixed_block.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_weekly_channel_report.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_oauth.sql"
