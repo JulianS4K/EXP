@@ -20,6 +20,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ApiRoute } from "../_shared/api/routes.ts";
 import { pageEnvelope, type Page } from "../_shared/api/paging.ts";
 import { type Claim, refundClaim } from "../_shared/refundRun.ts";
+import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
@@ -364,8 +365,11 @@ async function createRefund(c: CoreCtx, sessionId: string): Promise<Answer> {
   if (!c.idempotencyKey) {
     throw new CoreError(400, "refunds need an Idempotency-Key header (8-100 letters, digits, _ . : or -)");
   }
+  // Stripe and PayPal (mig 20261031220000), each only when its keys are set,
+  // as in exos-refund: an order paid with PayPal / Venmo refunds at PayPal.
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  if (!stripeKey) throw new CoreError(503, "payments are switched off");
+  const ppCfg = paypalConfig((k) => Deno.env.get(k));
+  if (!stripeKey && !ppCfg) throw new CoreError(503, "payments are switched off");
   const b = unwrap(c.body, "refund");
   const items = b.items ?? null;
   if (items !== null && (!Array.isArray(items) || items.length > 100)) {
@@ -378,10 +382,13 @@ async function createRefund(c: CoreCtx, sessionId: string): Promise<Answer> {
   const claim = await write(c, "refund.claim", sessionId, {
     items, amount_cents: amount, whole_order: b.whole_order === true, reason: str(b.reason),
   }) as Claim;
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
-  const out = await refundClaim(c.sb, stripe, claim, Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true");
-  // Same answers as exos-refund: 'claimed' = Stripe didn't answer (retry with
-  // the same key, it won't refund twice); 'failed' = Stripe refused.
+  const procs = {
+    stripe: stripeKey ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" }) : null,
+    pp: ppCfg ? createPayPalClient(ppCfg) : null,
+  };
+  const out = await refundClaim(c.sb, procs, claim, Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true");
+  // Same answers as exos-refund: 'claimed' = Stripe / PayPal didn't answer
+  // (retry with the same key, it won't refund twice); 'failed' = it refused.
   const status = out.status === "claimed" ? 502 : out.status === "failed" ? 402 : claim.existing ? 200 : 201;
   return new Answer(status, { data: { ...out, idempotent_replay: claim.existing } });
 }
