@@ -212,7 +212,7 @@
       "method": "GET",
       "path": "/v1/events/:id/ticket-types",
       "summary": "List an event's ticket types",
-      "description": "The event's ticket types (tiers) in display order, hidden ones included. `price` is in the event's currency's major unit (15 = $15.00); `ticket_type` is paid, free or donation.",
+      "description": "The event's ticket types (tiers) in display order, hidden ones included. `price` is in the event's currency's major unit (15 = $15.00); `ticket_type` is paid, free or donation. `seated` is true for a ticket type sold as reserved seats (see List an event's seats).",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -242,7 +242,8 @@
                 "visibility": "public",
                 "sales_start": null,
                 "sales_end": "2026-11-20T05:00:00+00:00",
-                "sort_order": 0
+                "sort_order": 0,
+                "seated": false
               },
               {
                 "id": "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712",
@@ -255,7 +256,8 @@
                 "visibility": "public",
                 "sales_start": null,
                 "sales_end": null,
-                "sort_order": 1
+                "sort_order": 1,
+                "seated": false
               }
             ]
           }

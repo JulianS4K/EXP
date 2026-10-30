@@ -54,6 +54,11 @@ export function buildApplePassJson(
   const auxiliaryFields: Field[] = [];
   const tier = [p.ticket.tier_name, p.ticket.section_label].filter(Boolean).join(" · ");
   if (tier) auxiliaryFields.push({ key: "tier", label: "TICKET", value: tier });
+  // Reserved seat: section / row / seat, the way venues print them.
+  const seat = p.ticket.seat;
+  if (seat?.section) auxiliaryFields.push({ key: "seat-section", label: "SECTION", value: seat.section });
+  if (seat?.row) auxiliaryFields.push({ key: "seat-row", label: "ROW", value: seat.row });
+  if (seat?.number) auxiliaryFields.push({ key: "seat-number", label: "SEAT", value: seat.number });
   if (p.ticket.attendee_name) auxiliaryFields.push({ key: "holder", label: "NAME", value: p.ticket.attendee_name });
   if (ev.doors_at) {
     auxiliaryFields.push({

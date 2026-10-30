@@ -311,6 +311,12 @@ export default function OrgSettings() {
           >
             Limit flags
           </button>
+          <button
+            onClick={() => navigate(`/orgs/${org.id}/seat-maps`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Seat maps
+          </button>
           {canSeeMoney(activeRole, isAdmin) && (
             <button
               onClick={() => navigate(`/orgs/${org.id}/payouts`)}

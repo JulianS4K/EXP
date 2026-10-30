@@ -40,6 +40,7 @@ import {
   type QueuedScan,
 } from '../lib/offlineCheckins';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
+import { getSeatRoster } from '../lib/seatingApi';
 import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
@@ -346,6 +347,27 @@ export default function OrganizerCheckIn() {
   const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
   const [extrasSyncing, setExtrasSyncing] = useState(false);
   const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+  // Reserved seating (mig 20261030140000): ticket id → seat label, cached on
+  // the device so the result card shows the seat offline too (labels only).
+  const [seatByTicket, setSeatByTicket] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!eventId) return undefined;
+    const key = `exos.door.seats.${eventId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) setSeatByTicket(JSON.parse(raw) as Record<string, string>);
+    } catch { /* storage blocked */ }
+    let live = true;
+    const pull = () => getSeatRoster(eventId).then((m) => {
+      if (!live || m.size === 0) return;
+      const next = Object.fromEntries(m);
+      setSeatByTicket(next);
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage full or blocked */ }
+    }).catch(() => undefined);
+    void pull();
+    const id = window.setInterval(() => void pull(), 60_000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [eventId]);
   // A door-only event (no Exos tickets, guests imported from another
   // platform) opens on the guest-list door.
   useEffect(() => {
@@ -1959,6 +1981,12 @@ export default function OrganizerCheckIn() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
+                 {seatByTicket[foundTicket.id] && (
+                   <div className="p-4 bg-white rounded-2xl border border-green-50 text-left" data-testid="door-seat">
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
+                     <p className="font-bold text-slate-900">{seatByTicket[foundTicket.id]}</p>
+                   </div>
+                 )}
                  {tableByTicket[foundTicket.id] && (() => {
                    const tb = tableByTicket[foundTicket.id];
                    return (

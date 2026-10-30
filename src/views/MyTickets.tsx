@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import TicketSeats from '../components/seating/TicketSeats';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Ticket, Event, Transfer } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -510,6 +511,7 @@ export default function MyTickets() {
                              {firstTicket.tierName || 'GENERAL'} <span className="type text-white/60 text-xs ml-2 normal-case tracking-normal">× {tickets.length}</span>
                           </h4>
                           <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">{firstTicket.purchaseDate ? format(firstTicket.purchaseDate.toDate(), 'PPP p') : 'N/A'}</p>
+                          <TicketSeats ticketIds={tickets.map((tk) => tk.id)} className="text-white/80 mt-1" />
                           {invoice && (
                             <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">
                               {formatDocNumber(invoice.number)} · {formatCents(invoice.totalCents, invoice.currency)}

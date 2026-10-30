@@ -41,6 +41,14 @@
 // absorbed, is stored in exos_checkout_fee_snapshots (not on the buyer-readable
 // session row) and copied to
 // exos_order_fees at fulfillment. Not the Exos platform fee above.
+//
+// Reserved seating (mig 20261030140000, docs/seating.md): a seated tier is
+// bought with seat_ids (the picked seats; the quantity is their count). The
+// cart hold is created as usual, then exos_hold_seats claims the seats for it
+// (409 with the taken seat's name if someone got there first); fulfillment
+// gives each ticket its seat. Seated orders always take a hold (no capacity
+// bypass) and a free seated order is issued here for signed-in buyers too.
+// Before the migration nothing is seated and seat_ids is refused.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -87,6 +95,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Ad click ids + browser ids (mig 20260929131000) and marketing consent.
     ad_ids?: Record<string, unknown>;
     consent?: string;
+    // Reserved seating (mig 20261030140000): the picked seats of a seated tier.
+    seat_ids?: unknown;
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
@@ -97,7 +107,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { event_id, tier_id, success_url, cancel_url } = p;
   const embedded = p.ui_mode === "embedded";
   const returnUrl = p.return_url;
-  const quantity = p.quantity ?? 1;
+  // Reserved seating: seat ids are "<section>-<row>-<key>"; a seated order's
+  // quantity is its seat count.
+  const seatIds = Array.isArray(p.seat_ids)
+    ? [...new Set(p.seat_ids.filter((x): x is string => typeof x === "string" && /^[A-Za-z0-9-]{5,40}$/.test(x)))]
+    : [];
+  if (Array.isArray(p.seat_ids) && seatIds.length !== p.seat_ids.length) return json({ error: "invalid seat_ids" }, 400);
+  const quantity = seatIds.length > 0 ? seatIds.length : (p.quantity ?? 1);
   const addonReq = Array.isArray(p.addons) ? p.addons : [];
   const voucherCode = (p.voucher_code ?? "").trim();
   const attrIn = p.attribution && typeof p.attribution === "object" ? p.attribution : {};
@@ -151,6 +167,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .eq("id", tier_id).eq("event_id", event_id).maybeSingle();
   if (tierErr || !tier) return json({ error: "tier not found" }, 404);
 
+  // Reserved seating (mig 20261030140000). Read on its own so a database
+  // without the column reads as general admission.
+  let seated = false;
+  {
+    const { data: st, error: stErr } = await sb.from("exos_ticket_tiers").select("seated").eq("id", tier_id).maybeSingle();
+    seated = !stErr && (st as { seated?: boolean } | null)?.seated === true;
+  }
+  if (seated && seatIds.length === 0) return json({ error: "pick your seats first", reason: "seats_required" }, 400);
+  if (!seated && seatIds.length > 0) return json({ error: "this ticket type isn't sold as seats" }, 400);
+
   const ev = (tier as unknown as { exos_events: { org_id: string; name: string; status: string; currency: string | null } }).exos_events;
   if (ev.status !== "published") return json({ error: "event not on sale" }, 409);
   // Another platform sells this event (mig 20261016100000): Exos doesn't take
@@ -202,7 +228,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     voucherId = v.voucher_id;
     voucherUnlocksTier = v.restrict_tier_id === tier_id;
-    bypassCapacity = v.can_bypass === true;
+    // Reserved seating: a seated order always holds its seats.
+    bypassCapacity = v.can_bypass === true && !seated;
     // A capacity-bypass code is an organizer's personal offer (waitlist, comp
     // upgrade); it stays tied to an account.
     if (bypassCapacity && !buyerUid) {
@@ -466,8 +493,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   // Free: signed-in buyers use the app's free-claim path; a guest claims here
   // with just an email (below), through the same guest hold and limits.
-  const freeGuest = lineItems.length === 0 && !buyerUid;
-  if (lineItems.length === 0 && buyerUid) {
+  // Reserved seating: free seats are issued here for everyone (the free-claim
+  // RPC can't hold seats).
+  const freeGuest = lineItems.length === 0 && (!buyerUid || seated);
+  if (lineItems.length === 0 && !freeGuest) {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
   }
   if (!freeGuest) {
@@ -517,6 +546,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     holdId = hid as string;
   }
 
+  // Reserved seating: claim the picked seats for this hold (race-safe in SQL).
+  if (seated) {
+    if (!holdId) return json({ error: "could not hold your seats" }, 409);
+    const { data: held, error: seatErr } = await sb.rpc("exos_hold_seats", { p_hold_id: holdId, p_seat_ids: seatIds });
+    if (seatErr) {
+      await releaseHold(sb, holdId);
+      const taken = seatErr.code === "XS409";
+      return json({ error: seatErr.message || "those seats are no longer available", ...(taken ? { reason: "seat_taken" } : {}) }, 409);
+    }
+    const labels = ((held as { seats?: { label?: string }[] } | null)?.seats ?? [])
+      .map((x) => x.label).filter((x): x is string => typeof x === "string");
+    const pd = lineItems.find((l) => l.price_data?.product_data?.name === `${ev.name} — ${tier.name}`)?.price_data?.product_data;
+    if (pd && labels.length > 0) {
+      pd.description = [pd.description, `Seats: ${labels.join("; ")}`].filter(Boolean).join(". ").slice(0, 500);
+    }
+  }
+
   // A guest's free tickets: no Stripe. Record the order and fulfil it now;
   // exos_fulfill_checkout parks the tickets on the organizer and mails the
   // guest one keyed claim link per ticket, as for a paid guest order.
@@ -524,7 +570,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const sessionId = `free_${crypto.randomUUID()}`;
     const fInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
-      buyer_uid: null, buyer_email: buyerEmail, guest: true,
+      // Reserved seating: a signed-in buyer lands here only for free seats.
+      buyer_uid: buyerUid, buyer_email: buyerEmail, guest: !buyerUid,
       quantity, amount_cents: 0, currency, status: "pending",
       addons: addonsForSession.length > 0 ? addonsForSession : null,
       voucher_id: voucherId, promoter_id: promoterId ?? null,
