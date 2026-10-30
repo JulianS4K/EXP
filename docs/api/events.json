@@ -348,7 +348,7 @@
       "method": "GET",
       "path": "/v1/events/:id/promo-codes",
       "summary": "List an event's promo codes",
-      "description": "The event's promo codes, newest first. A code gives one of `discount_percent`, `discount_amount` (major unit) or `price_override`; `tier_id` null means it applies to any ticket type. `link_*` are the tracked-link fields. The email a code is reserved for is never returned.",
+      "description": "The event's promo codes, newest first. A code gives one of `discount_percent`, `discount_amount` (major unit) or `price_override`; `tier_id` null means it applies to any ticket type. `link_*` are the tracked-link fields. The email a code is reserved for is never returned. Add ?code= to look one code up by name.",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -359,6 +359,14 @@
           "required": true,
           "description": "The event's id. An event of another organization answers 404.",
           "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "code",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only the code with this name, in any case (look a code up by name).",
+          "example": "LOFTFAM"
         },
         {
           "name": "page",

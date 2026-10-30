@@ -110,6 +110,7 @@ import { utcToOccursAtLocal } from '../lib/datetime';
 import FeeRulesEditor from '../components/FeeRulesEditor';
 import EventBookingPanels from '../components/booking/EventBookingPanels';
 import { useOrganization } from '../context/OrganizationContext';
+import { blockersSentence, getPublishBlockers, publishEvent, type PublishBlocker } from '../lib/publishBlockers';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -157,6 +158,9 @@ export default function EditEvent() {
   // against post-save state to queue 'event-updated' emails listing
   // only the fields that changed. Re-snapshotted on success so the
   // next save's diff is against the just-committed state.
+  // What stops the saved event from going live (exos_event_publish_blockers,
+  // the same list as the partner API's). null: not loaded (or not a draft).
+  const [blockers, setBlockers] = useState<PublishBlocker[] | null>(null);
   const [originalNotifiable, setOriginalNotifiable] = useState<{
     title?: string;
     location?: string;
@@ -218,6 +222,9 @@ export default function EditEvent() {
         return;
       }
       setEventData(data);
+      if (data.status === 'draft') {
+        getPublishBlockers(eventId).then(setBlockers).catch((err) => console.warn('publish blockers unavailable:', err));
+      }
       if (data.lineup !== undefined) setStore(storeFromEvent(data));
       if (data.format !== undefined) {
         setOnline(onlineFromEvent(data));
@@ -646,6 +653,9 @@ export default function EditEvent() {
       const removed = originalTierIds.filter((id) => !currentTierIds.includes(id));
 
       const ed = eventData as Event;
+      // Going live is its own step after the save (exos_publish_event), so it
+      // is checked against the saved event: blockers keep it a draft.
+      const publishing = ed.status === 'published' && originalNotifiable.status === 'draft';
       const tz = ed.timezone || getBrowserTimezone();
       const tsToIso = (ts: any): string | null =>
         ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : null;
@@ -655,7 +665,7 @@ export default function EditEvent() {
       await updateEvent(eventId, {
         name: ed.title,
         description: ed.description,
-        status: ed.status,
+        status: publishing ? 'draft' : ed.status,
         slug: (ed.branding?.customSlug || '').trim() || null,
         startsAt: tsToIso(startTs),
         doorsAt: tsToIso(ed.timing?.doorsOpen),
@@ -758,7 +768,16 @@ export default function EditEvent() {
       setOriginalTierIds((ed.ticketTiers || []).map((t) => t.id));
       // Re-pin the venue if its address changed (server skips unchanged, fresh pins).
       if (!onlineSupported || needsVenue(online.format)) void geocodeEvent(eventId);
-      toast({ kind: 'success', message: 'Changes saved.' });
+      if (publishing) {
+        const r = await publishEvent(eventId);
+        if (!r.published) {
+          setBlockers(r.blockers);
+          setEventData((d) => ({ ...d, status: 'draft' }));
+          toast({ kind: 'error', title: 'Saved, but not published yet', message: blockersSentence(r.blockers) });
+          return;
+        }
+      }
+      toast({ kind: 'success', message: publishing ? 'Saved and published.' : 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {
       // The server refused a plain date change (tickets it didn't know about
@@ -896,7 +915,18 @@ export default function EditEvent() {
           <div
             className={`flex items-center justify-between p-4 border mb-8 ${tone}`}
           >
-            <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
+              {status === 'draft' && blockers && blockers.length > 0 && (
+                <div className="mt-2 normal-case">
+                  <p className="text-[11px] font-bold">Before it can go live:</p>
+                  <ul className="mt-1 list-disc pl-4 text-[11px] space-y-0.5">
+                    {blockers.map((b) => <li key={b.code}>{b.message}</li>)}
+                  </ul>
+                  <p className="mt-1 text-[10px] opacity-70">As last saved. Fix these and save; publishing checks again.</p>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() =>

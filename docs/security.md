@@ -178,12 +178,33 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_gift_card_normalize`, `exos_gift_card_check_ok` (mig 20261030130000) | OK | Plain (not definer) pure functions; anon may call them |
 | `exos_offer_create` / `_update` / `_send` / `_record_response` / `_cancel` / `_delete`, `exos_offer_pool_ensure`, `exos_offer_import`, `exos_finance_categories_ensure` (mig 20261031100000) | OK | Owner / manager of the offer's (or budget's) org, from the row; an unknown or foreign id is the same 42501 (`exos_finance_categories_ensure`: owner / manager / finance). They call the `_exos_offer_*` cores (**service role only**, also what exos-api calls with the key's org), which lock the row, enforce the status machine (a sent offer edited back to draft kills its link; accepted / declined / expired / cancelled offers only take notes and event_id) and emit `offer.*` webhooks. `exos_offers` has no client write grant; budgets, lines, pools, templates, deals, finance categories and GL codes are RLS tables (read owner / manager / finance; write owner / manager, categories and codes also finance) whose definer triggers take the org from the parent and refuse links to another org's venue, hold, event, artist, category or code |
 | `exos_settlement_get` / `_update` / `_finalize` / `_reopen`, `exos_pnl_inputs`, `exos_ticket_counts_get` / `_save` / `_send_now` (mig 20261031100500) | OK | Owner / manager / finance of the event's org (reopen and ticket-count writes owner / manager); an unknown or foreign event is 42501. The `_exos_settlement_*`, `_exos_pnl_inputs`, `_exos_tc_*`, `_exos_box_office` and `_exos_settlement_inputs` cores are service role only. `exos_settlements` and the ticket-count tables have no client write grant; `snapshot`, `link_token_hash` and `optout_token` have no client column grant. Finance items are an RLS table (owner / manager / finance) whose trigger takes the org from the event; a client can't create an `auto` line. `exos_ticket_counts_run` (cron, created inactive) is service role only |
+| `exos_event_publish_blockers`, `exos_publish_event` | OK | Event's org: owner / manager / content read the blockers, owner / manager publish (mig 20261031110000) |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
 webhook workers, `exos_record_*`, `exos_refund_*`, wallet / calendar / MCP
 service functions, `_exos_*` internals) was already revoked from anon and
 authenticated and is service-role or owner only.
+
+### Partner API writes (exos_api_write)
+
+The partner API (`exos-api`, service role) writes through one definer
+function, `exos_api_write(key, action, target, args, idempotency_key)`
+(mig 20261031110000; service_role only, its `_exos_api_*` helpers no grant at
+all). It loads the API key (not revoked), re-checks the key's scope for the
+action, and requires the key's creator to still be an active member of the
+key's org. It then sets the transaction's JWT claims (`request.jwt.claims`,
+`request.jwt.claim.sub` / `role` / `email`) to that member, so `auth.uid()`
+inside the dashboard's RPCs is the creator and their role *now* decides, and
+puts the previous claims back before returning. Every target (event, ticket
+type, order, ticket, list, guest, item) is pinned to the key's org before any
+RPC runs, so a creator who is staff of several orgs, or a platform admin,
+can't reach another org through a key. Table writes the dashboard does under
+RLS (events, ticket types, add-ons, POS items) check the same roles as the
+policy and write only whitelisted columns; server-owned columns are refused.
+Each write is logged in `exos_api_writes` (owner / manager can read their
+org's rows); refunds and comps are flagged `money_moving`. Tests:
+`tests/exos/test_core_api.sql` (C1-C16), races: `tests/exos/race_core_api.sh`.
 
 ### Search path
 

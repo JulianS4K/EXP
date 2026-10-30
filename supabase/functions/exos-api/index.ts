@@ -17,6 +17,11 @@
 // through service-role SQL functions that take the key's org explicitly.
 // Offers, budgets, deals, finance items, settlements and P&L (migs
 // 20261031100000 / 100500) are handled in ./finance.ts (handleFinance).
+// The core API (events, ticket types, add-ons, promo codes, the door, comps,
+// refunds, guest lists, POS; mig 20261031110000, ./core.ts) writes through
+// exos_api_write, which runs as the member who created the key and calls the
+// dashboard's own SQL, so a write there behaves exactly like the same write in
+// the dashboard.
 //
 // Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
 // (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
@@ -46,6 +51,16 @@
 //   /deals, /finance-categories, /gl-codes, /events/:id/finance-items,
 //   /finance-items, /events/:id/settlement[/finalize|/reopen|/pdf],
 //   /events/:id/profit-and-loss, /profit-and-loss, /events/:id/ticket-counts.
+//   the core API (./core.ts): event create / update / publish (+ publish
+//   blockers), ticket types, add-ons, promo codes, tickets and check-in,
+//   offline check-ins, comps, refunds (Idempotency-Key required), guest lists,
+//   disputes, payouts, POS items and devices, the write log.
+//
+// Writes take a JSON body (or form-encoded), at most MAX_BODY_BYTES (2 MB +
+// 256 KB for the sales-count CSV import), read capped while streaming; an
+// Idempotency-Key header makes a core-API write safe to resend (the first
+// answer is replayed). Refunds need STRIPE_SECRET_KEY (optional
+// EXOS_REFUND_KEEP_PLATFORM_FEE), like exos-refund.
 //
 // commerce:read (migs 20261030130000 / 130500): /gift-card-products,
 // /gift-cards[/:id], /giving-campaigns[/:id], /donations,
@@ -83,6 +98,7 @@ import {
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
+import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -154,6 +170,7 @@ interface Ctx {
   page: Page;
   /** The body of a POST / PUT / PATCH ({} when empty, or for GET / DELETE). */
   body: Record<string, unknown>;
+  idempotencyKey: string | null;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -228,19 +245,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       body: method === "POST" || method === "PUT" || method === "PATCH"
         ? await readBody(req, match.route.id === "import-sales-counts" ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES)
         : {},
+      idempotencyKey: method === "GET" ? null : idempotencyKey(req),
     };
     const out = await handle(match.route, ctx);
     if (out instanceof Response) return out; // PDFs and CSV exports
+    if (out instanceof Answer) return json(out.body, out.status);
     if (out instanceof Created) return json(out.body, 201);
     return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
     if (e instanceof PagingError || e instanceof BodyError) return json({ error: e.message }, 400);
     if (e instanceof ApiError) return json({ error: e.message }, e.status);
-    // Sales-count RPCs prefix their messages "sales counts:"; booking's are
-    // "exos_<fn>:" and use more codes; the artist / lineup / key functions
-    // raise the codes in RPC_STATUS.
-    const db = (match.route.id.includes("sales-count") ? dbError(e) : null) ??
-      bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
+    if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status);
+    // Core-API writes (exos_api_write) map with sqlError; sales-count RPCs
+    // prefix their messages "sales counts:"; booking's are "exos_<fn>:" and use
+    // more codes; the artist / lineup / key functions raise the codes in
+    // RPC_STATUS.
+    const db = CORE_ROUTES.has(match.route.id) ? sqlError(e)
+      : (match.route.id.includes("sales-count") ? dbError(e) : null) ??
+        bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
     if (db) return json({ error: db.message }, db.status);
     console.error("exos-api error:", e);
     return json({ error: "internal error" }, 500);
@@ -254,6 +276,11 @@ class Created {
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  if (CORE_ROUTES.has(route.id)) {
+    return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
   switch (route.id) {
     case "me": {
       const { data: org } = await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
@@ -304,10 +331,17 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     case "list-promo-codes": {
       const id = await ownEvent(c);
       // Never reserved_email: a promo code's holder is not the partner's business.
-      return paged(await sb.from("exos_vouchers")
+      let q = sb.from("exos_vouchers")
         .select("id, code, tier_id, max_uses, used_count, discount_percent, discount_amount, price_override, " +
           "valid_until, link_label, link_channel, link_clicks, created_at", { count: "exact" })
-        .eq("event_id", id).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+        .eq("event_id", id);
+      // ?code=: look one code up by name (any case), as at checkout.
+      const code = c.q.get("code");
+      if (code !== null) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(code)) throw new ApiError(400, "code is invalid.");
+        q = q.ilike("code", code.replace(/_/g, "\\_"));
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
     case "list-attendees": {

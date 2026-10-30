@@ -1,0 +1,829 @@
+{
+  "file": "money",
+  "name": "Refunds, comps and payouts",
+  "order": 35,
+  "description": "Routes that move money or give tickets away, and the records around them. Refunds need the refunds:write scope (no other scope grants it) and an Idempotency-Key; comps need tickets:write. Both run the dashboard's own functions as the member who created the key (refunds: owner, manager or finance; comps: owner or manager) and are logged as money-moving in the write log (GET /v1/api-writes).",
+  "endpoints": [
+    {
+      "auth": "api_key",
+      "id": "get-refund-preview",
+      "method": "GET",
+      "path": "/v1/orders/:id/refund-preview",
+      "summary": "Preview a refund",
+      "description": "What is left to refund on an order, per ticket (each ticket's share of what was paid, minus refunds already made). Same numbers as the dashboard's refund dialog; needs the key's creator to be an owner, manager or finance.",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id. One of another organization answers 404.",
+          "example": "cs_live_a1B2c3D4e5F6"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "status": "partially_refunded",
+              "currency": "usd",
+              "amount_cents": 5000,
+              "refunded_cents": 2500,
+              "refundable_cents": 2500,
+              "has_payment": true,
+              "tickets": [
+                {
+                  "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                  "status": "active",
+                  "share_cents": 2500,
+                  "refunded_cents": 0,
+                  "refundable_cents": 2500,
+                  "tier_name": "GA",
+                  "attendee_name": "Maya Chen"
+                }
+              ],
+              "requests": []
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read, or the member who created the key can't do this in the dashboard (owner, manager or finance), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-refund",
+      "method": "POST",
+      "path": "/v1/orders/:id/refunds",
+      "summary": "Refund an order",
+      "description": "Refunds to the buyer's card, exactly as the dashboard does: the amount is reserved under a lock (never more than is left), Stripe refunds it (reversing the transfer to the organizer), and tickets refunded in full are voided. Say what to refund: items (per ticket; an omitted amount_cents is what is left on that ticket), amount_cents (an amount on the order), or whole_order. The Idempotency-Key makes a resend safe: the same key always means the same refund. 502 means Stripe did not answer: resend with the same key and it completes without refunding twice. Payments switched off answers 503.",
+      "scope": "refunds:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id. One of another organization answers 404.",
+          "example": "cs_live_a1B2c3D4e5F6"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": true,
+          "description": "Required. 8-100 letters, digits, _ . : or -; unique per request you mean (a UUID is ideal). Resending the same key never refunds twice: you get the same refund back. The key is bound to this order: reusing it on another order answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        },
+        {
+          "name": "items",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 100 { ticket_id, amount_cents? }.",
+          "example": [
+            {
+              "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+            }
+          ]
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "An amount on the order, in cents, not tied to tickets.",
+          "example": 1000
+        },
+        {
+          "name": "whole_order",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Refund everything still refundable.",
+          "example": true
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Kept on the refund (up to 500 characters).",
+          "example": "event moved, buyer can't make it"
+        }
+      ],
+      "request_example": {
+        "items": [
+          {
+            "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+          }
+        ],
+        "reason": "buyer can't make it"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: Stripe accepted the refund (succeeded or pending).",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "request_id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+              "amount_cents": 2500,
+              "status": "succeeded",
+              "voided": 1,
+              "stripe_refund_id": "re_3PxAbC2eZvKYlo2C0Kq1",
+              "idempotent_replay": false
+            }
+          }
+        },
+        {
+          "status": 200,
+          "description": "A resend of a refund that already went through: the same refund.",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "request_id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+              "amount_cents": 2500,
+              "status": "succeeded",
+              "voided": 1,
+              "stripe_refund_id": "re_3PxAbC2eZvKYlo2C0Kq1",
+              "idempotent_replay": true
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "No or a malformed Idempotency-Key, nothing to refund, more than is left, or the key was used on another order.",
+          "example": {
+            "error": "refunds need an Idempotency-Key header (8-100 letters, digits, _ . : or -)"
+          }
+        },
+        {
+          "status": 402,
+          "description": "Stripe refused the refund; nothing was refunded and the reservation is released.",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "request_id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+              "amount_cents": 2500,
+              "status": "failed",
+              "idempotent_replay": false,
+              "error": "charge_already_refunded"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks refunds:write, or the member who created the key can't do this in the dashboard (owner, manager or finance), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "refunds:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"refunds:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "order not found"
+          }
+        },
+        {
+          "status": 502,
+          "description": "Stripe did not answer. Resend with the same Idempotency-Key: it will not refund twice.",
+          "example": {
+            "data": {
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "request_id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+              "amount_cents": 2500,
+              "status": "claimed",
+              "idempotent_replay": false,
+              "error": "Stripe didn't answer; try again (it won't refund twice)"
+            }
+          }
+        },
+        {
+          "status": 503,
+          "description": "Payments are switched off on this install.",
+          "example": {
+            "error": "payments are switched off"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-refund",
+      "method": "GET",
+      "path": "/v1/refunds/:id",
+      "summary": "Get a refund",
+      "description": "One refund from the ledger (GET /v1/refunds lists them).",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The refund's id. One of another organization answers 404.",
+          "example": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "amount_cents": 2500,
+              "currency": "usd",
+              "status": "succeeded",
+              "reason": "requested_by_customer",
+              "is_partial": true,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such refund in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "refund not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-refund-request",
+      "method": "GET",
+      "path": "/v1/refund-requests/:id",
+      "summary": "Get a refund request",
+      "description": "An organizer refund as requested (the request_id a refund answers with): what was asked, its status (claimed, pending, succeeded, failed) and the tickets it covers.",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The refund request's id. One of another organization answers 404.",
+          "example": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "scope": "tickets",
+              "amount_cents": 2500,
+              "currency": "usd",
+              "reason": "buyer can't make it",
+              "status": "succeeded",
+              "stripe_refund_id": "re_3PxAbC2eZvKYlo2C0Kq1",
+              "error": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00",
+              "items": [
+                {
+                  "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                  "amount_cents": 2500,
+                  "covers_full": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such refund request in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "refund request not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "issue-comps",
+      "method": "POST",
+      "path": "/v1/events/:id/comps",
+      "summary": "Issue comps",
+      "description": "Sends free tickets to up to 200 emails through the dashboard's comp batch: quantity_each per person (1-10), on tier_id (or the event's first ticket type). Each email gets its tickets by mail; results says per email what happened (outcome issued, invalid or sold-out, with detail). Send an Idempotency-Key so a resend doesn't issue twice.",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "emails",
+          "location": "body",
+          "type": "array",
+          "required": true,
+          "description": "Up to 200 email addresses.",
+          "example": [
+            "guest@example.com"
+          ]
+        },
+        {
+          "name": "tier_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The ticket type to issue.",
+          "example": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f"
+        },
+        {
+          "name": "quantity_each",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Tickets per email, 1-10 (default 1).",
+          "example": 2
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "tier_id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+        "emails": [
+          "guest@example.com",
+          "press@example.com"
+        ],
+        "quantity_each": 1
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: per email, the outcome and the tickets.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "results": [
+                {
+                  "email": "guest@example.com",
+                  "outcome": "issued",
+                  "ticket_ids": [
+                    "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+                  ],
+                  "detail": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "emails must be a list"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-disputes",
+      "method": "GET",
+      "path": "/v1/disputes",
+      "summary": "List payment disputes",
+      "description": "Chargebacks on the organization's orders, newest first, with Stripe's status and the evidence deadline.",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only disputes in this Stripe status (needs_response, under_review, won, lost, …).",
+          "example": "needs_response"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "session_id": "cs_live_a1B2c3D4e5F6",
+                "dispute_id": "dp_1PxAbC2eZvKYlo2C",
+                "amount_cents": 5000,
+                "fee_cents": 1500,
+                "currency": "usd",
+                "reason": "fraudulent",
+                "status": "needs_response",
+                "evidence_due_by": "2026-11-12T23:59:59+00:00",
+                "evidence_submitted": false,
+                "recovery_status": null,
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00",
+                "closed_at": null
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-dispute",
+      "method": "GET",
+      "path": "/v1/disputes/:id",
+      "summary": "Get a payment dispute",
+      "description": "One dispute.",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The dispute's id. One of another organization answers 404.",
+          "example": "1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "session_id": "cs_live_a1B2c3D4e5F6",
+              "dispute_id": "dp_1PxAbC2eZvKYlo2C",
+              "amount_cents": 5000,
+              "fee_cents": 1500,
+              "currency": "usd",
+              "reason": "fraudulent",
+              "status": "under_review",
+              "evidence_due_by": "2026-11-12T23:59:59+00:00",
+              "evidence_submitted": true,
+              "recovery_status": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00",
+              "closed_at": null
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such dispute in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "dispute not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-payouts",
+      "method": "GET",
+      "path": "/v1/payouts",
+      "summary": "List payouts",
+      "description": "Transfers of the organization's money to its Stripe account, newest first. amount is in the major unit.",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d",
+                "currency": "usd",
+                "amount": 1834.5,
+                "status": "sent",
+                "stripe_transfer_id": "tr_1PxAbC2eZvKYlo2C",
+                "error": null,
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "sent_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-payout",
+      "method": "GET",
+      "path": "/v1/payouts/:id",
+      "summary": "Get a payout",
+      "description": "One payout with its lines (the orders and adjustments it pays).",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The payout's id. One of another organization answers 404.",
+          "example": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d",
+              "currency": "usd",
+              "amount": 1834.5,
+              "status": "sent",
+              "stripe_transfer_id": "tr_1PxAbC2eZvKYlo2C",
+              "error": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00",
+              "sent_at": "2026-10-30T14:05:11.204+00:00",
+              "lines": [
+                {
+                  "id": "3b4c5d6e-7f8a-4b9c-8d0e-1f2a3b4c5d6e",
+                  "order_id": null,
+                  "kind": "sale",
+                  "amount": 1834.5,
+                  "created_at": "2026-10-30T14:05:11.204+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such payout in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "payout not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-api-writes",
+      "method": "GET",
+      "path": "/v1/api-writes",
+      "summary": "List the API write log",
+      "description": "Every write made through the API for this organization, newest first: the action (event.create, refund.claim, comp.issue, …), its target, the API key and the member it ran as, and whether it moved money. Owners and managers also see it in the dashboard's data.",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "action",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this action.",
+          "example": "refund.claim"
+        },
+        {
+          "name": "money_moving",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "true: only refunds and comps.",
+          "example": "true"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+                "api_key_id": "6d7e8f9a-0b1c-4d2e-9f3a-4b5c6d7e8f9a",
+                "actor": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+                "action": "refund.claim",
+                "target": "cs_live_a1B2c3D4e5F6",
+                "idempotency_key": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77",
+                "money_moving": true,
+                "created_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "action is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    }
+  ]
+}

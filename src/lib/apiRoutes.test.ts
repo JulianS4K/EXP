@@ -25,14 +25,19 @@ describe('matchRoute', () => {
     expect(matchRoute('POST', '/events/abc/sales-counts/import')?.route.id).toBe('import-sales-counts');
     expect(matchRoute('PUT', '/sales-counts/x')?.route.id).toBe('update-sales-count');
     expect(matchRoute('GET', '/eventbrite-events/123')?.params).toEqual({ id: '123' });
+    expect(matchRoute('POST', '/events')?.route.id).toBe('create-event');
+    expect(matchRoute('PATCH', '/events/e1/ticket-types/t1')?.params).toEqual({ id: 'e1', tier: 't1' });
+    expect(matchRoute('POST', '/orders/cs_1/refunds')?.route.id).toBe('create-refund');
+    expect(matchRoute('GET', '/orders/cs_1/refunds')).toBeNull();
   });
 
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
-    expect(matchRoute('POST', '/events')).toBeNull();
     expect(matchRoute('PUT', '/sales-counts')).toBeNull();
     expect(matchRoute('DELETE', '/events/x/sales-counts')).toBeNull();
     expect(matchRoute('DELETE', '/artists/x')).toBeNull();
+    expect(matchRoute('PUT', '/events')).toBeNull();
+    expect(matchRoute('DELETE', '/events/abc')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -57,6 +62,8 @@ describe('matchRoute', () => {
       if (r.method === 'GET') expect(r.scope!.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
       else expect(r.scope!.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
     }
+    // Money: only refunds:write refunds, and nothing else needs it.
+    expect(ROUTES.filter((r) => r.scope === 'refunds:write').map((r) => r.id)).toEqual(['create-refund']);
     // Aliases are unique across the table and point at their own route only.
     const aliasKeys = ROUTES.flatMap((r) => (r.aliases ?? []).map((a) => `${r.method} ${a}`));
     expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
@@ -97,7 +104,7 @@ describe('booking routes', () => {
   it('knows which methods a path answers (405 vs 404)', () => {
     expect(allowedMethods('/holds')).toEqual(['GET', 'POST']);
     expect(allowedMethods('/venues/v1')).toEqual(['GET', 'PATCH', 'DELETE']);
-    expect(allowedMethods('/events')).toEqual(['GET']);
+    expect(allowedMethods('/events')).toEqual(['GET', 'POST']);
     expect(allowedMethods('/nope')).toEqual([]);
     expect(matchRoute('PUT', '/holds/h1')).toBeNull();
   });

@@ -59,35 +59,12 @@
 // undeployed until the operator turns payments on (docs/payments-go-live.md).
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import {
-  type ClaimedRequest,
-  isDefinitiveStripeRejection,
-  NONCE_RE,
-  organizerRefundIdempotencyKey,
-  organizerRefundParams,
-  requestStatusFromStripe,
-} from "../_shared/organizer-refund.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { NONCE_RE } from "../_shared/organizer-refund.ts";
+import { type Claim, type Outcome, refundClaim } from "../_shared/refundRun.ts";
 import { RESCHEDULE_TOKEN_RE } from "../_shared/reschedule-refund.ts";
 
 const BATCH = 10;
-
-type Claim = ClaimedRequest & {
-  status: string;
-  stripe_refund_id: string | null;
-  existing: boolean;
-  currency: string;
-};
-
-type Outcome = {
-  session_id: string;
-  request_id?: string;
-  status: string;
-  amount_cents?: number;
-  voided?: number;
-  stripe_refund_id?: string | null;
-  error?: string;
-};
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -287,56 +264,8 @@ async function rescheduleAction(req: Request, p: any): Promise<Response> {
   return json({ error: "unknown action" }, 400);
 }
 
-// Steps 2 + 3 for one claimed request. Never throws.
-// deno-lint-ignore no-explicit-any
-async function refundClaim(sb: SupabaseClient<any, any, any>, stripe: Stripe, c: Claim, keepFee: boolean): Promise<Outcome> {
-  const base = { session_id: c.session_id, request_id: c.request_id, amount_cents: c.amount_cents };
-  // A retried nonce whose request already has Stripe's answer: nothing to do.
-  if (c.existing && c.status !== "claimed") {
-    return { ...base, status: c.status, voided: 0, stripe_refund_id: c.stripe_refund_id };
-  }
-
-  let refund: Stripe.Refund | null = null;
-  try {
-    // A claimed request from an earlier attempt may already have a refund
-    // (idempotency keys expire after 24h): look for it before creating one.
-    if (c.existing) {
-      for await (const rf of stripe.refunds.list({ payment_intent: c.payment_intent, limit: 100 })) {
-        if (rf.metadata?.exos_refund_request_id === c.request_id) { refund = rf; break; }
-      }
-    }
-    refund ??= await stripe.refunds.create(
-      organizerRefundParams(c, keepFee),
-      { idempotencyKey: organizerRefundIdempotencyKey(c.request_id) },
-    );
-  } catch (e) {
-    const msg = (e as Error).message ?? "stripe error";
-    if (isDefinitiveStripeRejection(e)) {
-      const { error } = await sb.rpc("exos_refund_finalize", {
-        p_request_id: c.request_id, p_stripe_refund_id: null, p_status: "failed", p_error: msg,
-      });
-      if (error) console.error(`exos-refund: finalize(failed) ${c.request_id}`, error);
-      return { ...base, status: "failed", error: msg };
-    }
-    console.error(`exos-refund: stripe refund for ${c.request_id} not confirmed`, e);
-    return { ...base, status: "claimed", error: "Stripe didn't answer; try again (it won't refund twice)" };
-  }
-
-  const status = requestStatusFromStripe(refund.status);
-  const { data, error } = await sb.rpc("exos_refund_finalize", {
-    p_request_id: c.request_id,
-    p_stripe_refund_id: refund.id,
-    p_status: status,
-    p_error: refund.failure_reason ?? null,
-  });
-  if (error) {
-    // The refund exists; stripe-webhook's charge.refunded finalizes it by metadata.
-    console.error(`exos-refund: finalize ${c.request_id} (refund ${refund.id}) failed`, error);
-    return { ...base, status, stripe_refund_id: refund.id, error: "refund sent; bookkeeping will catch up" };
-  }
-  const f = data as { voided?: number } | null;
-  return { ...base, status, voided: f?.voided ?? 0, stripe_refund_id: refund.id };
-}
+// Steps 2 + 3 (Stripe, then exos_refund_finalize): refundClaim in
+// _shared/refundRun.ts, shared with exos-api.
 
 function claimError(error: { code?: string; message?: string }): Response {
   const msg = (error.message ?? "refund refused").replace(/^exos_refund_[a-z_]+: /, "");
