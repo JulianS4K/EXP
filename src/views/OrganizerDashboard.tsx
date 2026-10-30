@@ -143,6 +143,11 @@ export default function OrganizerDashboard() {
                 <Link to={`/orgs/${activeOrg.id}/flags`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                   <Flag className="w-4 h-4" /><span>Limit flags</span>
                 </Link>
+                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/calendar`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Calendar className="w-4 h-4" /><span>Booking calendar</span>
+                  </Link>
+                )}
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/payouts`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Landmark className="w-4 h-4" /><span>Payouts</span>

@@ -123,7 +123,7 @@
       "method": "GET",
       "path": "/v1/events/:id",
       "summary": "Get an event",
-      "description": "One event with its venue and times, and every ticket type (hidden ones included) as `tiers`. `venue_location` is free text as the organizer typed it.",
+      "description": "One event with its venue and times, and every ticket type (hidden ones included) as `tiers`. `venue_location` is free text as the organizer typed it. `exos_venue_id` / `exos_room_id` link one of the organization's venues and rooms (GET /v1/venues/:id) and `hold_id` the hold a draft was converted from; each is null when not set.",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -153,6 +153,9 @@
               "currency": "USD",
               "venue_name": "The Loft",
               "venue_location": "120 Morgan Ave, Brooklyn, NY",
+              "exos_venue_id": null,
+              "exos_room_id": null,
+              "hold_id": null,
               "tickets_sold": 57,
               "total_tickets": 400,
               "created_at": "2026-10-01T15:12:09.120+00:00",

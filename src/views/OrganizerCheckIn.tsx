@@ -45,6 +45,7 @@ import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
+import { EventScheduleReadOnly } from '../components/booking/EventBookingPanels';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   getDoorExtras,
@@ -2355,6 +2356,9 @@ export default function OrganizerCheckIn() {
 
           {/* Refused-scan audit — reads exos_scan_rejects (written by the
               scanner above on every refusal); polled, exportable. */}
+          {/* Day-of schedule (load in, doors, sets, curfew), read-only (mig 20261030100000). */}
+          {eventId && <EventScheduleReadOnly eventId={eventId} light />}
+
           {eventId && <ScanRejectAudit eventId={eventId} eventTitle={event.title} />}
         </div>
       </div>

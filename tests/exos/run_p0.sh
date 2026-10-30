@@ -130,6 +130,7 @@ for m in \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
+         20261030100000_exos_booking \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
          20261101000000_exos_integration; do
@@ -297,6 +298,7 @@ for m in \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
+         20261030100000_exos_booking \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
          20261101000000_exos_integration; do
@@ -348,3 +350,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrit
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_import.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_sales_counts.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_seating.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_booking.sql"

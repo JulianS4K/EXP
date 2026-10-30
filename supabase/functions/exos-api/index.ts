@@ -4,10 +4,15 @@
 // Auth: `Authorization: Bearer sk_live_...`. The key is never stored in plaintext
 // (migration 20260616200000) — we SHA-256 the presented key and look up the
 // matching non-revoked row in exos_api_keys, which yields the org_id every query
-// is then scoped to, and the key's scopes. Everything is a read except the
-// sales counts (tickets sold on other platforms, mig 20261030120000), whose
-// POST / PUT / DELETE need finance:write and go through service-role RPCs that
-// re-check the event / row belongs to the key's org.
+// is then scoped to, and the key's scopes. Reads everywhere; writes behind a
+// `:write` scope: the sales counts (tickets sold on other platforms, mig
+// 20261030120000), whose POST / PUT / DELETE go through service-role RPCs that
+// re-check the event / row belongs to the key's org, and booking (venues,
+// rooms, holds, show schedule, notes, contacts; mig 20261030100000). Hold
+// writes go through the _exos_hold_* SQL functions (levels, promotion and
+// convert in one transaction, hold.* webhooks); the rest are plain rows whose
+// triggers and checks validate them. Every query names the key's org: this
+// function runs with the service role, so RLS does not scope it.
 //
 // Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
 // (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
@@ -19,17 +24,19 @@
 //
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 //
-// Endpoints (all GET, all scoped to the key's org; each also under /v1):
-//   /me, /events, /events/:id, /events/:id/{ticket-types, add-ons, promo-codes,
-//   attendees, check-ins, check-in-lists, guest-lists, waitlist, seats,
-//   seat-reconciliation}, /orders,
-//   /orders/:id, /invoices, /refunds, /webhooks, /events/:id/sales-counts,
-//   /sales-counts, /sales-counts/:id, /eventbrite-events/:id
-// Writes: POST /sales-counts, PUT + DELETE /sales-counts/:id,
-//   POST /events/:id/sales-counts/import
+// Endpoints (all scoped to the key's org; each also under /v1): the table in
+// _shared/api/routes.ts. GET /me, /events…, /events/:id/{seats,
+// seat-reconciliation, sales-counts}, /orders…, /invoices, /refunds,
+// /webhooks, /sales-counts, /eventbrite-events/:id; sales-count writes (POST
+// /sales-counts, PUT + DELETE /sales-counts/:id, POST
+// /events/:id/sales-counts/import); booking: /venues, /rooms, /holds,
+// /calendar, /events/:id/show-activities, /events/:id/notes,
+// /events/:id/contacts, /notes, /event-contacts (GET / POST / PATCH / DELETE
+// as listed there).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { API_METHODS, apiPath, matchRoute, type ApiMethod, type ApiRoute } from "../_shared/api/routes.ts";
+import { allowedMethods, API_METHODS, apiPath, matchRoute, type ApiMethod, type ApiRoute } from "../_shared/api/routes.ts";
+import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import { effectiveScopes, hasScope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
 import { parseCsv } from "../_shared/csvParse.ts";
@@ -37,6 +44,11 @@ import {
   isPlatform, MAX_IMPORT_BYTES, planSalesImport, SALES_FIELDS, salesTotals, suggestSalesMapping,
   type SalesCountRow, type SalesField, type SalesMapping,
 } from "../_shared/salesCounts.ts";
+import {
+  ACTIVITY_COLS, bookingDbError, BodyError, clearBody, CONTACT_COLS, convertBody, holdBody, isIsoDate, isUuid,
+  NOTE_COLS, parseActivity, parseContact, parseHoldFilters, parseNote, parseRoom, parseVenue, ROOM_COLS, VENUE_COLS,
+  venueView,
+} from "../_shared/api/booking.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,7 +57,12 @@ const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
 const EVENT_LIST_COLS = "id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at";
 const EVENT_COLS =
   "id, name, slug, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_location, " +
-  "tickets_sold, total_tickets, created_at";
+  "exos_venue_id, exos_room_id, hold_id, tickets_sold, total_tickets, created_at";
+// Routes that answer 201 Created.
+const CREATED = new Set([
+  "create-venue", "create-room", "create-hold", "convert-hold", "create-show-activity", "create-event-note",
+  "create-event-contact",
+]);
 const TIER_COLS =
   "id, name, description, price, capacity, sold, ticket_type, visibility, sales_start, sales_end, sort_order";
 // Reserved seating (mig 20261030140000): extra columns, dropped again on a
@@ -60,8 +77,9 @@ const EVENT_STATUSES = new Set(["draft", "published", "cancelled"]);
 const SALES_COLS =
   "id, event_id, kind, platform, label, sold, gross_cents, currency, capacity, tiers, note, file_name, row_count, " +
   "created_at, updated_at";
-// A JSON body: the CSV import may carry a 2 MB file as a string.
-const MAX_BODY_BYTES = MAX_IMPORT_BYTES + 256 * 1024;
+// The CSV import's body may carry a 2 MB file as a string; every other write
+// body is at most MAX_BODY_BYTES (_shared/api/body.ts).
+const MAX_IMPORT_BODY_BYTES = MAX_IMPORT_BYTES + 256 * 1024;
 
 class ApiError extends Error {
   status: number;
@@ -78,6 +96,7 @@ interface Ctx {
   params: Record<string, string>;
   q: URLSearchParams;
   page: Page;
+  /** The body of a POST / PUT / PATCH ({} when empty, or for GET / DELETE). */
   body: Record<string, unknown>;
 }
 
@@ -126,8 +145,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch { /* best-effort */ }
 
   const url = new URL(req.url);
-  const match = matchRoute(method, apiPath(url.pathname));
+  const path = apiPath(url.pathname);
+  const match = matchRoute(method, path);
   if (!match) {
+    const allow = allowedMethods(path);
+    if (allow.length) return json({ error: "method not allowed" }, 405, { allow: allow.join(", ") });
     return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
   }
   const scopes = (keyRow.scopes ?? []) as string[];
@@ -138,7 +160,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const body = method === "GET" || method === "DELETE" ? {} : await readJson(req);
     const ctx: Ctx = {
       sb, orgId,
       key: { id: keyRow.id, name: keyRow.name, key_prefix: keyRow.key_prefix, scopes },
@@ -146,16 +167,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       q: url.searchParams,
       // Only lists read ?page / ?per_page; elsewhere they are ignored.
       page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
-      body,
+      body: method === "POST" || method === "PUT" || method === "PATCH"
+        ? await readBody(req, match.route.id === "import-sales-counts" ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES)
+        : {},
     };
     const out = await handle(match.route, ctx);
     if (out instanceof Response) return out;
-    return json(out);
+    return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
-    if (e instanceof PagingError) return json({ error: e.message }, 400);
+    if (e instanceof PagingError || e instanceof BodyError) return json({ error: e.message }, 400);
     if (e instanceof ApiError) return json({ error: e.message }, e.status);
-    const pg = dbError(e);
-    if (pg) return json({ error: pg.message }, pg.status);
+    // Sales-count RPCs prefix their messages "sales counts:"; booking's are
+    // "exos_<fn>:" and use more codes.
+    const db = (match.route.id.includes("sales-count") ? dbError(e) : null) ??
+      bookingDbError(e as { code?: string; message?: string });
+    if (db) return json({ error: db.message }, db.status);
     console.error("exos-api error:", e);
     return json({ error: "internal error" }, 500);
   }
@@ -473,7 +499,336 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       };
     }
   }
+  return await handleBooking(route, c);
+}
+
+// -- Booking (mig 20261030100000, docs/booking.md) ------------------------------------
+
+async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
+  const { sb, orgId, page } = c;
+  switch (route.id) {
+    // Venues ------------------------------------------------------------------
+    case "list-venues": {
+      let q = sb.from("exos_venues").select(VENUE_COLS, { count: "exact" }).eq("org_id", orgId);
+      const name = search(c.q, "q", "q[name_cont]");
+      if (name) q = q.ilike("name", `%${name}%`);
+      const rel = c.q.get("relationship");
+      if (rel !== null) {
+        if (!["owned", "rented", "partner"].includes(rel)) throw new ApiError(400, "relationship must be owned, rented or partner.");
+        q = q.eq("relationship", rel);
+      }
+      return pagedMap(await q.order("name").order("id").range(page.from, page.to), page, venueView);
+    }
+    case "create-venue": {
+      const row = parseVenue(c.body, false);
+      return { data: venueView(await single(sb.from("exos_venues").insert({ ...row, org_id: orgId }).select(VENUE_COLS).single())) };
+    }
+    case "get-venue":
+      return {
+        data: venueView(await found(sb.from("exos_venues").select(VENUE_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "venue")).maybeSingle(), "venue")),
+      };
+    case "update-venue": {
+      const id = uuidParam(c, "id", "venue");
+      const row = parseVenue(c.body, true);
+      return {
+        data: venueView(await found(sb.from("exos_venues").update(row).eq("org_id", orgId).eq("id", id)
+          .select(VENUE_COLS).maybeSingle(), "venue")),
+      };
+    }
+    case "delete-venue": {
+      const id = uuidParam(c, "id", "venue");
+      await found(sb.from("exos_venues").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "venue");
+      return { data: { id, deleted: true } };
+    }
+
+    // Rooms -------------------------------------------------------------------
+    case "list-venue-rooms": {
+      const venue = await ownVenue(c);
+      return rows(await sb.from("exos_venue_rooms").select(ROOM_COLS).eq("org_id", orgId).eq("venue_id", venue)
+        .order("sort_order").order("name").order("id"));
+    }
+    case "create-room": {
+      const venue = await ownVenue(c);
+      const row = parseRoom(c.body, false);
+      return {
+        data: await single(sb.from("exos_venue_rooms").insert({ ...row, venue_id: venue, org_id: orgId })
+          .select(ROOM_COLS).single()),
+      };
+    }
+    case "list-rooms": {
+      let q = sb.from("exos_venue_rooms").select(ROOM_COLS, { count: "exact" }).eq("org_id", orgId);
+      const venue = c.q.get("venue_id") ?? c.q.get("q[venue_ownership_id_eq]");
+      if (venue !== null) {
+        if (!isUuid(venue)) throw new ApiError(400, "venue_id must be a UUID.");
+        q = q.eq("venue_id", venue);
+      }
+      const name = search(c.q, "q", "q[name_cont]");
+      if (name) q = q.ilike("name", `%${name}%`);
+      return paged(await q.order("venue_id").order("sort_order").order("name").order("id").range(page.from, page.to), page);
+    }
+    case "get-room":
+      return {
+        data: await found(roomOfVenue(c, sb.from("exos_venue_rooms").select(ROOM_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "room"))).maybeSingle(), "room"),
+      };
+    case "update-room": {
+      const id = uuidParam(c, "id", "room");
+      const row = parseRoom(c.body, true);
+      return {
+        data: await found(roomOfVenue(c, sb.from("exos_venue_rooms").update(row).eq("org_id", orgId).eq("id", id))
+          .select(ROOM_COLS).maybeSingle(), "room"),
+      };
+    }
+    case "delete-room": {
+      const id = uuidParam(c, "id", "room");
+      await found(roomOfVenue(c, sb.from("exos_venue_rooms").delete().eq("org_id", orgId).eq("id", id))
+        .select("id").maybeSingle(), "room");
+      return { data: { id, deleted: true } };
+    }
+
+    // Holds (every write through the SQL functions) -------------------------------
+    case "list-holds": {
+      const f = parseHoldFilters(c.q);
+      const out = await rpc(sb, "_exos_holds_page", {
+        p_org: orgId, p_from: f.from, p_to: f.to, p_venue: f.venueId, p_room: f.roomId, p_status: f.status, p_q: f.q,
+        p_limit: page.perPage, p_offset: page.from,
+      }) as { total: number; data: unknown[] };
+      return pageEnvelope(out.data ?? [], page, out.total ?? 0);
+    }
+    case "create-hold":
+      return {
+        data: await rpc(sb, "_exos_hold_create", {
+          p_org: orgId, p_actor: null, p_via: "api", p_api_key: c.key.id, p: holdBody(c.body, false),
+        }),
+      };
+    case "get-hold": {
+      const id = await ownHold(c);
+      return { data: await rpc(sb, "_exos_hold_json", { p_hold_id: id }) };
+    }
+    case "update-hold": {
+      const id = holdParam(c);
+      return { data: await rpc(sb, "_exos_hold_update", { p_org: orgId, p_hold_id: id, p: holdBody(c.body, true) }) };
+    }
+    case "clear-hold": {
+      const id = holdParam(c);
+      return { data: await rpc(sb, "_exos_hold_clear", { p_org: orgId, p_hold_id: id, p_position_ids: clearBody(c.body) }) };
+    }
+    case "convert-hold": {
+      const id = holdParam(c);
+      const out = await rpc(sb, "_exos_hold_convert", {
+        p_org: orgId, p_actor: null, p_via: "api", p_api_key: c.key.id, p_hold_id: id, p: convertBody(c.body),
+      }) as { hold: unknown; position_id: string; event_id: string };
+      const event = await single(sb.from("exos_events").select(EVENT_COLS).eq("org_id", orgId).eq("id", out.event_id).single());
+      return {
+        data: {
+          hold: out.hold,
+          position_id: out.position_id,
+          event: { ...(event as Record<string, unknown>), tiers: await tiers(sb, out.event_id) },
+        },
+      };
+    }
+    case "get-calendar": {
+      const from = c.q.get("from");
+      const to = c.q.get("to");
+      if (!isIsoDate(from) || !isIsoDate(to)) throw new ApiError(400, "from and to are required, written YYYY-MM-DD.");
+      const venue = c.q.get("venue_id");
+      if (venue !== null && !isUuid(venue)) throw new ApiError(400, "venue_id must be a UUID.");
+      return { data: await rpc(sb, "_exos_booking_calendar", { p_org: orgId, p_from: from, p_to: to, p_venue: venue }) };
+    }
+
+    // Show schedule -------------------------------------------------------------------
+    case "list-show-activities": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_show_activities").select(ACTIVITY_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("starts_at").order("id").range(page.from, page.to), page);
+    }
+    case "create-show-activity": {
+      const ev = await ownEvent(c);
+      const row = parseActivity(c.body, false);
+      return {
+        data: await single(sb.from("exos_show_activities").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(ACTIVITY_COLS).single()),
+      };
+    }
+    case "get-show-activity": {
+      const ev = await ownEvent(c);
+      return {
+        data: await found(sb.from("exos_show_activities").select(ACTIVITY_COLS).eq("org_id", orgId).eq("event_id", ev)
+          .eq("id", uuidParam(c, "aid", "show activity")).maybeSingle(), "show activity"),
+      };
+    }
+    case "update-show-activity": {
+      const ev = await ownEvent(c);
+      const id = uuidParam(c, "aid", "show activity");
+      const row = parseActivity(c.body, true);
+      return {
+        data: await found(sb.from("exos_show_activities").update(row).eq("org_id", orgId).eq("event_id", ev).eq("id", id)
+          .select(ACTIVITY_COLS).maybeSingle(), "show activity"),
+      };
+    }
+    case "delete-show-activity": {
+      const ev = await ownEvent(c);
+      const id = uuidParam(c, "aid", "show activity");
+      await found(sb.from("exos_show_activities").delete().eq("org_id", orgId).eq("event_id", ev).eq("id", id)
+        .select("id").maybeSingle(), "show activity");
+      return { data: { id, deleted: true } };
+    }
+
+    // Notes -----------------------------------------------------------------------------
+    case "list-event-notes": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_event_notes").select(NOTE_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("created_at").order("id").range(page.from, page.to), page);
+    }
+    case "create-event-note": {
+      const ev = await ownEvent(c);
+      const row = parseNote(c.body, false);
+      return {
+        data: await single(sb.from("exos_event_notes").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(NOTE_COLS).single()),
+      };
+    }
+    case "list-notes": {
+      let q = sb.from("exos_event_notes").select(NOTE_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!isUuid(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+    case "get-note":
+      return {
+        data: await found(sb.from("exos_event_notes").select(NOTE_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "note")).maybeSingle(), "note"),
+      };
+    case "update-note": {
+      const id = uuidParam(c, "id", "note");
+      const row = parseNote(c.body, true);
+      return {
+        data: await found(sb.from("exos_event_notes").update(row).eq("org_id", orgId).eq("id", id)
+          .select(NOTE_COLS).maybeSingle(), "note"),
+      };
+    }
+    case "delete-note": {
+      const id = uuidParam(c, "id", "note");
+      await found(sb.from("exos_event_notes").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "note");
+      return { data: { id, deleted: true } };
+    }
+
+    // Contacts --------------------------------------------------------------------------
+    case "list-event-contacts": {
+      const ev = await ownEvent(c);
+      return paged(await sb.from("exos_event_contacts").select(CONTACT_COLS, { count: "exact" })
+        .eq("org_id", orgId).eq("event_id", ev).order("role").order("name").order("id").range(page.from, page.to), page);
+    }
+    case "create-event-contact": {
+      const ev = await ownEvent(c);
+      const row = parseContact(c.body, false);
+      return {
+        data: await single(sb.from("exos_event_contacts").insert({ ...row, event_id: ev, org_id: orgId })
+          .select(CONTACT_COLS).single()),
+      };
+    }
+    case "list-contacts": {
+      let q = sb.from("exos_event_contacts").select(CONTACT_COLS, { count: "exact" }).eq("org_id", orgId);
+      const ev = c.q.get("event_id");
+      if (ev !== null) {
+        if (!isUuid(ev)) throw new ApiError(400, "event_id must be a UUID.");
+        q = q.eq("event_id", ev);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+    case "get-contact":
+      return {
+        data: await found(sb.from("exos_event_contacts").select(CONTACT_COLS).eq("org_id", orgId)
+          .eq("id", uuidParam(c, "id", "contact")).maybeSingle(), "contact"),
+      };
+    case "update-contact": {
+      const id = uuidParam(c, "id", "contact");
+      const row = parseContact(c.body, true);
+      return {
+        data: await found(sb.from("exos_event_contacts").update(row).eq("org_id", orgId).eq("id", id)
+          .select(CONTACT_COLS).maybeSingle(), "contact"),
+      };
+    }
+    case "delete-contact": {
+      const id = uuidParam(c, "id", "contact");
+      await found(sb.from("exos_event_contacts").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "contact");
+      return { data: { id, deleted: true } };
+    }
+  }
   throw new ApiError(404, "not found");
+}
+
+/** A path parameter as a UUID; anything else is simply not found. */
+function uuidParam(c: Ctx, name: string, what: string): string {
+  const v = c.params[name];
+  if (!isUuid(v)) throw new ApiError(404, `${what} not found`);
+  return v;
+}
+
+/** Under /venues/:vid/rooms/:id the room must also be that venue's. */
+// deno-lint-ignore no-explicit-any
+function roomOfVenue(c: Ctx, q: any): any {
+  if (c.params.vid === undefined) return q;
+  return q.eq("venue_id", uuidParam(c, "vid", "room"));
+}
+
+function holdParam(c: Ctx): string {
+  return uuidParam(c, "id", "hold");
+}
+
+async function ownVenue(c: Ctx): Promise<string> {
+  const id = uuidParam(c, "id", "venue");
+  await found(c.sb.from("exos_venues").select("id").eq("org_id", c.orgId).eq("id", id).maybeSingle(), "venue");
+  return id;
+}
+
+async function ownHold(c: Ctx): Promise<string> {
+  const id = holdParam(c);
+  await found(c.sb.from("exos_holds").select("id").eq("org_id", c.orgId).eq("id", id).maybeSingle(), "hold");
+  return id;
+}
+
+/** ?q= (or an Opendate-style alias), trimmed, with LIKE wildcards escaped. */
+function search(q: URLSearchParams, ...names: string[]): string | null {
+  for (const n of names) {
+    const v = q.get(n);
+    if (v === null || !v.trim()) continue;
+    if (v.length > 100) throw new ApiError(400, `${n} must be at most 100 characters.`);
+    return v.trim().replace(/[\\%_,()]/g, (ch) => `\\${ch}`);
+  }
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function rpc(sb: SupabaseClient, fn: string, args: Record<string, unknown>): Promise<any> {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function single(p: PromiseLike<{ data: any; error: unknown }>): Promise<any> {
+  const { data, error } = await p;
+  if (error) throw error;
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+async function found(p: PromiseLike<{ data: any; error: unknown }>, what: string): Promise<any> {
+  const { data, error } = await p;
+  if (error) throw error;
+  if (!data) throw new ApiError(404, `${what} not found`);
+  return data;
+}
+
+// deno-lint-ignore no-explicit-any
+function pagedMap(r: { data: any; error: any; count: number | null }, page: Page, fn: (row: any) => unknown) {
+  const out = paged(r, page);
+  return { ...out, data: (out.data as unknown[]).map(fn) };
 }
 
 /** The :id path parameter as an event id; anything but a UUID is simply not found. */
@@ -597,41 +952,24 @@ function importMapping(raw: unknown, header: string[]): SalesMapping {
 }
 
 /**
- * The body as text, refused with 413 once it passes `max` bytes. Counts while
- * streaming, so a chunked body without Content-Length can't be read in full.
+ * A JSON body, or a form-encoded one (artist[name]=…&artist[genres][]=…), at
+ * most `max` bytes, counted while streaming (_shared/api/body.ts). Form bodies
+ * are decoded from the capped text (never req.formData(), which reads without
+ * a cap). Any other declared Content-Type is a 415.
  */
-async function readCapped(req: Request, max: number): Promise<string> {
-  if (!req.body) return "";
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel().catch(() => {});
-      throw new ApiError(413, "request body too large.");
-    }
-    chunks.push(value);
-  }
-  const buf = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    buf.set(c, off);
-    off += c.byteLength;
-  }
-  return new TextDecoder().decode(buf);
-}
-
-async function readJson(req: Request): Promise<Record<string, unknown>> {
-  if (Number(req.headers.get("content-length") ?? "0") > MAX_BODY_BYTES) throw new ApiError(413, "request body too large.");
+async function readBody(req: Request, max: number): Promise<Record<string, unknown>> {
   const ct = (req.headers.get("content-type") ?? "").toLowerCase();
-  if (!ct.startsWith("application/json")) throw new ApiError(415, "send a JSON body (Content-Type: application/json).");
-  const text = await readCapped(req, MAX_BODY_BYTES);
+  const form = ct.includes("application/x-www-form-urlencoded");
+  if (ct && !form && !ct.includes("json")) {
+    throw new ApiError(415, "send a JSON body (Content-Type: application/json) or a form-encoded one.");
+  }
+  const text = await readCapped(req, max);
+  if (text === null) throw new ApiError(413, "request body too large.");
+  if (!text.trim()) return {};
+  if (form) return formBody(text);
   let v: unknown;
   try {
-    v = JSON.parse(text || "{}");
+    v = JSON.parse(text);
   } catch {
     throw new ApiError(400, "the body is not valid JSON.");
   }

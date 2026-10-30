@@ -1,0 +1,1080 @@
+{
+  "file": "venues",
+  "name": "Venues and rooms",
+  "order": 60,
+  "description": "The organization's venues (its own, or rooms it rents or books from a partner) and their rooms. Holds and converted events point at them. Reads need `booking:read`, writes `booking:write`. The /v1/venue_ownerships paths answer the same routes as /v1/venues.",
+  "endpoints": [
+    {
+      "id": "list-venues",
+      "method": "GET",
+      "path": "/v1/venues",
+      "summary": "List venues",
+      "description": "The organization's venues, by name. Also at /v1/venue_ownerships.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only venues whose name contains this (also `q[name_cont]`).",
+          "example": "hall"
+        },
+        {
+          "name": "relationship",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only venues of this relationship.",
+          "enum": [
+            "owned",
+            "rented",
+            "partner"
+          ],
+          "example": "rented"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "address": {
+                  "street": "2424 N Lincoln Ave",
+                  "city": "Chicago",
+                  "region": "IL",
+                  "country": "US",
+                  "postal": "60614"
+                },
+                "timezone": "America/Chicago",
+                "capacity": 520,
+                "website": "https://lincolnhall.example/",
+                "permalink": "lincoln-hall",
+                "relationship": "owned",
+                "contact": null,
+                "notes": null,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              },
+              {
+                "id": "7a10c3e2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Metro",
+                "address": {
+                  "city": "Chicago",
+                  "region": "IL",
+                  "country": "US"
+                },
+                "timezone": "America/Chicago",
+                "capacity": 1100,
+                "website": null,
+                "permalink": "metro",
+                "relationship": "rented",
+                "contact": {
+                  "name": "Club GM",
+                  "email": "gm@metro.example",
+                  "phone": "555-0100"
+                },
+                "notes": null,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "relationship must be owned, rented or partner."
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-venue",
+      "method": "POST",
+      "path": "/v1/venues",
+      "summary": "Create a venue",
+      "description": "Adds a venue (at most 200 per organization). Also at POST /v1/venue_ownerships.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Up to 100 characters.",
+          "example": "Lincoln Hall"
+        },
+        {
+          "name": "address",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "{ street, city, region, country, postal }, each up to 120 characters.",
+          "example": {
+            "street": "2424 N Lincoln Ave",
+            "city": "Chicago",
+            "region": "IL",
+            "country": "US",
+            "postal": "60614"
+          }
+        },
+        {
+          "name": "timezone",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "IANA time zone, e.g. America/Chicago. Holds are nights in this zone and a converted night starts in it. `time_zone` is accepted too.",
+          "example": "America/Chicago"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-1,000,000.",
+          "example": 520
+        },
+        {
+          "name": "website",
+          "location": "body",
+          "type": "string (URL) or null",
+          "required": false,
+          "description": "An https URL.",
+          "example": "https://lincolnhall.example/"
+        },
+        {
+          "name": "permalink",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Lowercase letters, digits and dashes, unique in the organization. Left out on create, it is made from the name (with -2, -3 ... when taken).",
+          "example": "lincoln-hall"
+        },
+        {
+          "name": "relationship",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "owned (default), rented (you rent it for your shows) or partner. Holds on any venue count only your organization's holds.",
+          "enum": [
+            "owned",
+            "rented",
+            "partner"
+          ],
+          "example": "owned"
+        },
+        {
+          "name": "contact",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Who you book the venue from: { name, email, phone }.",
+          "example": {
+            "name": "Club GM",
+            "email": "gm@metro.example",
+            "phone": "555-0100"
+          }
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 2000 characters."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Lincoln Hall",
+              "address": {
+                "street": "2424 N Lincoln Ave",
+                "city": "Chicago",
+                "region": "IL",
+                "country": "US",
+                "postal": "60614"
+              },
+              "timezone": "America/Chicago",
+              "capacity": 520,
+              "website": "https://lincolnhall.example/",
+              "permalink": "lincoln-hall",
+              "relationship": "owned",
+              "contact": null,
+              "notes": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "timezone must be an IANA zone, e.g. America/New_York"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The permalink is in use, or the organization has 200 venues.",
+          "example": {
+            "error": "That conflicts with an existing record (e.g. a permalink in use or a second doors row)."
+          }
+        }
+      ],
+      "request_example": {
+        "name": "Lincoln Hall",
+        "timezone": "America/Chicago",
+        "capacity": 520,
+        "address": {
+          "street": "2424 N Lincoln Ave",
+          "city": "Chicago",
+          "region": "IL",
+          "country": "US",
+          "postal": "60614"
+        }
+      }
+    },
+    {
+      "id": "get-venue",
+      "method": "GET",
+      "path": "/v1/venues/:id",
+      "summary": "Get a venue",
+      "description": "One venue. Also at /v1/venue_ownerships/:id.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue's id. One of another organization answers 404.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Lincoln Hall",
+              "address": {
+                "street": "2424 N Lincoln Ave",
+                "city": "Chicago",
+                "region": "IL",
+                "country": "US",
+                "postal": "60614"
+              },
+              "timezone": "America/Chicago",
+              "capacity": 520,
+              "website": "https://lincolnhall.example/",
+              "permalink": "lincoln-hall",
+              "relationship": "owned",
+              "contact": null,
+              "notes": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such venue in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "venue not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-venue",
+      "method": "PATCH",
+      "path": "/v1/venues/:id",
+      "summary": "Update a venue",
+      "description": "Changes the fields sent; the rest stay as they are. Also at PATCH /v1/venue_ownerships/:id.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue's id. One of another organization answers 404.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Lincoln Hall"
+        },
+        {
+          "name": "address",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "{ street, city, region, country, postal }, each up to 120 characters.",
+          "example": {
+            "street": "2424 N Lincoln Ave",
+            "city": "Chicago",
+            "region": "IL",
+            "country": "US",
+            "postal": "60614"
+          }
+        },
+        {
+          "name": "timezone",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "IANA time zone, e.g. America/Chicago. Holds are nights in this zone and a converted night starts in it. `time_zone` is accepted too.",
+          "example": "America/Chicago"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-1,000,000.",
+          "example": 520
+        },
+        {
+          "name": "website",
+          "location": "body",
+          "type": "string (URL) or null",
+          "required": false,
+          "description": "An https URL.",
+          "example": "https://lincolnhall.example/"
+        },
+        {
+          "name": "permalink",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Lowercase letters, digits and dashes, unique in the organization. Left out on create, it is made from the name (with -2, -3 ... when taken).",
+          "example": "lincoln-hall"
+        },
+        {
+          "name": "relationship",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "owned (default), rented (you rent it for your shows) or partner. Holds on any venue count only your organization's holds.",
+          "enum": [
+            "owned",
+            "rented",
+            "partner"
+          ],
+          "example": "owned"
+        },
+        {
+          "name": "contact",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Who you book the venue from: { name, email, phone }.",
+          "example": {
+            "name": "Club GM",
+            "email": "gm@metro.example",
+            "phone": "555-0100"
+          }
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 2000 characters."
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Lincoln Hall",
+              "address": {
+                "street": "2424 N Lincoln Ave",
+                "city": "Chicago",
+                "region": "IL",
+                "country": "US",
+                "postal": "60614"
+              },
+              "timezone": "America/Chicago",
+              "capacity": 560,
+              "website": "https://lincolnhall.example/",
+              "permalink": "lincoln-hall",
+              "relationship": "owned",
+              "contact": null,
+              "notes": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Nothing to update."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such venue in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "venue not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The permalink is in use.",
+          "example": {
+            "error": "That conflicts with an existing record (e.g. a permalink in use or a second doors row)."
+          }
+        }
+      ],
+      "request_example": {
+        "capacity": 560
+      }
+    },
+    {
+      "id": "delete-venue",
+      "method": "DELETE",
+      "path": "/v1/venues/:id",
+      "summary": "Delete a venue",
+      "description": "Deletes a venue and its rooms. A venue any hold night points at (even a cleared one) is kept: 409. Events linked to it keep their own venue name and address and lose the link. Also at DELETE /v1/venue_ownerships/:id.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue's id. One of another organization answers 404.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such venue in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "venue not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Hold nights point at the venue.",
+          "example": {
+            "error": "Still in use: holds or events point at it."
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-venue-rooms",
+      "method": "GET",
+      "path": "/v1/venues/:id/rooms",
+      "summary": "List a venue's rooms",
+      "description": "Every room of the venue (at most 50), in sort order.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue's id. One of another organization answers 404.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 450,
+                "color": "#e4572e",
+                "notes": "Stage left load-in",
+                "sort_order": 0,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              },
+              {
+                "id": "5b20d4f2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Loft",
+                "capacity": 120,
+                "color": null,
+                "notes": null,
+                "sort_order": 1,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such venue in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "venue not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-room",
+      "method": "POST",
+      "path": "/v1/venues/:id/rooms",
+      "summary": "Add a room",
+      "description": "Adds a room to the venue (at most 50 per venue).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue's id. One of another organization answers 404.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Up to 100 characters.",
+          "example": "Main Room"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-1,000,000. A converted night's ticket type is sized to it.",
+          "example": 450
+        },
+        {
+          "name": "color",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Calendar colour, #rrggbb (`calendar_color_hex` is accepted too).",
+          "example": "#e4572e"
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 1000 characters.",
+          "example": "Stage left load-in"
+        },
+        {
+          "name": "sort_order",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Order in lists, 0-1000.",
+          "example": 0
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Main Room",
+              "capacity": 450,
+              "color": "#e4572e",
+              "notes": "Stage left load-in",
+              "sort_order": 0,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "name is required."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such venue in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "venue not found"
+          }
+        }
+      ],
+      "request_example": {
+        "name": "Main Room",
+        "capacity": 450
+      }
+    },
+    {
+      "id": "list-rooms",
+      "method": "GET",
+      "path": "/v1/rooms",
+      "summary": "List rooms",
+      "description": "Every room of every venue of the organization, by venue then sort order.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this venue's rooms (also `q[venue_ownership_id_eq]`).",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only rooms whose name contains this (also `q[name_cont]`).",
+          "example": "main"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 450,
+                "color": "#e4572e",
+                "notes": "Stage left load-in",
+                "sort_order": 0,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              },
+              {
+                "id": "5b20d4f2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Loft",
+                "capacity": 120,
+                "color": null,
+                "notes": null,
+                "sort_order": 1,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "venue_id must be a UUID."
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-room",
+      "method": "GET",
+      "path": "/v1/rooms/:id",
+      "summary": "Get a room",
+      "description": "One room. Also at /v1/venues/:venue_id/rooms/:id (the room must be that venue’s).",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The room's id. One of another organization answers 404.",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Main Room",
+              "capacity": 450,
+              "color": "#e4572e",
+              "notes": "Stage left load-in",
+              "sort_order": 0,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such room in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "room not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-room",
+      "method": "PATCH",
+      "path": "/v1/rooms/:id",
+      "summary": "Update a room",
+      "description": "Changes the fields sent. Also at /v1/venues/:venue_id/rooms/:id (the room must be that venue’s).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The room's id. One of another organization answers 404.",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Main Room"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "0-1,000,000. A converted night's ticket type is sized to it.",
+          "example": 450
+        },
+        {
+          "name": "color",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Calendar colour, #rrggbb (`calendar_color_hex` is accepted too).",
+          "example": "#e4572e"
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 1000 characters.",
+          "example": "Stage left load-in"
+        },
+        {
+          "name": "sort_order",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Order in lists, 0-1000.",
+          "example": 0
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Main Room",
+              "capacity": 450,
+              "color": "#e4572e",
+              "notes": "Load in from the alley",
+              "sort_order": 0,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Nothing to update."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such room in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "room not found"
+          }
+        }
+      ],
+      "request_example": {
+        "notes": "Load in from the alley"
+      }
+    },
+    {
+      "id": "delete-room",
+      "method": "DELETE",
+      "path": "/v1/rooms/:id",
+      "summary": "Delete a room",
+      "description": "Deletes a room. A room any hold night points at is kept: 409. Also at /v1/venues/:venue_id/rooms/:id (the room must be that venue’s).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The room's id. One of another organization answers 404.",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such room in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "room not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Hold nights point at the room.",
+          "example": {
+            "error": "Still in use: holds or events point at it."
+          }
+        }
+      ]
+    }
+  ]
+}
