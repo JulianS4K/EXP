@@ -40,6 +40,7 @@ describe('API reference covers the route table', () => {
       const docs = endpoints.filter((e) => key(e.method, e.path) === key(r.method, `/v1${r.path === '/' ? '' : r.path}`));
       expect(docs.map((e) => e.id), `${r.method} ${r.path}`).toEqual([r.id]);
       expect(docs[0].scope, `${r.id} scope`).toBe(r.scope);
+      expect(docs[0].auth, `${r.id} auth`).toBe(r.auth);
     }
   });
 
@@ -56,10 +57,14 @@ describe('API reference covers the route table', () => {
       const e = endpoints.find((x) => x.id === r.id);
       const names = (e.parameters as any[]).filter((p) => p.location === 'query').map((p) => p.name);
       const pagedDoc = names.includes('page') && names.includes('per_page');
-      expect(pagedDoc, `${r.id} paged`).toBe(r.paged);
-      if (r.paged) {
+      expect(pagedDoc, `${r.id} paged`).toBe(r.paged !== false);
+      if (r.paged === true) {
         const ok = e.responses.find((x: any) => x.status === 200);
         expect(Object.keys(ok.example.meta), `${r.id} meta`).toEqual(['page', 'per_page', 'total', 'total_pages']);
+      } else if (r.paged === 'opendate') {
+        const ok = e.responses.find((x: any) => x.status === 200);
+        expect(Object.keys(ok.example), `${r.id} envelope`)
+          .toEqual(['current_page', 'per_page', 'total_entries', 'total_pages', 'collection']);
       }
     }
   });

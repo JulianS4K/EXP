@@ -37,7 +37,7 @@ reviewed and added to its allowlist.
 Legend: **OK** = intended and properly checked; **Revoked** = internal helper,
 client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 
-### Callable by anon (23 flagged)
+### Callable by anon (24 flagged)
 
 | Function | Verdict | Why |
 |---|---|---|
@@ -55,9 +55,10 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_promoter_add_guest`, `_remove_guest`, `_set_guest_access_needs`, `_note_limit_flag`, `_set_socials` | OK | Anon writes gated by the kit token and `_exos_promoter_list` (list must be the promoter's, open, and on a live event); guest adds count against the list cap when one is set |
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
+| `exos_public_lineups` (mig 20261030110000) | OK (anon + authenticated) | Lineups of published events only (at most 100 ids per call): slot position, act type, set time, and the artist's name, permalink, photo and Spotify id, all of which the event page shows. Never bio, links, org or drafts' lineups |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
 
-### Callable by authenticated (131 flagged)
+### Callable by authenticated (136 flagged)
 
 Grouped by the check they rely on. All pin `search_path`.
 
@@ -135,6 +136,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
 | `exos_hold_create`, `exos_hold_update`, `exos_hold_clear`, `exos_hold_convert` (mig 20261030100000) | OK | Booking holds (calendar pencils, not the checkout's `exos_create_hold` cart holds; `docs/booking.md`). Owner / manager of the hold's org; "no such hold" and "not yours" are the same 42501. They call the `_exos_hold_*` cores (**service role only**, also what exos-api calls with the key's org), which take a per-org advisory lock, renumber every touched line and enqueue `hold.*` webhooks. `exos_holds` / `exos_hold_positions` have no client write grant at all; `_exos_holds_page`, `_exos_booking_calendar`, `_exos_hold_json` are service role only. Venues, rooms, show schedule, notes and contacts are plain RLS tables (staff roles per table) whose definer triggers set `org_id` from the parent and refuse moves across orgs; an event can only link its own org's venue, and only convert sets its hold links |
+| `exos_artist_save`, `exos_artist_merge`, `exos_lineup_save`, `exos_listing_key_create`, `exos_listing_key_revoke` (mig 20261030110000) | OK | Org role from the row, never from the caller: artists and lineups owner / manager / content (merge owner / manager), shared keys owner only; an unknown or foreign id gets the same refusal. They call the `_exos_*` cores, which are service-role only (exos-api passes the API key's org) and check that every artist and event belongs to that org; a trigger refuses a cross-org lineup slot. Over exos-api the shared-key cores also require the calling API key's creator to be an active owner (`_exos_api_key_owner_ok`), and revoking or deleting an API key revokes the shared keys it minted (trigger on `exos_api_keys`). Shared keys are stored as SHA-256 hashes (`key_hash` has no client column grant); `exos_listing_feed_source` (service role) answers only the key's org's published, listed events and redacts secret venues |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

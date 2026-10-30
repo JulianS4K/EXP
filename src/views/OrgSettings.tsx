@@ -34,6 +34,7 @@ import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
 import FeeRulesEditor from '../components/FeeRulesEditor';
+import ListingFeedPanel from '../components/ListingFeedPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -310,6 +311,12 @@ export default function OrgSettings() {
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >
             Limit flags
+          </button>
+          <button
+            onClick={() => navigate(`/orgs/${org.id}/artists`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Artists
           </button>
           {canSeeMoney(activeRole, isAdmin) && (
             <button
@@ -607,6 +614,9 @@ export default function OrgSettings() {
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <FeeRulesEditor orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
+
+            {/* Listing feed: per-partner shared keys (mig 20261030110000). Owners only. */}
+            {(isAdmin || activeRole === 'owner') && <ListingFeedPanel orgId={org.id} />}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />
