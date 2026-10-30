@@ -123,7 +123,8 @@ for m in \
          20261027090000_exos_api_scopes \
          20261027100000_exos_fee_rules \
          20261029090000_exos_free_tier_resale_consent \
-         20261029100000_exos_last_call; do
+         20261029100000_exos_last_call \
+         20261029130000_exos_discovery_publishing; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -281,7 +282,8 @@ for m in \
          20261027090000_exos_api_scopes \
          20261027100000_exos_fee_rules \
          20261029090000_exos_free_tier_resale_consent \
-         20261029100000_exos_last_call; do
+         20261029100000_exos_last_call \
+         20261029130000_exos_discovery_publishing; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -322,3 +324,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fee_rules
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_public_tier_available.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_free_tier_resale.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_last_call.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discovery_publishing.sql"

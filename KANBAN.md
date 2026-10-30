@@ -56,6 +56,12 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
 - S4K feed (cron live per prod state; open: id mapping, then payments + payouts).
 - Marketplace adapters (`exos-distribute`): written, held undeployed until each partner's write scope is signed off.
 - Eventbrite capacity writes (`EXOS_EVENTBRITE_WRITES`), Luma (off), wallet passes (no Apple / Google certificates).
+- Discovery listings (2026-10-29, mig `20261029130000`, not applied): per-event, per-channel status on the Promote page;
+  Google / calendar / ad-catalog status computed from each feed's rule; a manual submission queue for DoNYC, Time Out NY,
+  CitySpark, RA, Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, worked at `/admin/listings`
+  (`docs/organizer-guide.md` "Discovery listings"). Edmtrain's API is read-only and Meetup's `createEvent` would be a new
+  third-party write (Pro + OAuth), so both are manual until the operator decides. Free-tier events (capacity <= 150)
+  get at most 5 manual channels; operator minutes per submission are logged and totalled per event / org (pilot).
 
 **Not built**
 - Neighborhood pages ("this week in Bushwick", Phase 1 item 7c) and follower lists + "new event" email (Phase 1 CRM).
@@ -64,8 +70,8 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
   include small ones (Posh, Shotgun, Tixr, Humanitix).
 - StubHub Open Distribution: not in `docs/`. StubHub's free, non-exclusive connection for primary ticketers lists
   tickets as new from the organizer; the adapters above use seller APIs, so listings read as resale.
-- TikTok event links (partner deal), RA / DICE / Posh / Partiful listings (manual only), native app (Stories
-  hand-off), Instagram / Facebook Shops, Google feed uploader.
+- TikTok event links (partner deal), DICE / Posh / Partiful listings (RA is in the discovery queue above), native app
+  (Stories hand-off), Instagram / Facebook Shops, Google feed uploader. Meetup / Edmtrain API submission (see above).
 
 **Doc drift**
 - `docs/marketplace/s4k-feed.md` says "built, not applied or deployed"; prod state says applied and running.
@@ -97,6 +103,8 @@ Go to market:
 - [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if over 150 and opted in).
 - [ ] Submit every Exos event to NYC listings: Hidden City, GUNK, Queer on the Street, coolstuff.nyc, Eddie's List,
       RA (if it takes outside ticket links).
+      DoNYC, Time Out, CitySpark and RA now go through the discovery queue (`/admin/listings`); the rest aren't in the
+      channel catalog yet (add them to `_shared/discovery/channels.ts` + the migration seed once their pages are checked).
 - [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).
 - [ ] Decide on the 18 paused partner-outreach drafts in Gmail.
 - [ ] Public-sector RFPs as a parallel track (readiness list: "Public-sector RFP readiness" below;

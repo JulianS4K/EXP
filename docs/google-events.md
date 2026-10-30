@@ -59,6 +59,10 @@ business step (see "Going live").
 Hidden ticket types (unlocked by codes) are never listed. The feed is a **snapshot**: an event that drops out is
 removed from Google.
 
+Organizers see whether each event is in the feed, with the reason when it isn't, on the Promote page under
+**Discovery listings** (`docs/organizer-guide.md`); that status is `feedBlocker` run on the same columns, not a
+stored guess.
+
 ## Report (operator)
 
 `GET …/exos-google-feed?report=1` with `Authorization: Bearer <service role key>` returns the counts and every event
