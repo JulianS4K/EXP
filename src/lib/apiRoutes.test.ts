@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
+import { allowedMethods, apiPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
 import { effectiveScopes, hasScope, READ_SCOPES, SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 import { PagingError, pageEnvelope, parsePage } from '../../supabase/functions/_shared/api/paging.ts';
 
@@ -44,8 +44,41 @@ describe('matchRoute', () => {
     }
     // Only GET /me is reachable without a scope.
     expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // The API is read-only: no route needs a write scope yet.
-    expect(ROUTES.every((r) => r.scope === null || r.scope.endsWith(':read'))).toBe(true);
+    // Reads need a :read scope, writes a :write scope (booking, mig 20261030100000).
+    for (const r of ROUTES) {
+      if (r.scope === null) continue;
+      expect(r.scope.endsWith(r.method === 'GET' ? ':read' : ':write'), `${r.id} ${r.scope}`).toBe(true);
+    }
+    // Aliases are unique across the table and point at their own route only.
+    const aliasKeys = ROUTES.flatMap((r) => (r.aliases ?? []).map((a) => `${r.method} ${a}`));
+    expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
+    for (const r of ROUTES) {
+      for (const a of r.aliases ?? []) {
+        expect(a).toMatch(/^(\/([a-z_]+|:[a-z]+))+$/);
+        expect(matchRoute(r.method, a.replace(/:[a-z]+/g, 'x'))?.route.id, a).toBe(r.id);
+      }
+    }
+  });
+});
+
+describe('booking routes', () => {
+  it('matches the Opendate-style aliases', () => {
+    expect(matchRoute('POST', '/holds/h1/convert_to_confirm')?.route.id).toBe('convert-hold');
+    expect(matchRoute('POST', '/holds/h1/convert_to_event')?.params).toEqual({ id: 'h1' });
+    expect(matchRoute('GET', '/venue_ownerships')?.route.id).toBe('list-venues');
+    expect(matchRoute('DELETE', '/venue_ownerships/v1')?.route.id).toBe('delete-venue');
+    expect(matchRoute('GET', '/confirms/e1/show_activities/a1')?.params).toEqual({ id: 'e1', aid: 'a1' });
+    expect(matchRoute('PATCH', '/events/e1/show-activities/a1')?.route.id).toBe('update-show-activity');
+    expect(matchRoute('GET', '/calendar_event_contacts/c1')?.route.id).toBe('get-contact');
+    expect(matchRoute('PATCH', '/venues/v1/rooms/r1')?.params).toEqual({ vid: 'v1', id: 'r1' });
+  });
+
+  it('knows which methods a path answers (405 vs 404)', () => {
+    expect(allowedMethods('/holds')).toEqual(['GET', 'POST']);
+    expect(allowedMethods('/venues/v1')).toEqual(['GET', 'PATCH', 'DELETE']);
+    expect(allowedMethods('/events')).toEqual(['GET']);
+    expect(allowedMethods('/nope')).toEqual([]);
+    expect(matchRoute('PUT', '/holds/h1')).toBeNull();
   });
 });
 

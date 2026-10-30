@@ -1,16 +1,18 @@
 # Partner API (exos-api)
 
-A read-only REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
-site, reporting. The full reference, with every endpoint, parameter and example, is the public page
+A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
+site, reporting, booking tools. Everything is read-only except booking (venues, rooms, holds, the show
+schedule, staff notes and contacts), which partners can also write (docs/booking.md). The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
 - **Base URL:** `https://<project-ref>.supabase.co/functions/v1/exos-api`, paths under `/v1` (`/v1/events`). Each
   path also answers without `/v1`, for clients of the first release.
 - **Code:** `supabase/functions/exos-api/index.ts` (the edge function), `supabase/functions/_shared/api/`
-  (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page). Pure TypeScript, so vitest
-  imports the same files.
+  (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page, `booking.ts` the booking
+  bodies). Pure TypeScript, so vitest imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap). SQL harness: `tests/exos/test_api_scopes.sql`.
+  the 10-key cap), `20261030100000` (booking). SQL harnesses: `tests/exos/test_api_scopes.sql`,
+  `tests/exos/test_booking.sql`.
 - **Deploy:** `exos-api` takes an API key, not a Supabase JWT, so it is deployed with `--no-verify-jwt`.
 
 ## Auth and scopes
@@ -31,12 +33,24 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
   `{ data, meta: { page, per_page, total, total_pages } }`. Unpaged lists answer `{ data }`.
 - 120 requests per key per minute; over it, `429` with `Retry-After`. If the limiter fails, `503` (no limiter, no
   answer: the API returns personal data).
-- Errors are `{ "error": "…" }`: `400` bad paging or filter, `401` missing or invalid key, `403` scope, `404`
-  unknown path or another org's id, `405` anything but GET, `500`, `503`.
+- Errors are `{ "error": "…" }`: `400` bad paging, filter or body, `401` missing or invalid key, `403` scope,
+  `404` unknown path or another org's id, `405` a method the path doesn't answer (`Allow` lists the ones it
+  does), `409` a booking conflict, `413` a body over 64 KB, `500`, `503`.
+
+## Writes
+
+Only booking routes write (POST / PATCH / DELETE, JSON body, a `:write` scope). The function runs with the
+service role, so every query names the key's org itself. Hold writes call the `_exos_hold_*` SQL functions
+(levels, promotion and convert in one transaction, `hold.*` webhooks); the other tables are written as rows and
+their triggers and checks validate them. The SQL raises with fixed codes and `bookingDbError()`
+(`_shared/api/booking.ts`) maps them: `22023` → 400, `P0002` → 404, `23505` / `55000` / `54000` → 409.
+Opendate-style spellings answer the same routes through `aliases` in `routes.ts` (`/holds/:id/convert_to_confirm`,
+`/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`).
 
 ## Adding a route
 
-1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, path, scope, paged.
+1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, path, scope (`:read` for GET, `:write` otherwise),
+   paged, and any aliases.
 2. A `case` for that id in `handle()` in `exos-api/index.ts`. Select explicit columns; never secrets (barcode
    secrets, webhook secrets, reserved emails). Scope every query to the key's org.
 3. An endpoint in the right `docs/api/<area>.json` with the same `id`, the path under `/v1`, the same `scope`,

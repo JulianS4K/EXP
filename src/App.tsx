@@ -58,6 +58,7 @@ const DoorApp = lazy(() => import('./views/DoorApp'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
+const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const Notifications = lazy(() => import('./views/Notifications'));
 const ResetPassword = lazy(() => import('./views/ResetPassword'));
@@ -179,6 +180,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
+                    <Route path="/orgs/:orgId/calendar" element={<BookingCalendar />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />
