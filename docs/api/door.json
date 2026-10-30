@@ -1,0 +1,1329 @@
+{
+  "file": "door",
+  "name": "Tickets and check-in",
+  "order": 25,
+  "description": "Tickets, check-in and check-out, offline scan uploads and guest lists. Check-ins run the dashboard's door functions as the member who created the key (owner, manager or scanner), with the same rules: doors-open time, check-in lists, re-entry, rotating codes. A check-in that the door would refuse is not an error: the answer is 200 with ok false and the reason (doors-not-open, already-used, needs-manager, reason-required, voided, wrong-event, …).",
+  "endpoints": [
+    {
+      "auth": "api_key",
+      "id": "list-tickets",
+      "method": "GET",
+      "path": "/v1/tickets",
+      "summary": "List tickets",
+      "description": "The organization's tickets across events, newest first. Never the barcode secret.",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's tickets.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only tickets in this status (active, used, voided, …).",
+          "example": "active"
+        },
+        {
+          "name": "order_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this order's tickets.",
+          "example": "cs_live_a1B2c3D4e5F6"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "tier_id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+                "tier_name": "GA",
+                "attendee_name": "Maya Chen",
+                "buyer_email": "maya@example.com",
+                "status": "active",
+                "check_in_at": null,
+                "price_paid": 25,
+                "order_ref": "cs_live_a1B2c3D4e5F6",
+                "channel_source": "vibepass",
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "event_id must be a UUID."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-ticket",
+      "method": "GET",
+      "path": "/v1/tickets/:id",
+      "summary": "Get a ticket",
+      "description": "One ticket with its last 50 scans (entries and exits).",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket's id. One of another organization answers 404.",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "tier_id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+              "tier_name": "GA",
+              "attendee_name": "Maya Chen",
+              "buyer_email": "maya@example.com",
+              "status": "active",
+              "check_in_at": null,
+              "price_paid": 25,
+              "order_ref": "cs_live_a1B2c3D4e5F6",
+              "channel_source": "vibepass",
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00",
+              "check_ins": []
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "scan-lookup",
+      "method": "GET",
+      "path": "/v1/scan-lookups/:code",
+      "summary": "Look up a scanned code",
+      "description": "Finds the ticket behind a ticket id or a rotating door code (T-<ticket>:…). It only finds the ticket; checking in with the code (POST /v1/tickets/:id/check-in with barcode) is what verifies it.",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "code",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "A ticket id or a T- door code (URL-encoded).",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "code_type": "ticket_id",
+              "ticket": {
+                "id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "tier_id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+                "tier_name": "GA",
+                "attendee_name": "Maya Chen",
+                "buyer_email": "maya@example.com",
+                "status": "active",
+                "check_in_at": null,
+                "price_paid": 25,
+                "order_ref": "cs_live_a1B2c3D4e5F6",
+                "channel_source": "vibepass",
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00",
+                "check_ins": []
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No ticket of the key's organization for this code.",
+          "example": {
+            "error": "no ticket for this code"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "check-in-ticket",
+      "method": "POST",
+      "path": "/v1/tickets/:id/check-in",
+      "summary": "Check a ticket in",
+      "description": "Checks a ticket in at its event. With barcode the code is verified like a camera scan; without one it is a typed override that needs an owner or manager and a reason. The scan is logged under the key's creator.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket's id. One of another organization answers 404.",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "barcode",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The door code a scanner read (T-… rotating code or W-… wallet code). Checked like a camera scan at the door; without one the check-in is a typed override.",
+          "example": "T-2b9e4f1a-…"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Why, for a typed check-in (at least 3 characters; kept on the check-in).",
+          "example": "box office, ID checked"
+        },
+        {
+          "name": "list_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The check-in list (gate) to check in on; its ticket types, hours and re-entry rules apply.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "device",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A label for the scanner or app (shown in the check-in log). Default \"api\".",
+          "example": "gate-2"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "reason": "box office, ID checked",
+        "device": "box-office-1"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The door's answer: ok, or ok false with the reason.",
+          "example": {
+            "data": {
+              "ok": true,
+              "reason": "checked-in",
+              "check_in_at": "2026-10-30T14:05:11.204+00:00",
+              "verified": false
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner, manager or scanner; a typed check-in without a door code needs an owner or manager and a reason), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "check-out-ticket",
+      "method": "POST",
+      "path": "/v1/tickets/:id/check-out",
+      "summary": "Check a ticket out",
+      "description": "Records an exit on a re-entry check-in list (pass its list_id), so the holder can come back in. The ticket stays used.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket's id. One of another organization answers 404.",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "barcode",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The door code a scanner read (T-… rotating code or W-… wallet code). Checked like a camera scan at the door; without one the check-in is a typed override.",
+          "example": "T-2b9e4f1a-…"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Why, for a typed check-in (at least 3 characters; kept on the check-in).",
+          "example": "box office, ID checked"
+        },
+        {
+          "name": "list_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The check-in list (gate) to check in on; its ticket types, hours and re-entry rules apply.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "device",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A label for the scanner or app (shown in the check-in log). Default \"api\".",
+          "example": "gate-2"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+        "barcode": "T-2b9e4f1a-…"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The door's answer.",
+          "example": {
+            "data": {
+              "ok": true,
+              "reason": "checked-out",
+              "direction": "exit",
+              "scanned_at": "2026-10-30T14:05:11.204+00:00",
+              "verified": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner, manager or scanner; a typed check-in without a door code needs an owner or manager and a reason), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "undo-check-in",
+      "method": "POST",
+      "path": "/v1/tickets/:id/undo-check-in",
+      "summary": "Undo a check-in",
+      "description": "Puts a used ticket back to active (a scan by mistake), as Undo in the door app. Needs an owner or manager and a reason.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket's id. One of another organization answers 404.",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Why (kept on the record).",
+          "example": "scanned the wrong ticket"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "reason": "scanned the wrong ticket"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "Undone, or ok false with the reason (not-checked-in, needs-manager, reason-required).",
+          "example": {
+            "data": {
+              "ok": true,
+              "reason": "undone"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "check-in-order",
+      "method": "POST",
+      "path": "/v1/orders/:id/check-in",
+      "summary": "Check an order in",
+      "description": "Checks in every ticket on the order (a typed check-in each: owner or manager, with a reason). results has the door's answer per ticket.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id. One of another organization answers 404.",
+          "example": "cs_live_a1B2c3D4e5F6"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Why (at least 3 characters).",
+          "example": "whole party at the box office"
+        },
+        {
+          "name": "list_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The check-in list to use.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "direction",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "entry (default) or exit.",
+          "example": "entry"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "reason": "whole party at the box office"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "order_id": "cs_live_a1B2c3D4e5F6",
+              "results": [
+                {
+                  "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                  "ok": true,
+                  "reason": "checked-in",
+                  "check_in_at": "2026-10-30T14:05:11.204+00:00",
+                  "verified": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "submit-offline-check-ins",
+      "method": "POST",
+      "path": "/v1/events/:id/offline-check-ins",
+      "summary": "Upload offline check-ins",
+      "description": "Scans a door app made while offline, up to 500 at a time, applied through the dashboard's offline sync: each client_ref is applied once (resending is safe), scanned_at must be within the event's scan window, and a ticket another device already admitted comes back as such. A ticket of another organization answers not-found for that scan. Opendate calls these offline check-in activities.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "scans",
+          "location": "body",
+          "type": "array",
+          "required": true,
+          "description": "Up to 500 { client_ref (UUID, unique per scan), ticket_id, scanned_at, barcode?, source? (camera, manual), reason?, device?, list_id?, direction? }.",
+          "example": [
+            {
+              "client_ref": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+              "scanned_at": "2027-01-16T00:41:07Z",
+              "barcode": "T-2b9e4f1a-…"
+            }
+          ]
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "scans": [
+          {
+            "client_ref": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+            "scanned_at": "2027-01-16T00:41:07Z",
+            "barcode": "T-2b9e4f1a-…",
+            "device": "gate-2"
+          }
+        ]
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "One answer per scan, in order (ok false with bad-scan for a malformed one).",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "results": [
+                {
+                  "client_ref": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                  "ok": true,
+                  "reason": "checked-in",
+                  "check_in_at": "2026-10-30T14:05:11.204+00:00",
+                  "verified": false
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "scans must be a list of at most 500"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner, manager or scanner), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-guest-list",
+      "method": "POST",
+      "path": "/v1/events/:id/guest-lists",
+      "summary": "Create a guest list",
+      "description": "Adds a guest list to the event through the dashboard's guest-list function: name (required), cap (people incl. plus-ones), max_plus_ones (default 5), counts_toward_capacity, status (open, closed), closes_at, promoter_id (the list belongs to that promoter).",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "guest_list",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields (or send them unwrapped).",
+          "example": {
+            "name": "Friends",
+            "cap": 20,
+            "max_plus_ones": 2
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "guest_list": {
+          "name": "Friends",
+          "cap": 20,
+          "max_plus_ones": 2
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "org_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+              "name": "Friends",
+              "promoter_id": null,
+              "cap": 20,
+              "max_plus_ones": 2,
+              "counts_toward_capacity": false,
+              "status": "open",
+              "closes_at": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-guest-list",
+      "method": "PATCH",
+      "path": "/v1/guest-lists/:id",
+      "summary": "Update a guest list",
+      "description": "Changes the given fields; the rest keep their values. The cap can't go below the people already on the list.",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest list's id. One of another organization answers 404.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "guest_list",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change.",
+          "example": {
+            "cap": 25
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "guest_list": {
+          "cap": 25,
+          "status": "closed"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "org_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+              "name": "Friends",
+              "promoter_id": null,
+              "cap": 25,
+              "max_plus_ones": 2,
+              "counts_toward_capacity": false,
+              "status": "open",
+              "closes_at": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest list in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest list not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "delete-guest-list",
+      "method": "DELETE",
+      "path": "/v1/guest-lists/:id",
+      "summary": "Delete a guest list",
+      "description": "Deletes a list nobody on it has arrived from; once guests arrived, close it instead.",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest list's id. One of another organization answers 404.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest list in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest list not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-guests",
+      "method": "GET",
+      "path": "/v1/guest-lists/:id/guests",
+      "summary": "List a guest list's guests",
+      "description": "The guests on a list, in the order they were added. arrived counts the party members checked in so far.",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest list's id. One of another organization answers 404.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+                "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "guest_name": "Ana Ruiz",
+                "email": null,
+                "phone": null,
+                "plus_ones": 1,
+                "arrived": 0,
+                "arrived_at": null,
+                "note": "VIP",
+                "source": null,
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest list in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest list not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "add-guests",
+      "method": "POST",
+      "path": "/v1/guest-lists/:id/guests",
+      "summary": "Add guests",
+      "description": "Adds one guest (send the fields) or up to 500 (send { guests: [...] }), all or none: guest_name (required), email, phone, plus_ones, note. The list's cap and plus-one limit apply.",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest list's id. One of another organization answers 404.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "guests",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 500 guests; or send one guest's fields directly.",
+          "example": [
+            {
+              "guest_name": "Ana Ruiz",
+              "plus_ones": 1
+            }
+          ]
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "guests": [
+          {
+            "guest_name": "Ana Ruiz",
+            "plus_ones": 1,
+            "note": "VIP"
+          },
+          {
+            "guest_name": "Bo Kim"
+          }
+        ]
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: the new guests.",
+          "example": {
+            "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+            "data": [
+              {
+                "id": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+                "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "guest_name": "Ana Ruiz",
+                "email": null,
+                "phone": null,
+                "plus_ones": 1,
+                "arrived": 0,
+                "arrived_at": null,
+                "note": "VIP",
+                "source": null,
+                "created_at": "2026-10-30T14:05:11.204+00:00",
+                "updated_at": "2026-10-30T14:05:11.204+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest list in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest list not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The list is full, or a party has more plus-ones than the list allows.",
+          "example": {
+            "error": "the list is full"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-guest",
+      "method": "PATCH",
+      "path": "/v1/guests/:id",
+      "summary": "Update a guest",
+      "description": "Changes a guest's guest_name, email, phone, plus_ones or note; the rest keep their values.",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest's id. One of another organization answers 404.",
+          "example": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c"
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Any of guest_name, email, phone, plus_ones, note.",
+          "example": "VIP"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "plus_ones": 2,
+        "note": "VIP"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+              "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "guest_name": "Ana Ruiz",
+              "email": null,
+              "phone": null,
+              "plus_ones": 1,
+              "arrived": 0,
+              "arrived_at": null,
+              "note": "VIP",
+              "source": null,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "updated_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Over the list's limits.",
+          "example": {
+            "error": "this list allows up to 2 plus-one(s)"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "remove-guest",
+      "method": "DELETE",
+      "path": "/v1/guests/:id",
+      "summary": "Remove a guest",
+      "description": "Takes a guest off the list. A guest who already arrived stays (409).",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest's id. One of another organization answers 404.",
+          "example": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The guest already arrived.",
+          "example": {
+            "error": "this guest already arrived"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "check-in-guest",
+      "method": "POST",
+      "path": "/v1/guests/:id/check-in",
+      "summary": "Check a guest in",
+      "description": "Admits count people of the guest's party (default 1), up to 1 + plus_ones in all.",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The guest's id. One of another organization answers 404.",
+          "example": "9f3a2b4c-5d6e-4f7a-8b9c-0d1e2f3a4b5c"
+        },
+        {
+          "name": "count",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "People arriving now (default 1).",
+          "example": 2
+        },
+        {
+          "name": "client_ref",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A scan id from an offline door app; the same one is applied once.",
+          "example": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "count": 2
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The door answer (ok false with bad-count, doors-not-open, voided, …).",
+          "example": {
+            "data": {
+              "ok": true,
+              "reason": "checked-in",
+              "arrived": 2,
+              "party": 2
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the member who created the key can't do this in the dashboard (owner, manager or scanner), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such guest in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "guest not found"
+          }
+        }
+      ]
+    }
+  ]
+}

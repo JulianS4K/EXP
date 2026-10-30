@@ -1,10 +1,13 @@
-// exos-api — read-only, org-scoped partner REST API for Exos.
+// exos-api — org-scoped partner REST API for Exos.
 // Reference: docs/api-reference.md and /developers (built from docs/api/*.json).
 //
 // Auth: `Authorization: Bearer sk_live_...`. The key is never stored in plaintext
 // (migration 20260616200000) — we SHA-256 the presented key and look up the
 // matching non-revoked row in exos_api_keys, which yields the org_id every query
-// is then scoped to, and the key's scopes. Read-only: no endpoint mutates anything.
+// is then scoped to, and the key's scopes. Reads everywhere; every write goes
+// through exos_api_write (mig 20261031110000, ./core.ts), which runs as the
+// member who created the key and calls the dashboard's own SQL, so a write here
+// behaves exactly like the same write in the dashboard.
 //
 // Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
 // (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
@@ -16,15 +19,26 @@
 //
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 //
-// Endpoints (all GET, all scoped to the key's org; each also under /v1):
-//   /me, /events, /events/:id, /events/:id/{ticket-types, add-ons, promo-codes,
-//   attendees, check-ins, check-in-lists, guest-lists, waitlist}, /orders,
-//   /orders/:id, /invoices, /refunds, /webhooks
+// Endpoints (scoped to the key's org; each also under /v1), _shared/api/routes.ts:
+//   GET /me, /events, /events/:id, /events/:id/{ticket-types, add-ons,
+//   promo-codes, attendees, check-ins, check-in-lists, guest-lists, waitlist},
+//   /orders, /orders/:id, /invoices, /refunds, /webhooks;
+//   the core API (./core.ts): event create / update / publish (+ publish
+//   blockers), ticket types, add-ons, promo codes, tickets and check-in,
+//   offline check-ins, comps, refunds (Idempotency-Key required), guest lists,
+//   disputes, payouts, POS items and devices, the write log.
+//
+// Writes take a JSON body (or form-encoded), at most MAX_BODY_BYTES, read
+// capped while streaming; an Idempotency-Key header makes any write safe to
+// resend (the first answer is replayed). Refunds need STRIPE_SECRET_KEY
+// (optional EXOS_REFUND_KEEP_PLATFORM_FEE), like exos-refund.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { apiPath, matchRoute, type ApiRoute } from "../_shared/api/routes.ts";
+import { API_METHODS, apiPath, matchRoute, type ApiMethod, type ApiRoute } from "../_shared/api/routes.ts";
 import { effectiveScopes, hasScope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
+import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,10 +70,15 @@ interface Ctx {
   params: Record<string, string>;
   q: URLSearchParams;
   page: Page;
+  body: Record<string, unknown>;
+  idempotencyKey: string | null;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method !== "GET") return json({ error: "method not allowed" }, 405, { allow: "GET" });
+  const url = new URL(req.url);
+  const path = apiPath(url.pathname);
+  const method = req.method.toUpperCase() as ApiMethod;
+  if (!API_METHODS.includes(method)) return json({ error: "method not allowed" }, 405, { allow: API_METHODS.join(", ") });
 
   const auth = req.headers.get("Authorization") ?? "";
   const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
@@ -101,9 +120,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     await sb.from("exos_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRow.id);
   } catch { /* best-effort */ }
 
-  const url = new URL(req.url);
-  const match = matchRoute("GET", apiPath(url.pathname));
-  if (!match) {
+  const match = matchRoute(method, path);
+  if (!match || match.route.auth !== "api_key") {
     return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
   }
   const scopes = (keyRow.scopes ?? []) as string[];
@@ -121,11 +139,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       q: url.searchParams,
       // Only lists read ?page / ?per_page; elsewhere they are ignored.
       page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
+      body: method === "POST" || method === "PUT" || method === "PATCH" ? await readBody(req) : {},
+      idempotencyKey: method === "GET" ? null : idempotencyKey(req),
     };
-    return json(await handle(match.route, ctx));
+    const out = await handle(match.route, ctx);
+    return out instanceof Answer ? json(out.body, out.status) : json(out);
   } catch (e) {
     if (e instanceof PagingError) return json({ error: e.message }, 400);
     if (e instanceof ApiError) return json({ error: e.message }, e.status);
+    if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status);
+    const mapped = sqlError(e);
+    if (mapped) return json({ error: mapped.message }, mapped.status);
     console.error("exos-api error:", e);
     return json({ error: "internal error" }, 500);
   }
@@ -133,6 +157,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
   const { sb, orgId, page } = c;
+  if (CORE_ROUTES.has(route.id)) {
+    return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
   switch (route.id) {
     case "me": {
       const { data: org } = await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
@@ -183,10 +212,17 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
     case "list-promo-codes": {
       const id = await ownEvent(c);
       // Never reserved_email: a promo code's holder is not the partner's business.
-      return paged(await sb.from("exos_vouchers")
+      let q = sb.from("exos_vouchers")
         .select("id, code, tier_id, max_uses, used_count, discount_percent, discount_amount, price_override, " +
           "valid_until, link_label, link_channel, link_clicks, created_at", { count: "exact" })
-        .eq("event_id", id).order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+        .eq("event_id", id);
+      // ?code=: look one code up by name (any case), as at checkout.
+      const code = c.q.get("code");
+      if (code !== null) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(code)) throw new ApiError(400, "code is invalid.");
+        q = q.ilike("code", code.replace(/_/g, "\\_"));
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
     case "list-attendees": {
@@ -351,4 +387,23 @@ async function sha256Hex(s: string): Promise<string> {
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...extra } });
+}
+
+/**
+ * A JSON body, or a form-encoded one (event[name]=…), at most MAX_BODY_BYTES.
+ * Form bodies are decoded from the capped text (never req.formData(), which
+ * reads without a cap).
+ */
+async function readBody(req: Request): Promise<Record<string, unknown>> {
+  const text = await readCapped(req, MAX_BODY_BYTES);
+  if (text === null) throw new ApiError(413, "request body is too large");
+  if (!text.trim()) return {};
+  if ((req.headers.get("content-type") ?? "").toLowerCase().includes("application/x-www-form-urlencoded")) {
+    return formBody(text);
+  }
+  try {
+    const v = JSON.parse(text);
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  } catch { /* fall through */ }
+  throw new ApiError(400, "the body must be a JSON object");
 }
