@@ -55,6 +55,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_promoter_add_guest`, `_remove_guest`, `_set_guest_access_needs`, `_note_limit_flag`, `_set_socials` | OK | Anon writes gated by the kit token and `_exos_promoter_list` (list must be the promoter's, open, and on a live event); guest adds count against the list cap when one is set |
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
+| `exos_public_event_seating`, `exos_public_event_seats` (mig 20261030140000) | OK | Reserved seating, published events only. The layout (stage, section boxes, which tiers are seated) and, per seat, id / section / row / number / label / tier / position / accessibility flags and a plain `available` boolean. No holder, ticket, hold or claim data; staff status is `exos_event_seat_status` (signed-in, org roles). Seat holds are written only by `exos_hold_seats` (service role, `exos-checkout`) |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
 
 ### Callable by authenticated (131 flagged)
@@ -134,6 +135,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_set_event_seating`, `exos_set_seats_blocked`, `exos_seat_reconciliation`, `exos_release_orphan_seats`, `exos_event_seat_status`, `exos_event_seat_roster` (mig 20261030140000) | OK | Reserved seating. Writes: owner / manager of the event's org; seating can't change once a seat is held or sold. Status: any org role; roster: door staff of the event (`exos_can_door_event`). Client-vs-service is told apart by the `role` setting (`_exos_seat_client_call`), since `current_user` inside SECURITY DEFINER is the definer. Tables: `exos_seat_maps` RLS owner / manager write, org staff read; `exos_event_seating` / `_seats` / `_seat_claims` read by org staff, no client writes. `exos_tickets.seat_*` and `exos_ticket_tiers.seated` (and a seated tier's capacity) are server-written by trigger; any ticket insert for a seated tier outside a seat-picker checkout is refused |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

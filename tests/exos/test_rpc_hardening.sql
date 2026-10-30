@@ -126,6 +126,8 @@ BEGIN
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
        -- counts a promo-link visit, answers nothing (mig 20261016110000)
        'exos_promo_link_hit',
+       -- a published event's seat layout and per-seat availability only (mig 20261030140000)
+       'exos_public_event_seating', 'exos_public_event_seats',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
