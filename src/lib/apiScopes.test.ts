@@ -2,21 +2,28 @@
 // supabase/functions/_shared/api/scopes.ts (the edge function, the key UI,
 // /developers) and exos_api_scope_names() in mig 20261027090000 (what
 // exos_create_api_key / exos_set_api_key_scopes accept). They must agree.
+// The SQL side is the LATEST migration that (re)defines the function (first
+// 20261027090000; 20261031120000 added fans:read / fans:write).
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   LEGACY_READ, READ_SCOPES, SCOPES, SCOPE_INFO, effectiveScopes, hasScope,
 } from '../../supabase/functions/_shared/api/scopes.ts';
 
-const MIGRATION = path.resolve(__dirname, '../../supabase/migrations/20261027090000_exos_api_scopes.sql');
+const MIGRATIONS = path.resolve(__dirname, '../../supabase/migrations');
+const FN_RE = /FUNCTION public\.exos_api_scope_names\(\)[\s\S]*?SELECT ARRAY\[([\s\S]*?)\]::text\[\]/;
 
 function sqlScopeNames(): string[] {
-  const sql = readFileSync(MIGRATION, 'utf8');
-  const fn = /FUNCTION public\.exos_api_scope_names\(\)[\s\S]*?SELECT ARRAY\[([\s\S]*?)\]::text\[\]/.exec(sql);
-  if (!fn) throw new Error('exos_api_scope_names() not found in the migration');
-  return [...fn[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
+  let body: string | null = null;
+  for (const f of files) {
+    const m = FN_RE.exec(readFileSync(path.join(MIGRATIONS, f), 'utf8'));
+    if (m) body = m[1];
+  }
+  if (body === null) throw new Error('exos_api_scope_names() not found in any migration');
+  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 }
 
 describe('API scopes', () => {

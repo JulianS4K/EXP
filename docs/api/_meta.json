@@ -2,7 +2,7 @@
   "title": "Exos API",
   "version": "1",
   "base_url": "https://<project-ref>.supabase.co/functions/v1/exos-api",
-  "description": "A read-only REST API over one organization's Exos data: events, ticket types, attendees, door scans, orders, invoices, refunds and webhooks. Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, or build reports. Every request is scoped to the organization of the API key that makes it; nothing in the API changes data. Requests are GET, responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers, and a key in a browser is a key anyone can copy.",
+  "description": "A REST API over one organization's Exos data: events, ticket types, attendees, door scans, orders, invoices, refunds, refund requests, fans, tags and webhooks. Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, or build reports. Every request is scoped to the organization of the API key that makes it; most routes only read, and the few that write (fan contacts and tags) never touch payments or a fan's consent. Reads are GET; writes are POST, PATCH or DELETE with a JSON (or form-encoded) body of at most 64 KB. Responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers, and a key in a browser is a key anyone can copy.",
   "authentication": {
     "description": "Send an organization API key as a bearer token. An owner or manager creates keys in Org settings → Developer, choosing the scopes each key gets; the key (sk_live_ plus 48 hex characters) is shown once, and only its SHA-256 hash and a 16-character prefix are stored. An organization has at most 10 active keys. Keys do not expire: they work until revoked, and a key is revoked automatically when the member who created it leaves the organization. A request for anything outside the key's organization answers 404, so ids from other organizations cannot be probed.",
     "header": "Authorization",
@@ -66,9 +66,11 @@
     { "status": 401, "name": "Unauthorized", "description": "No bearer key (\"missing bearer API key\"), or a key that is unknown or revoked (\"invalid or revoked API key\")." },
     { "status": 403, "name": "Forbidden", "description": "The key lacks the endpoint's scope. The body names it (required_scope) and so does the WWW-Authenticate header: Bearer error=\"insufficient_scope\", scope=\"…\"." },
     { "status": 404, "name": "Not found", "description": "An unknown path, or an event or order that does not exist in the key's organization." },
-    { "status": 405, "name": "Method not allowed", "description": "Anything but GET (the API is read-only). The Allow header says GET." },
+    { "status": 405, "name": "Method not allowed", "description": "A method the API never answers (HEAD, OPTIONS, ...). The Allow header lists GET, POST, PUT, PATCH, DELETE." },
+    { "status": 409, "name": "Conflict", "description": "A write that clashes with existing data, e.g. a tag or fan email that already exists, or a daily limit." },
+    { "status": 413, "name": "Payload too large", "description": "A request body over 64 KB." },
     { "status": 429, "name": "Too many requests", "description": "Over 120 requests this minute for this key; wait Retry-After seconds." },
-    { "status": 500, "name": "Server error", "description": "Unexpected; safe to retry, since every call is a read." },
+    { "status": 500, "name": "Server error", "description": "Unexpected; reads are safe to retry, and so are the writes (tagging twice is one tag; adding a fan twice answers 409)." },
     { "status": 503, "name": "Unavailable", "description": "The rate limiter could not be reached, so the request was refused; retry after Retry-After seconds." }
   ],
   "webhooks": {

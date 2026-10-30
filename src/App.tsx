@@ -58,6 +58,9 @@ const DoorApp = lazy(() => import('./views/DoorApp'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
+const OrgFans = lazy(() => import('./views/OrgFans'));
+const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
+const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const Notifications = lazy(() => import('./views/Notifications'));
 const ResetPassword = lazy(() => import('./views/ResetPassword'));
@@ -143,6 +146,8 @@ export default function App() {
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/signup/confirm" element={<SignupConfirm mode="confirm" />} />
+                    <Route path="/signup/unsubscribe" element={<SignupConfirm mode="unsubscribe" />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
@@ -179,6 +184,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
+                    <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />
@@ -190,6 +196,8 @@ export default function App() {
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />
                     <Route path="/embed/org/:slug" element={<EmbedOrg />} />
+                    {/* Signup form (fans, mig 20261031120000): no payment on this page. */}
+                    <Route path="/embed/signup/:formId" element={<EmbedSignup />} />
                     {/* Stripe Embedded Checkout return page, inside the same iframe. */}
                     <Route path="/embed/return" element={<EmbedReturn />} />
                     <Route path="/privacy" element={<Privacy />} />

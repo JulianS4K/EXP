@@ -14,9 +14,11 @@
 
 import type { Scope } from './scopes.ts';
 
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
 export interface ApiRoute {
   id: string;
-  method: 'GET';
+  method: ApiMethod;
   path: string;
   /** null: any valid key (GET /me). */
   scope: Scope | null;
@@ -40,7 +42,31 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-invoices', method: 'GET', path: '/invoices', scope: 'orders:read', paged: true },
   { id: 'list-refunds', method: 'GET', path: '/refunds', scope: 'orders:read', paged: true },
   { id: 'list-webhooks', method: 'GET', path: '/webhooks', scope: 'webhooks:read', paged: false },
+  // Fans, tags, signup forms, refund requests (mig 20261031120000, docs/fans.md).
+  // /fans/lookup sits before /fans/:id so it isn't read as an id.
+  { id: 'list-fans', method: 'GET', path: '/fans', scope: 'fans:read', paged: true },
+  { id: 'lookup-fans', method: 'GET', path: '/fans/lookup', scope: 'fans:read', paged: false },
+  { id: 'get-fan', method: 'GET', path: '/fans/:id', scope: 'fans:read', paged: false },
+  { id: 'create-fan', method: 'POST', path: '/fans', scope: 'fans:write', paged: false },
+  { id: 'update-fan', method: 'PATCH', path: '/fans/:id', scope: 'fans:write', paged: false },
+  { id: 'discard-fan', method: 'DELETE', path: '/fans/:id', scope: 'fans:write', paged: false },
+  { id: 'list-signup-forms', method: 'GET', path: '/signup-forms', scope: 'fans:read', paged: false },
+  // Tags are org metadata (events:*); a fan's tags also need fans:* (checked per request).
+  { id: 'list-tags', method: 'GET', path: '/tags', scope: 'events:read', paged: false },
+  { id: 'get-tag', method: 'GET', path: '/tags/:id', scope: 'events:read', paged: false },
+  { id: 'create-tag', method: 'POST', path: '/tags', scope: 'events:write', paged: false },
+  { id: 'update-tag', method: 'PATCH', path: '/tags/:id', scope: 'events:write', paged: false },
+  { id: 'delete-tag', method: 'DELETE', path: '/tags/:id', scope: 'events:write', paged: false },
+  { id: 'list-tagged-items', method: 'GET', path: '/tagged-items', scope: 'events:read', paged: true },
+  { id: 'get-tagged-item', method: 'GET', path: '/tagged-items/:id', scope: 'events:read', paged: false },
+  { id: 'create-tagged-item', method: 'POST', path: '/tagged-items', scope: 'events:write', paged: false },
+  { id: 'delete-tagged-item', method: 'DELETE', path: '/tagged-items/:id', scope: 'events:write', paged: false },
+  { id: 'list-canonical-tags', method: 'GET', path: '/canonical-tags', scope: 'events:read', paged: false },
+  { id: 'list-refund-requests', method: 'GET', path: '/refund-requests', scope: 'orders:read', paged: true },
 ];
+
+/** Methods the API answers (anything else is 405). */
+export const API_METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
 export interface RouteMatch {
   route: ApiRoute;
