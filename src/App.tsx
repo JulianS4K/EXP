@@ -39,6 +39,9 @@ const Privacy = lazy(() => import('./views/Privacy'));
 const Terms = lazy(() => import('./views/Terms'));
 const Status = lazy(() => import('./views/Status'));
 const Developers = lazy(() => import('./views/Developers'));
+const DeveloperApps = lazy(() => import('./views/DeveloperApps'));
+const OAuthAuthorize = lazy(() => import('./views/OAuthAuthorize'));
+const LiveTicketLink = lazy(() => import('./views/LiveTicketLink'));
 const Profile = lazy(() => import('./views/Profile'));
 const OrganizerProfile = lazy(() => import('./views/OrganizerProfile'));
 const SlugRedirect = lazy(() => import('./views/SlugRedirect'));
@@ -196,6 +199,11 @@ export default function App() {
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />
                     <Route path="/developers" element={<Developers />} />
+                    {/* Developer platform (mig 20261031130500): OAuth apps and the consent screen. */}
+                    <Route path="/developers/apps" element={<DeveloperApps />} />
+                    <Route path="/oauth/authorize" element={<OAuthAuthorize />} />
+                    {/* A partner ticket's signed live link (mig 20261031130000). */}
+                    <Route path="/t/:ticketId" element={<LiveTicketLink />} />
                     {/* 404 catch-all — punk "off the door list" screen. */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>

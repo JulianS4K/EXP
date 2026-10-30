@@ -1,0 +1,1174 @@
+{
+  "file": "partner-sales",
+  "name": "Public: Partner sales",
+  "group": "Partner contract",
+  "order": 80,
+  "description": "Opendate's distribution contract, for brokers and marketplaces that sell an organizer's tickets (Automatiq, StubHub, Vivid Seats, SeatGeek, Ticket Network, Victory Live). If you integrate with Opendate's /api/v2/public/…, change the base URL and key: the paths, parameters and shapes match. Authenticate with your partner key (dk_live_…) as ?shared_key=, the X-Shared-Key header or a bearer token; 120 requests a minute per key. Reserve first (10 minutes), charge your buyer, then complete. Every ticket is delivered as a signed link to the live ticket, whose door code changes every 30 seconds; there is no PDF. docs/partner-sales.md.",
+  "endpoints": [
+    {
+      "id": "public-list-ticket-types",
+      "method": "GET",
+      "path": "/v1/public/confirms/:id/ticket_types",
+      "summary": "Ticket types you may sell",
+      "description": "The event's ticket types the organizer opened to you, on sale now, with the all-in price per ticket (final_cost) and what is left. An empty list when the event isn't sold through partners.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": [
+            {
+              "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "General admission",
+              "description": "",
+              "ticket_type": "paid",
+              "currency": "USD",
+              "price": 25.0,
+              "calculated_fees": [
+                {
+                  "name": "Facility",
+                  "amount": 2.0
+                }
+              ],
+              "fees_total": 2.0,
+              "taxes_total": 0.0,
+              "final_cost": 27.0,
+              "available": 140,
+              "sold_out": false,
+              "on_sale": true,
+              "sales_start": null,
+              "sales_end": null
+            }
+          ]
+        },
+        {
+          "status": 404,
+          "description": "Not an event of your organizer, or not published.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-create-reservation",
+      "method": "POST",
+      "path": "/v1/public/confirms/:id/ticket_reservations",
+      "summary": "Reserve tickets",
+      "description": "Holds the seats for 10 minutes, for every channel at once: two partners racing for the last seats can't both get them; the loser gets 409 before charging anyone.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "ticket_reservation[order_items_attributes]",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "1-10 lines of { ticket_type_id, quantity } (quantity 1-100, at most 100 tickets in all). JSON (nested or flat) and Rails-style form fields both work.",
+          "example": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ]
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Held for 10 minutes (expires_at).",
+          "example": {
+            "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "status": "active",
+            "expires_at": "2026-10-31T18:10:00+00:00",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "currency": "USD",
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0,
+                "fees_total": 4.0,
+                "taxes_total": 0.0,
+                "total": 54.0
+              }
+            ],
+            "subtotal": 50.0,
+            "fees_total": 4.0,
+            "taxes_total": 0.0,
+            "total": 54.0,
+            "cash_paid": null,
+            "should_send_ticket_email": false,
+            "first_name": null,
+            "last_name": null,
+            "email": null,
+            "stubhub_transaction_id": "SH-88231",
+            "order_id": null,
+            "created_at": "2026-10-31T18:00:00+00:00",
+            "updated_at": "2026-10-31T18:00:00+00:00"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not enough seats left: nothing was held, don't charge your buyer.",
+          "example": {
+            "error": "sold out: General admission has 1 left",
+            "reason": "sold_out"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
+          "example": {
+            "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
+            "reason": "not_available"
+          }
+        }
+      ],
+      "request_example": {
+        "ticket_reservation": {
+          "order_items_attributes": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ],
+          "stubhub_transaction_id": "SH-88231"
+        }
+      }
+    },
+    {
+      "id": "public-get-reservation",
+      "method": "GET",
+      "path": "/v1/public/confirms/:id/ticket_reservations/:token",
+      "summary": "Get a reservation",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "status": "active",
+            "expires_at": "2026-10-31T18:10:00+00:00",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "currency": "USD",
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0,
+                "fees_total": 4.0,
+                "taxes_total": 0.0,
+                "total": 54.0
+              }
+            ],
+            "subtotal": 50.0,
+            "fees_total": 4.0,
+            "taxes_total": 0.0,
+            "total": 54.0,
+            "cash_paid": null,
+            "should_send_ticket_email": false,
+            "first_name": null,
+            "last_name": null,
+            "email": null,
+            "stubhub_transaction_id": "SH-88231",
+            "order_id": null,
+            "created_at": "2026-10-31T18:00:00+00:00",
+            "updated_at": "2026-10-31T18:00:00+00:00"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not yours, or another event's.",
+          "example": {
+            "error": "Reservation not found."
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-update-reservation",
+      "method": "PUT",
+      "path": "/v1/public/confirms/:id/ticket_reservations/:token",
+      "summary": "Set the attendee",
+      "description": "Attendee name and email, whether we email the tickets, your transaction id. Doesn't extend the hold.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "status": "active",
+            "expires_at": "2026-10-31T18:10:00+00:00",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "currency": "USD",
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0,
+                "fees_total": 4.0,
+                "taxes_total": 0.0,
+                "total": 54.0
+              }
+            ],
+            "subtotal": 50.0,
+            "fees_total": 4.0,
+            "taxes_total": 0.0,
+            "total": 54.0,
+            "cash_paid": null,
+            "should_send_ticket_email": false,
+            "first_name": "Jane",
+            "last_name": "Buyer",
+            "email": "jane@example.com",
+            "stubhub_transaction_id": "SH-88231",
+            "order_id": null,
+            "created_at": "2026-10-31T18:00:00+00:00",
+            "updated_at": "2026-10-31T18:00:00+00:00"
+          }
+        },
+        {
+          "status": 410,
+          "description": "The 10 minutes ran out: nothing was sold and the seats went back on sale. Reserve again.",
+          "example": {
+            "error": "This reservation expired; nothing was sold and the seats were released.",
+            "reason": "expired"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Completed or cancelled.",
+          "example": {
+            "error": "this reservation is completed"
+          }
+        }
+      ],
+      "request_example": {
+        "ticket_reservation": {
+          "first_name": "Jane",
+          "last_name": "Buyer",
+          "email": "jane@example.com"
+        }
+      }
+    },
+    {
+      "id": "public-cancel-reservation",
+      "method": "DELETE",
+      "path": "/v1/public/confirms/:id/ticket_reservations/:token",
+      "summary": "Cancel a reservation",
+      "description": "When your buyer walks away: the seats go back on sale. Cancelling twice is fine.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "status": "cancelled",
+            "released": true
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already completed.",
+          "example": {
+            "error": "this reservation was completed; it can no longer be cancelled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-complete-reservation",
+      "method": "POST",
+      "path": "/v1/public/confirms/:id/ticket_reservations/:token/complete",
+      "summary": "Complete a reservation",
+      "description": "Makes the order and the tickets, once. Attendee fields may come with this call. After expires_at it answers 410 and the seats are released: reserve again.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        },
+        {
+          "name": "include_ticket_pdfs",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "Add ticket_pdfs: each ticket's live link (no PDF).",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "The order. Calling again answers 200 with the same order (safe to retry after a timeout).",
+          "example": {
+            "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+            "status": "completed",
+            "state": "paid",
+            "ticket_reservation_token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "calendar_event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "event_title": "Night Market",
+            "first_name": "Jane",
+            "last_name": "Buyer",
+            "email": "jane@example.com",
+            "stubhub_transaction_id": "SH-88231",
+            "external_order_id": "SH-88231",
+            "device_name": "StubHub",
+            "currency": "USD",
+            "subtotal": 50.0,
+            "fees_total": 4.0,
+            "taxes_total": 0.0,
+            "total": 54.0,
+            "cash_paid": 54.0,
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0
+              }
+            ],
+            "tickets": [
+              {
+                "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "ticket_type_name": "General admission",
+                "product_name": "General admission",
+                "attendee_name": "Jane Buyer",
+                "status": "active",
+                "checked_in_at": null,
+                "delivery": {
+                  "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                  "wallet": "from the live ticket page"
+                }
+              }
+            ],
+            "created_at": "2026-10-31T18:03:00+00:00",
+            "updated_at": "2026-10-31T18:03:00+00:00"
+          }
+        },
+        {
+          "status": 410,
+          "description": "The 10 minutes ran out: nothing was sold and the seats went back on sale. Reserve again.",
+          "example": {
+            "error": "This reservation expired; nothing was sold and the seats were released.",
+            "reason": "expired"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Cancelled.",
+          "example": {
+            "error": "this reservation was cancelled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-create-comp",
+      "method": "POST",
+      "path": "/v1/public/confirms/:id/comps",
+      "summary": "Comp tickets",
+      "description": "Free tickets, completed in one call. Needs a key with the comps scope.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "comp[order_items_attributes]",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "1-10 lines of { ticket_type_id, quantity } of types open to you.",
+          "example": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 1
+            }
+          ]
+        },
+        {
+          "name": "comp[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Guest first name.",
+          "example": "Sam"
+        },
+        {
+          "name": "comp[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Guest last name.",
+          "example": "Guest"
+        },
+        {
+          "name": "comp[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Guest email.",
+          "example": "sam@example.com"
+        },
+        {
+          "name": "comp[comp_reason]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Why (at most 200 characters).",
+          "example": "Radio giveaway"
+        },
+        {
+          "name": "comp[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the guest their links.",
+          "example": true
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "A completed, free order.",
+          "example": {
+            "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+            "status": "completed",
+            "state": "paid",
+            "ticket_reservation_token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "calendar_event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "event_title": "Night Market",
+            "first_name": "Jane",
+            "last_name": "Buyer",
+            "email": "jane@example.com",
+            "stubhub_transaction_id": "SH-88231",
+            "external_order_id": "SH-88231",
+            "device_name": "StubHub",
+            "currency": "USD",
+            "subtotal": 0.0,
+            "fees_total": 0.0,
+            "taxes_total": 0.0,
+            "total": 0.0,
+            "cash_paid": null,
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0
+              }
+            ],
+            "tickets": [
+              {
+                "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "ticket_type_name": "General admission",
+                "product_name": "General admission",
+                "attendee_name": "Jane Buyer",
+                "status": "active",
+                "checked_in_at": null,
+                "delivery": {
+                  "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                  "wallet": "from the live ticket page"
+                }
+              }
+            ],
+            "created_at": "2026-10-31T18:03:00+00:00",
+            "updated_at": "2026-10-31T18:03:00+00:00"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Your key lacks the comps scope.",
+          "example": {
+            "error": "This key does not have the \"comps\" scope."
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not enough seats left: nothing was held, don't charge your buyer.",
+          "example": {
+            "error": "sold out: General admission has 1 left",
+            "reason": "sold_out"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
+          "example": {
+            "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
+            "reason": "not_available"
+          }
+        }
+      ],
+      "request_example": {
+        "comp": {
+          "order_items_attributes": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 1
+            }
+          ],
+          "first_name": "Sam",
+          "last_name": "Guest",
+          "comp_reason": "Radio giveaway"
+        }
+      }
+    },
+    {
+      "id": "public-list-orders",
+      "method": "GET",
+      "path": "/v1/public/orders",
+      "summary": "List your orders",
+      "description": "Your completed orders, newest first, in Opendate's envelope. Each lists the tickets the buyer still holds (voided ones marked).",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "q[calendar_event_id_eq]",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "q[email_eq]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this attendee email.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "q[stubhub_transaction_id_eq]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this transaction id of yours.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "q[created_at_gteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Completed at or after.",
+          "example": "2026-10-01T00:00:00Z"
+        },
+        {
+          "name": "q[created_at_lteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Completed at or before.",
+          "example": "2026-10-31T23:59:59Z"
+        },
+        {
+          "name": "q[updated_at_gteq]",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Changed at or after: a nightly reconciliation.",
+          "example": "2026-10-30T00:00:00Z"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number (default 1).",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-250 (default 25).",
+          "example": 25,
+          "default": 25
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "current_page": 1,
+            "per_page": 25,
+            "total_entries": 1,
+            "total_pages": 1,
+            "collection": [
+              {
+                "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+                "status": "completed",
+                "state": "paid",
+                "ticket_reservation_token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "calendar_event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "event_title": "Night Market",
+                "first_name": "Jane",
+                "last_name": "Buyer",
+                "email": "jane@example.com",
+                "stubhub_transaction_id": "SH-88231",
+                "external_order_id": "SH-88231",
+                "device_name": "StubHub",
+                "currency": "USD",
+                "subtotal": 50.0,
+                "fees_total": 4.0,
+                "taxes_total": 0.0,
+                "total": 54.0,
+                "cash_paid": 54.0,
+                "order_items": [
+                  {
+                    "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                    "name": "General admission",
+                    "quantity": 2,
+                    "price": 25.0
+                  }
+                ],
+                "tickets": [
+                  {
+                    "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                    "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                    "ticket_type_name": "General admission",
+                    "product_name": "General admission",
+                    "attendee_name": "Jane Buyer",
+                    "status": "active",
+                    "checked_in_at": null,
+                    "delivery": {
+                      "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                      "wallet": "from the live ticket page"
+                    }
+                  }
+                ],
+                "created_at": "2026-10-31T18:03:00+00:00",
+                "updated_at": "2026-10-31T18:03:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter or page.",
+          "example": {
+            "error": "q[created_at_gteq] must be an ISO 8601 date or time."
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-get-order",
+      "method": "GET",
+      "path": "/v1/public/orders/:id",
+      "summary": "Get an order",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The order id.",
+          "example": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+            "status": "completed",
+            "state": "paid",
+            "ticket_reservation_token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "calendar_event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "event_title": "Night Market",
+            "first_name": "Jane",
+            "last_name": "Buyer",
+            "email": "jane@example.com",
+            "stubhub_transaction_id": "SH-88231",
+            "external_order_id": "SH-88231",
+            "device_name": "StubHub",
+            "currency": "USD",
+            "subtotal": 50.0,
+            "fees_total": 4.0,
+            "taxes_total": 0.0,
+            "total": 54.0,
+            "cash_paid": 54.0,
+            "order_items": [
+              {
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "name": "General admission",
+                "quantity": 2,
+                "price": 25.0
+              }
+            ],
+            "tickets": [
+              {
+                "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "ticket_type_name": "General admission",
+                "product_name": "General admission",
+                "attendee_name": "Jane Buyer",
+                "status": "active",
+                "checked_in_at": null,
+                "delivery": {
+                  "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                  "wallet": "from the live ticket page"
+                }
+              }
+            ],
+            "created_at": "2026-10-31T18:03:00+00:00",
+            "updated_at": "2026-10-31T18:03:00+00:00"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your orders.",
+          "example": {
+            "error": "Order not found."
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-list-ticket-links",
+      "method": "GET",
+      "path": "/v1/public/orders/:id/ticket_pdfs",
+      "summary": "Ticket links of an order",
+      "description": "Opendate's ticket PDFs, as live links: each ticket's url opens the live ticket with its rotating door code (content_base64 is always null; a PDF would be a static code anyone could copy).",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The order id.",
+          "example": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "order_id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+            "ticket_pdfs": [
+              {
+                "ticket_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                "product_name": "General admission",
+                "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                "content_type": null,
+                "content_base64": null
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your orders.",
+          "example": {
+            "error": "Order not found."
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-get-ticket-link",
+      "method": "GET",
+      "path": "/v1/public/orders/:id/ticket_pdfs/:ticket",
+      "summary": "One ticket's link",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The order id.",
+          "example": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a"
+        },
+        {
+          "name": "ticket",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket id.",
+          "example": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "ticket_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+            "product_name": "General admission",
+            "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+            "content_type": null,
+            "content_base64": null
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a ticket the buyer still holds.",
+          "example": {
+            "error": "Ticket not found."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -37,7 +37,7 @@ reviewed and added to its allowlist.
 Legend: **OK** = intended and properly checked; **Revoked** = internal helper,
 client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 
-### Callable by anon (23 flagged)
+### Callable by anon (23 flagged, + `exos_ticket_link_view`)
 
 | Function | Verdict | Why |
 |---|---|---|
@@ -56,6 +56,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
+| `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 
 ### Callable by authenticated (131 flagged)
 
@@ -134,6 +135,14 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_create_distribution_partner`, `exos_update_distribution_partner`, `exos_revoke_distribution_partner` (mig 20261031130000) | OK | Partner keys: owner of the org (or of the key's org), checked against the row, not the caller's input. The key is returned once; `exos_distribution_partners` grants authenticated SELECT on every column but `key_hash`, RLS owner / manager |
+| `exos_set_tier_distribution` (mig 20261031130000) | OK | The per-tier partner switch: owner / manager of the event's org; tiers must be the event's, partner ids the org's live partners, tables refused |
+| `exos_dist_partner_auth`, `_exos_partner_*`, `_exos_dist_partner_*`, `_exos_tier_distribution_set`, `exos_ticket_link_wallet_issue`, `exos_partner_reservations_sweep` (mig 20261031130000) | Service role | `exos-api` resolves the partner from the key's hash and passes the partner's org and id to every call; reservations and orders are looked up by (org, partner, token / id), so another partner's look not found. API-key management passes the key id and the SQL requires its creator to be an owner now. The wallet fallback re-checks the link key |
+| `exos_create_personal_token`, `exos_revoke_personal_token` (mig 20261031130500) | OK | Self-service: a confirmed member of the org, scopes within the caller's role, 25 live per user; returned once, hash only (`exos_personal_tokens` has no `key_hash` column grant; RLS: own rows) |
+| `exos_oauth_app_create`, `_update`, `_rotate_secret`, `_delete` (mig 20261031130500) | OK | The developer's own apps (`owner_uid = auth.uid()`; unknown and others' look the same); confirmed email; 20 apps; redirect URIs validated (`_exos_redirect_uri_ok`); the secret is returned once (no `secret_hash` column grant) |
+| `exos_oauth_authorize_info`, `exos_oauth_authorize_approve` (mig 20261031130500) | OK | The consent screen, as the signed-in user: the app and redirect URI must match exactly; the grant's scopes are narrowed to the user's live role in the org they pick, which must be theirs; PKCE required for public apps; the code is single use, 10 minutes, hash only |
+| `exos_oauth_my_grants`, `exos_oauth_org_grants`, `exos_oauth_revoke_grant` (mig 20261031130500) | OK | Own grants; an org's grants for its owners only (with the member's email); disconnect by the grant's user or an owner of its org |
+| `exos_api_token_auth`, `exos_oauth_exchange_code`, `exos_oauth_refresh`, `exos_oauth_revoke_token`, `exos_oauth_introspect`, `exos_oauth_register`, `_exos_pat_revoke_self` (mig 20261031130500) | Service role | `exos-api`, `exos-mcp`, `exos-oauth`. Tokens are looked up by SHA-256; client authentication (confidential: secret hash, public: none) inside SQL; codes spent on first use, reuse revokes; refresh rotation with family revocation on reuse. `exos_oauth_codes` / `_tokens` have no client grants. Dynamic registration is reachable only with `EXOS_OAUTH_DCR=on` |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
