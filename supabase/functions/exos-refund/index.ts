@@ -52,6 +52,16 @@
 //   also finalizes by the refund's metadata.exos_refund_request_id, so a crash
 //   between steps 2 and 3 still reconciles.
 //
+// PayPal orders (mig 20261031220000): a claim whose payment is a PayPal
+// capture (payment_intent 'ppcap_…') is refunded at PayPal instead
+// (_shared/paypal/flows.ts refundPayPal: POST /v2/payments/captures/{id}/refund
+// with PayPal-Request-Id exos_refund_<request id> and custom_id the same, so
+// exos-paypal's PAYMENT.CAPTURE.REFUNDED finalizes it too). Same claim,
+// finalize and void as Stripe; the refund id is stored as 'pprf_<id>'. The
+// platform fee comes back the same way (exos_paypal_order_owed lowers what
+// the org is owed by the refund less its share of the fee);
+// EXOS_REFUND_KEEP_PLATFORM_FEE doesn't apply. Works with PayPal keys alone.
+//
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY. Optional: EXOS_REFUND_KEEP_PLATFORM_FEE=true.
 // Payments off (no STRIPE_SECRET_KEY) -> 503.
@@ -69,6 +79,19 @@ import {
   requestStatusFromStripe,
 } from "../_shared/organizer-refund.ts";
 import { RESCHEDULE_TOKEN_RE } from "../_shared/reschedule-refund.ts";
+import { createPayPalClient, PayPalError, paypalConfig, type PayPalClient } from "../_shared/paypal/client.ts";
+import { refundPayPal } from "../_shared/paypal/flows.ts";
+import { isPayPalRef } from "../_shared/paypal/model.ts";
+
+// Stripe and PayPal clients, each only when its keys are set.
+function processors(): { stripe: Stripe | null; pp: PayPalClient | null } {
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+  const ppCfg = paypalConfig((k) => Deno.env.get(k));
+  return {
+    stripe: stripeKey ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" }) : null,
+    pp: ppCfg ? createPayPalClient(ppCfg) : null,
+  };
+}
 
 const BATCH = 10;
 
@@ -102,8 +125,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return await rescheduleAction(req, parsed);
   }
 
-  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  if (!stripeKey) return json({ error: "payments are switched off" }, 503);
+  const procs = processors();
+  if (!procs.stripe && !procs.pp) return json({ error: "payments are switched off" }, 503);
 
   const authHeader = req.headers.get("Authorization") ?? "";
   const sbUser = createClient(
@@ -123,7 +146,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const reason = typeof p.reason === "string" ? p.reason.slice(0, 500) : null;
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  const stripe = procs;
   const keepFee = Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true";
 
   if (p.action === "refund") {
@@ -252,9 +275,8 @@ async function rescheduleAction(req: Request, p: any): Promise<Response> {
   }
 
   if (p.action === "reschedule_refund") {
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) return json({ error: "payments are switched off" }, 503);
-    const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+    const stripe = processors();
+    if (!stripe.stripe && !stripe.pp) return json({ error: "payments are switched off" }, 503);
     const keepFee = Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true";
     const { data, error } = await sb.rpc("exos_request_reschedule_refund", {
       p_actor: userId, p_ticket_ids: ticketIds, p_token: token,
@@ -288,13 +310,25 @@ async function rescheduleAction(req: Request, p: any): Promise<Response> {
 }
 
 // Steps 2 + 3 for one claimed request. Never throws.
-// deno-lint-ignore no-explicit-any
-async function refundClaim(sb: SupabaseClient<any, any, any>, stripe: Stripe, c: Claim, keepFee: boolean): Promise<Outcome> {
+async function refundClaim(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>,
+  procs: { stripe: Stripe | null; pp: PayPalClient | null },
+  c: Claim,
+  keepFee: boolean,
+): Promise<Outcome> {
   const base = { session_id: c.session_id, request_id: c.request_id, amount_cents: c.amount_cents };
   // A retried nonce whose request already has Stripe's answer: nothing to do.
   if (c.existing && c.status !== "claimed") {
     return { ...base, status: c.status, voided: 0, stripe_refund_id: c.stripe_refund_id };
   }
+  // Paid with PayPal / Venmo: refund at PayPal.
+  if (isPayPalRef(c.payment_intent)) {
+    if (!procs.pp) return { ...base, status: "claimed", error: "PayPal is switched off; try again once it's back" };
+    return await refundClaimPayPal(sb, procs.pp, c, base);
+  }
+  if (!procs.stripe) return { ...base, status: "claimed", error: "Stripe is switched off; try again once it's back" };
+  const stripe = procs.stripe;
 
   let refund: Stripe.Refund | null = null;
   try {
@@ -336,6 +370,42 @@ async function refundClaim(sb: SupabaseClient<any, any, any>, stripe: Stripe, c:
   }
   const f = data as { voided?: number } | null;
   return { ...base, status, voided: f?.voided ?? 0, stripe_refund_id: refund.id };
+}
+
+// The PayPal leg of refundClaim: same states as Stripe's. A definitive "no"
+// (4xx) finalizes 'failed'; anything else leaves the request claimed, and a
+// retry reuses PayPal-Request-Id exos_refund_<request id>.
+async function refundClaimPayPal(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>,
+  pp: PayPalClient,
+  c: Claim,
+  base: { session_id: string; request_id: string; amount_cents: number },
+): Promise<Outcome> {
+  let rf: Awaited<ReturnType<typeof refundPayPal>>;
+  try {
+    rf = await refundPayPal(pp, { ...c, currency: c.currency || "usd" });
+  } catch (e) {
+    const msg = (e as Error).message ?? "paypal error";
+    if (e instanceof PayPalError && e.definitive) {
+      const { error } = await sb.rpc("exos_refund_finalize", {
+        p_request_id: c.request_id, p_stripe_refund_id: null, p_status: "failed", p_error: msg,
+      });
+      if (error) console.error(`exos-refund: finalize(failed) ${c.request_id}`, error);
+      return { ...base, status: "failed", error: msg };
+    }
+    console.error(`exos-refund: paypal refund for ${c.request_id} not confirmed`, e);
+    return { ...base, status: "claimed", error: "PayPal didn't answer; try again (it won't refund twice)" };
+  }
+  const { data, error } = await sb.rpc("exos_refund_finalize", {
+    p_request_id: c.request_id, p_stripe_refund_id: rf.ref, p_status: rf.status, p_error: null,
+  });
+  if (error) {
+    console.error(`exos-refund: finalize ${c.request_id} (paypal refund ${rf.refundId}) failed`, error);
+    return { ...base, status: rf.status, stripe_refund_id: rf.ref, error: "refund sent; bookkeeping will catch up" };
+  }
+  const f = data as { voided?: number } | null;
+  return { ...base, status: rf.status, voided: f?.voided ?? 0, stripe_refund_id: rf.ref };
 }
 
 function claimError(error: { code?: string; message?: string }): Response {

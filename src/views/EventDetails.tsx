@@ -50,6 +50,7 @@ import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
 import { paymentsEnabled } from '../lib/payments';
+import { eventTakesPayPal, stashPayPalCart, venmoPossible } from '../lib/paypal';
 import SubscribeCalendar from '../components/SubscribeCalendar';
 import { venueFeedLinks, venueKey } from '../lib/calendar';
 
@@ -68,6 +69,8 @@ export default function EventDetails() {
   const [org, setOrg] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  // "Pay with Venmo / PayPal" (mig 20261031220000): only where the org takes it.
+  const [takesPayPal, setTakesPayPal] = useState(false);
   // Signed-out paid checkout: ask for an email instead of an account.
   const [guestOpen, setGuestOpen] = useState(false);
   const [guestFree, setGuestFree] = useState(false);
@@ -357,6 +360,30 @@ export default function EventDetails() {
     } finally {
       setPurchasing(false);
     }
+  };
+
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let alive = true;
+    eventTakesPayPal(event.id).then((ok) => { if (alive) setTakesPayPal(ok); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [event?.id]);
+
+  // PayPal / Venmo: its own page (no Stripe there, docs/pci.md). The server
+  // prices the order exactly as Stripe checkout would.
+  const goToPayPal = () => {
+    if (!event) return;
+    const tier = selectedTier ?? allTiers[0];
+    if (!tier?.id) return;
+    stashPayPalCart({
+      eventId: event.id, tierId: tier.id, quantity, title: event.title,
+      currency: (event.currency || 'USD').toLowerCase(),
+      addons: addonSel.items, voucherCode: voucher?.code, attribution,
+      displayCents: Math.round((priceToDisplay * quantity) * 100) + addonSel.totalCents,
+      at: Date.now(),
+    });
+    // A full page load: the PayPal page has its own CSP (PayPal in, Stripe out).
+    window.location.assign(publicUrl('pay/paypal'));
   };
 
   // Paid checkout (signed in, or as a guest with just an email).
@@ -1184,6 +1211,17 @@ export default function EventDetails() {
                     </>
                   )}
                 </button>
+                {takesPayPal && stripeEnabled && !soldOut && (priceToDisplay > 0 || addonSel.totalCents > 0)
+                  && (user || guestCheckoutAllowed(event.purchaseLimits)) && !voucher?.canBypass && (
+                  <button
+                    type="button"
+                    disabled={purchasing}
+                    onClick={goToPayPal}
+                    className="disp w-full mt-3 border border-white/30 text-white py-3 text-base tracking-wide hover:border-white transition-colors disabled:opacity-40"
+                  >
+                    {venmoPossible(event.currency) ? 'Pay with Venmo / PayPal' : 'Pay with PayPal'}
+                  </button>
+                )}
                 </>)}
 
                 {paidNotOnSale && !soldOut && (

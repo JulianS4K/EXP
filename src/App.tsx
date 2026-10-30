@@ -17,6 +17,8 @@ import { isPixelRoute, leavePixelScope } from './lib/pixels';
 import Home from './views/Home';
 const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
+const PayPalCheckout = lazy(() => import('./views/PayPalCheckout'));
+const SplitWithFriends = lazy(() => import('./views/SplitWithFriends'));
 const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
 const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
@@ -142,6 +144,9 @@ export default function App() {
                     <Route path="/event/:id" element={<EventDetails />} />
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
+                    <Route path="/pay/paypal" element={<PayPalCheckout />} />
+                    <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
+                    <Route path="/split/:sessionId" element={<SplitWithFriends />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />

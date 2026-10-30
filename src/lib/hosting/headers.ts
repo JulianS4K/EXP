@@ -20,6 +20,10 @@
 //     (src/lib/storeContent.ts videoEmbedUrl). /bridge/e/<slug> redirects
 //     client-side to /bridge/event/<id> and keeps the first document's CSP.
 //   • The door scanner needs the camera, so /bridge allows camera=(self).
+//   • /bridge/pay/paypal (the "Pay with Venmo / PayPal" page, mig
+//     20261031220000) loads PayPal's JS SDK and nothing from Stripe: its
+//     policy swaps Stripe's hosts for PayPal's and Venmo's, so the two
+//     processors' scripts never share a page (docs/pci.md). No pixels.
 
 // Meta, GA4, TikTok, Reddit (redditstatic.com loader; alb.reddit.com events,
 // pixel-config.reddit.com config), Snap (sc-static.net loader; tr.snapchat.com
@@ -55,6 +59,13 @@ const VIDEO_PREFIXES = ['/bridge/event/', '/bridge/e/'];
 
 const startsWithAny = (path: string, prefixes: string[]) => prefixes.some((p) => path.startsWith(p));
 
+// PayPal's JS SDK and the frames / calls its buttons make (PayPal's CSP guide).
+const PAYPAL_SCRIPT = ' https://www.paypal.com https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com';
+const PAYPAL_CONNECT = ' https://*.paypal.com https://*.paypalobjects.com https://*.venmo.com https://*.braintreegateway.com';
+const PAYPAL_FRAME = 'https://www.paypal.com https://*.paypal.com https://*.venmo.com';
+
+export const isPayPalPagePath = (path: string) => path === '/bridge/pay/paypal' || path.startsWith('/bridge/pay/paypal/');
+
 export const isBridgePath = (path: string) => path === '/bridge' || path.startsWith('/bridge/');
 export const isEmbedPath = (path: string) => path.startsWith('/bridge/embed/');
 
@@ -64,6 +75,22 @@ export function bridgeCsp(path: string, search = ''): string {
   const embed = isEmbedPath(path);
   const maps = !embed && startsWithAny(path, MAPS_PREFIXES);
   const video = startsWithAny(path, VIDEO_PREFIXES);
+  if (isPayPalPagePath(path)) {
+    return (
+      "default-src 'self'; " +
+      "script-src 'self'" + PAYPAL_SCRIPT + '; ' +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
+      "img-src 'self' data: blob: https:; " +
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sentry.io" + PAYPAL_CONNECT + '; ' +
+      'frame-src ' + PAYPAL_FRAME + '; ' +
+      "worker-src 'self'; " +
+      "manifest-src 'self'; " +
+      "frame-ancestors 'none'; " +
+      "base-uri 'self'; " +
+      "form-action 'self' https://www.paypal.com https://www.sandbox.paypal.com"
+    );
+  }
   return (
     "default-src 'self'; " +
     "script-src 'self' https://js.stripe.com" +
