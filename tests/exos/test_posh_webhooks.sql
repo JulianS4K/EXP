@@ -34,6 +34,10 @@ BEGIN;
 -- The 250-capacity resale rule on (run_p0.sh turns it off for older fixtures).
 INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_min_capacity', '250')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- Integration: since mig 20261029090000 the resale rule is the free tier
+-- (<= 150 seats) plus the organizer's opt-in; run_p0.sh turns both off for older
+-- fixtures, so put the defaults back for this file.
+DELETE FROM public.exos_platform_settings WHERE key IN ('free_tier_max_capacity', 'resale_consent_required');
 
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('b5000000-0000-0000-0000-0000000000a1','b5own@x.com',now()),
@@ -152,7 +156,7 @@ BEGIN
   ASSERT public.exos_channel_allocated(pg_temp.u('d1')) = 10, 'P2: via exos_channel_allocated';
   -- P11: a 100-seat event: resale is locked, Posh isn't.
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e1')), 'P11: under the resale minimum';
-  ASSERT pg_temp.refused($$SELECT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 5)$$, 'resale marketplaces unlock'),
+  ASSERT pg_temp.refused($$SELECT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 5)$$, 'resale marketplaces'),
          'P11: the marketplace allocation is refused';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1')), 'P11: nothing in the resale table';
   -- The house cap reads it too.
