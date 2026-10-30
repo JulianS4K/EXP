@@ -14,9 +14,11 @@
 
 import type { Scope } from './scopes.ts';
 
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
 export interface ApiRoute {
   id: string;
-  method: 'GET';
+  method: ApiMethod;
   path: string;
   /** null: any valid key (GET /me). */
   scope: Scope | null;
@@ -40,7 +42,20 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-invoices', method: 'GET', path: '/invoices', scope: 'orders:read', paged: true },
   { id: 'list-refunds', method: 'GET', path: '/refunds', scope: 'orders:read', paged: true },
   { id: 'list-webhooks', method: 'GET', path: '/webhooks', scope: 'webhooks:read', paged: false },
+  // Tickets sold on other platforms (mig 20261030120000). The first write
+  // routes: each needs a :write scope (apiRoutes.test.ts).
+  { id: 'list-sales-counts', method: 'GET', path: '/sales-counts', scope: 'finance:read', paged: true },
+  { id: 'get-sales-count', method: 'GET', path: '/sales-counts/:id', scope: 'finance:read', paged: false },
+  { id: 'create-sales-count', method: 'POST', path: '/sales-counts', scope: 'finance:write', paged: false },
+  { id: 'update-sales-count', method: 'PUT', path: '/sales-counts/:id', scope: 'finance:write', paged: false },
+  { id: 'delete-sales-count', method: 'DELETE', path: '/sales-counts/:id', scope: 'finance:write', paged: false },
+  { id: 'list-event-sales-counts', method: 'GET', path: '/events/:id/sales-counts', scope: 'finance:read', paged: false },
+  { id: 'import-sales-counts', method: 'POST', path: '/events/:id/sales-counts/import', scope: 'finance:write', paged: false },
+  { id: 'find-eventbrite-event', method: 'GET', path: '/eventbrite-events/:id', scope: 'events:read', paged: false },
 ];
+
+/** Methods exos-api answers. */
+export const API_METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'DELETE'];
 
 export interface RouteMatch {
   route: ApiRoute;
