@@ -100,3 +100,9 @@ deploy (no snapshot) gets its absorbed fees computed from the current rules and 
 - **Refunds.** A refund returns what the buyer paid (fees included); `exos_order_fees` isn't reversed on refund yet.
   Settlements should net refunded sessions out until it is.
 - **Saved events / series cards** price from `event.price` without tiers (as before, also without tax).
+
+## Gift cards and donations
+
+A gift card is a way to pay, applied after the all-in price (fees and tax) is known (`docs/gift-cards.md`); the Exos
+application fee is on the card charge only. An add-a-donation line comes after the tax and no fee rule applies to it
+(`docs/giving.md`).

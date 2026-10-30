@@ -41,6 +41,15 @@
 // absorbed, is stored in exos_checkout_fee_snapshots (not on the buyer-readable
 // session row) and copied to
 // exos_order_fees at fulfillment. Not the Exos platform fee above.
+//
+// exos: gift cards + giving (mig 20261030130000, docs/gift-cards.md,
+// docs/giving.md). Optional body fields: gift_card_code and donation
+// { campaign_id, amount_cents }. A donation is its own Stripe line after the
+// tax (no fees, never taxed). A gift card pays last: the Stripe session gets a
+// one-off coupon for its part, the card is held right after the session row is
+// written and captured by exos_fulfill_checkout; an order the card covers in
+// full skips Stripe and is fulfilled here. amount_cents on the session stays
+// what Stripe charges; gift_card_cents is the rest of the order's value.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -56,6 +65,7 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
+import { giftCardApplied, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -87,6 +97,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Ad click ids + browser ids (mig 20260929131000) and marketing consent.
     ad_ids?: Record<string, unknown>;
     consent?: string;
+    // exos: gift cards + giving (mig 20261030130000).
+    gift_card_code?: string;
+    donation?: { campaign_id?: string; amount_cents?: number };
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
@@ -391,8 +404,56 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const feeRecord0 = feeRulesRead ? { fee_breakdown: feeLines } : {};
 
+  // exos: giving — add-a-donation to one of the org's campaigns that offers it
+  // at checkout, in the event's currency. Its own line after tax, no fees.
+  let donationCents = 0;
+  let donationCampaign: { id: string; name: string } | null = null;
+  if (p.donation && typeof p.donation === "object") {
+    const amt = parseDonationCents(p.donation.amount_cents);
+    if (amt === null) return json({ error: "donation must be between 1.00 and 100,000.00" }, 400);
+    const { data: camp } = await sb.from("exos_giving_campaigns")
+      .select("id, name, org_id, currency, active, checkout_add_on, starts_at, ends_at")
+      .eq("id", String(p.donation.campaign_id ?? "")).maybeSingle();
+    const now = Date.now();
+    if (!camp || camp.org_id !== ev.org_id || !camp.active || !camp.checkout_add_on || camp.currency !== currency
+      || (camp.starts_at && Date.parse(camp.starts_at) > now) || (camp.ends_at && Date.parse(camp.ends_at) <= now)) {
+      return json({ error: "that campaign isn't taking donations here" }, 409);
+    }
+    donationCents = amt;
+    donationCampaign = { id: camp.id, name: camp.name };
+  }
+
   // addonTotal is already all-in; the exclusive tax sits inside both unit amounts.
-  const amountCents = ticketAllIn * quantity + addonTotal;
+  const amountCents = ticketAllIn * quantity + addonTotal + donationCents;
+
+  // exos: gift cards — quoted now (nothing reserved), held after the session
+  // row exists. Rate-limited per account or hashed IP in SQL.
+  const giftCode = p.gift_card_code ? normalizeGiftCardCode(p.gift_card_code) : null;
+  if (p.gift_card_code && !giftCode) return json({ error: "that gift card code isn't valid (check for a typo)" }, 400);
+  const giftBucket = buyerUid
+    ? `u:${buyerUid}`
+    : `ip:${await hashIp(clientIp((h) => req.headers.get(h)), Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!)}`;
+  let giftCents = 0;
+  let giftLast4 = "";
+  if (giftCode) {
+    const { data: gq, error: gqErr } = await sb.rpc("exos_gift_card_quote", {
+      p_code: giftCode, p_bucket: giftBucket, p_org_id: ev.org_id, p_currency: currency, p_amount_cents: amountCents,
+    });
+    if (gqErr) return json({ error: "could not check the gift card, try again" }, 503);
+    const q = gq as { error?: string | null; applicable_cents?: number; last4?: string } | null;
+    if (q?.error) return json({ error: q.error }, 409);
+    giftCents = giftCardApplied(amountCents, Number(q?.applicable_cents ?? 0));
+    if (giftCents <= 0) return json({ error: "this gift card can't pay for this order" }, 409);
+    giftLast4 = String(q?.last4 ?? "");
+  }
+  // What the card is charged. The Exos application fee is on this part only:
+  // the gift card's own sale already paid it.
+  const chargeCents = amountCents - giftCents;
+  const giftFull = giftCents > 0 && chargeCents === 0;
+  const commerceRecord: Record<string, unknown> = {
+    ...(giftCents > 0 ? { gift_card_cents: giftCents } : {}),
+    ...(donationCampaign ? { donation_cents: donationCents, donation_campaign_id: donationCampaign.id } : {}),
+  };
   // The Exos fee: 3% net after Stripe, from the organizer's share. The
   // platform pays Stripe's card fee under destination charges, so the
   // application fee is 3% plus that fee (_shared/platformFee.ts).
@@ -409,11 +470,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
     fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
   };
-  const applicationFee = checkoutApplicationFeeCents(amountCents, { bps: feeBps, card: cardFee });
+  const applicationFee = checkoutApplicationFeeCents(chargeCents, { bps: feeBps, card: cardFee });
   // The same fee, broken down for the order record (mig 20260929131000).
   // Recorded only, never sent to Stripe: application_fee_amount stays
   // applicationFee above.
-  const feeSplit = checkoutFeeSplit(amountCents, { bps: feeBps, card: cardFee });
+  const feeSplit = checkoutFeeSplit(chargeCents, { bps: feeBps, card: cardFee });
   const feeRecord = feeSplit.applicationFeeCents === applicationFee
     ? {
       application_fee_cents: feeSplit.applicationFeeCents,
@@ -464,18 +525,59 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
   }
+  // exos: giving — the donation line (no fees, no tax).
+  if (donationCampaign) {
+    lineItems.push({
+      quantity: 1,
+      price_data: { currency, unit_amount: donationCents, product_data: { name: `Donation: ${donationCampaign.name}` } },
+    });
+  }
   // Free: signed-in buyers use the app's free-claim path; a guest claims here
   // with just an email (below), through the same guest hold and limits.
   const freeGuest = lineItems.length === 0 && !buyerUid;
   if (lineItems.length === 0 && buyerUid) {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
   }
-  if (!freeGuest) {
+  if (!freeGuest && !giftFull) {
     if (!stripeKey) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
     if (!payments.connectedAccountId || !payments.chargesEnabled) {
       return json({ error: "organizer has not completed payment setup" }, 409);
     }
   }
+
+  // Price-disclosure record (mig 20260926070000): what the buyer is shown on
+  // Stripe's page, per line, so the charged amount can be checked against it
+  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee; fee_cents is the
+  // organizer's passed-on fees inside each line (fee rules). Non-fatal: the
+  // sale is already recorded; a missing record is visible in the export.
+  // exos: a donation is its own line; a gift card part counts as paid when the
+  // charge is recorded (exos_record_price_charged).
+  const recordDisclosure = async (sid: string): Promise<void> => {
+    const { error: pdErr } = await sb.rpc("exos_record_price_disclosure", {
+      p_session_id: sid,
+      p_currency: currency,
+      p_lines: [
+        {
+          kind: "ticket", item_id: tier_id, name: tier.name, quantity,
+          face_unit_cents: unitAmount, tax_cents: ticketLineTax,
+          tax_included: tierRule?.price_includes_tax === true,
+          fee_cents: ticketUnitFee * quantity, unit_all_in_cents: ticketAllIn,
+        },
+        ...addonLines.map((a) => ({
+          kind: "addon", item_id: a.id, name: a.name, quantity: a.quantity,
+          face_unit_cents: a.unit_face, tax_cents: a.line_tax, tax_included: a.tax_included,
+          fee_cents: a.unit_fee * a.quantity, unit_all_in_cents: a.unit_all_in,
+        })),
+        ...(donationCampaign
+          ? [{
+            kind: "donation", item_id: donationCampaign.id, name: `Donation: ${donationCampaign.name}`, quantity: 1,
+            face_unit_cents: donationCents, tax_cents: 0, tax_included: false, fee_cents: 0, unit_all_in_cents: donationCents,
+          }]
+          : []),
+      ],
+    });
+    if (pdErr) console.error("exos-checkout: price disclosure record failed (non-fatal)", pdErr);
+  };
 
   // Salted hash of the request IP: the guest hold's rate-limit key and the
   // checkout record's client_ip_hash (the IP itself is never stored).
@@ -555,7 +657,70 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ free: true, issued, email: buyerEmail });
   }
 
+  // exos: gift cards — the card covers the whole order: no Stripe. Record the
+  // order, hold the card, fulfil now (fulfillment captures the hold; a failure
+  // gives it back through the session's status trigger).
+  if (giftFull) {
+    const sessionId = `gc_${crypto.randomUUID().replaceAll("-", "")}`;
+    const gInsErr = await insertSessionRow(sb, {
+      session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
+      buyer_uid: buyerUid, buyer_email: buyerEmail, ...(buyerUid ? {} : { guest: true }),
+      quantity, amount_cents: 0, currency, status: "pending",
+      addons: addonsForSession.length > 0 ? addonsForSession : null,
+      voucher_id: voucherId, tax_cents: recordedTax > 0 ? recordedTax : null, promoter_id: promoterId ?? null,
+      attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
+      ...checkoutRecord, ...commerceRecord, ...feeRecord0,
+    });
+    if (gInsErr) {
+      console.error("exos-checkout: gift card order not recorded", gInsErr.message);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not record the order" }, 500);
+    }
+    if (holdId) await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
+    const { error: ghErr } = await sb.rpc("exos_gift_card_hold", {
+      p_code: giftCode, p_session_id: sessionId, p_amount_cents: giftCents, p_bucket: giftBucket,
+      p_org_id: ev.org_id, p_currency: currency,
+    });
+    if (ghErr) {
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: ghErr.message || "the gift card balance changed, please try again" }, 409);
+    }
+    await recordDisclosure(sessionId);
+    const { data: ids, error: fulErr } = await sb.rpc("exos_fulfill_checkout", { p_session_id: sessionId });
+    if (fulErr) {
+      // Unexpected: the session stays pending and exos_gift_card_release_stale
+      // gives the hold back later.
+      console.error("exos-checkout: gift card fulfilment failed", fulErr.message);
+      return json({ error: "could not issue the tickets" }, 500);
+    }
+    const issued = Array.isArray(ids) ? ids.length : 0;
+    if (issued === 0) {
+      const { data: row } = await sb.from("exos_checkout_sessions").select("failure_reason").eq("session_id", sessionId).maybeSingle();
+      return json({ error: row?.failure_reason || "those tickets are no longer available" }, 409);
+    }
+    await sb.rpc("exos_record_price_charged", { p_session_id: sessionId, p_amount_cents: 0, p_currency: currency });
+    return json({ paid_with_gift_card: true, session_id: sessionId, issued, gift_card_cents: giftCents });
+  }
+
   const stripe = new Stripe(stripeKey!, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+
+  // exos: gift cards — line items can't be negative, so the card's part is a
+  // one-off coupon on the platform account (the receipt still lists every line).
+  let giftCoupon: string | null = null;
+  if (giftCents > 0) {
+    try {
+      const c = await stripe.coupons.create({
+        amount_off: giftCents, currency, duration: "once", max_redemptions: 1,
+        name: `Gift card ending ${giftLast4}`.slice(0, 40),
+      });
+      giftCoupon = c.id;
+    } catch (e) {
+      console.error("exos-checkout: gift card coupon failed", e);
+      await releaseHold(sb, holdId);
+      return json({ error: "could not apply the gift card, try again" }, 502);
+    }
+  }
 
   let session: Stripe.Checkout.Session;
   try {
@@ -566,6 +731,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // hold and settle days later into seats that may be gone.
       payment_method_types: ["card"],
       line_items: lineItems,
+      ...(giftCoupon ? { discounts: [{ coupon: giftCoupon }] } : {}),
       payment_intent_data: {
         application_fee_amount: applicationFee,
         transfer_data: { destination: payments.connectedAccountId },
@@ -582,6 +748,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       metadata: {
         exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
         exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
+        ...(giftCents > 0 ? { exos_gift_card_cents: String(giftCents), exos_gift_card_last4: giftLast4 } : {}),
+        ...(donationCampaign ? { exos_donation_cents: String(donationCents) } : {}),
       },
     });
   } catch (e) {
@@ -595,13 +763,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     event_id, tier_id, org_id: ev.org_id,
     buyer_uid: buyerUid, buyer_email: buyerEmail,
     ...(buyerUid ? {} : { guest: true }),
-    quantity, amount_cents: amountCents, currency, status: "pending",
+    quantity, amount_cents: chargeCents, currency, status: "pending",
     addons: addonsForSession.length > 0 ? addonsForSession : null,
     voucher_id: voucherId,
     tax_cents: recordedTax > 0 ? recordedTax : null,
     promoter_id: promoterId ?? null,
     attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
     ...checkoutRecord,
+    ...commerceRecord,
     ...feeRecord,
     ...feeRecord0,
   };
@@ -621,29 +790,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (linkErr) console.error("exos-checkout: hold link failed (non-fatal)", linkErr);
   }
 
-  // Price-disclosure record (mig 20260926070000): what the buyer is shown on
-  // Stripe's page, per line, so the charged amount can be checked against it
-  // (NY ACAL 25.07 / FTC fee rule). Exos adds no buyer fee; fee_cents is the
-  // organizer's passed-on fees inside each line (fee rules). Non-fatal: the
-  // sale is already recorded; a missing record is visible in the export.
-  const { error: pdErr } = await sb.rpc("exos_record_price_disclosure", {
-    p_session_id: session.id,
-    p_currency: currency,
-    p_lines: [
-      {
-        kind: "ticket", item_id: tier_id, name: tier.name, quantity,
-        face_unit_cents: unitAmount, tax_cents: ticketLineTax,
-        tax_included: tierRule?.price_includes_tax === true,
-        fee_cents: ticketUnitFee * quantity, unit_all_in_cents: ticketAllIn,
-      },
-      ...addonLines.map((a) => ({
-        kind: "addon", item_id: a.id, name: a.name, quantity: a.quantity,
-        face_unit_cents: a.unit_face, tax_cents: a.line_tax, tax_included: a.tax_included,
-        fee_cents: a.unit_fee * a.quantity, unit_all_in_cents: a.unit_all_in,
-      })),
-    ],
-  });
-  if (pdErr) console.error("exos-checkout: price disclosure record failed (non-fatal)", pdErr);
+  // exos: gift cards — the card's part leaves the balance now. If it moved
+  // since the quote, the buyer never saw the Stripe page: expire it.
+  if (giftCents > 0) {
+    const { error: ghErr } = await sb.rpc("exos_gift_card_hold", {
+      p_code: giftCode, p_session_id: session.id, p_amount_cents: giftCents, p_bucket: giftBucket,
+      p_org_id: ev.org_id, p_currency: currency,
+    });
+    if (ghErr) {
+      try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", session.id).eq("status", "pending");
+      return json({ error: ghErr.message || "the gift card balance changed, please try again" }, 409);
+    }
+  }
+
+  await recordDisclosure(session.id);
 
   if (embedded) return json({ client_secret: session.client_secret, session_id: session.id });
   return json({ url: session.url, session_id: session.id });

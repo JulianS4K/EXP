@@ -50,6 +50,10 @@ export async function startCheckout(input: {
   attribution?: Attribution;
   /** Signed out: pay as a guest; tickets go to this email. */
   guestEmail?: string;
+  /** Pay (part of) the order with a gift card (mig 20261030130000). */
+  giftCardCode?: string;
+  /** Add-a-donation to a giving campaign (its own line after tax). */
+  donation?: { campaign_id: string; amount_cents: number };
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -62,10 +66,17 @@ export async function startCheckout(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
+      gift_card_code: input.giftCardCode || undefined,
+      donation: input.donation,
       ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
+  // The gift card covered everything: no Stripe page, the tickets are issued.
+  const paid = data as { paid_with_gift_card?: boolean; session_id?: string } | null;
+  if (paid?.paid_with_gift_card) {
+    return input.successUrl.replace('{CHECKOUT_SESSION_ID}', encodeURIComponent(paid.session_id ?? ''));
+  }
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');
   return url;
