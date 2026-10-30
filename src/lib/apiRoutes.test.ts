@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
+import { apiPath, isSharedKeyPath, matchRoute, ROUTES } from '../../supabase/functions/_shared/api/routes.ts';
 import { effectiveScopes, hasScope, READ_SCOPES, SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 import { PagingError, pageEnvelope, parsePage } from '../../supabase/functions/_shared/api/paging.ts';
 
@@ -27,6 +27,7 @@ describe('matchRoute', () => {
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
     expect(matchRoute('POST', '/events')).toBeNull();
+    expect(matchRoute('DELETE', '/artists/x')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -42,10 +43,28 @@ describe('matchRoute', () => {
       if (r.scope !== null) expect(SCOPES).toContain(r.scope);
       expect(matchRoute(r.method, r.path.replace(/:[a-z]+/g, 'x'))?.route.id).toBe(r.id);
     }
-    // Only GET /me is reachable without a scope.
-    expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // The API is read-only: no route needs a write scope yet.
-    expect(ROUTES.every((r) => r.scope === null || r.scope.endsWith(':read'))).toBe(true);
+    // Of the API-key routes only GET /me is reachable without a scope; the
+    // shared-key routes (the public listing feed) take no scope at all.
+    expect(ROUTES.filter((r) => r.auth === 'api_key' && r.scope === null).map((r) => r.id)).toEqual(['me']);
+    expect(ROUTES.filter((r) => r.auth === 'shared_key').every((r) => r.scope === null && r.method === 'GET')).toBe(true);
+    // Every write needs a write scope; every read a read scope (or org:admin).
+    for (const r of ROUTES.filter((x) => x.auth === 'api_key' && x.scope)) {
+      if (r.method === 'GET') expect(r.scope!.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
+      else expect(r.scope!.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
+    }
+  });
+
+  it('routes the artist, lineup, key and feed paths', () => {
+    expect(matchRoute('POST', '/artists')?.route.id).toBe('create-artist');
+    expect(matchRoute('PATCH', '/artists/a1')?.params).toEqual({ id: 'a1' });
+    expect(matchRoute('POST', '/artists/a1/merge')?.route.id).toBe('merge-artist');
+    expect(matchRoute('PUT', '/events/e1/lineup')?.route.id).toBe('set-lineup');
+    expect(matchRoute('DELETE', '/listing-keys/k1')?.route.id).toBe('revoke-listing-key');
+    expect(matchRoute('GET', apiPath('/functions/v1/exos-api/v1/public/events'))?.route.auth).toBe('shared_key');
+    expect(matchRoute('GET', '/public/confirms/e1')?.route.id).toBe('public-get-confirm');
+    expect(isSharedKeyPath('/public/events')).toBe(true);
+    expect(isSharedKeyPath('/publicity')).toBe(false);
+    expect(isSharedKeyPath('/events')).toBe(false);
   });
 });
 

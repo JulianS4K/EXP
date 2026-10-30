@@ -31,6 +31,8 @@ import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import VenueMap from '../components/VenueMap';
+import EventArtistLineup from '../components/EventArtistLineup';
+import { getPublicLineups, jsonLdPerformers, type JsonLdPerformer, type LineupSlot } from '../lib/artists';
 import { captureAttribution, type Attribution } from '../lib/attribution';
 import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
 import { getVoucherTier } from '../lib/vouchers';
@@ -66,6 +68,8 @@ export default function EventDetails() {
   const { toast } = useToast();
   const [event, setEvent] = useState<Event | null>(null);
   const [org, setOrg] = useState<Organization | null>(null);
+  // Structured lineup (mig 20261030110000); empty: the free-text performers show.
+  const [lineup, setLineup] = useState<LineupSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   // Signed-out paid checkout: ask for an email instead of an account.
@@ -143,48 +147,60 @@ export default function EventDetails() {
         // SEO: per-event meta tags (Open Graph, Twitter Card,
         // Schema.org Event). Crawlers that execute JS pick this up;
         // social-card previewers fall back to the index.html defaults.
-        try {
-          const startIso = data.date?.toDate ? data.date.toDate().toISOString() : undefined;
-          const endIso = data.timing?.endTime?.toDate?.()?.toISOString();
-          const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
-          applyMeta({
-            title: data.title,
-            // The organizer's one-line summary when set (mig 20260929120000).
-            description: (data.summary || data.description || '').slice(0, 200),
-            imageUrl: data.image || undefined,
-            canonicalUrl: publicUrl(`event/${data.id}`),
-            // Organizer's "hide from search engines" (mig 20261005090000).
-            noindex: data.noindex === true,
-            event: startIso
-              ? {
-                  name: data.title,
-                  startDate: startIso,
-                  endDate: endIso,
-                  location: {
-                    name: data.location,
-                    streetAddress: data.address?.street,
-                    city: data.address?.city,
-                    region: data.address?.region,
-                    country: data.address?.country,
-                    postal: data.address?.postal,
-                  },
-                  image: data.image,
-                  description: (data.summary || data.description || '').slice(0, 200),
-                  format: data.format,
-                  pageUrl: publicUrl(`event/${data.id}`),
-                  offers: {
-                    price: data.price,
-                    currency: data.currency || 'USD',
-                    availability: remaining > 0 ? 'InStock' : 'SoldOut',
-                    url: publicUrl(`event/${data.id}`),
-                  },
-                }
-              : undefined,
-          });
-        } catch (err) {
-          // Meta-tag failures are non-fatal — they don't block render.
-          console.warn('Meta apply failed:', err);
-        }
+        const applyEventMeta = (performers: JsonLdPerformer[]) => {
+          try {
+            const startIso = data.date?.toDate ? data.date.toDate().toISOString() : undefined;
+            const endIso = data.timing?.endTime?.toDate?.()?.toISOString();
+            const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
+            applyMeta({
+              title: data.title,
+              // The organizer's one-line summary when set (mig 20260929120000).
+              description: (data.summary || data.description || '').slice(0, 200),
+              imageUrl: data.image || undefined,
+              canonicalUrl: publicUrl(`event/${data.id}`),
+              // Organizer's "hide from search engines" (mig 20261005090000).
+              noindex: data.noindex === true,
+              event: startIso
+                ? {
+                    name: data.title,
+                    startDate: startIso,
+                    endDate: endIso,
+                    location: {
+                      name: data.location,
+                      streetAddress: data.address?.street,
+                      city: data.address?.city,
+                      region: data.address?.region,
+                      country: data.address?.country,
+                      postal: data.address?.postal,
+                    },
+                    image: data.image,
+                    description: (data.summary || data.description || '').slice(0, 200),
+                    format: data.format,
+                    pageUrl: publicUrl(`event/${data.id}`),
+                    performers,
+                    offers: {
+                      price: data.price,
+                      currency: data.currency || 'USD',
+                      availability: remaining > 0 ? 'InStock' : 'SoldOut',
+                      url: publicUrl(`event/${data.id}`),
+                    },
+                  }
+                : undefined,
+            });
+          } catch (err) {
+            // Meta-tag failures are non-fatal — they don't block render.
+            console.warn('Meta apply failed:', err);
+          }
+        };
+        // Free-text names first; the lineup (with Spotify sameAs) once it loads.
+        applyEventMeta(jsonLdPerformers(null, data.performers));
+        setLineup([]);
+        getPublicLineups([data.id]).then((m) => {
+          if (!alive) return;
+          const l = m[data.id] ?? [];
+          setLineup(l);
+          if (l.length) applyEventMeta(jsonLdPerformers(l));
+        });
         // Marketing: load the hosting org's pixels (consent-gated) and fire a
         // ViewContent for this event. The public event row carries only
         // orgId, so fetch the public org for its marketing config.
@@ -882,7 +898,9 @@ export default function EventDetails() {
                   headliner (slightly larger). The block sits above
                   genres because at a music event, performer names
                   are usually what the buyer cares about most. */}
-              {event.performers && event.performers.length > 0 ? (
+              {lineup.length > 0 ? (
+                <EventArtistLineup lineup={lineup} timezone={event.timezone} />
+              ) : event.performers && event.performers.length > 0 ? (
                 <div className="p-7 bg-[#111] sm:col-span-2">
                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">performers</p>
                   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
