@@ -19,7 +19,7 @@ bash tests/exos/run.sh <db>   # SQL harnesses against a scratch Postgres
 
 Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs the same three plus the SQL harnesses.
 
-New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. PCI scope (SAQ A; never add scripts to a page with a Stripe card field): `docs/pci.md`. Running your own install (open source): `docs/self-hosting.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Partner REST API (scopes, /developers, adding a route): `docs/api-reference.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. Organizer fee rules (passed on inside the all-in price, or absorbed): `docs/fees.md`. Writing an RPC or reviewing the security advisor: `docs/security.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
+New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. PCI scope (SAQ A; never add scripts to a page with a Stripe card field): `docs/pci.md`. Running your own install (open source): `docs/self-hosting.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Partner REST API (scopes, /developers, adding a route): `docs/api-reference.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. Group chats and the masked SMS relay: `docs/group-chat.md`. Organizer fee rules (passed on inside the all-in price, or absorbed): `docs/fees.md`. Writing an RPC or reviewing the security advisor: `docs/security.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
 
 ## Rules carried over from Terminal-2
 
@@ -37,6 +37,10 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `_shared/channels/`): writes only to each module's allowlist, and only with
   the org's switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`
   (otherwise dry run). Luma is off entirely until `EXOS_LUMA_ENABLED=on`.
+  The group-chat SMS relay (`exos-sms-relay`, operator decision 2026-10-30)
+  sends texts from the platform's own pool numbers, only with
+  `EXOS_SMS_RELAY=on` (otherwise dry run); tests use a provider mock. US A2P
+  10DLC registration comes first (`docs/group-chat.md`).
   Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
   endpoint tagged read or write. The StubHub write foundation
   (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it
