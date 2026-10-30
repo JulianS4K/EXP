@@ -16,23 +16,18 @@
 // 20261030120000) and booking (mig 20261030100000); each needs a `:write`
 // scope.
 //
-// `auth`: `api_key` (an org API key, Authorization: Bearer sk_live_…, held to
-// `scope`) or `shared_key` (a listing-feed shared key, ?shared_key=sh_live_…
-// or X-Shared-Key; it reads the public feed of one org and nothing else).
-// `paged`: true for the API's { data, meta } lists, 'opendate' for the
-// listing feed's { current_page, per_page, total_entries, total_pages,
-// collection } envelope.
-//
-// `auth`: `api_key` (an org API key, Authorization: Bearer sk_live_…, held to
-// `scope`). Writes (POST / PUT / PATCH / DELETE) need a `:write` scope
-// (apiRoutes.test.ts) and run through exos_api_write (mig 20261031110000).
-//
 // `auth`: `api_key` is a bearer credential of the organization: an org API
 // key (sk_live_…), a personal access token (exos_pat_…) or an OAuth access
-// token (exos_oat_…), held to `scope` (docs/developer-platform.md).
-// `partner_key` is a distribution partner's key (dk_live_…, ?shared_key= or
-// X-Shared-Key, docs/partner-sales.md): the Opendate partner contract under
-// /public/…, which needs no scope but the partner's own (inventory / comps).
+// token (exos_oat_…), held to `scope` (docs/developer-platform.md). Writes
+// (POST / PUT / PATCH / DELETE) need a `:write` scope (apiRoutes.test.ts);
+// core writes run through exos_api_write (mig 20261031110000).
+// `shared_key` is a listing-feed shared key (?shared_key=sh_live_… or
+// X-Shared-Key): it reads the public feed of one org and nothing else
+// (docs/listing-feed.md). `partner_key` is a distribution partner's key
+// (dk_live_…, same transport, docs/partner-sales.md): the Opendate partner
+// contract under /public/…, which needs no scope but the partner's own
+// (inventory / comps). exos-api dispatches /public/* by the matched route's
+// auth (publicAuthAt).
 // `paged`: true for the API's { data, meta } lists, 'opendate' for
 // Opendate's { current_page, per_page, total_entries, total_pages,
 // collection } envelope.
