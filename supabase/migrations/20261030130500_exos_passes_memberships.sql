@@ -146,9 +146,14 @@ CREATE TABLE IF NOT EXISTS public.exos_fan_memberships (
   session_id             text UNIQUE,
   gift                   jsonb CHECK (gift IS NULL OR jsonb_typeof(gift) = 'object'),
   gift_token_hash        text UNIQUE CHECK (gift_token_hash IS NULL OR gift_token_hash ~ '^[0-9a-f]{64}$'),
+  -- Why it ended for good: 'refunded' (the purchase was refunded) or
+  -- 'gift_cancelled'. Terminal: no later Stripe event brings it back.
+  ended_reason           text CHECK (ended_reason IS NULL OR ended_reason IN ('refunded', 'gift_cancelled')),
   created_at             timestamptz NOT NULL DEFAULT now(),
   updated_at             timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.exos_fan_memberships ADD COLUMN IF NOT EXISTS ended_reason text
+  CHECK (ended_reason IS NULL OR ended_reason IN ('refunded', 'gift_cancelled'));
 CREATE INDEX IF NOT EXISTS exos_fan_memberships_holder_idx ON public.exos_fan_memberships (holder_uid);
 CREATE INDEX IF NOT EXISTS exos_fan_memberships_org_idx ON public.exos_fan_memberships (org_id, status);
 
@@ -489,6 +494,12 @@ BEGIN
       s.buyer_email, NULL, false, NULL, p_session_id, s.event_id, 'order:' || p_session_id, NULL, s.currency);
   END IF;
 
+  -- Member presale (any order that isn't a credit redemption, which checked it
+  -- already): a buyer who isn't an eligible member fails the order (refunded).
+  IF s.redemption IS NULL AND public._exos_presale_blocks(s.event_id, s.tier_id, s.buyer_uid) THEN
+    RAISE EXCEPTION 'tickets are on presale for members right now' USING ERRCODE = 'XF001';
+  END IF;
+
   -- Credits: the row is locked here, inside fulfillment's all-or-nothing block,
   -- so two redemptions racing for the last credit can't both pass.
   IF s.redemption IS NOT NULL THEN
@@ -756,7 +767,9 @@ BEGIN
   IF o.kind = 'pass' THEN
     UPDATE public.exos_passes SET status = 'voided' WHERE id = o.result_id;
   ELSIF o.kind = 'membership' THEN
-    UPDATE public.exos_fan_memberships SET status = 'cancelled',
+    -- Terminal (ended_reason): a later subscription event can't revive it.
+    -- stripe-webhook also cancels the Stripe subscription.
+    UPDATE public.exos_fan_memberships SET status = 'cancelled', ended_reason = 'refunded',
            current_period_end = least(coalesce(current_period_end, now()), now()),
            gift = CASE WHEN gift IS NULL THEN NULL ELSE gift || '{"status":"cancelled"}' END, gift_token_hash = NULL
      WHERE id = o.result_id;
@@ -767,35 +780,46 @@ REVOKE ALL ON FUNCTION public._exos_commerce_refund_ext(public.exos_commerce_ord
 -- Service role (stripe-webhook): invoice.paid, customer.subscription.updated /
 -- .deleted. Finds the membership by subscription id; an unknown one (the first
 -- invoice can land before checkout.session.completed) is ignored.
+-- Rules:
+--   * A refunded or cancelled-gift membership (ended_reason) is terminal: nothing
+--     changes it again.
+--   * Only invoice.paid moves the period end, and only forward. A cancelled or
+--     expired membership comes back to active only through invoice.paid for a
+--     period after the current one (money for a new period). A
+--     customer.subscription.updated never reactivates and never extends.
 CREATE OR REPLACE FUNCTION public.exos_membership_sync(p_subscription_id text, p_event text, p_status text,
   p_period_end timestamptz, p_cancel_at_period_end boolean DEFAULT NULL)
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE m public.exos_fan_memberships%ROWTYPE; v_status text;
+DECLARE m public.exos_fan_memberships%ROWTYPE; v_status text; v_new_period boolean;
 BEGIN
   IF NOT public._exos_caller_is_service() THEN RAISE EXCEPTION 'service role only' USING ERRCODE = '42501'; END IF;
+  IF p_event NOT IN ('invoice_paid', 'updated', 'deleted') THEN RAISE EXCEPTION 'bad event' USING ERRCODE = '22023'; END IF;
   SELECT * INTO m FROM public.exos_fan_memberships WHERE stripe_subscription_id = p_subscription_id FOR UPDATE;
   IF NOT FOUND THEN RETURN 'unknown'; END IF;
+  IF m.ended_reason IS NOT NULL THEN RETURN m.status; END IF;
+  v_new_period := p_event = 'invoice_paid' AND p_period_end IS NOT NULL
+                  AND p_period_end > coalesce(m.current_period_end, '-infinity');
   v_status := CASE
     WHEN p_event = 'deleted' THEN 'cancelled'
+    WHEN p_event = 'invoice_paid' THEN CASE WHEN v_new_period OR m.status IN ('active', 'past_due') THEN 'active' ELSE m.status END
     WHEN p_status IN ('active', 'trialing') THEN 'active'
     WHEN p_status IN ('past_due', 'unpaid') THEN 'past_due'
     WHEN p_status = 'canceled' THEN 'cancelled'
     WHEN p_status = 'incomplete_expired' THEN 'expired'
-    WHEN p_event = 'invoice_paid' THEN 'active'
     ELSE m.status END;
-  -- A cancelled or expired membership never comes back through an old event.
-  IF m.status IN ('cancelled', 'expired') AND p_event <> 'deleted' AND v_status = 'active'
-     AND (p_period_end IS NULL OR p_period_end <= coalesce(m.current_period_end, '-infinity')) THEN
-    RETURN m.status;
+  -- An update can end or degrade a membership, never revive one.
+  IF p_event = 'updated' AND m.status IN ('cancelled', 'expired', 'pending') AND v_status IN ('active', 'past_due') THEN
+    v_status := m.status;
   END IF;
   UPDATE public.exos_fan_memberships
      SET status = v_status,
-         current_period_start = CASE WHEN p_period_end > coalesce(current_period_end, '-infinity') THEN coalesce(current_period_end, now()) ELSE current_period_start END,
-         current_period_end = greatest(coalesce(current_period_end, p_period_end), coalesce(p_period_end, current_period_end)),
-         cancel_at_period_end = coalesce(p_cancel_at_period_end, cancel_at_period_end)
+         current_period_start = CASE WHEN v_new_period THEN coalesce(least(current_period_end, p_period_end), now()) ELSE current_period_start END,
+         current_period_end = CASE WHEN v_new_period THEN p_period_end ELSE current_period_end END,
+         cancel_at_period_end = CASE WHEN p_event = 'updated' THEN coalesce(p_cancel_at_period_end, cancel_at_period_end)
+                                     ELSE cancel_at_period_end END
    WHERE id = m.id;
   BEGIN
-    IF p_event = 'invoice_paid' AND p_period_end > coalesce(m.current_period_end, '-infinity') AND m.current_period_end IS NOT NULL THEN
+    IF v_new_period AND m.current_period_end IS NOT NULL THEN
       PERFORM public.exos_enqueue_webhook(m.org_id, 'membership.renewed', jsonb_build_object('membership_id', m.id, 'current_period_end', p_period_end));
     ELSIF v_status = 'cancelled' AND m.status <> 'cancelled' THEN
       PERFORM public.exos_enqueue_webhook(m.org_id, 'membership.cancelled', jsonb_build_object('membership_id', m.id));
@@ -839,7 +863,8 @@ BEGIN
     RAISE EXCEPTION 'not allowed' USING ERRCODE = '42501';
   END IF;
   IF m.status <> 'pending' THEN RAISE EXCEPTION 'this gift was already claimed' USING ERRCODE = 'P0001'; END IF;
-  UPDATE public.exos_fan_memberships SET status = 'cancelled', gift = gift || '{"status":"cancelled"}', gift_token_hash = NULL
+  UPDATE public.exos_fan_memberships SET status = 'cancelled', ended_reason = 'gift_cancelled',
+         gift = gift || '{"status":"cancelled"}', gift_token_hash = NULL
    WHERE id = m.id;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_membership_cancel_gift(uuid) FROM PUBLIC, anon, authenticated;
@@ -872,15 +897,53 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_membership_claim_gift(text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_membership_claim_gift(text) TO authenticated;
 
+-- Every household add / remove, for the anti-spam rules below (service only).
+CREATE TABLE IF NOT EXISTS public.exos_membership_household_changes (
+  id            bigserial PRIMARY KEY,
+  membership_id uuid NOT NULL REFERENCES public.exos_fan_memberships (id) ON DELETE CASCADE,
+  email         text NOT NULL,
+  action        text NOT NULL CHECK (action IN ('add', 'remove')),
+  mailed        boolean NOT NULL DEFAULT false,
+  actor         uuid,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_membership_household_changes_idx ON public.exos_membership_household_changes (membership_id, created_at);
+CREATE INDEX IF NOT EXISTS exos_membership_household_changes_email_idx ON public.exos_membership_household_changes (email, created_at) WHERE mailed;
+ALTER TABLE public.exos_membership_household_changes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_membership_household_changes FROM anon, authenticated;
+REVOKE ALL ON SEQUENCE public.exos_membership_household_changes_id_seq FROM anon, authenticated;
+GRANT ALL ON public.exos_membership_household_changes TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.exos_membership_household_changes_id_seq TO service_role;
+
 -- Holder: share benefits with up to household_seats emails.
+-- Anti-spam: 10 changes a minute per account (exos_rate_hit); at most
+-- 2 x seats + 4 adds / removes per membership per billing period (at least
+-- the last 30 days);
+-- an address gets at most 3 household mails a day from all memberships, and
+-- none when it was removed from this same membership in the last 24 hours (a
+-- re-add then is silent).
 CREATE OR REPLACE FUNCTION public.exos_membership_household_set(p_membership_id uuid, p_email text, p_add boolean DEFAULT true)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE m public.exos_fan_memberships%ROWTYPE; v_email text := lower(btrim(coalesce(p_email, ''))); n int; v_org text;
+        v_mail boolean;
 BEGIN
   SELECT * INTO m FROM public.exos_fan_memberships WHERE id = p_membership_id FOR UPDATE;
   IF NOT FOUND OR m.holder_uid IS DISTINCT FROM auth.uid() THEN RAISE EXCEPTION 'membership not found' USING ERRCODE = 'P0002'; END IF;
+  IF NOT public.exos_rate_hit('mbr-hh:u:' || auth.uid()::text, 10) THEN
+    RAISE EXCEPTION 'too many household changes, try again in a minute' USING ERRCODE = '54000';
+  END IF;
+  SELECT count(*) INTO n FROM public.exos_membership_household_changes c
+   WHERE c.membership_id = m.id
+     -- The current period, and never less than the last 30 days.
+     AND c.created_at >= least(coalesce(m.current_period_start, now()), now() - interval '30 days');
+  IF n >= 2 * coalesce((m.benefits->>'household_seats')::int, 0) + 4 THEN
+    RAISE EXCEPTION 'too many household changes this period' USING ERRCODE = '54000';
+  END IF;
   IF NOT p_add THEN
     DELETE FROM public.exos_membership_household WHERE membership_id = m.id AND email = v_email;
+    IF FOUND THEN
+      INSERT INTO public.exos_membership_household_changes (membership_id, email, action, actor) VALUES (m.id, v_email, 'remove', auth.uid());
+    END IF;
   ELSE
     IF v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' THEN RAISE EXCEPTION 'enter a valid email' USING ERRCODE = '22023'; END IF;
     IF v_email = lower(coalesce(m.holder_email, '')) THEN RAISE EXCEPTION 'that''s you' USING ERRCODE = '22023'; END IF;
@@ -890,8 +953,16 @@ BEGIN
     END IF;
     INSERT INTO public.exos_membership_household (membership_id, email) VALUES (m.id, v_email) ON CONFLICT DO NOTHING;
     IF FOUND THEN
+      v_mail := NOT EXISTS (SELECT 1 FROM public.exos_membership_household_changes c
+                             WHERE c.membership_id = m.id AND c.email = v_email AND c.action = 'remove'
+                               AND c.created_at > now() - interval '24 hours')
+            AND (SELECT count(*) FROM public.exos_membership_household_changes c
+                  WHERE c.email = v_email AND c.mailed AND c.created_at > now() - interval '24 hours') < 3
+            AND public.exos_rate_hit('mbr-hh:to:' || v_email, 2);
+      INSERT INTO public.exos_membership_household_changes (membership_id, email, action, mailed, actor)
+      VALUES (m.id, v_email, 'add', v_mail, auth.uid());
       SELECT name INTO v_org FROM public.exos_orgs WHERE id = m.org_id;
-      BEGIN
+      IF v_mail THEN BEGIN
         INSERT INTO public.exos_mail (template, to_email, subject, html, created_by, status)
         VALUES ('membership-household', v_email, left('You''re on a ' || coalesce(v_org, '') || ' membership', 200),
           '<p>' || replace(replace(replace(coalesce(m.holder_email, 'A member'), '&', '&amp;'), '<', '&lt;'), '>', '&gt;') ||
@@ -899,7 +970,7 @@ BEGIN
           '</strong> membership. Sign in with this email to get the member price, presales and free tickets.</p>',
           auth.uid(), 'pending');
       EXCEPTION WHEN others THEN NULL;
-      END;
+      END; END IF;
     END IF;
   END IF;
   SELECT count(*) INTO n FROM public.exos_membership_household WHERE membership_id = m.id;
@@ -988,3 +1059,42 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_claim_my_passes() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_claim_my_passes() TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 8. Member presale on every ticket-issuing path
+-- ---------------------------------------------------------------------------
+-- Checkout fulfillment checks it in _exos_commerce_on_fulfill (a failed order
+-- is refunded). Every other insert of a ticket into a presale tier (free
+-- claims, waitlist / voucher claims, any future box-office mint) is checked
+-- here, against the signed-in caller (or the ticket owner):
+--   * staff of the event's org (owner / manager / scanner) keep their override
+--     (comps, guest lists, box office);
+--   * a server-side insert with no signed-in user and not inside checkout
+--     fulfillment (marketplace / feed orders the organizer configured) passes;
+--   * everyone else must be an eligible member.
+CREATE OR REPLACE FUNCTION public.exos_tg_ticket_member_presale()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v_uid uuid := auth.uid();
+BEGIN
+  IF NEW.tier_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.exos_member_presales ps WHERE ps.event_id = NEW.event_id) THEN
+    RETURN NEW;
+  END IF;
+  -- Inside exos_fulfill_checkout: the commerce hook decided (graceful failure).
+  -- The setting lives for the rest of the transaction, so it only counts while
+  -- that order is still being fulfilled (pending, same event).
+  IF EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
+              WHERE cs.session_id = nullif(current_setting('exos.table_mint', true), '')
+                AND cs.status = 'pending' AND cs.event_id = NEW.event_id) THEN
+    RETURN NEW;
+  END IF;
+  IF v_uid IS NULL THEN RETURN NEW; END IF;
+  IF public.exos_has_org_role(NEW.org_id, ARRAY['owner', 'manager', 'scanner']) OR public.exos_is_admin() THEN RETURN NEW; END IF;
+  IF public._exos_presale_blocks(NEW.event_id, NEW.tier_id, v_uid) THEN
+    RAISE EXCEPTION 'Tickets are on presale for members right now.' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_tg_ticket_member_presale() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_tickets_member_presale ON public.exos_tickets;
+CREATE TRIGGER exos_tickets_member_presale BEFORE INSERT ON public.exos_tickets
+  FOR EACH ROW EXECUTE FUNCTION public.exos_tg_ticket_member_presale();

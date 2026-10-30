@@ -34,6 +34,7 @@ import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, exosFeeBpsAt } from "../_shared/platformFee.ts";
 import { coverFeesCents, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
+import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,7 +44,10 @@ type Body = Record<string, any>;
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
   let p: Body;
-  try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  // Streaming cap: a huge or endless body is never read in full.
+  const raw = await readCapped(req, MAX_BODY_BYTES);
+  if (raw === null) return json({ error: "request body too large" }, 413);
+  try { p = JSON.parse(raw); } catch { return json({ error: "invalid JSON" }, 400); }
   if (!p || typeof p !== "object" || typeof p.action !== "string") return json({ error: "missing action" }, 400);
 
   const url = Deno.env.get("SUPABASE_URL")!;

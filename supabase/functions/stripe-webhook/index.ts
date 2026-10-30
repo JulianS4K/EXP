@@ -91,8 +91,20 @@ const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership"]);
 // exos: fulfil a settled commerce session; auto-refund one the database refused
 // (sold out pass, amount mismatch). Throws on transient errors (-> 500, retry).
 async function fulfillCommerceSession(sb: SupabaseClient, session: Stripe.Checkout.Session): Promise<void> {
-  const pi = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
+  let pi = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
   const sub = typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null;
+  // A subscription session has no PaymentIntent of its own: the first
+  // invoice's is the one a refund of this purchase will carry.
+  const invoiceId = typeof session.invoice === "string" ? session.invoice : session.invoice?.id ?? null;
+  if (!pi && sub && invoiceId) {
+    try {
+      const inv = await stripe.invoices.retrieve(invoiceId);
+      const ipi = (inv as unknown as { payment_intent?: string | { id: string } | null }).payment_intent;
+      pi = typeof ipi === "string" ? ipi : ipi?.id ?? null;
+    } catch (e) {
+      throw new Error(`invoice lookup failed for ${session.id}: ${(e as Error).message}`);
+    }
+  }
   let periodEnd: string | null = null;
   if (sub) {
     try {
@@ -467,7 +479,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const sessionId = await sessionIdForPaymentIntent(sb, pi);
         if (!sessionId) {
           // exos: a commerce order (gift card, donation, pass, membership term).
-          const { data: co } = await sb.from("exos_commerce_orders").select("session_id").eq("payment_intent", pi).maybeSingle();
+          const { data: co } = await sb.from("exos_commerce_orders").select("session_id, subscription_id")
+            .eq("payment_intent", pi).maybeSingle();
           if (co?.session_id && obj.object === "charge") {
             const ch = obj as Stripe.Charge;
             if (ch.refunded || (ch.amount_refunded ?? 0) >= (ch.amount ?? 0)) {
@@ -475,6 +488,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
               if (error) {
                 console.error(`stripe-webhook: commerce refund failed for ${co.session_id}`, error);
                 return new Response("refund handling error", { status: 500 });
+              }
+              // A refunded membership stops billing too (platform account).
+              // Already cancelled is fine; anything else retries.
+              if (co.subscription_id) {
+                try {
+                  await stripe.subscriptions.cancel(co.subscription_id);
+                } catch (e) {
+                  const code = (e as { code?: string }).code;
+                  if (code !== "resource_missing" && !/canceled/i.test((e as Error).message ?? "")) {
+                    console.error(`stripe-webhook: cancel ${co.subscription_id} failed`, e);
+                    return new Response("subscription cancel error", { status: 500 });
+                  }
+                }
               }
             }
             break;

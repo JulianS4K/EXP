@@ -48,6 +48,13 @@ terms end); `past_due` keeps benefits for 3 days; a cancelled subscription keeps
 | `customer.subscription.updated` | Status mirrored (`active`/`trialing` → active, `past_due`/`unpaid` → past_due, `canceled` → cancelled, `incomplete_expired` → expired), `cancel_at_period_end`, period end. A stale event never revives a cancelled membership. |
 | `customer.subscription.deleted` | Cancelled (`membership.cancelled`). |
 
+Endings are sticky. A refunded purchase (`ended_reason = 'refunded'`) or a cancelled gift (`'gift_cancelled'`) is
+terminal: no later event changes it. A `customer.subscription.updated` can end or degrade a membership but never
+revives a cancelled / expired one and never moves the period end; only `invoice.paid` for a period **after** the
+current one extends it (and is the only way a Stripe-cancelled membership comes back). When a membership purchase is
+refunded, stripe-webhook also cancels the Stripe subscription (platform account), so billing stops. A subscription
+session's refund is matched through its first invoice's PaymentIntent.
+
 Both API shapes are read (`subscription.current_period_end` / `items.data[].current_period_end`;
 `invoice.subscription` / `invoice.parent.subscription_details.subscription`). Add these events to the Stripe webhook
 endpoint. Subscriptions are created on the platform account with `transfer_data` to the organizer and an
@@ -67,7 +74,11 @@ owner / manager (`exos_membership_cancel_gift`); a paid gift isn't refunded auto
 
 ### Household
 
-The holder adds up to `household_seats` emails (`exos_membership_household_set`); each gets a mail. Anyone signed in
+The holder adds up to `household_seats` emails (`exos_membership_household_set`); each gets a mail. Anti-spam: 10
+changes a minute per account, at most 2 × seats + 4 adds / removes per membership per billing period (at least the
+last 30 days), at most 3 household mails a day to one address, and no mail to an address removed from the same
+membership in the last 24 hours (re-adding it is silent). Every change is logged in
+`exos_membership_household_changes` (service role only). Anyone signed in
 with a **confirmed** email on the list gets the member price, presales and free tickets. Only the holder manages
 billing and the household.
 
@@ -88,8 +99,12 @@ product / first name, never the email.
 
 Per event (`exos_set_member_presale`, owner / manager): from `starts_at` (or now) until `ends_at`, the covered tiers
 (all when empty) sell only to members of the listed products (any of the org's when empty) whose benefits include
-presale. Everyone else, guests included, gets 403 "Tickets are on presale for members right now." from exos-checkout;
-pass and member-free redemptions are gated the same way. Not yet: letting members buy before a tier's own
+presale. Everyone else, guests included, gets 403 "Tickets are on presale for members right now." from exos-checkout.
+It holds on every path: checkout fulfillment checks it again (a non-member's order that reaches fulfillment fails and
+is refunded), pass and member-free redemptions check it, and a trigger on ticket insert
+(`exos_tg_ticket_member_presale`) refuses free claims and any other signed-in issuing by a non-member. Staff of the org
+(owner / manager / scanner: comps, guest lists, box office) keep their override; a server-side insert with no
+signed-in user outside checkout (marketplace / feed orders the organizer set up) passes. Not yet: letting members buy before a tier's own
 `sales_start`.
 
 ## Using passes and member free tickets
@@ -105,8 +120,9 @@ request id returns the tickets already issued. Tickets have `price_paid = 0`, so
 
 ## Refunds
 
-A full Stripe refund of a pass or one-time membership purchase (`exos_commerce_refund`) voids the pass / cancels the
-membership. A subscription refund doesn't cancel the subscription; cancel it in Stripe (the deleted event follows).
+A full Stripe refund of a pass or membership purchase (`exos_commerce_refund`) voids the pass / ends the membership
+for good (`ended_reason = 'refunded'`), and for a subscription stripe-webhook cancels it in Stripe. Refunds of later
+renewal invoices aren't matched to the membership yet.
 Voiding a pass ticket doesn't give the credit back.
 
 ## Partner API

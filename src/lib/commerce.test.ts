@@ -199,3 +199,13 @@ describe('member price and passes', () => {
     expect(membershipStatusFromStripe('incomplete')).toBeNull();
   });
 });
+
+describe('request body cap (exos-commerce, exos-checkout)', () => {
+  it('reads a small body and refuses an oversized one, declared or streamed', async () => {
+    const { readCapped } = await import('../../supabase/functions/_shared/api/body.ts');
+    expect(await readCapped(new Request('https://x.test', { method: 'POST', body: '{"a":1}' }), 100)).toBe('{"a":1}');
+    expect(await readCapped(new Request('https://x.test', { method: 'POST', body: 'x'.repeat(101) }), 100)).toBeNull();
+    const stream = new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(64)); } }); // endless, no length
+    expect(await readCapped(new Request('https://x.test', { method: 'POST', body: stream, duplex: 'half' } as RequestInit), 1000)).toBeNull();
+  });
+});

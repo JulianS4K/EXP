@@ -19,6 +19,11 @@
 --   M8 door lookup of a membership card (no email; other org refused)
 --   M9 one-time terms stack; refunds void the pass / cancel the membership
 --   M10 cross-org isolation
+--   M11 endings are terminal: a refund (ended_reason) or a cancel is never undone by
+--       customer.subscription.updated; only invoice.paid for a later period reactivates
+--   M12 member presale on every path: free claim refused for a non-member, a
+--       member and staff comps pass, a paid order fails at fulfillment
+--   M13 household anti-spam: change cap per period, no re-mail after a removal
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_passes_memberships.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -33,6 +38,7 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
   ('c7000000-0000-0000-0000-0000000000a6', 'c7-partner@x.com', now()),
   ('c7000000-0000-0000-0000-0000000000a7', 'c7-friend@x.com', now()),
   ('c7000000-0000-0000-0000-0000000000a8', 'c7-unconfirmed@x.com', NULL),
+  ('c7000000-0000-0000-0000-0000000000a9', 'c7-nonmember@x.com', now()),
   ('c7000000-0000-0000-0000-0000000000b9', 'c7-other-owner@x.com', now());
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   ('c7000000-0000-0000-0000-000000000001', 'C7 Org', 'c7-org', 'c7000000-0000-0000-0000-0000000000a0'),
@@ -54,6 +60,7 @@ INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold,
   ('c7000000-0000-0000-0000-0000000000d3', 'c7000000-0000-0000-0000-0000000000e2', 'GA', 30, 1, 1, 'public'),
   ('c7000000-0000-0000-0000-0000000000d4', 'c7000000-0000-0000-0000-0000000000e2', 'Floor', 30, 100, 0, 'public'),
   ('c7000000-0000-0000-0000-0000000000d5', 'c7000000-0000-0000-0000-0000000000e3', 'GA', 30, 100, 0, 'public'),
+  ('c7000000-0000-0000-0000-0000000000d6', 'c7000000-0000-0000-0000-0000000000e1', 'Free', 0, 100, 0, 'public'),
   ('c7000000-0000-0000-0000-0000000000d9', 'c7000000-0000-0000-0000-0000000000e9', 'GA', 30, 100, 0, 'public');
 
 CREATE FUNCTION pg_temp.act(p_uid text) RETURNS void LANGUAGE sql AS $$
@@ -490,6 +497,104 @@ BEGIN
   RAISE NOTICE 'OK  M10 cross-org isolation';
 END $$;
 RESET ROLE;
+
+-- M11 -----------------------------------------------------------------------
+INSERT INTO public.exos_commerce_orders (session_id, org_id, kind, product_id, buyer_uid, buyer_email, amount_cents, currency) VALUES
+  ('cs_c7_m2', 'c7000000-0000-0000-0000-000000000001', 'membership', 'c7000000-0000-0000-0000-00000000a001',
+   'c7000000-0000-0000-0000-0000000000a9', 'c7-nonmember@x.com', 1000, 'usd');
+SET ROLE service_role;
+DO $$
+DECLARE st text; v_end timestamptz := now() + interval '1 month';
+BEGIN
+  ASSERT public.exos_commerce_fulfill('cs_c7_m2', 'pi_c7_m2', 1000, 'sub_c7two', v_end) = 'fulfilled', 'M11: bought';
+  ASSERT public.exos_membership_sync('sub_c7two', 'deleted', 'canceled', v_end) = 'cancelled', 'M11: Stripe cancelled it';
+  ASSERT public.exos_membership_sync('sub_c7two', 'updated', 'active', v_end + interval '1 month', false) = 'cancelled',
+    'M11: an update never revives (nor extends)';
+  ASSERT public.exos_membership_sync('sub_c7two', 'invoice_paid', NULL, v_end) = 'cancelled', 'M11: no new period, no revival';
+  ASSERT public.exos_membership_sync('sub_c7two', 'invoice_paid', NULL, v_end + interval '1 month') = 'active',
+    'M11: a paid later period reactivates';
+  ASSERT public.exos_commerce_refund('cs_c7_m2', 'test') = 'refunded', 'M11: refunded';
+  ASSERT public.exos_membership_sync('sub_c7two', 'updated', 'active', v_end + interval '2 months', false) = 'cancelled', 'M11: refund terminal (update)';
+  ASSERT public.exos_membership_sync('sub_c7two', 'invoice_paid', NULL, v_end + interval '3 months') = 'cancelled', 'M11: refund terminal (invoice)';
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT (SELECT ended_reason = 'refunded' AND status = 'cancelled' AND current_period_end <= now()
+            FROM public.exos_fan_memberships WHERE stripe_subscription_id = 'sub_c7two'), 'M11: ended for good';
+  ASSERT (SELECT ended_reason FROM public.exos_fan_memberships m JOIN public.exos_commerce_orders o ON o.result_id = m.id
+           WHERE o.session_id = 'cs_c7_o2') = 'refunded', 'M11: the refunded one-time term too';
+  RAISE NOTICE 'OK  M11 terminal endings';
+END $$;
+
+-- M12 -----------------------------------------------------------------------
+SET ROLE authenticated;
+DO $$
+DECLARE refused boolean := false; n int;
+BEGIN
+  PERFORM pg_temp.act('c7000000-0000-0000-0000-0000000000a0');
+  PERFORM public.exos_set_member_presale('c7000000-0000-0000-0000-0000000000e1', NULL, now() + interval '1 day',
+    ARRAY['c7000000-0000-0000-0000-0000000000d2', 'c7000000-0000-0000-0000-0000000000d6']::uuid[], '{}');
+  -- Non-member free claim: refused.
+  PERFORM set_config('app.uid', 'c7000000-0000-0000-0000-0000000000a9', true);
+  PERFORM set_config('app.jwt', '{"email":"c7-nonmember@x.com"}', true);
+  BEGIN
+    PERFORM public.exos_claim_free_tickets('c7000000-0000-0000-0000-0000000000e1', 'c7000000-0000-0000-0000-0000000000d6', 1);
+  EXCEPTION WHEN insufficient_privilege THEN refused := true;
+  END;
+  ASSERT refused, 'M12: a non-member''s free claim during the presale is refused';
+  -- A member (holder of m1) claims.
+  PERFORM set_config('app.uid', 'c7000000-0000-0000-0000-0000000000a5', true);
+  PERFORM set_config('app.jwt', '{"email":"c7-fan@x.com"}', true);
+  PERFORM public.exos_claim_free_tickets('c7000000-0000-0000-0000-0000000000e1', 'c7000000-0000-0000-0000-0000000000d6', 1);
+  -- Staff comp keeps the override.
+  PERFORM pg_temp.act('c7000000-0000-0000-0000-0000000000a0');
+  PERFORM public.exos_mint_tickets('c7000000-0000-0000-0000-0000000000e1', 'c7000000-0000-0000-0000-0000000000d6', 1);
+  RAISE NOTICE 'OK  M12 presale on free claims and comps';
+END $$;
+RESET ROLE;
+DO $$
+DECLARE ids uuid[];
+BEGIN
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE tier_id = 'c7000000-0000-0000-0000-0000000000d6') = 2, 'M12: member + comp tickets';
+  -- A paid order by a non-member that reaches fulfillment during the presale fails (and is refunded).
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, buyer_uid, buyer_email, quantity, amount_cents, currency, status)
+  VALUES ('c7-ps1', 'c7000000-0000-0000-0000-0000000000e1', 'c7000000-0000-0000-0000-0000000000d2', 'c7000000-0000-0000-0000-000000000001',
+          'c7000000-0000-0000-0000-0000000000a9', 'c7-nonmember@x.com', 1, 9000, 'usd', 'pending');
+  ids := public.exos_fulfill_checkout('c7-ps1');
+  ASSERT cardinality(ids) = 0 AND (SELECT failure_reason FROM public.exos_checkout_sessions WHERE session_id = 'c7-ps1') LIKE '%presale%',
+    'M12: paid non-member order fails at fulfillment';
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, buyer_uid, buyer_email, quantity, amount_cents, currency, status)
+  VALUES ('c7-ps2', 'c7000000-0000-0000-0000-0000000000e1', 'c7000000-0000-0000-0000-0000000000d2', 'c7000000-0000-0000-0000-000000000001',
+          'c7000000-0000-0000-0000-0000000000a5', 'c7-fan@x.com', 1, 8100, 'usd', 'pending');
+  ids := public.exos_fulfill_checkout('c7-ps2');
+  ASSERT cardinality(ids) = 1, 'M12: the member''s paid order goes through';
+END $$;
+
+-- M13 -----------------------------------------------------------------------
+SET ROLE authenticated;
+DO $$
+DECLARE m uuid := (SELECT v::uuid FROM c7 WHERE k = 'm1'); refused boolean := false; mails int;
+BEGIN
+  PERFORM pg_temp.act('c7000000-0000-0000-0000-0000000000a5');
+  -- 1 seat: cap 2 x 1 + 4 = 6 changes this period (the first add in M6 counts).
+  PERFORM public.exos_membership_household_set(m, 'c7-partner@x.com', false);   -- 2
+  PERFORM public.exos_membership_household_set(m, 'c7-partner@x.com', true);    -- 3: removed < 24 h ago, no mail
+  PERFORM public.exos_membership_household_set(m, 'c7-partner@x.com', false);   -- 4
+  PERFORM public.exos_membership_household_set(m, 'c7-partner@x.com', true);    -- 5
+  PERFORM public.exos_membership_household_set(m, 'c7-partner@x.com', false);   -- 6
+  BEGIN PERFORM public.exos_membership_household_set(m, 'c7-friend@x.com', true);
+  EXCEPTION WHEN program_limit_exceeded THEN refused := true; END;
+  ASSERT refused, 'M13: household change cap per period';
+  RAISE NOTICE 'OK  M13 household limits';
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'membership-household' AND to_email = 'c7-partner@x.com') = 1,
+    'M13: one mail to the partner (re-adds after a removal are silent)';
+  ASSERT NOT has_table_privilege('authenticated', 'public.exos_membership_household_changes', 'SELECT'), 'M13: change log service only';
+END $$;
 
 SELECT '*** PASSES + MEMBERSHIPS PASSED ***';
 ROLLBACK;

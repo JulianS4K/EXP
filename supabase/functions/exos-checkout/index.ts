@@ -70,6 +70,7 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
+import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import {
   giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeGiftCardCode, parseDonationCents,
 } from "../_shared/commerce.ts";
@@ -108,7 +109,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     gift_card_code?: string;
     donation?: { campaign_id?: string; amount_cents?: number };
   };
-  try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
+  // Streaming cap: a huge or endless body is never read in full.
+  const raw = await readCapped(req, MAX_BODY_BYTES);
+  if (raw === null) return json({ error: "request body too large" }, 413);
+  try { p = JSON.parse(raw); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
   if (!user && p.guest_email === undefined) return json({ error: "unauthorized" }, 401);
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
