@@ -37,7 +37,7 @@ reviewed and added to its allowlist.
 Legend: **OK** = intended and properly checked; **Revoked** = internal helper,
 client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 
-### Callable by anon (23 flagged)
+### Callable by anon (24 flagged)
 
 | Function | Verdict | Why |
 |---|---|---|
@@ -55,9 +55,10 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_promoter_add_guest`, `_remove_guest`, `_set_guest_access_needs`, `_note_limit_flag`, `_set_socials` | OK | Anon writes gated by the kit token and `_exos_promoter_list` (list must be the promoter's, open, and on a live event); guest adds count against the list cap when one is set |
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
+| `exos_match_public` (mig 20261031210000) | OK | Matched seats: group sizes, quiz options, match / reveal times and the number of spots for the public tiers of published events. No spot names or addresses, no people |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
 
-### Callable by authenticated (131 flagged)
+### Callable by authenticated (148 flagged)
 
 Grouped by the check they rely on. All pin `search_path`.
 
@@ -134,6 +135,10 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_match_set_config`, `exos_match_upsert_spot`, `exos_match_delete_spot`, `exos_match_staff_view`, `exos_match_move`, `exos_match_swap`, `exos_match_remove_member`, `exos_match_lock`, `exos_match_reveal_now`, `exos_match_review_report` (mig 20261031210000) | OK | Matched seats, staff: owner / manager of the tier's org (`_exos_match_staff_cfg` → `_exos_can_edit_event`), or admin. Moves, swaps and placements are refused after reveal and re-check group size, spot capacity and blocks (`_exos_match_can_join`) under the config row lock. The review shows first names, quiz answers and order refs, never emails |
+| `exos_match_save_intake`, `exos_match_set_answers`, `exos_match_clear_answers`, `exos_match_my_group`, `exos_match_pick`, `exos_match_report`, `exos_match_block` (mig 20261031210000) | OK | Matched seats, holders: self (`auth.uid()`) and the current owner of an active / used ticket. Answers are validated against the tier's options (age band, never a birthdate) and only used while their author holds the ticket. The spot and the other members (first names only, no emails, no user ids) come back only after the group is revealed. A pick is shown only when mutual; reports are 10 a day per account; a member's block is visible to nobody and applies in every org's matching |
+| `exos_match_inputs`, `exos_match_apply`, `exos_match_due`, `exos_match_reveal_due`, `exos_match_sweep`, `_exos_match_*`, `exos_tg_social_member_fill` (mig 20261031210000) | Internal | Service role only (exos-match). `exos_match_inputs` / `exos_match_apply` take the verified user id from exos-match's "Match now" and check owner / manager themselves. `exos_match_apply` re-checks every hard rule (one order never split, group max, spot capacity, blocked pairs, tickets of this tier) before writing |
+| `exos_match_configs`, `exos_match_spots`, `exos_social_groups`, `exos_social_group_members`, `exos_match_leftovers`, `exos_match_reports`, `exos_match_blocks`, `exos_match_intake`, `exos_match_answers`, `exos_match_picks` (tables, mig 20261031210000) | OK | RLS on; no client writes. Owner / manager (or admin) read their org's configs, spots, groups, members, leftovers, reports and staff blocks. Quiz answers, intake, picks and member blocks have no client grant at all. `exos_match_sweep` deletes answers `retention_days` after the event |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

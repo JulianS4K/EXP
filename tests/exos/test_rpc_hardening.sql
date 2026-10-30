@@ -124,6 +124,8 @@ BEGIN
        -- public by design
        'exos_event_is_published', 'exos_public_promoter', 'exos_public_table_tiers',
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
+       -- matched seats: group sizes + quiz options of published events, no people (mig 20261031210000)
+       'exos_match_public',
        -- counts a promo-link visit, answers nothing (mig 20261016110000)
        'exos_promo_link_hit',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)

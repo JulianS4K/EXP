@@ -39,6 +39,7 @@ import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
+import MatchedSeatsPanel from '../components/MatchedSeatsPanel';
 import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
@@ -466,6 +467,8 @@ export default function OrganizerEventReport() {
         {tab === 'door' && (<>
         {/* Nightlife: table labels for sold tables, and guest lists. */}
         <TableAssignmentsPanel event={event} canManage={canAct} />
+        {/* Matched seats: buyers grouped into tables / crews (mig 20261031210000). */}
+        <MatchedSeatsPanel event={event} canManage={canAct} />
         <GuestListPanel event={event} canManage={canAct} />
         {/* Exos Door: attendees sold on another platform (mig 20261013090000). */}
         {canAct && (

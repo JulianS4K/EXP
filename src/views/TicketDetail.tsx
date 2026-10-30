@@ -28,6 +28,7 @@ import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import ReferralProgress from '../components/ReferralProgress';
 import TicketOnlineAccess from '../components/TicketOnlineAccess';
+import TicketMatchedGroup from '../components/TicketMatchedGroup';
 import { useT } from '../context/LanguageContext';
 
 export default function TicketDetail() {
@@ -512,6 +513,12 @@ export default function TicketDetail() {
                  {(currentTicket.status === 'active' || currentTicket.status === 'used')
                    && !(currentTicket as any).pendingTransferId && (
                    <TicketOnlineAccess eventId={event.id} format={event.format} whatToBring={event.whatToBring} />
+                 )}
+
+                 {/* Matched seats (mig 20261031210000): the holder's group, revealed before the event. */}
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used')
+                   && !(currentTicket as any).pendingTransferId && (
+                   <TicketMatchedGroup ticketId={currentTicket.id} />
                  )}
 
                  <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />
