@@ -55,6 +55,8 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_promoter_add_guest`, `_remove_guest`, `_set_guest_access_needs`, `_note_limit_flag`, `_set_socials` | OK | Anon writes gated by the kit token and `_exos_promoter_list` (list must be the promoter's, open, and on a live event); guest adds count against the list cap when one is set |
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
+| `exos_public_series`, `exos_public_org_series`, `exos_public_collection` (mig 20261030150000) | OK | Public series and collection pages: active series / published collections, and only their upcoming **published** events, through one column list (`_exos_public_event_json`: no status, counts or buyer data). Nothing for drafts |
+| `exos_public_timed_entry`, `exos_public_event_slots` (mig 20261030150000) | OK | A timed event's slot config and what is left per slot (live holds count as taken), for published or cancelled events; a draft's only for its org's staff (`_exos_timed_visible`). At most 62 days per call. No buyer data |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
 
 ### Callable by authenticated (131 flagged)
@@ -134,6 +136,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_series_*` (create, generate, publish, cancel_date, propagate, update, cancel, delete, attach_event, detach_event), `exos_set_timed_entry`, `exos_clear_timed_entry`, `exos_set_event_slot` (mig 20261030150000) | OK | Owner / manager of the series' or event's org (`exos_has_org_role`), looked up from the row; another org's id answers "not found" (42501) |
+| `exos_event_slot_report`, `exos_collection_event_ids`, `exos_event_door_slots`, `exos_admit_outside_window` (mig 20261030150000) | OK | Org staff (report, collection preview); door roles plus `exos_can_door_event` (door registry, "admit anyway"). `exos_attach_hold_slot` is service role only (exos-checkout); `_exos_slot_commit`, `_exos_slot_report` and the other `_exos_*` helpers have no client grant |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

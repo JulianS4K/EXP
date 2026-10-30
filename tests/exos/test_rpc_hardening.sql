@@ -126,6 +126,9 @@ BEGIN
        'exos_transfer_claim_preview', 'exos_invite_preview', 'exos_server_time',
        -- counts a promo-link visit, answers nothing (mig 20261016110000)
        'exos_promo_link_hit',
+       -- published series / collections / timed-entry slots only (mig 20261030150000)
+       'exos_public_series', 'exos_public_org_series', 'exos_public_collection',
+       'exos_public_timed_entry', 'exos_public_event_slots',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
