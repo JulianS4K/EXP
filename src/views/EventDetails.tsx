@@ -63,6 +63,10 @@ import { getSeatedTierIds } from '../lib/seatingApi';
 // Timed entry + series dates (mig 20261030150000).
 import SlotPicker from '../components/SlotPicker';
 import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } from '../lib/seriesTimedApi';
+// Matched seats (mig 20261031210000): the optional quiz before checkout.
+import MatchedQuiz from '../components/MatchedQuiz';
+import { getPublicMatchedTiers, saveIntake, type PublicMatchedTier } from '../lib/matchedSeatsApi';
+import { answersBody, EMPTY_ANSWERS, type QuizAnswers } from '../lib/matchedSeats';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -102,6 +106,15 @@ export default function EventDetails() {
     return () => { live = false; };
   }, [event?.id, event?.seriesId]);
   const slotTier = !!timed && !!selectedTierId && timed.tierIds.includes(selectedTierId);
+  // Matched seats: which tiers are matched, and the buyer's quiz answers.
+  const [matchedTiers, setMatchedTiers] = useState<PublicMatchedTier[]>([]);
+  const [quiz, setQuiz] = useState<QuizAnswers>(EMPTY_ANSWERS);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    getPublicMatchedTiers(event.id).then((m) => { if (live) setMatchedTiers(m); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [event?.id]);
   // Phone buy bar: shown while the buy card is off screen.
   const buyCardRef = useRef<HTMLDivElement>(null);
   const [buyInView, setBuyInView] = useState(false);
@@ -531,6 +544,17 @@ export default function EventDetails() {
     if (!tier?.id) {
       toast({ kind: 'error', message: selectedTierId ? 'That ticket type is no longer available. Pick another.' : 'No ticket tier available for this event yet.' });
       return;
+    }
+    // Matched seats: save the optional quiz first (per account and tier; copied
+    // onto the tickets when groups form). Nothing answered = nothing saved.
+    const matchedTier = matchedTiers.find((m) => m.tierId === tier.id);
+    if (matchedTier?.quizEnabled && JSON.stringify(quiz) !== JSON.stringify(EMPTY_ANSWERS)) {
+      try {
+        await saveIntake(tier.id, answersBody(quiz, { tags: matchedTier.quizTags, languages: matchedTier.quizLanguages }));
+      } catch (err: any) {
+        toast({ kind: 'error', message: err?.message || 'Check your answers.' });
+        return;
+      }
     }
     const unitPrice = tier.price ?? event.price ?? 0;
     // A purchase needs Stripe checkout whenever there's anything PRICED — a paid
@@ -1175,6 +1199,27 @@ export default function EventDetails() {
                      })}
                   </div>
                 )}
+
+                {/* Matched seats: how it works + the optional quiz (signed in; guests answer on their ticket). */}
+                {(() => {
+                  const m = matchedTiers.find((x) => x.tierId === (selectedTierId ?? allTiers[0]?.id));
+                  if (!m) return null;
+                  return (
+                    <div className="mb-8 border border-white/10 p-4 space-y-3">
+                      <p className="type text-sm text-white/80">
+                        A matched seat: you'll be grouped with {m.groupMin === m.groupMax ? m.groupMax : `${m.groupMin}–${m.groupMax}`} people
+                        {m.spotCount > 1 ? ` at one of ${m.spotCount} spots` : ''}. Tickets in one order sit together.
+                        Where and with whom is revealed {m.revealAt
+                          ? formatInTz(new Date(m.revealAt), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                          : 'before the event'}.
+                      </p>
+                      {m.quizEnabled && m.status === 'open' && (user
+                        ? <MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} />
+                        : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
+                    </div>
+                  );
+                })()}
+
 
                 {/* Timed entry: date + time slot for the chosen ticket type. */}
                 {slotTier && timed && selectedTierId && (
