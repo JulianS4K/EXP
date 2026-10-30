@@ -831,6 +831,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const gInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       buyer_uid: buyerUid, buyer_email: buyerEmail, ...(buyerUid ? {} : { guest: true }),
+      // Timed entry: fulfillment counts the slot from the session row.
+      ...(timedSlot ? { slot_id: timedSlot } : {}),
       quantity, amount_cents: 0, currency, status: "pending",
       addons: addonsForSession.length > 0 ? addonsForSession : null,
       voucher_id: voucherId, tax_cents: recordedTax > 0 ? recordedTax : null, promoter_id: promoterId ?? null,
