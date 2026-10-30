@@ -398,7 +398,7 @@ DECLARE v jsonb;
 BEGIN
   v := public.exos_oauth_register('Claude', ARRAY['https://claude.ai/api/mcp/auth_callback'], NULL, 'public', NULL, NULL);
   ASSERT v->>'source' = 'dcr' AND NOT (v->>'verified')::boolean AND v->>'client_secret' IS NULL
-     AND jsonb_array_length(v->'scopes') = 15, 'DP12 registered ' || v::text;
+     AND jsonb_array_length(v->'scopes') = cardinality(public.exos_api_scope_names()), 'DP12 registered ' || v::text;
   BEGIN
     PERFORM public.exos_oauth_register('x', ARRAY['http://attacker.example/cb'], NULL, 'public', NULL, NULL);
     RAISE EXCEPTION 'DP12 bad redirect registered';

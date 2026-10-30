@@ -447,6 +447,11 @@ DECLARE
 BEGIN
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_min_capacity', '100000')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  -- Integration: since mig 20261029090000 the resale rule is the free tier
+  -- (run_p0.sh sets free_tier_max_capacity to -1, off); every event is free
+  -- tier here, so resale is closed.
+  INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_capacity', '100000')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
   BEGIN
     PERFORM public._exos_partner_reserve(org, ev, sh, NULL, '[{"ticket_type_id":"c3000000-0000-0000-0000-0000000000d1","quantity":1}]', '{}');
     RAISE EXCEPTION 'PS12 a partner sold under the resale rule';
@@ -470,6 +475,7 @@ BEGIN
   EXCEPTION WHEN no_data_found THEN NULL;
   END;
   UPDATE public.exos_platform_settings SET value = '0' WHERE key = 'resale_min_capacity';
+  UPDATE public.exos_platform_settings SET value = '-1' WHERE key = 'free_tier_max_capacity';
   RAISE NOTICE 'OK  PS12 resale rule; organizer reservations';
 END $$;
 
