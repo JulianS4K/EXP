@@ -8,6 +8,7 @@
 -- REPLACE only.
 --
 -- Touches:  R: FUNCTION exos_event_buy_link (section 1)
+--           R: FUNCTION exos_api_scope_names (section 2)
 -- Pre-reqs: every exos migration before this one.
 -- ============================================================================
 
@@ -42,3 +43,26 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.exos_event_buy_link(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_buy_link(uuid) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 2. Partner API scopes: the union.
+--    20261031110000 (core API) added refunds:write and 20261031120000 (fans)
+--    added fans:read / fans:write; each redefined exos_api_scope_names() from
+--    the 15-scope list, so the later one dropped refunds:write and a key could
+--    no longer be given the refund scope. Same order as SCOPES in
+--    supabase/functions/_shared/api/scopes.ts (src/lib/apiScopes.test.ts reads
+--    the latest definition); org:admin stays last.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.exos_api_scope_names()
+RETURNS text[]
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT ARRAY[
+    'events:read', 'events:write', 'orders:read', 'refunds:write', 'fans:read', 'fans:write', 'tickets:read',
+    'tickets:write', 'checkin:write', 'booking:read', 'booking:write', 'finance:read', 'finance:write',
+    'commerce:read', 'commerce:write', 'webhooks:read', 'webhooks:write', 'org:admin'
+  ]::text[]
+$$;
+REVOKE ALL ON FUNCTION public.exos_api_scope_names() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_api_scope_names() TO authenticated, service_role;

@@ -32,6 +32,9 @@ function sqlScopeNames(): string[] {
 
 describe('API scopes', () => {
   it('SCOPES equals exos_api_scope_names() in the migration, in order', () => {
+    // 18 since the build-phase integration (mig 20261101000000): the base 15,
+    // refunds:write (mig 20261031110000), fans:read / fans:write (mig 20261031120000).
+    expect(SCOPES).toHaveLength(18);
     expect(sqlScopeNames()).toEqual([...SCOPES]);
   });
 
