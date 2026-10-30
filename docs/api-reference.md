@@ -1,6 +1,6 @@
 # Partner API (exos-api)
 
-A read-only REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
+A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
 site, reporting. The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
@@ -10,7 +10,13 @@ site, reporting. The full reference, with every endpoint, parameter and example,
   (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page). Pure TypeScript, so vitest
   imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap). SQL harness: `tests/exos/test_api_scopes.sql`.
+  the 10-key cap), `20261030120000` (sales counts, the first write routes). SQL harnesses:
+  `tests/exos/test_api_scopes.sql`, `tests/exos/test_sales_counts.sql`.
+- **Writes:** reads are GET. The only writes are the sales counts (`POST /v1/sales-counts`, `PUT` / `DELETE
+  /v1/sales-counts/:id`, `POST /v1/events/:id/sales-counts/import`), each needing `finance:write`. They take a JSON
+  body and call service-role RPCs (`exos_api_sales_count_put` / `_delete`) that re-check the event or row
+  belongs to the key's org. A new write route needs a `:write` scope (`apiRoutes.test.ts` checks it) and the same
+  shape: validate in the function, write through an RPC that takes the key's org id.
 - **Deploy:** `exos-api` takes an API key, not a Supabase JWT, so it is deployed with `--no-verify-jwt`.
 
 ## Auth and scopes
@@ -32,7 +38,8 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
 - 120 requests per key per minute; over it, `429` with `Retry-After`. If the limiter fails, `503` (no limiter, no
   answer: the API returns personal data).
 - Errors are `{ "error": "…" }`: `400` bad paging or filter, `401` missing or invalid key, `403` scope, `404`
-  unknown path or another org's id, `405` anything but GET, `500`, `503`.
+  unknown path or another org's id, `405` a method the API never answers, `409` / `413` / `415` / `422` on the
+  sales-count writes, `500`, `503`.
 
 ## Adding a route
 

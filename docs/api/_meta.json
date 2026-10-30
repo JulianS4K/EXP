@@ -2,7 +2,7 @@
   "title": "Exos API",
   "version": "1",
   "base_url": "https://<project-ref>.supabase.co/functions/v1/exos-api",
-  "description": "A read-only REST API over one organization's Exos data: events, ticket types, attendees, door scans, orders, invoices, refunds and webhooks. Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, or build reports. Every request is scoped to the organization of the API key that makes it; nothing in the API changes data. Requests are GET, responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers, and a key in a browser is a key anyone can copy.",
+  "description": "A REST API over one organization's Exos data: events, ticket types, attendees, door scans, orders, invoices, refunds, webhooks and tickets sold on other platforms (sales counts). Use it to sync sales into a CRM or a spreadsheet, show your events on your own site, or build reports. Every request is scoped to the organization of the API key that makes it. Everything is a read (GET) except the sales counts, which a key with finance:write can also add, change, delete and import (POST, PUT and DELETE with a JSON body); responses are JSON, and times are ISO 8601 strings in UTC. Paths below are relative to the base URL (the exos-api edge function of your Supabase project), e.g. https://<project-ref>.supabase.co/functions/v1/exos-api/v1/events. Each path also answers without the /v1 prefix, for clients of the first release. Call the API from your server: it sends no CORS headers, and a key in a browser is a key anyone can copy.",
   "authentication": {
     "description": "Send an organization API key as a bearer token. An owner or manager creates keys in Org settings → Developer, choosing the scopes each key gets; the key (sk_live_ plus 48 hex characters) is shown once, and only its SHA-256 hash and a 16-character prefix are stored. An organization has at most 10 active keys. Keys do not expire: they work until revoked, and a key is revoked automatically when the member who created it leaves the organization. A request for anything outside the key's organization answers 404, so ids from other organizations cannot be probed.",
     "header": "Authorization",
@@ -17,7 +17,7 @@
         "description": "Every endpoint. Held to the scopes chosen when the key was created (an owner or manager can change them later). Keys created before scopes existed carry the legacy `read` scope, which covers every `:read` scope."
       }
     ],
-    "scopes_description": "Every endpoint needs one scope, named on the endpoint; GET /v1/me needs none. A key without the scope gets 403 with WWW-Authenticate: Bearer error=\"insufficient_scope\". A `:write` scope covers the `:read` scope of the same resource, and the legacy `read` scope covers every `:read` scope. Scopes for areas without routes yet (booking, finance, commerce) and the `:write` scopes can already be granted, so a key can be narrowed ahead of the routes that will use them. GET /v1/me returns a key's scopes as stored and as they take effect."
+    "scopes_description": "Every endpoint needs one scope, named on the endpoint; GET /v1/me needs none. A key without the scope gets 403 with WWW-Authenticate: Bearer error=\"insufficient_scope\". A `:write` scope covers the `:read` scope of the same resource, and the legacy `read` scope covers every `:read` scope. Scopes for areas without routes yet (booking, commerce) and the `:write` scopes without routes can already be granted, so a key can be narrowed ahead of the routes that will use them. GET /v1/me returns a key's scopes as stored and as they take effect."
   },
   "pagination": {
     "description": "List endpoints marked as paged take page and per_page and answer { data, meta }. meta.total is the number of rows matching the filters and meta.total_pages the number of pages at this per_page; walk the list by asking for page + 1 until page >= total_pages. A page past the end answers an empty data array. Each list has a fixed order (documented per endpoint) with a tiebreak on the id, so pages do not overlap while the data is unchanged. Endpoints that are not paged answer { data: [...] } with every row. A bad page or per_page answers 400.",
@@ -62,13 +62,17 @@
     "unknown_path_example": { "error": "not found", "hint": "see /developers for the API reference" }
   },
   "error_codes": [
-    { "status": 400, "name": "Bad request", "description": "A bad page, per_page or filter value; the message names it." },
+    { "status": 400, "name": "Bad request", "description": "A bad page, per_page or filter value, or an invalid field in a request body; the message names it." },
     { "status": 401, "name": "Unauthorized", "description": "No bearer key (\"missing bearer API key\"), or a key that is unknown or revoked (\"invalid or revoked API key\")." },
     { "status": 403, "name": "Forbidden", "description": "The key lacks the endpoint's scope. The body names it (required_scope) and so does the WWW-Authenticate header: Bearer error=\"insufficient_scope\", scope=\"…\"." },
     { "status": 404, "name": "Not found", "description": "An unknown path, or an event or order that does not exist in the key's organization." },
-    { "status": 405, "name": "Method not allowed", "description": "Anything but GET (the API is read-only). The Allow header says GET." },
+    { "status": 405, "name": "Method not allowed", "description": "A method the API does not answer (it answers GET, POST, PUT and DELETE; the Allow header lists them). A method a path does not take answers 404." },
+    { "status": 409, "name": "Conflict", "description": "A write that clashes with existing data, e.g. renaming a sales count to a label its event already has." },
+    { "status": 413, "name": "Payload too large", "description": "A request body over the limit (a CSV import carries at most 2 MB)." },
+    { "status": 415, "name": "Unsupported media type", "description": "A POST or PUT whose body is not JSON (Content-Type: application/json)." },
+    { "status": 422, "name": "Unprocessable", "description": "A CSV import whose file has errors; each is listed with its line and field, and nothing was written." },
     { "status": 429, "name": "Too many requests", "description": "Over 120 requests this minute for this key; wait Retry-After seconds." },
-    { "status": 500, "name": "Server error", "description": "Unexpected; safe to retry, since every call is a read." },
+    { "status": 500, "name": "Server error", "description": "Unexpected; safe to retry: reads change nothing, and the sales-count writes are idempotent (a label or a platform's import replaces, never adds)." },
     { "status": 503, "name": "Unavailable", "description": "The rate limiter could not be reached, so the request was refused; retry after Retry-After seconds." }
   ],
   "webhooks": {

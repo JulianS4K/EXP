@@ -11,6 +11,7 @@ import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
 import { canSeeMoney } from '../lib/settlement';
+import { soldElsewhereByEvent } from '../lib/salesCounts';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
@@ -19,6 +20,9 @@ export default function OrganizerDashboard() {
   const { orgs, activeOrg, activeRole } = useOrganization();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  // Tickets sold on other platforms per event (mig 20261030120000); empty for
+  // roles that can't read them. Shown beside our counts, never added.
+  const [elsewhere, setElsewhere] = useState<Map<string, number>>(new Map());
   // Search + filter state. Both apply client-side over the loaded
   // event set since we already cap at 200 and an organizer with
   // 200+ events still benefits from a sub-100ms filter loop. When
@@ -52,6 +56,7 @@ export default function OrganizerDashboard() {
           return true;
         });
         setEvents(deduped);
+        void soldElsewhereByEvent(deduped.map((ev) => ev.id)).then(setElsewhere).catch(() => setElsewhere(new Map()));
       } catch (err) {
         console.error('Failed to load events', err);
         setEvents([]);
@@ -289,7 +294,7 @@ export default function OrganizerDashboard() {
                       <p className="text-[11px] text-slate-500 truncate">{formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric' })} · {event.location}</p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <EventStatusPill status={event.status} />
-                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold · {formatCurrency(eventGrossSales(event))}</span>
+                        <span className="text-[11px] font-bold text-slate-500">{event.ticketsSold}{event.totalTickets > 0 ? `/${event.totalTickets}` : ''} sold{elsewhere.get(event.id) ? ` +${elsewhere.get(event.id)} elsewhere` : ''} · {formatCurrency(eventGrossSales(event))}</span>
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 mt-1 shrink-0" />
@@ -350,6 +355,9 @@ export default function OrganizerDashboard() {
                            <div className="bg-[#026cdf] h-full" style={{ width: `${event.totalTickets > 0 ? Math.min(100, (event.ticketsSold / event.totalTickets) * 100) : 0}%` }}></div>
                         </div>
                         <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{event.ticketsSold}{event.totalTickets > 0 ? ` / ${event.totalTickets}` : ''} SOLD</p>
+                        {(elsewhere.get(event.id) ?? 0) > 0 && (
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">+{elsewhere.get(event.id)} sold elsewhere</p>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-900 text-sm">{formatCurrency(eventGrossSales(event))}</p>

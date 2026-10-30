@@ -56,6 +56,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
+| `exos_public_sales_count_total` (mig 20261030120000) | OK | Tickets sold on other platforms, one number per **published** event (at most 200 ids a call); drafts answer nothing. Never the platforms, amounts, ticket types or notes, which stay staff-only. The same kind of number as the public `tickets_sold`. In the H3 allowlist |
 
 ### Callable by authenticated (131 flagged)
 
@@ -134,6 +135,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_set_sales_count`, `exos_import_sales_counts`, `exos_delete_sales_count` (mig 20261030120000) | OK | Sales counts (tickets sold outside Exos): owner / manager / finance of the event's (or row's) org, or admin, looked up from the row (`_exos_sales_count_can`), never from an org id the caller passes. Everything goes through `_exos_sales_count_write` (internal), which validates, merges ticket types (50 at most), caps an event at 20 entries under a per-event advisory lock, and answers `unchanged` for a re-import of the same numbers. Counts and amounts only, no buyer data. Table `exos_sales_counts`: RLS SELECT for owner / manager / finance (and admin), no client INSERT / UPDATE / DELETE grant; `exos_sales_count_totals` is `security_invoker` |
+| `exos_api_sales_count_put`, `exos_api_sales_count_delete` (mig 20261030120000) | Service role | `exos-api` only (the first write routes, `finance:write`). The function resolves the org from the API key's hash and passes it; the RPC refuses an event or row of any other org (`P0002`, answered 404) |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

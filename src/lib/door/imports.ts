@@ -14,44 +14,9 @@ export function normalizeDoorCode(raw: unknown): string | null {
   return c.length >= 1 && c.length <= 128 ? c : null;
 }
 
-/** RFC 4180-ish: quoted fields, doubled quotes, CRLF / LF, a leading BOM.
- *  The delimiter (comma, semicolon or tab) is taken from the header line. */
-export function parseCsv(text: string): string[][] {
-  const src = text.replace(/^﻿/, '');
-  const firstLine = src.split(/\r?\n/, 1)[0] ?? '';
-  const delim = [',', ';', '\t'].reduce((best, d) =>
-    firstLine.split(d).length > firstLine.split(best).length ? d : best, ',');
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let quoted = false;
-  for (let i = 0; i < src.length; i++) {
-    const ch = src[i];
-    if (quoted) {
-      if (ch === '"') {
-        if (src[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else quoted = false;
-      } else field += ch;
-      continue;
-    }
-    if (ch === '"' && field === '') quoted = true;
-    else if (ch === delim) {
-      row.push(field);
-      field = '';
-    } else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && src[i + 1] === '\n') i++;
-      row.push(field);
-      field = '';
-      if (row.some((c) => c.trim() !== '')) rows.push(row);
-      row = [];
-    } else field += ch;
-  }
-  row.push(field);
-  if (row.some((c) => c.trim() !== '')) rows.push(row);
-  return rows;
-}
+// The CSV reader is shared with the sales-count import (src/lib/salesCounts.ts)
+// and exos-api, so it lives in supabase/functions/_shared/csvParse.ts.
+export { parseCsv } from '../../../supabase/functions/_shared/csvParse.ts';
 
 export type ImportField = 'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'code' | 'ticket' | 'note';
 

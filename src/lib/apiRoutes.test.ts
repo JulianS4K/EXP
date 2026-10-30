@@ -22,11 +22,16 @@ describe('matchRoute', () => {
     expect(matchRoute('GET', '/events')?.route.id).toBe('list-events');
     expect(matchRoute('GET', '/orders/cs_test_1')?.params).toEqual({ id: 'cs_test_1' });
     expect(matchRoute('get', '/me')?.route.id).toBe('me');
+    expect(matchRoute('POST', '/events/abc/sales-counts/import')?.route.id).toBe('import-sales-counts');
+    expect(matchRoute('PUT', '/sales-counts/x')?.route.id).toBe('update-sales-count');
+    expect(matchRoute('GET', '/eventbrite-events/123')?.params).toEqual({ id: '123' });
   });
 
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
     expect(matchRoute('POST', '/events')).toBeNull();
+    expect(matchRoute('PUT', '/sales-counts')).toBeNull();
+    expect(matchRoute('DELETE', '/events/x/sales-counts')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -44,8 +49,13 @@ describe('matchRoute', () => {
     }
     // Only GET /me is reachable without a scope.
     expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // The API is read-only: no route needs a write scope yet.
-    expect(ROUTES.every((r) => r.scope === null || r.scope.endsWith(':read'))).toBe(true);
+    // Reads need a :read scope; anything that changes data needs a :write scope.
+    for (const r of ROUTES) {
+      if (r.scope === null) continue;
+      expect(r.scope.endsWith(r.method === 'GET' ? ':read' : ':write'), r.id).toBe(true);
+    }
+    // The only write routes are the sales counts (mig 20261030120000).
+    expect(ROUTES.filter((r) => r.method !== 'GET').every((r) => r.id.includes('sales-count'))).toBe(true);
   });
 });
 
