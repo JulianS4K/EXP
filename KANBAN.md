@@ -1362,7 +1362,7 @@ indie-cap + secondary-market positioning.
 
 ## Post-launch (operator, 2026-09-26)
 
-- `[ ]` **Group buy: split with friends (Venmo, restaurant-style).** Tabled until after launch.
+- `[x]` **Group buy: split with friends (Venmo, restaurant-style).** Built 2026-10-30 (mig 20261031220000, `/split/:sessionId`). A friend needs an email (the transfer mails the claim link); the text goes from the host's phone (`sms:` link).
   - The host buys every ticket in one normal checkout: no holds, no Stripe changes, no inventory risk.
   - After purchase, a "Split with friends" screen: add friends by name or phone, even or custom amounts.
   - Each friend gets one text: their ticket (existing transfer claim link, so it's in their own account)

@@ -31,12 +31,21 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `apply_migration`, DML/DDL, cron changes, and edge-function deploys need explicit
   operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
-  Never add order/hold/price/inventory writes to a third party. The one
-  exception (operator decision 2026-10-19) is the organizer's OWN Eventbrite
+  Never add order/hold/price/inventory writes to a third party. There are two
+  exceptions. The first (operator decision 2026-10-19) is the organizer's OWN Eventbrite
   and Luma accounts, mirrored 1-1 from Exos (`exos-channel-sync`,
   `_shared/channels/`): writes only to each module's allowlist, and only with
   the org's switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`
   (otherwise dry run). Luma is off entirely until `EXOS_LUMA_ENABLED=on`.
+  The second (operator approval 2026-10-30) is PayPal as a second payment
+  processor, to accept Venmo: PayPal Orders v2 order create, capture and
+  capture refund on the PLATFORM's own PayPal account, and nothing else
+  (`_shared/paypal/client.ts` refuses any other POST; the OAuth token and
+  webhook-signature checks are the only other calls). Sandbox by default;
+  live only when `EXOS_PAYPAL_ENV=live` and `PAYPAL_CLIENT_ID` /
+  `PAYPAL_CLIENT_SECRET` are set. Paying organizers out of the PayPal balance
+  is not automated (`exos_paypal_org_balances`). PayPal's JS SDK never loads
+  on a page with a Stripe card field (`docs/pci.md`).
   Vendor API docs live in `docs/marketplace/` (StubHub so far), with each
   endpoint tagged read or write. The StubHub write foundation
   (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it

@@ -236,7 +236,9 @@ const REFUND_TEXT: Record<string, (paid: string, refunded: string) => string> = 
 // Disputes (mig 20261001101000). The dispute lives on the Exos platform's
 // Stripe account (destination charges), so the one link out of the app is
 // Stripe's own dashboard page for that dispute, built from a checked id.
-const DISPUTE_ID = /^(dp|du)_[A-Za-z0-9]{1,200}$/;
+// PayPal disputes (mig 20261031220000) are 'ppdsp_…' and live in PayPal's
+// Resolution Center on the platform account.
+const DISPUTE_ID = /^(dp|du|ppdsp)_[A-Za-z0-9]{1,200}$/;
 const DISPUTE_REASONS: Record<string, string> = {
   bank_cannot_process: "the bank couldn't process the payment",
   credit_not_processed: "the buyer says a promised refund wasn't made",
@@ -263,6 +265,7 @@ interface DisputeView {
   amount: string;
   fee: string | null;
   stripeUrl: string;
+  processor: "Stripe" | "PayPal";
   eventLine: string;
 }
 function disputeView(ctx: Ctx): DisputeView {
@@ -277,13 +280,16 @@ function disputeView(ctx: Ctx): DisputeView {
     ev,
     amount: formatMoney(num(ctx.p, "amount_cents"), cur),
     fee: feeCents > 0 ? formatMoney(feeCents, cur) : null,
-    stripeUrl: `https://dashboard.stripe.com/${ctx.p.livemode === false ? "test/" : ""}disputes/${id}`,
+    stripeUrl: id.startsWith("ppdsp_")
+      ? `https://www.${ctx.p.livemode === false ? "sandbox." : ""}paypal.com/resolutioncenter`
+      : `https://dashboard.stripe.com/${ctx.p.livemode === false ? "test/" : ""}disputes/${id}`,
+    processor: id.startsWith("ppdsp_") ? "PayPal" : "Stripe",
     eventLine: ev ? eventBlock(ev) : "",
   };
 }
 function disputeLinks(ctx: Ctx, v: DisputeView): string {
   return (v.ev ? button(ctx, `/dashboard/event/${v.ev.id}`, "See it in the event's Money") : button(ctx, "/dashboard", "Your dashboard")) +
-    `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in Stripe</a>.</p>`;
+    `<p style="color:#666;font-size:13px">Exos staff: <a href="${esc(v.stripeUrl)}">open the dispute in ${v.processor}</a>.</p>`;
 }
 
 // Weekly sales by channel (mig 20261029120000). The SPA's Channels card and

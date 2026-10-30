@@ -144,6 +144,7 @@ for m in \
          20261031130000_exos_partner_sales \
          20261031130500_exos_developer_platform \
          20261031210000_exos_matched_seats \
+         20261031220000_exos_payments_paypal_cashapp_split \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -323,6 +324,7 @@ for m in \
          20261031130000_exos_partner_sales \
          20261031130500_exos_developer_platform \
          20261031210000_exos_matched_seats \
+         20261031220000_exos_payments_paypal_cashapp_split \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -383,3 +385,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fans.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_sales.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_developer_platform.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_matched_seats.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_paypal_payments.sql"

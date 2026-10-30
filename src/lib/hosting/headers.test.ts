@@ -69,6 +69,21 @@ describe('bridgeCsp', () => {
     expect(bridgeCsp('/bridge/embed/return')).toContain("script-src 'self' https://js.stripe.com;");
   });
 
+  it("the PayPal page loads PayPal's SDK and nothing from Stripe (PCI: never on a card page)", () => {
+    for (const path of ['/bridge/pay/paypal', '/bridge/pay/paypal/return']) {
+      const csp = bridgeCsp(path, '?token=ABC');
+      const script = csp.split('; ').find((d) => d.startsWith('script-src'))!;
+      expect(script).toContain('https://www.paypal.com');
+      expect(csp).not.toContain('stripe.com');
+      expect(csp).not.toContain('connect.facebook.net');
+      expect(csp).toContain("frame-ancestors 'none';");
+    }
+    // ...and no other page can load it, the Stripe card pages least of all.
+    for (const path of ['/bridge/embed/event/1', '/bridge/embed/return', '/bridge/event/1', '/bridge/my-tickets', '/bridge/pay/paypalx']) {
+      expect(bridgeCsp(path)).not.toContain('paypal.com');
+    }
+  });
+
   it('lets only the embed be framed', () => {
     expect(bridgeCsp('/bridge/embed/event/1')).toContain('frame-ancestors *;');
     expect(bridgeCsp('/bridge/event/1')).toContain("frame-ancestors 'none';");

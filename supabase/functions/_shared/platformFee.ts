@@ -123,6 +123,15 @@ export function organizerNetCents(amountCents: number, bps: number = EXOS_FEE_BP
 /** Stripe's standard US card pricing: 2.9% + 30c per successful charge. */
 export const STRIPE_CARD_FEE = { bps: 290, fixedCents: 30 } as const;
 
+/**
+ * PayPal Checkout's standard US rate (PayPal and Venmo): 3.49% + 49c. A
+ * PayPal checkout records the same fee split as Stripe with this in the
+ * card-fee slot (EXOS_PAYPAL_FEE_BPS / EXOS_PAYPAL_FEE_FIXED_CENTS
+ * override), so the organizer's share is computed the same way; PayPal's
+ * actual fee lands on the payment row (mig 20261031220000).
+ */
+export const PAYPAL_FEE = { bps: 349, fixedCents: 49 } as const;
+
 export interface CardFee {
   bps: number;
   fixedCents: number;
