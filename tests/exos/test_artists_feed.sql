@@ -18,6 +18,10 @@
 --   AF8  secret venues show the area label only; online events no venue
 --   AF9  public lineups: published events only, no bio, anon-callable
 --   AF10 cross-org isolation of the service-role cores
+--   AF11 the API path to shared keys needs an API key an active owner made;
+--        revoking (or deleting) that API key revokes the shared keys it minted
+--   AF12 noindex events stay out of the feed (like the Google / catalog feeds)
+--        but keep their public lineup (their event page is still public)
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_artists_feed.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -75,6 +79,10 @@ INSERT INTO public.exos_events (id, org_id, name, status, starts_at, timezone, v
    now() + interval '2 days', 'UTC', 'Y', NULL, NULL, NULL, 'in_person', 'af000000-0000-0000-0000-0000000000b0');
 UPDATE public.exos_events SET secret_location = true, location_area = 'Williamsburg, Brooklyn'
  WHERE id = 'af000000-0000-0000-0000-0000000000e3';
+-- e8: published and upcoming, but hidden from search (noindex).
+INSERT INTO public.exos_events (id, org_id, name, status, starts_at, timezone, venue_name, format, noindex, created_by)
+VALUES ('af000000-0000-0000-0000-0000000000e8', 'af000000-0000-0000-0000-000000000001', 'AF Hidden', 'published',
+        now() + interval '4 days', 'UTC', 'Z', 'in_person', true, 'af000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold, visibility, sort_order) VALUES
   ('af000000-0000-0000-0000-0000000000d1', 'af000000-0000-0000-0000-0000000000e1', 'GA', 25, 100, 0, 'public', 1),
   ('af000000-0000-0000-0000-0000000000d2', 'af000000-0000-0000-0000-0000000000e1', 'Free', 0, 10, 0, 'public', 0),
@@ -114,7 +122,7 @@ BEGIN
   ASSERT has_column_privilege('authenticated', 'public.exos_listing_keys', 'key_prefix', 'SELECT'), 'AF1: prefix not readable';
   FOREACH f IN ARRAY ARRAY['public._exos_artist_save(uuid,uuid,jsonb,uuid)', 'public._exos_artist_merge(uuid,uuid,uuid)',
                            'public._exos_lineup_save(uuid,uuid,jsonb)', 'public._exos_listing_key_create(uuid,text,text,uuid,uuid)',
-                           'public._exos_listing_key_revoke(uuid,uuid)', 'public.exos_listing_feed_source(text,uuid,timestamptz)',
+                           'public._exos_listing_key_revoke(uuid,uuid,uuid)', 'public._exos_api_key_owner_ok(uuid,uuid)', 'public.exos_listing_feed_source(text,uuid,timestamptz)',
                            'public.exos_api_artist_events(uuid,uuid,integer,integer)', 'public._exos_lineup_json(uuid)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'AF1: authenticated runs ' || f;
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE'), 'AF1: anon runs ' || f;
@@ -132,7 +140,8 @@ BEGIN
               'exos_artist_save', 'exos_artist_merge', 'exos_lineup_save', 'exos_public_lineups',
               '_exos_listing_key_create', 'exos_listing_key_create', '_exos_listing_key_revoke',
               'exos_listing_key_revoke', 'exos_listing_feed_source', '_exos_listing_feed_event',
-              'exos_api_artist_events', '_exos_lineup_json', '_exos_lineup_sync_performers', '_exos_tg_lineup_guard')),
+              'exos_api_artist_events', '_exos_lineup_json', '_exos_lineup_sync_performers', '_exos_tg_lineup_guard',
+              '_exos_api_key_owner_ok', '_exos_tg_api_key_revoke_listing_keys')),
          'AF1: a definer function without the pinned search_path';
   ASSERT public._exos_slugify('Beyoncé & Jay-Z') = 'beyonce-and-jay-z', 'AF2: slug accents';
   ASSERT public._exos_slugify('  !!DJ  Aurora!! ') = 'dj-aurora', 'AF2: slug punctuation';
@@ -397,6 +406,7 @@ BEGIN
   one := public.exos_listing_feed_source(h, 'af000000-0000-0000-0000-0000000000e6');
   ASSERT jsonb_array_length(one->'events') = 1, 'AF7: one listable past event';
   FOREACH ev IN ARRAY ARRAY['"af000000-0000-0000-0000-0000000000e4"', '"af000000-0000-0000-0000-0000000000e5"',
+                            '"af000000-0000-0000-0000-0000000000e8"',
                             '"af000000-0000-0000-0000-0000000000e9"']::jsonb[] LOOP
     one := public.exos_listing_feed_source(h, (ev #>> '{}')::uuid);
     ASSERT jsonb_array_length(one->'events') = 0, 'AF7: not listable: ' || ev::text;
@@ -475,6 +485,79 @@ BEGIN
   EXCEPTION WHEN invalid_parameter_value THEN NULL;
   END;
   RAISE NOTICE 'OK  AF10 cross-org isolation';
+END $$;
+
+-- AF11 ----------------------------------------------------------------------
+-- Org 2: b0 is the owner, a1 joins as manager; each makes an API key.
+INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
+  ('af000000-0000-0000-0000-000000000002', 'af000000-0000-0000-0000-0000000000a1', 'manager');
+INSERT INTO public.exos_api_keys (id, org_id, name, key_prefix, key_hash, scopes, created_by) VALUES
+  ('af000000-0000-0000-0000-0000000000f1', 'af000000-0000-0000-0000-000000000002', 'owner key', 'sk_live_af1',
+   encode(extensions.digest('af-owner-key', 'sha256'), 'hex'), ARRAY['org:admin'], 'af000000-0000-0000-0000-0000000000b0'),
+  ('af000000-0000-0000-0000-0000000000f2', 'af000000-0000-0000-0000-000000000002', 'manager key', 'sk_live_af2',
+   encode(extensions.digest('af-manager-key', 'sha256'), 'hex'), ARRAY['org:admin'], 'af000000-0000-0000-0000-0000000000a1'),
+  ('af000000-0000-0000-0000-0000000000f3', 'af000000-0000-0000-0000-000000000002', 'doomed key', 'sk_live_af3',
+   encode(extensions.digest('af-doomed-key', 'sha256'), 'hex'), ARRAY['org:admin'], 'af000000-0000-0000-0000-0000000000b0');
+SET LOCAL ROLE service_role;
+INSERT INTO af SELECT 'n1', pg_temp.err($q$SELECT public._exos_listing_key_create('af000000-0000-0000-0000-000000000002', 'x', 'website', NULL, 'af000000-0000-0000-0000-0000000000f2')$q$);
+INSERT INTO af SELECT 'n2', pg_temp.err($q$SELECT public._exos_listing_key_create('af000000-0000-0000-0000-000000000001', 'x', 'website', NULL, 'af000000-0000-0000-0000-0000000000f1')$q$);
+INSERT INTO af SELECT 'k_owner', (public._exos_listing_key_create('af000000-0000-0000-0000-000000000002', 'Site', 'website', NULL, 'af000000-0000-0000-0000-0000000000f1'))->>'id';
+INSERT INTO af SELECT 'k_doomed', (public._exos_listing_key_create('af000000-0000-0000-0000-000000000002', 'Doomed', 'jambase', NULL, 'af000000-0000-0000-0000-0000000000f3'))->>'id';
+INSERT INTO af SELECT 'n3', pg_temp.err(format('SELECT public._exos_listing_key_revoke(%L, %L, %L)', 'af000000-0000-0000-0000-000000000002',
+  (SELECT v FROM af WHERE k = 'k_owner'), 'af000000-0000-0000-0000-0000000000f2'));
+RESET ROLE;
+DO $$
+DECLARE k uuid := (SELECT v::uuid FROM af WHERE af.k = 'k_owner');
+BEGIN
+  ASSERT (SELECT v FROM af WHERE af.k = 'n1') = '42501', 'AF11: a manager''s API key minted a shared key';
+  ASSERT (SELECT v FROM af WHERE af.k = 'n2') = '42501', 'AF11: an API key of another org minted one';
+  ASSERT (SELECT v FROM af WHERE af.k = 'n3') = '42501', 'AF11: a manager''s API key revoked one';
+  ASSERT (SELECT created_by_api_key FROM public.exos_listing_keys WHERE id = k) = 'af000000-0000-0000-0000-0000000000f1',
+         'AF11: the minting API key is recorded';
+  ASSERT (SELECT revoked_at IS NULL FROM public.exos_listing_keys WHERE id = k), 'AF11: refused revoke still revoked';
+  PERFORM public._exos_listing_key_revoke('af000000-0000-0000-0000-000000000002', k, 'af000000-0000-0000-0000-0000000000f1');
+  ASSERT (SELECT revoked_at IS NOT NULL FROM public.exos_listing_keys WHERE id = k), 'AF11: owner''s API key revokes';
+  -- Revoking the minting API key revokes its shared keys; so does deleting it.
+  INSERT INTO af SELECT 'k_owner2', (public._exos_listing_key_create('af000000-0000-0000-0000-000000000002', 'Site 2', 'website', NULL,
+                                       'af000000-0000-0000-0000-0000000000f1'))->>'id';
+  UPDATE public.exos_api_keys SET revoked_at = now() WHERE id = 'af000000-0000-0000-0000-0000000000f1';
+  ASSERT (SELECT revoked_at IS NOT NULL FROM public.exos_listing_keys WHERE id = (SELECT v::uuid FROM af WHERE af.k = 'k_owner2')),
+         'AF11: API key revoke didn''t cascade';
+  DELETE FROM public.exos_api_keys WHERE id = 'af000000-0000-0000-0000-0000000000f3';
+  ASSERT (SELECT revoked_at IS NOT NULL FROM public.exos_listing_keys WHERE id = (SELECT v::uuid FROM af WHERE af.k = 'k_doomed')),
+         'AF11: API key delete didn''t revoke';
+  -- The owner is demoted: an API key they made no longer manages shared keys
+  -- (checked on the key's own row: an active key, no longer an owner's).
+  INSERT INTO public.exos_api_keys (id, org_id, name, key_prefix, key_hash, scopes, created_by) VALUES
+    ('af000000-0000-0000-0000-0000000000f4', 'af000000-0000-0000-0000-000000000002', 'later key', 'sk_live_af4',
+     encode(extensions.digest('af-later-key', 'sha256'), 'hex'), ARRAY['org:admin'], 'af000000-0000-0000-0000-0000000000b0');
+  ASSERT public._exos_api_key_owner_ok('af000000-0000-0000-0000-000000000002', 'af000000-0000-0000-0000-0000000000f4'), 'AF11: owner key';
+  UPDATE public.exos_org_memberships SET role = 'manager'
+   WHERE org_id = 'af000000-0000-0000-0000-000000000002' AND user_id = 'af000000-0000-0000-0000-0000000000b0';
+  ASSERT NOT public._exos_api_key_owner_ok('af000000-0000-0000-0000-000000000002', 'af000000-0000-0000-0000-0000000000f4'),
+         'AF11: a demoted owner''s key still passes';
+  RAISE NOTICE 'OK  AF11 shared keys over the API need an owner''s API key; revoking it revokes them';
+END $$;
+
+-- AF12 ----------------------------------------------------------------------
+INSERT INTO af SELECT 'okey', (public._exos_listing_key_create('af000000-0000-0000-0000-000000000001', 'AF12', 'website', NULL, NULL))->>'key'
+ WHERE (SELECT count(*) FROM public.exos_listing_keys WHERE org_id = 'af000000-0000-0000-0000-000000000001' AND revoked_at IS NULL) < 20;
+SELECT public._exos_lineup_save('af000000-0000-0000-0000-000000000001', 'af000000-0000-0000-0000-0000000000e8',
+  jsonb_build_array(jsonb_build_object('artist_id', (SELECT v FROM af WHERE k = 'nova')))) IS NOT NULL AS ok;
+DO $$
+DECLARE
+  h text := encode(extensions.digest((SELECT v FROM af WHERE af.k = 'okey'), 'sha256'), 'hex');
+  r jsonb;
+BEGIN
+  r := public.exos_listing_feed_source(h, NULL, now() - interval '30 days');
+  ASSERT r IS NOT NULL, 'AF12: key';
+  ASSERT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'events') x WHERE x->>'id' = 'af000000-0000-0000-0000-0000000000e8'),
+         'AF12: a noindex event is in the feed';
+  ASSERT jsonb_array_length(public.exos_listing_feed_source(h, 'af000000-0000-0000-0000-0000000000e8')->'events') = 0,
+         'AF12: a noindex event answers by id';
+  ASSERT public.exos_public_lineups(ARRAY['af000000-0000-0000-0000-0000000000e8']::uuid[]) ? 'af000000-0000-0000-0000-0000000000e8',
+         'AF12: the noindex event page lost its lineup';
+  RAISE NOTICE 'OK  AF12 noindex events are left out of the feed; their page keeps its lineup';
 END $$;
 
 ROLLBACK;

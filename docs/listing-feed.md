@@ -65,7 +65,9 @@ The **event page** shows the lineup with photos, act types, set times and a
 Spotify link per act, and its JSON-LD lists them as `performer` with the
 Spotify URL as `sameAs` (`src/lib/meta.ts`); the server-rendered preview for
 crawlers lists the names (`src/lib/hosting/seo.ts`, from `performer_names`).
-Public pages read lineups with `exos_public_lineups` (published events only).
+Public pages read lineups with `exos_public_lineups` (published events only;
+a `noindex` event's page is still public, so it keeps its lineup there, while
+its JSON-LD is skipped as before).
 The lineup editor is on Edit Event (an event needs to exist first, so not on
 Create Event) and saves right after the event; if only the lineup fails, the
 event is saved and the page says so.
@@ -81,7 +83,12 @@ once; only the SHA-256 hash and a 16-character prefix are stored
 (`exos_listing_keys`; `key_hash` has no client grant). One key per partner, so
 each can be revoked alone and its ticket links carry the partner. At most 20
 active keys. Revoking takes effect at once. With an API key (`org:admin`):
-`GET/POST /v1/listing-keys`, `DELETE /v1/listing-keys/:id`.
+`GET/POST /v1/listing-keys`, `DELETE /v1/listing-keys/:id`. Minting and
+revoking over the API keep the owner rule: the API key must have been created
+by someone who is an active owner of the org right now (otherwise `403`), and
+the shared key records which API key minted it. Revoking that API key (or
+deleting it, or its creator leaving the org, which revokes their API keys)
+revokes the shared keys it minted.
 
 A shared key reads one organization's feed and nothing else. It isn't an API
 key, and an API key isn't a shared key.
@@ -101,7 +108,8 @@ header would need a preflight, which is answered but costs a round trip).
 ### What is in it
 
 Events of the key's organization that are published, listed (not "link
-only", `exclusivity.customUrlOnly`) and start at or after the cutoff (default
+only", `exclusivity.customUrlOnly`), not hidden from search (`noindex`, the
+same rule as the Google and catalog feeds) and start at or after the cutoff (default
 now; `q[start_time_gteq]` for earlier). Drafts and cancelled events never
 appear. `exos_listing_feed_source` (SQL) decides this and reads at most 2000
 events per request; filters, sort and paging happen after (`feed.ts`), so
@@ -175,6 +183,8 @@ Example (`GET /v1/public/events?shared_key=…&per_page=1`):
 requests without a well-formed key share a bucket per network); over it `429`
 with `Retry-After`. Errors are `{ "error": "…" }` and `no-store`: `401` missing,
 unknown or revoked key, `404` an event not in the feed, `400` a bad parameter.
+Write bodies on the rest of the API are read with a running byte count and
+refused with `413` past 64 KB (`readCapped`), chunked or not.
 
 ## The events-list widget
 

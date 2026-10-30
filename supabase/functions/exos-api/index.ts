@@ -43,6 +43,7 @@ import {
   type FeedSource, type SourceEvent,
 } from "../_shared/listingFeed/feed.ts";
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
+import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
@@ -66,7 +67,6 @@ const ARTIST_SORTS: Record<string, [string, boolean]> = {
   "created_at asc": ["created_at", true], "created_at desc": ["created_at", false],
   "updated_at asc": ["updated_at", true], "updated_at desc": ["updated_at", false],
 };
-const MAX_BODY = 64 * 1024;
 const FEED_RATE_LIMIT = 120; // listing-feed requests per shared key (or per network without one) per minute
 
 class ApiError extends Error {
@@ -420,7 +420,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown> {
     case "revoke-listing-key": {
       const id = c.params.id;
       if (!UUID_RE.test(id)) throw new ApiError(404, "shared key not found");
-      await rpc(sb, "_exos_listing_key_revoke", { p_org_id: orgId, p_key_id: id });
+      // The API key's creator must be an owner now, as in the dashboard (SQL checks it).
+      await rpc(sb, "_exos_listing_key_revoke", { p_org_id: orgId, p_key_id: id, p_api_key_id: c.key.id });
       return { data: { id, revoked: true } };
     }
   }
@@ -553,25 +554,17 @@ function unwrap(body: Record<string, unknown>, wrapper: string): Record<string, 
   return inner && typeof inner === "object" && !Array.isArray(inner) ? inner as Record<string, unknown> : body;
 }
 
-/** A JSON body, or a form-encoded one (artist[name]=…&artist[genres][]=…), at most 64 KB. */
+/**
+ * A JSON body, or a form-encoded one (artist[name]=…&artist[genres][]=…), at
+ * most MAX_BODY_BYTES. Form bodies are decoded from the capped text here
+ * (never req.formData(), which reads without a cap).
+ */
 async function readBody(req: Request): Promise<Record<string, unknown>> {
-  const text = await req.text();
-  if (text.length > MAX_BODY) throw new ApiError(413, "request body is too large");
+  const text = await readCapped(req, MAX_BODY_BYTES);
+  if (text === null) throw new ApiError(413, "request body is too large");
   if (!text.trim()) return {};
   if ((req.headers.get("content-type") ?? "").toLowerCase().includes("application/x-www-form-urlencoded")) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of new URLSearchParams(text)) {
-      const m = /^(?:[a-z_]+\[)?([a-z_]+)\]?(\[\])?$/i.exec(k);
-      if (!m) continue;
-      if (m[2]) {
-        const list = Array.isArray(out[m[1]]) ? out[m[1]] as unknown[] : [];
-        list.push(v);
-        out[m[1]] = list;
-      } else {
-        out[m[1]] = v;
-      }
-    }
-    return out;
+    return formBody(text);
   }
   try {
     const v = JSON.parse(text);
@@ -587,7 +580,9 @@ async function rpc(sb: SupabaseClient, fn: string, args: Record<string, unknown>
 }
 
 /** The SQLSTATEs the artist, lineup and key functions raise, as HTTP answers. */
-const RPC_STATUS: Record<string, number> = { "22023": 400, "P0002": 404, "23505": 409, "55000": 409, "54000": 409 };
+const RPC_STATUS: Record<string, number> = {
+  "22023": 400, "42501": 403, "P0002": 404, "23505": 409, "55000": 409, "54000": 409,
+};
 
 function rpcError(e: unknown): { status: number; message: string } | null {
   const err = e as { code?: unknown; message?: unknown } | null;

@@ -7,6 +7,9 @@
 --                       _exos_lineup_sync_performers, _exos_tg_lineup_guard,
 --                       _exos_artist_save, _exos_artist_merge, _exos_lineup_save,
 --                       _exos_listing_key_create, _exos_listing_key_revoke,
+--                       _exos_api_key_owner_ok, _exos_tg_api_key_revoke_listing_keys
+--                       (trigger on exos_api_keys: revoking an API key revokes
+--                       the shared keys it minted),
 --                       _exos_listing_feed_event, exos_listing_feed_source,
 --                       exos_api_artist_events (new, service role only)
 --              FUNCTION exos_artist_save, exos_artist_merge, exos_lineup_save,
@@ -43,7 +46,7 @@
 -- exos-api edge function hashes the presented key and calls
 -- exos_listing_feed_source, which answers the key's org's listable events:
 -- published, starting at/after the cutoff, not link-only
--- (exclusivity.customUrlOnly). Venue fields are redacted for an event whose
+-- (exclusivity.customUrlOnly), not hidden from search (noindex). Venue fields are redacted for an event whose
 -- row says secret_location = true (only `location_area` is shown) — that
 -- column does not exist yet (venues and their privacy belong to booking); the
 -- function reads the row through to_jsonb so the redaction starts working the
@@ -209,7 +212,7 @@ CREATE TABLE IF NOT EXISTS public.exos_listing_keys (
   key_prefix         text NOT NULL,
   key_hash           text NOT NULL,
   created_by         uuid,
-  created_by_api_key uuid,
+  created_by_api_key uuid REFERENCES public.exos_api_keys(id) ON DELETE SET NULL,
   created_at         timestamptz NOT NULL DEFAULT now(),
   last_used_at       timestamptz,
   revoked_at         timestamptz,
@@ -751,9 +754,29 @@ GRANT EXECUTE ON FUNCTION public.exos_api_artist_events(uuid, uuid, int, int) TO
 -- 5. Listing-feed shared keys.
 -- ---------------------------------------------------------------------------
 
+-- Minting or revoking a shared key publishes (or unpublishes) the org's feed,
+-- which the dashboard allows owners only. Through exos-api the caller is an
+-- org API key, which a manager may have created; so the API path requires the
+-- key's creator (exos_api_keys.created_by) to be an active owner of the org
+-- right now. Internal.
+CREATE OR REPLACE FUNCTION public._exos_api_key_owner_ok(p_org_id uuid, p_api_key_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.exos_api_keys k
+      JOIN public.exos_org_memberships m ON m.org_id = k.org_id AND m.user_id = k.created_by
+     WHERE k.id = p_api_key_id AND k.org_id = p_org_id AND k.revoked_at IS NULL
+       AND m.role = 'owner' AND m.disabled IS NOT TRUE)
+$$;
+REVOKE ALL ON FUNCTION public._exos_api_key_owner_ok(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_api_key_owner_ok(uuid, uuid) TO service_role;
+
 -- Returns { id, label, partner_type, key_prefix, created_at, key }. The key
 -- (sh_live_ + 48 hex) is returned ONCE and never stored. At most 20 active
--- keys per org.
+-- keys per org. p_api_key_id (the exos-api path) must pass
+-- _exos_api_key_owner_ok and is recorded on the key.
 CREATE OR REPLACE FUNCTION public._exos_listing_key_create(p_org_id uuid, p_label text, p_partner_type text,
                                                            p_actor uuid, p_api_key_id uuid)
 RETURNS jsonb
@@ -765,6 +788,10 @@ DECLARE
   v_key  text;
   r      public.exos_listing_keys%ROWTYPE;
 BEGIN
+  IF p_api_key_id IS NOT NULL AND NOT public._exos_api_key_owner_ok(p_org_id, p_api_key_id) THEN
+    RAISE EXCEPTION 'listing key: only an API key created by an owner of the organization can manage shared keys'
+      USING ERRCODE = '42501';
+  END IF;
   IF v_type NOT IN ('bandsintown', 'jambase', 'songkick', 'website', 'other') THEN
     RAISE EXCEPTION 'listing key: partner_type must be bandsintown, jambase, songkick, website or other'
       USING ERRCODE = '22023';
@@ -802,19 +829,48 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_listing_key_create(uuid, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_listing_key_create(uuid, text, text) TO authenticated;
 
--- Idempotent: revoking a revoked key is fine; an unknown or foreign id is P0002.
-CREATE OR REPLACE FUNCTION public._exos_listing_key_revoke(p_org_id uuid, p_key_id uuid)
+-- Idempotent: revoking a revoked key is fine; an unknown or foreign id is
+-- P0002. p_api_key_id (the exos-api path) must pass _exos_api_key_owner_ok.
+CREATE OR REPLACE FUNCTION public._exos_listing_key_revoke(p_org_id uuid, p_key_id uuid, p_api_key_id uuid DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
+  IF p_api_key_id IS NOT NULL AND NOT public._exos_api_key_owner_ok(p_org_id, p_api_key_id) THEN
+    RAISE EXCEPTION 'listing key: only an API key created by an owner of the organization can manage shared keys'
+      USING ERRCODE = '42501';
+  END IF;
   UPDATE public.exos_listing_keys SET revoked_at = coalesce(revoked_at, now())
    WHERE id = p_key_id AND org_id = p_org_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'shared key not found' USING ERRCODE = 'P0002'; END IF;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_listing_key_revoke(uuid, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_listing_key_revoke(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_listing_key_revoke(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_listing_key_revoke(uuid, uuid, uuid) TO service_role;
+
+-- An API key that is revoked (or deleted) takes the shared keys it minted
+-- with it, so a feed a departed manager's integration published stops too.
+-- (exos_api_keys are revoked when their creator leaves the org.)
+CREATE OR REPLACE FUNCTION public._exos_tg_api_key_revoke_listing_keys()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' OR (NEW.revoked_at IS NOT NULL AND OLD.revoked_at IS NULL) THEN
+    UPDATE public.exos_listing_keys SET revoked_at = now()
+     WHERE created_by_api_key = OLD.id AND revoked_at IS NULL;
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_api_key_revoke_listing_keys() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_api_keys_revoke_listing_keys ON public.exos_api_keys;
+CREATE TRIGGER exos_api_keys_revoke_listing_keys AFTER UPDATE OF revoked_at ON public.exos_api_keys
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_api_key_revoke_listing_keys();
+-- BEFORE DELETE: the foreign key's SET NULL would otherwise run first.
+DROP TRIGGER IF EXISTS exos_api_keys_delete_listing_keys ON public.exos_api_keys;
+CREATE TRIGGER exos_api_keys_delete_listing_keys BEFORE DELETE ON public.exos_api_keys
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_api_key_revoke_listing_keys();
 
 CREATE OR REPLACE FUNCTION public.exos_listing_key_revoke(p_key_id uuid)
 RETURNS void
@@ -924,6 +980,9 @@ BEGIN
        AND e.starts_at IS NOT NULL
        AND coalesce(to_jsonb(e)->'exclusivity'->>'customUrlOnly', 'false') <> 'true'
        AND coalesce(to_jsonb(e)->>'is_test', 'false') <> 'true'
+       -- Hidden from search by the organizer (mig 20261005090000): out, like
+       -- the Google and catalog feeds (feedBlocker: noindex === true).
+       AND coalesce(to_jsonb(e)->>'noindex', 'false') <> 'true'
        AND CASE WHEN p_event_id IS NOT NULL THEN e.id = p_event_id
                 ELSE e.starts_at >= coalesce(p_since, now()) END
      ORDER BY e.starts_at, e.id

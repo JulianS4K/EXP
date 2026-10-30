@@ -9,7 +9,7 @@
       "method": "GET",
       "path": "/v1/public/events",
       "summary": "List public events",
-      "description": "The key's organization's public events: published, listed (not link-only), starting at or after q[start_time_gteq] (default now), with their lineup. Opendate's public listing shape and paging, so a partner already reading Opendate needs a new base URL and key only. Times are ISO 8601 with the offset of the event's time zone. ticket_url is the event page tagged utm_source=<partner type> (listing for other), utm_medium=listing, utm_campaign=listing_feed. price_min / price_max are all-in (passed-on fees and tax included) over the public ticket types, in major units. on_sale is false when sold out or no public ticket type is inside its sale window. A secret-location event shows only its public area label as venue_name; venue_id, venue_permalink, city, region and country are null and the address never appears. An online-only event has online: true and no venue. performers is the lineup in running order: performer_id (also under the deprecated alias id) is the slot, artist_id and everything under artist belong to the artist; spotify_id, spotify_uri and spotify_url are all set or all null; canonical_artist_id is set when the artist was merged into another. name, permalink, image_url and image_thumb_url_for_json are deprecated flat copies of the artist block for older readers. An event with only free-text performer names lists them with artist_id null. Cached 60 seconds; poll at most once a minute.",
+      "description": "The key's organization's public events: published, listed (not link-only), not hidden from search (noindex), starting at or after q[start_time_gteq] (default now), with their lineup. Opendate's public listing shape and paging, so a partner already reading Opendate needs a new base URL and key only. Times are ISO 8601 with the offset of the event's time zone. ticket_url is the event page tagged utm_source=<partner type> (listing for other), utm_medium=listing, utm_campaign=listing_feed. price_min / price_max are all-in (passed-on fees and tax included) over the public ticket types, in major units. on_sale is false when sold out or no public ticket type is inside its sale window. A secret-location event shows only its public area label as venue_name; venue_id, venue_permalink, city, region and country are null and the address never appears. An online-only event has online: true and no venue. performers is the lineup in running order: performer_id (also under the deprecated alias id) is the slot, artist_id and everything under artist belong to the artist; spotify_id, spotify_uri and spotify_url are all set or all null; canonical_artist_id is set when the artist was merged into another. name, permalink, image_url and image_thumb_url_for_json are deprecated flat copies of the artist block for older readers. An event with only free-text performer names lists them with artist_id null. Cached 60 seconds; poll at most once a minute.",
       "auth": "shared_key",
       "scope": null,
       "parameters": [
@@ -884,7 +884,7 @@
       "method": "POST",
       "path": "/v1/listing-keys",
       "summary": "Create a shared key",
-      "description": "Mints a shared key for one partner and returns it, with a ready feed URL, this once; only its SHA-256 hash is kept. At most 20 active keys per organization.",
+      "description": "Mints a shared key for one partner and returns it, with a ready feed URL, this once; only its SHA-256 hash is kept. At most 20 active keys per organization. Owner rule: the API key must have been created by someone who is an active owner of the organization now; otherwise 403. A shared key minted over the API is revoked with the API key that minted it.",
       "auth": "api_key",
       "scope": "org:admin",
       "parameters": [
@@ -952,6 +952,13 @@
           }
         },
         {
+          "status": 403,
+          "description": "The API key's creator is not an owner of the organization (now).",
+          "example": {
+            "error": "listing key: only an API key created by an owner of the organization can manage shared keys"
+          }
+        },
+        {
           "status": 409,
           "description": "20 active keys already.",
           "example": {
@@ -965,7 +972,7 @@
       "method": "DELETE",
       "path": "/v1/listing-keys/:id",
       "summary": "Revoke a shared key",
-      "description": "The key stops working at once. Revoking a revoked key is fine.",
+      "description": "The key stops working at once. Revoking a revoked key is fine. Owner rule: the API key must have been created by someone who is an active owner of the organization now; otherwise 403. A shared key minted over the API is revoked with the API key that minted it.",
       "auth": "api_key",
       "scope": "org:admin",
       "parameters": [
@@ -998,6 +1005,13 @@
           },
           "headers": {
             "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The API key's creator is not an owner of the organization (now).",
+          "example": {
+            "error": "listing key: only an API key created by an owner of the organization can manage shared keys"
           }
         },
         {
