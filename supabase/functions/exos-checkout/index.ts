@@ -50,6 +50,11 @@
 // written and captured by exos_fulfill_checkout; an order the card covers in
 // full skips Stripe and is fulfilled here. amount_cents on the session stays
 // what Stripe charges; gift_card_cents is the rest of the order's value.
+//
+// exos: memberships (mig 20261030130500, docs/memberships.md): a member
+// presale refuses non-members (403, reason member_presale); a member's
+// discount applies after any code, before fees and tax, on up to 1 + guest
+// allowance tickets, and the session records membership_id.
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -65,7 +70,9 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
-import { giftCardApplied, giftCardOrderFee, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
+import {
+  giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeGiftCardCode, parseDonationCents,
+} from "../_shared/commerce.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -233,6 +240,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: "ticket type not available" }, 409);
   }
 
+  // exos: memberships (mig 20261030130500) — a member presale gates the tier
+  // (guests and non-members wait), and a member gets their discount on up to
+  // 1 + guest allowance tickets. Before the migration: no-op.
+  let member: { membership_id: string; discount_percent: number } | null = null;
+  {
+    const { data: mc, error: mcErr } = await sb.rpc("exos_member_checkout", {
+      p_event_id: event_id, p_tier_id: tier_id, p_buyer: buyerUid,
+    });
+    if (mcErr && mcErr.code !== "PGRST202") {
+      console.error("exos-checkout: member check failed", mcErr.message);
+      return json({ error: "could not price the order, try again" }, 503);
+    }
+    const m = mc as { presale_blocked?: boolean; membership_id?: string; discount_percent?: number; guest_allowance?: number } | null;
+    if (m?.presale_blocked) return json({ error: "Tickets are on presale for members right now.", reason: "member_presale" }, 403);
+    if (m?.membership_id && Number(m.discount_percent) > 0 && memberPriceApplies(quantity, Number(m.guest_allowance ?? 0))) {
+      member = { membership_id: m.membership_id, discount_percent: Number(m.discount_percent) };
+    }
+  }
+
   // Availability is enforced by a cart HOLD created just before the Stripe
   // session (exos_create_hold — atomically reserves against tier capacity AND
   // any shared quota for a TTL, so two buyers can't both pay for the last seat).
@@ -286,7 +312,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     Number(tier.price),
     (tier as unknown as { price_schedule?: unknown }).price_schedule,
   );
-  const unitAmount = Math.round(voucherUnitPrice(scheduled, { overridePrice, discountPercent, discountAmount }) * 100);
+  const codeUnitAmount = Math.round(voucherUnitPrice(scheduled, { overridePrice, discountPercent, discountAmount }) * 100);
+  // exos: memberships — promo first, then the member discount (half up once); fees and tax follow on it.
+  const unitAmount = member ? memberUnitCents(codeUnitAmount, member.discount_percent) : codeUnitAmount;
   // A discount that leaves a paid ticket free is a comp, not a sale.
   if (scheduled > 0 && unitAmount <= 0 && overridePrice == null) {
     return json({ error: "that code takes off more than the ticket price" }, 409);
@@ -456,6 +484,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const commerceRecord: Record<string, unknown> = {
     ...(giftCents > 0 ? { gift_card_cents: giftCents } : {}),
     ...(donationCampaign ? { donation_cents: donationCents, donation_campaign_id: donationCampaign.id } : {}),
+    ...(member ? { membership_id: member.membership_id, member_discount_percent: member.discount_percent } : {}),
   };
   // The Exos fee: 3% net after Stripe, from the organizer's share. The
   // platform pays Stripe's card fee under destination charges, so the
@@ -518,7 +547,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       price_data: {
         currency, unit_amount: ticketAllIn,
         product_data: {
-          name: `${ev.name} — ${tier.name}`,
+          name: `${ev.name} — ${tier.name}${member ? " (member price)" : ""}`,
           ...taxNote(ticketAllIn - unitAmount - ticketUnitFee, ticketUnitFee, feeNames(ticketFees, unitAmount)),
         },
       },

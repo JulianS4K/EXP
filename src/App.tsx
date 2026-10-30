@@ -53,6 +53,8 @@ const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
 const Shop = lazy(() => import('./views/Shop'));
 const Give = lazy(() => import('./views/Give'));
 const GiftCardBalance = lazy(() => import('./views/GiftCardBalance'));
+const MyMemberships = lazy(() => import('./views/MyMemberships'));
+const ClaimMembership = lazy(() => import('./views/ClaimMembership'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
 const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
@@ -193,6 +195,8 @@ export default function App() {
                     <Route path="/shop/:orgSlug" element={<Shop />} />
                     <Route path="/give/:orgSlug/:campaignSlug" element={<Give />} />
                     <Route path="/gift-cards/balance" element={<GiftCardBalance />} />
+                    <Route path="/me/memberships" element={<MyMemberships />} />
+                    <Route path="/membership/claim" element={<ClaimMembership />} />
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />

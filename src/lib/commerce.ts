@@ -8,6 +8,7 @@ import { supabase } from './supabase';
 import { toCsv } from './csv';
 
 export * from '../../supabase/functions/_shared/commerce.ts';
+import { passCreditsLeft, type PassEligibility } from '../../supabase/functions/_shared/commerce.ts';
 
 /** The function's own error message, if any. */
 async function fnError(error: unknown, fallback: string): Promise<Error> {
@@ -271,4 +272,191 @@ export function donationsCsv(rows: DonationExportRow[]): string {
 export function campaignProgress(raisedCents: number, goalCents: number): number {
   if (!(goalCents > 0)) return 0;
   return Math.min(1, Math.max(0, raisedCents / goalCents));
+}
+
+// ---------------------------------------------------------------------------
+// Passes and memberships (mig 20261030130500)
+// ---------------------------------------------------------------------------
+export interface PassProduct {
+  id: string; org_id: string; kind: 'season' | 'flex'; name: string; description: string | null; image_url: string | null;
+  price_cents: number; currency: string; credits: number | null; per_event_limit: number | null; event_ids: string[];
+  date_from: string | null; date_to: string | null; tier_ids?: string[]; valid_until: string | null; sales_end?: string | null;
+  max_sold?: number | null; sold?: number; active?: boolean; sold_out?: boolean; org_slug?: string; org_name?: string;
+}
+
+export interface MembershipProduct {
+  id: string; org_id: string; name: string; description: string | null; image_url: string | null; price_cents: number;
+  currency: string; billing: 'month' | 'year' | 'once'; duration_days: number; discount_percent: number; presale: boolean;
+  free_tickets_per_period: number; guest_allowance: number; household_seats: number; giftable: boolean; active?: boolean;
+  org_slug?: string; org_name?: string;
+}
+
+export interface MyPass {
+  id: string; org_id: string; org_name: string; kind: 'season' | 'flex'; name: string; credits_total: number | null;
+  credits_used: number; per_event_limit: number | null; eligibility: PassEligibility; valid_until: string | null; status: string;
+}
+
+export interface MyMembership {
+  id: string; org_id: string; org_name: string; product_name: string; billing: string | null; status: string;
+  current_period_end: string | null; cancel_at_period_end: boolean; benefits: Record<string, unknown>; shared: boolean;
+  household: string[] | null; free_used_this_period: number; can_manage_billing: boolean;
+}
+
+export async function publicPassProducts(orgSlug: string): Promise<PassProduct[]> {
+  const { data, error } = await supabase.from('exos_public_pass_products').select('*').eq('org_slug', orgSlug);
+  if (error) throw error;
+  return (data ?? []) as PassProduct[];
+}
+
+export async function publicMembershipProducts(orgSlug: string): Promise<MembershipProduct[]> {
+  const { data, error } = await supabase.from('exos_public_membership_products').select('*').eq('org_slug', orgSlug);
+  if (error) throw error;
+  return (data ?? []) as MembershipProduct[];
+}
+
+export async function listPassProducts(orgId: string): Promise<PassProduct[]> {
+  const { data, error } = await supabase.from('exos_pass_products').select('*').eq('org_id', orgId).order('created_at');
+  if (error) throw error;
+  return (data ?? []) as PassProduct[];
+}
+
+export async function listMembershipProducts(orgId: string): Promise<MembershipProduct[]> {
+  const { data, error } = await supabase.from('exos_membership_products').select('*').eq('org_id', orgId).order('created_at');
+  if (error) throw error;
+  return (data ?? []) as MembershipProduct[];
+}
+
+export async function savePassProduct(p: Partial<PassProduct> & { org_id: string; name: string; kind: 'season' | 'flex'; price_cents: number }): Promise<void> {
+  const row = {
+    org_id: p.org_id, kind: p.kind, name: p.name, description: p.description ?? null, image_url: p.image_url ?? null,
+    price_cents: p.price_cents, currency: p.currency ?? 'usd', credits: p.kind === 'flex' ? p.credits ?? 1 : null,
+    per_event_limit: p.per_event_limit ?? null, event_ids: p.event_ids ?? [], date_from: p.date_from ?? null,
+    date_to: p.date_to ?? null, tier_ids: p.tier_ids ?? [], valid_until: p.valid_until ?? null,
+    sales_end: p.sales_end ?? null, max_sold: p.max_sold ?? null, active: p.active ?? true,
+  };
+  const { error } = p.id
+    ? await supabase.from('exos_pass_products').update(row).eq('id', p.id)
+    : await supabase.from('exos_pass_products').insert(row);
+  if (error) throw error;
+}
+
+export async function saveMembershipProduct(p: Partial<MembershipProduct> & { org_id: string; name: string; price_cents: number; billing: 'month' | 'year' | 'once' }): Promise<void> {
+  const row: Record<string, unknown> = {
+    org_id: p.org_id, name: p.name, description: p.description ?? null, image_url: p.image_url ?? null,
+    price_cents: p.price_cents, currency: p.currency ?? 'usd', duration_days: p.duration_days ?? 365,
+    discount_percent: p.discount_percent ?? 0, presale: p.presale ?? false,
+    free_tickets_per_period: p.free_tickets_per_period ?? 0, guest_allowance: p.guest_allowance ?? 0,
+    household_seats: p.household_seats ?? 0, giftable: p.giftable ?? true, active: p.active ?? true,
+  };
+  if (!p.id) row.billing = p.billing;
+  const { error } = p.id
+    ? await supabase.from('exos_membership_products').update(row).eq('id', p.id)
+    : await supabase.from('exos_membership_products').insert(row);
+  if (error) throw error;
+}
+
+export async function buyPass(input: { productId: string; email?: string; successUrl: string; cancelUrl: string }): Promise<string> {
+  const d = await commerce<{ url?: string }>({
+    action: 'buy_pass', product_id: input.productId, email: input.email || undefined,
+    success_url: input.successUrl, cancel_url: input.cancelUrl,
+  }, 'Could not start checkout.');
+  if (!d?.url) throw new Error('Could not start checkout.');
+  return d.url;
+}
+
+export async function buyMembership(input: {
+  productId: string; giftToEmail?: string; giftMessage?: string; giftFromName?: string; successUrl: string; cancelUrl: string;
+}): Promise<string> {
+  const d = await commerce<{ url?: string }>({
+    action: 'buy_membership', product_id: input.productId, gift_to_email: input.giftToEmail || undefined,
+    gift_message: input.giftMessage || undefined, gift_from_name: input.giftFromName || undefined,
+    success_url: input.successUrl, cancel_url: input.cancelUrl,
+  }, 'Could not start checkout.');
+  if (!d?.url) throw new Error('Could not start checkout.');
+  return d.url;
+}
+
+export async function openBillingPortal(membershipId: string, returnUrl: string): Promise<string> {
+  const d = await commerce<{ url?: string }>({ action: 'membership_portal', membership_id: membershipId, return_url: returnUrl },
+    'Could not open billing.');
+  if (!d?.url) throw new Error('Could not open billing.');
+  return d.url;
+}
+
+export async function myPasses(): Promise<MyPass[]> {
+  await supabase.rpc('exos_claim_my_passes');
+  const { data, error } = await supabase.rpc('exos_my_passes');
+  if (error) throw error;
+  return (data ?? []) as MyPass[];
+}
+
+export async function myMemberships(): Promise<MyMembership[]> {
+  const { data, error } = await supabase.rpc('exos_my_memberships');
+  if (error) throw error;
+  return (data ?? []) as MyMembership[];
+}
+
+export interface MemberBenefit { membership_id: string; product_name: string; discount_percent: number; guest_allowance: number; presale: boolean }
+
+export async function myMemberBenefit(orgId: string): Promise<MemberBenefit | null> {
+  const { data, error } = await supabase.rpc('exos_my_member_benefit', { p_org_id: orgId });
+  if (error) return null;
+  return (data as MemberBenefit | null) ?? null;
+}
+
+export type RedeemResult = { session_id: string; ticket_ids?: string[]; error?: string; fresh?: boolean };
+
+export async function redeemPass(passId: string, eventId: string, tierId: string, quantity: number, requestId: string): Promise<RedeemResult> {
+  const { data, error } = await supabase.rpc('exos_pass_redeem', {
+    p_pass_id: passId, p_event_id: eventId, p_tier_id: tierId, p_quantity: quantity, p_request_id: requestId,
+  });
+  if (error) throw error;
+  return data as RedeemResult;
+}
+
+export async function redeemMemberFree(membershipId: string, eventId: string, tierId: string, quantity: number, requestId: string): Promise<RedeemResult> {
+  const { data, error } = await supabase.rpc('exos_membership_redeem', {
+    p_membership_id: membershipId, p_event_id: eventId, p_tier_id: tierId, p_quantity: quantity, p_request_id: requestId,
+  });
+  if (error) throw error;
+  return data as RedeemResult;
+}
+
+export async function claimMembershipGift(token: string): Promise<string> {
+  const { data, error } = await supabase.rpc('exos_membership_claim_gift', { p_token: token });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function setHousehold(membershipId: string, email: string, add: boolean): Promise<number> {
+  const { data, error } = await supabase.rpc('exos_membership_household_set', { p_membership_id: membershipId, p_email: email, p_add: add });
+  if (error) throw error;
+  return data as number;
+}
+
+export async function giftMembership(productId: string, toEmail: string, fromName?: string, message?: string): Promise<string> {
+  const { data, error } = await supabase.rpc('exos_membership_gift', {
+    p_product_id: productId, p_to_email: toEmail, p_from_name: fromName ?? null, p_message: message ?? null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function setMemberPresale(eventId: string, startsAt: string | null, endsAt: string | null, tierIds: string[] = [], productIds: string[] = []): Promise<void> {
+  const { error } = await supabase.rpc('exos_set_member_presale', {
+    p_event_id: eventId, p_starts_at: startsAt, p_ends_at: endsAt, p_tier_ids: tierIds, p_product_ids: productIds,
+  });
+  if (error) throw error;
+}
+
+export async function scanMembershipCard(orgId: string, membershipId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.rpc('exos_membership_scan', { p_org_id: orgId, p_membership_id: membershipId });
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+/** Plain words for a pass's admissions left. */
+export function passLeftLabel(p: { credits_total: number | null; credits_used: number }): string {
+  const left = passCreditsLeft(p.credits_total, p.credits_used);
+  return left === null ? 'one per event' : `${left} admission${left === 1 ? '' : 's'} left`;
 }

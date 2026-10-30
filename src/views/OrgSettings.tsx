@@ -36,6 +36,7 @@ import OrgLegalSettings from '../components/OrgLegalSettings';
 import FeeRulesEditor from '../components/FeeRulesEditor';
 import OrgGiftCardsPanel from '../components/OrgGiftCardsPanel';
 import OrgGivingPanel from '../components/OrgGivingPanel';
+import OrgMembershipsPanel from '../components/OrgMembershipsPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -620,6 +621,13 @@ export default function OrgSettings() {
               <OrgGivingPanel orgId={org.id} orgSlug={org.slug}
                 canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
                 canRecord={isAdmin || ['owner', 'manager', 'finance'].includes(activeRole ?? '')} />
+            )}
+
+            {/* Memberships, season passes, flex packs (mig 20261030130500). */}
+            {(isAdmin || ['owner', 'manager', 'finance', 'scanner'].includes(activeRole ?? '')) && (
+              <OrgMembershipsPanel orgId={org.id}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canScan={isAdmin || ['owner', 'manager', 'scanner'].includes(activeRole ?? '')} />
             )}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}

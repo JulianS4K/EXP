@@ -61,6 +61,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/self-hosting.md`](docs/self-hosting.md): running your own Exos (Supabase, edge functions, secrets, the web app, schedules)
 - [`docs/pci.md`](docs/pci.md): PCI DSS scope (SAQ A), the controls that keep it, and the yearly operator checklist
 - [`docs/gift-cards.md`](docs/gift-cards.md), [`docs/giving.md`](docs/giving.md): gift cards (ledger, codes, redeem at checkout) and donations / campaigns
+- [`docs/memberships.md`](docs/memberships.md): memberships (Stripe subscriptions, member price, presales, households, gifts), season passes and flex packs, and the Opendate API mapping
 - [`docs/organizer-guide.md`](docs/organizer-guide.md): what organizers do, for support and testing
 - [`docs/strategy.md`](docs/strategy.md): where Exos is going and the phased build plan
 - [`docs/gtm-nyc.md`](docs/gtm-nyc.md): go-to-market, NYC first

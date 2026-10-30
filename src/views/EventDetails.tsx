@@ -47,6 +47,7 @@ import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import CheckoutExtras, { type CheckoutExtrasValue } from '../components/CheckoutExtras';
+import MemberPassRedeem from '../components/MemberPassRedeem';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
@@ -1173,6 +1174,19 @@ export default function EventDetails() {
                     initialQty={prefill?.addons}
                   />
                 )}
+
+                {/* Member price notice, "use my pass" / member free tickets (mig 20261030130500). */}
+                <MemberPassRedeem
+                  orgId={event.orgId}
+                  event={{ id: event.id, starts_at: event.date ? event.date.toDate().toISOString() : null }}
+                  tierId={selectedTierId}
+                  quantity={quantity}
+                  signedIn={!!user}
+                  onIssued={(n) => {
+                    toast({ kind: 'success', message: `${n} ticket${n === 1 ? '' : 's'} added to My Tickets.` });
+                    window.location.href = publicUrl('my-tickets');
+                  }}
+                />
 
                 {(!soldOut || voucher?.canBypass) && (priceToDisplay > 0 || addonSel.totalCents > 0) && (
                   <CheckoutExtras
