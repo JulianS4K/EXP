@@ -56,6 +56,8 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
+| `exos_public_community`, `exos_public_communities`, `exos_public_event_communities` (mig 20261031200000) | OK | Community page, directory and the event page's community block: active communities only (the directory: public ones); member **count** only, never names or emails; members-only posts only when the caller is a member, host or staff; fediverse replies only once approved. The event block answers for published events only and tells the caller whether the gate lets them in |
+| `exos_community_invite_preview` (mig 20261031200000) | OK | Bearer `ecv_` / `ech_` + 64 hex (256-bit) invite token, SHA-256 compared; returns the community's name and slug, whether it's still valid and the host display name. Accepting needs an account (and the invited, confirmed email for email-bound invites) |
 
 ### Callable by authenticated (131 flagged)
 
@@ -134,7 +136,12 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_community_join`, `_leave`, `_set_notify`, `_report`, `_host_accept`, `exos_my_communities` (mig 20261031200000) | OK | Self-scoped to `auth.uid()`. Join: banned refused, invite token checked (email-bound invites need the confirmed email), consent text stored for any channel, texts only with an existing org SMS opt-in; 30 joins a day. Report: only posts the caller can see, once per post, 10 a day |
+| `exos_community_save`, `_admin`, `_member_list`, `_decide`, `_remove_member`, `_unban`, `_invite`, `_revoke_invite`, `_host_invite`, `_host_revoke`, `_moderate_post`, `_resolve_report`, `_review_reply`, `_block_remote` (mig 20261031200000) | OK | Owner / manager of the community's org, re-read from the community / post / report / invite row (an org id the caller passes in must match it). Member emails go to owner / manager only. Invite tokens are returned once and stored as SHA-256 |
+| `exos_community_add_event`, `_remove_event`, `_post`, `_host_create_event` (mig 20261031200000) | OK | Owner / manager (content may post) or an **active host of that community**: a host adds only events of an org where they're owner / manager (or drafts they proposed), proposes drafts only (5 a day), can't tie access to memberships. Posts: 10 a day per author, 50 per community; notifying posts 3 a day / 10 a week; event announcements 5 a day. Mail through `exos_mail_enqueue` (marketing: opt-out + unsubscribe), texts through the SMS outbox (quiet hours, 8 a month, STOP) |
 | All anon-callable functions above | as above | authenticated also holds them |
+
+Communities and federation (mig 20261031200000): `exos_community_checkout_gate` and every `exos_ap_*` function (lookup, key store, `exos_ap_signing_key` which returns the Vault-held private key, outbox, follow / reply / delete handling, delivery claim and mark) are **service role only**, called by `exos-checkout` and `exos-activitypub`. The helpers `_exos_comm_*`, `_exos_ap_*` and the triggers `exos_tg_ticket_community_gate` / `exos_tg_event_published_community` have no client grant.
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
 webhook workers, `exos_record_*`, `exos_refund_*`, wallet / calendar / MCP

@@ -179,6 +179,18 @@ function org(p: Obj): { id: string; name: string } {
   const o = obj(p, "org");
   return { id: uuid(o, "id"), name: str(o, "name", "your organization") };
 }
+const COMMUNITY_SLUG = /^[a-z0-9][a-z0-9_-]{1,38}[a-z0-9]$/;
+function community(p: Obj): { id: string; name: string; slug: string } {
+  const c = obj(p, "community");
+  const slug = str(c, "slug");
+  if (!COMMUNITY_SLUG.test(slug)) throw new PayloadError("community slug is not a slug");
+  return { id: uuid(c, "id"), name: str(c, "name", "your community"), slug };
+}
+/** Why they got it and how to change it, per community (the global unsubscribe is in the footer). */
+function communityFooter(ctx: Ctx, c: { name: string; slug: string }): string {
+  return `<p style="color:#888;font-size:12px">You joined ${esc(c.name)} and chose email updates. ` +
+    `<a href="${href(ctx, `/c/${c.slug}?settings=1`)}">Change or stop them</a>.</p>`;
+}
 function salesTable(rows: Obj[]): string {
   if (rows.length === 0) return "";
   const tr = rows.map((r) =>
@@ -408,6 +420,42 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
           ? ""
           : `<p>Follow ${esc(o.name)} on Exos to hear about their next events first.</p>` +
             button(ctx, `/organizer/${o.id}`, `Follow ${o.name}`)),
+    };
+  },
+
+  // ── community members (mig 20261031200000; marketing: they chose email) ──
+  "community-post": (ctx) => {
+    const c = community(ctx.p);
+    const p = obj(ctx.p, "post");
+    const title = opt(p, "title");
+    const body = str(p, "body");
+    const id = uuid(p, "id");
+    const paras = body.split(/\n{2,}/).slice(0, 6).map((x) => `<p>${esc(x).replace(/\n/g, "<br>")}</p>`).join("");
+    return {
+      audience: "buyer",
+      orgName: c.name,
+      subject: title ? `${c.name}: ${title}` : `News from ${c.name}`,
+      body:
+        (title ? `<p><strong>${esc(title)}</strong></p>` : "") + paras +
+        (p.members_only === true ? `<p style="color:#666">For members of ${esc(c.name)}.</p>` : "") +
+        button(ctx, `/c/${c.slug}#post-${id}`, `Open ${c.name}`) + communityFooter(ctx, c),
+    };
+  },
+
+  "community-event": (ctx) => {
+    const c = community(ctx.p);
+    const ev = event(ctx.p);
+    const e = obj(ctx.p, "event");
+    const early = opt(e, "early_access_until");
+    return {
+      audience: "buyer",
+      orgName: c.name,
+      subject: `${c.name}: ${ev.name}`,
+      body:
+        `<p>New in ${esc(c.name)}:</p>` + eventBlock(ev) +
+        (e.members_only === true ? `<p>Tickets are for members of ${esc(c.name)}.</p>` : "") +
+        (early ? `<p>Members get early access until ${esc(formatWhen(early, opt(e, "timezone")))}.</p>` : "") +
+        button(ctx, `/event/${ev.id}`, "Get tickets") + communityFooter(ctx, c),
     };
   },
 

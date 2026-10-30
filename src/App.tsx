@@ -49,6 +49,8 @@ const OrgMembers = lazy(() => import('./views/OrgMembers'));
 const OrgLimitFlags = lazy(() => import('./views/OrgLimitFlags'));
 const OrgPayouts = lazy(() => import('./views/OrgPayouts'));
 const OrgStorefront = lazy(() => import('./views/OrgStorefront'));
+const Community = lazy(() => import('./views/Community'));
+const Communities = lazy(() => import('./views/Communities'));
 const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
 const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
@@ -186,6 +188,9 @@ export default function App() {
                         /e/:slug (event slug) — /o/:slug resolves to an
                         org's branded landing page with their event list. */}
                     <Route path="/o/:slug" element={<OrgStorefront />} />
+                    {/* Communities (mig 20261031200000): a community page and the directory by city. */}
+                    <Route path="/c/:slug" element={<Community />} />
+                    <Route path="/communities" element={<Communities />} />
                     {/* Embed widget (Sprint 6) — chromeless event card for
                         venues to iframe on their own site. */}
                     <Route path="/embed/event/:eventId" element={<EmbedEvent />} />

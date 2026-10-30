@@ -121,6 +121,52 @@ async function startServer() {
     next();
   });
 
+  // -- ActivityPub (docs/federation.md) -------------------------------------
+  // With EXOS_FEDERATION=on, the fediverse paths are reverse-proxied to the
+  // exos-activitypub edge function. The path is kept as is (inbound HTTP
+  // signatures cover it) and the body is passed through raw (they cover its
+  // digest too), so this runs before express.json. Off: these paths 404 as before.
+  if (process.env.EXOS_FEDERATION === 'on') {
+    const fnBase = `${(process.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '')}/functions/v1/exos-activitypub`;
+    const isAp = (p: string) =>
+      p === '/.well-known/webfinger' || p === '/.well-known/nodeinfo' || p.startsWith('/nodeinfo/') || p.startsWith('/ap/');
+    const pass = ['accept', 'content-type', 'date', 'digest', 'signature', 'user-agent', 'if-none-match'];
+    app.use(async (req, res, next) => {
+      if (!isAp(req.path)) return next();
+      if (!/^https:\/\//.test(fnBase)) return res.status(503).type('text/plain').send('federation not configured');
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'POST') return res.status(405).end();
+      try {
+        let body: Buffer | undefined;
+        if (req.method === 'POST') {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          for await (const c of req) {
+            size += (c as Buffer).length;
+            if (size > 256 * 1024) return res.status(413).type('text/plain').send('payload too large');
+            chunks.push(c as Buffer);
+          }
+          body = Buffer.concat(chunks);
+        }
+        const headers: Record<string, string> = { 'x-forwarded-for': req.ip || '' };
+        for (const h of pass) {
+          const v = req.get(h);
+          if (v) headers[h] = v;
+        }
+        const r = await fetch(fnBase + req.originalUrl, {
+          method: req.method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(20_000),
+        });
+        res.status(r.status);
+        for (const h of ['content-type', 'cache-control', 'location', 'etag', 'retry-after', 'access-control-allow-origin']) {
+          const v = r.headers.get(h);
+          if (v) res.setHeader(h, v);
+        }
+        res.send(Buffer.from(await r.arrayBuffer()));
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
+
   // -- Body parsing with a sane cap ---------------------------------------
   // 100kb is plenty for the API's JSON payloads. If something legitimately
   // larger comes along (e.g. ticket batch ops) raise it on a per-route basis.

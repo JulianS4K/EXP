@@ -220,6 +220,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: "ticket type not available" }, 409);
   }
 
+  // Community members-only events and member early access (mig
+  // 20261031200000), before any hold or Stripe session, for paid and free
+  // orders. A guest (no account) can't be a member. Until that migration is
+  // applied the RPC doesn't exist and nothing is gated.
+  const { data: gate, error: gateErr } = await sb.rpc("exos_community_checkout_gate", { p_event_id: event_id, p_buyer: buyerUid ?? null });
+  if (gateErr && gateErr.code !== "PGRST202") {
+    return json({ error: "could not check event access, try again" }, 503);
+  }
+  const g = gate as { blocked?: boolean; message?: string; community_slug?: string; reason?: string } | null;
+  if (!gateErr && g?.blocked) {
+    return json({ error: g.message ?? "tickets are for community members", reason: `community_${g.reason ?? "members_only"}`, community_slug: g.community_slug }, 403);
+  }
+
   // Availability is enforced by a cart HOLD created just before the Stripe
   // session (exos_create_hold — atomically reserves against tier capacity AND
   // any shared quota for a TTL, so two buyers can't both pay for the last seat).

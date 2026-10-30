@@ -66,6 +66,8 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/social.md`](docs/social.md): social integrations for promoters + buyers, built vs. missing
 - [`docs/maps.md`](docs/maps.md): venue geocoding proxy, 30-day pin cache, interactive maps
 - [`docs/native-sharing.md`](docs/native-sharing.md): fan + promoter sharing, and the Stories bridge for the future app
+- [`docs/communities.md`](docs/communities.md): communities (join, hosts, posts, members-only events, moderation, directory)
+- [`docs/federation.md`](docs/federation.md): ActivityPub federation for communities (Lemmy / Mastodon follow), off by default
 - [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
 
 ## Repository layout
