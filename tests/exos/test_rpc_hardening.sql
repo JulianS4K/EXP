@@ -128,6 +128,8 @@ BEGIN
        'exos_promo_link_hit',
        -- total sold on other platforms, published events only (mig 20261030120000)
        'exos_public_sales_count_total',
+       -- a published event's seat layout and per-seat availability only (mig 20261030140000)
+       'exos_public_event_seating', 'exos_public_event_seats',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)

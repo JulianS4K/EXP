@@ -21,7 +21,8 @@
 //
 // Endpoints (all GET, all scoped to the key's org; each also under /v1):
 //   /me, /events, /events/:id, /events/:id/{ticket-types, add-ons, promo-codes,
-//   attendees, check-ins, check-in-lists, guest-lists, waitlist}, /orders,
+//   attendees, check-ins, check-in-lists, guest-lists, waitlist, seats,
+//   seat-reconciliation}, /orders,
 //   /orders/:id, /invoices, /refunds, /webhooks, /events/:id/sales-counts,
 //   /sales-counts, /sales-counts/:id, /eventbrite-events/:id
 // Writes: POST /sales-counts, PUT + DELETE /sales-counts/:id,
@@ -47,6 +48,11 @@ const EVENT_COLS =
   "tickets_sold, total_tickets, created_at";
 const TIER_COLS =
   "id, name, description, price, capacity, sold, ticket_type, visibility, sales_start, sales_end, sort_order";
+// Reserved seating (mig 20261030140000): extra columns, dropped again on a
+// database without them (42703) so the API keeps answering.
+const TIER_SEAT_COLS = ", seated";
+const TICKET_SEAT_COLS = ", seat_id, seat_label, seat_section, seat_row, seat_number";
+const SEAT_STATUSES = new Set(["available", "held", "sold", "blocked"]);
 const ORDER_COLS =
   "session_id, event_id, status, quantity, amount_cents, tax_cents, currency, buyer_email, created_at, fulfilled_at";
 
@@ -216,17 +222,35 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     case "list-attendees": {
       const id = await ownEvent(c);
       // Never barcode_secret.
-      let q = sb.from("exos_tickets")
-        .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
-          "order_ref, channel_source, created_at", { count: "exact" })
-        .eq("event_id", id).eq("org_id", orgId);
       const status = c.q.get("status");
-      if (status !== null) {
-        if (!/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
-        q = q.eq("status", status);
-      }
-      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+      if (status !== null && !/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
+      return paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
+        let q = sb.from("exos_tickets")
+          .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
+            "order_ref, channel_source, created_at" + extra, { count: "exact" })
+          .eq("event_id", id).eq("org_id", orgId);
+        if (status !== null) q = q.eq("status", status);
+        return q.order("created_at", { ascending: false }).order("id").range(page.from, page.to);
+      }), page);
     }
+
+    case "list-seats": {
+      // Every seat of the event's map with its status (available / held /
+      // sold / blocked), the ticket on a sold seat, and the tier it sells as.
+      // An event without a seat map answers an empty list.
+      const id = await ownEvent(c);
+      const status = c.q.get("status");
+      if (status !== null && !SEAT_STATUSES.has(status)) throw new ApiError(400, "status is invalid.");
+      const { data, error } = await sb.rpc("exos_event_seat_status", { p_event_id: id });
+      if (error) throw error;
+      const seats = ((data ?? []) as { status: string }[]).filter((s) => status === null || s.status === status);
+      return { data: seats };
+    }
+
+    case "get-seat-reconciliation":
+      // Sold seats without a live ticket, live seated tickets without their
+      // seat, and held seats of dead holds (Opendate's seat_reconciliation).
+      return rows(await sb.rpc("exos_seat_reconciliation", { p_event_id: await ownEvent(c) }));
 
     case "list-check-ins": {
       const id = await ownEvent(c);
@@ -282,8 +306,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       if (error) throw error;
       if (!order) throw new ApiError(404, "order not found");
       const [tickets, addons, refunds] = await Promise.all([
-        sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at")
-          .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
+        withoutMissing(TICKET_SEAT_COLS, (extra) =>
+          sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at" + extra)
+            .eq("org_id", orgId).eq("order_ref", sid).order("created_at")),
         sb.from("exos_order_addons").select("id, addon_id, addon_name, quantity, unit_price_paid, status")
           .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
         sb.from("exos_order_refunds").select("id, amount_cents, currency, status, reason, is_partial, created_at")
@@ -626,10 +651,20 @@ function dbError(e: unknown): { status: number; message: string } | null {
 }
 
 async function tiers(sb: SupabaseClient, eventId: string): Promise<unknown[]> {
-  const { data, error } = await sb.from("exos_ticket_tiers").select(TIER_COLS)
-    .eq("event_id", eventId).order("sort_order", { ascending: true });
+  const { data, error } = await withoutMissing(TIER_SEAT_COLS, (extra) =>
+    sb.from("exos_ticket_tiers").select(TIER_COLS + extra)
+      .eq("event_id", eventId).order("sort_order", { ascending: true }));
   if (error) throw error;
   return data ?? [];
+}
+
+/** Runs a query with optional extra columns, and again without them when the
+ *  database doesn't have them yet (undefined column). */
+// deno-lint-ignore no-explicit-any
+async function withoutMissing<R extends { error: any }>(extra: string, run: (extra: string) => PromiseLike<R>): Promise<R> {
+  const r = await run(extra);
+  if (r.error && (r.error.code === "42703" || r.error.code === "PGRST204")) return await run("");
+  return r;
 }
 
 function isoParam(q: URLSearchParams, name: string): string | null {

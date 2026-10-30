@@ -36,6 +36,9 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-check-ins', method: 'GET', path: '/events/:id/check-ins', scope: 'tickets:read', paged: true },
   { id: 'list-check-in-lists', method: 'GET', path: '/events/:id/check-in-lists', scope: 'tickets:read', paged: false },
   { id: 'list-guest-lists', method: 'GET', path: '/events/:id/guest-lists', scope: 'tickets:read', paged: false },
+  // Reserved seating (mig 20261030140000).
+  { id: 'list-seats', method: 'GET', path: '/events/:id/seats', scope: 'tickets:read', paged: false },
+  { id: 'get-seat-reconciliation', method: 'GET', path: '/events/:id/seat-reconciliation', scope: 'tickets:read', paged: false },
   { id: 'list-waitlist', method: 'GET', path: '/events/:id/waitlist', scope: 'orders:read', paged: true },
   { id: 'list-orders', method: 'GET', path: '/orders', scope: 'orders:read', paged: true },
   { id: 'get-order', method: 'GET', path: '/orders/:id', scope: 'orders:read', paged: false },

@@ -78,7 +78,15 @@ export function buildEventTicketObject(p: WalletPayload, issuerId: string): Reco
   };
   if (p.ticket.attendee_name) obj.ticketHolderName = p.ticket.attendee_name;
   if (p.ticket.tier_name) obj.ticketType = loc(p.ticket.tier_name);
-  if (p.ticket.section_label) obj.seatInfo = { section: loc(p.ticket.section_label) };
+  const seat = p.ticket.seat;
+  if (seat?.section || seat?.row || seat?.number) {
+    // Reserved seat (mig 20261030140000).
+    obj.seatInfo = {
+      ...(seat.section ? { section: loc(seat.section) } : {}),
+      ...(seat.row ? { row: loc(seat.row) } : {}),
+      ...(seat.number ? { seat: loc(seat.number) } : {}),
+    };
+  } else if (p.ticket.section_label) obj.seatInfo = { section: loc(p.ticket.section_label) };
   if (state === "void") {
     obj.textModulesData = [{
       id: "void", header: "Void",

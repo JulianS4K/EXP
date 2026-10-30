@@ -50,6 +50,8 @@ export async function startCheckout(input: {
   attribution?: Attribution;
   /** Signed out: pay as a guest; tickets go to this email. */
   guestEmail?: string;
+  /** Reserved seating (mig 20261030140000): the picked seats of a seated tier. */
+  seatIds?: string[];
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -62,10 +64,14 @@ export async function startCheckout(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
+      seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
       ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
+  // Free seats are issued straight away (no Stripe): go to My Tickets.
+  const free = data as { free?: boolean; issued?: number } | null;
+  if (free?.free && free.issued) return `/my-tickets?claimed=${free.issued}`;
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');
   return url;
@@ -82,6 +88,8 @@ export async function claimFreeAsGuest(input: {
   cancelUrl: string;
   voucherCode?: string;
   attribution?: Attribution;
+  /** Reserved seating: the picked seats of a seated tier. */
+  seatIds?: string[];
 } & CheckoutRecordInput): Promise<{ issued: number; email: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -93,6 +101,7 @@ export async function claimFreeAsGuest(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail.trim().toLowerCase(),
+      seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
       ...recordBody(input),
     },
   });

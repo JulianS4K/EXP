@@ -31,6 +31,7 @@ import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import CurrencySelect from '../components/CurrencySelect';
 import TableTierFields from '../components/TableTierFields';
+import EventSeatingPanel from '../components/seating/EventSeatingPanel';
 import { BLANK_TABLE_DRAFT, admissionsForTier, rowToTableDraft, validateTableDraft, type TableTierDraft } from '../lib/tables';
 import { getTierTableRows, saveTierTableConfig } from '../lib/tablesApi';
 import {
@@ -1579,6 +1580,18 @@ export default function EditEvent() {
           />
         )}
 
+
+        {/* Reserved seating (mig 20261030140000): map + ticket type per section,
+            seat blocks. Self-contained, not part of the form submit. */}
+        {eventId && eventData.orgId && (
+          <EventSeatingPanel
+            eventId={eventId}
+            orgId={eventData.orgId}
+            canEdit={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id))
+              .map((t) => ({ id: t.id, name: t.name, kind: (t as { kind?: string }).kind }))}
+          />
+        )}
 
         {/* Distribution Hub Section (Already present but refined) */}
         <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-8">
