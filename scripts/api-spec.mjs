@@ -38,7 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-export const AUTH = ['api_key'];
+export const AUTH = ['api_key', 'shared_key'];
 export const LOCATIONS = ['path', 'query', 'body', 'header'];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const FILE_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -296,10 +296,13 @@ export function typeSchema(type, enumValues) {
 
 const SECURITY = {
   api_key: { type: 'http', scheme: 'bearer', bearerFormat: 'sk_live_…', description: 'Organization API key, created in Org settings → Developer.' },
+  shared_key: { type: 'apiKey', in: 'query', name: 'shared_key', description: 'Listing-feed shared key (sh_live_…), one per listing partner, created in Org settings → Listing feed. Also accepted as the X-Shared-Key header.' },
 };
 
 function operation(e, category) {
-  const scopeLine = e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
+  const scopeLine = e.auth === 'shared_key'
+    ? 'Authenticated with a listing-feed shared key.'
+    : e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
   const op = {
     operationId: e.id,
     summary: e.summary,

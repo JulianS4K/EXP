@@ -22,6 +22,7 @@ const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
 const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
+const OrgArtists = lazy(() => import('./views/OrgArtists'));
 const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
 const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
@@ -157,6 +158,7 @@ export default function App() {
                     <Route path="/p/:token" element={<PromoterPortal />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
                     <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
+                    <Route path="/orgs/:orgId/artists" element={<OrgArtists />} />
                     <Route path="/promoter/:eventId/:code" element={<PromoterKit />} />
                     <Route path="/organizer/:id" element={<OrganizerProfile />} />
                     <Route path="/profile" element={<Profile />} />

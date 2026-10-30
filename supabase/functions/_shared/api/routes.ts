@@ -16,6 +16,13 @@
 // 20261030120000) and booking (mig 20261030100000); each needs a `:write`
 // scope.
 //
+// `auth`: `api_key` (an org API key, Authorization: Bearer sk_live_…, held to
+// `scope`) or `shared_key` (a listing-feed shared key, ?shared_key=sh_live_…
+// or X-Shared-Key; it reads the public feed of one org and nothing else).
+// `paged`: true for the API's { data, meta } lists, 'opendate' for the
+// listing feed's { current_page, per_page, total_entries, total_pages,
+// collection } envelope.
+//
 // Pure TypeScript, imported by vitest.
 
 import type { Scope } from './scopes.ts';
@@ -26,111 +33,138 @@ export interface ApiRoute {
   id: string;
   method: ApiMethod;
   path: string;
-  /** null: any valid key (GET /me). */
+  auth: 'api_key' | 'shared_key';
+  /** null: any valid key (GET /me, and every shared-key route). */
   scope: Scope | null;
-  paged: boolean;
+  paged: boolean | 'opendate';
   /** Other paths answering the same route. */
   aliases?: readonly string[];
 }
 
 
+const K = 'api_key' as const;
+
 export const ROUTES: readonly ApiRoute[] = [
-  { id: 'me', method: 'GET', path: '/me', scope: null, paged: false },
-  { id: 'list-events', method: 'GET', path: '/events', scope: 'events:read', paged: true },
-  { id: 'get-event', method: 'GET', path: '/events/:id', scope: 'events:read', paged: false },
-  { id: 'list-ticket-types', method: 'GET', path: '/events/:id/ticket-types', scope: 'events:read', paged: false },
-  { id: 'list-add-ons', method: 'GET', path: '/events/:id/add-ons', scope: 'events:read', paged: false },
-  { id: 'list-promo-codes', method: 'GET', path: '/events/:id/promo-codes', scope: 'events:read', paged: true },
-  { id: 'list-attendees', method: 'GET', path: '/events/:id/attendees', scope: 'tickets:read', paged: true },
-  { id: 'list-check-ins', method: 'GET', path: '/events/:id/check-ins', scope: 'tickets:read', paged: true },
-  { id: 'list-check-in-lists', method: 'GET', path: '/events/:id/check-in-lists', scope: 'tickets:read', paged: false },
-  { id: 'list-guest-lists', method: 'GET', path: '/events/:id/guest-lists', scope: 'tickets:read', paged: false },
+  { id: 'me', method: 'GET', auth: K, path: '/me', scope: null, paged: false },
+  { id: 'list-events', method: 'GET', auth: K, path: '/events', scope: 'events:read', paged: true },
+  { id: 'get-event', method: 'GET', auth: K, path: '/events/:id', scope: 'events:read', paged: false },
+  { id: 'list-ticket-types', method: 'GET', auth: K, path: '/events/:id/ticket-types', scope: 'events:read', paged: false },
+  { id: 'list-add-ons', method: 'GET', auth: K, path: '/events/:id/add-ons', scope: 'events:read', paged: false },
+  { id: 'list-promo-codes', method: 'GET', auth: K, path: '/events/:id/promo-codes', scope: 'events:read', paged: true },
+  { id: 'list-attendees', method: 'GET', auth: K, path: '/events/:id/attendees', scope: 'tickets:read', paged: true },
+  { id: 'list-check-ins', method: 'GET', auth: K, path: '/events/:id/check-ins', scope: 'tickets:read', paged: true },
+  { id: 'list-check-in-lists', method: 'GET', auth: K, path: '/events/:id/check-in-lists', scope: 'tickets:read', paged: false },
+  { id: 'list-guest-lists', method: 'GET', auth: K, path: '/events/:id/guest-lists', scope: 'tickets:read', paged: false },
   // Reserved seating (mig 20261030140000).
-  { id: 'list-seats', method: 'GET', path: '/events/:id/seats', scope: 'tickets:read', paged: false },
-  { id: 'get-seat-reconciliation', method: 'GET', path: '/events/:id/seat-reconciliation', scope: 'tickets:read', paged: false },
-  { id: 'list-waitlist', method: 'GET', path: '/events/:id/waitlist', scope: 'orders:read', paged: true },
-  { id: 'list-orders', method: 'GET', path: '/orders', scope: 'orders:read', paged: true },
-  { id: 'get-order', method: 'GET', path: '/orders/:id', scope: 'orders:read', paged: false },
-  { id: 'list-invoices', method: 'GET', path: '/invoices', scope: 'orders:read', paged: true },
-  { id: 'list-refunds', method: 'GET', path: '/refunds', scope: 'orders:read', paged: true },
-  { id: 'list-webhooks', method: 'GET', path: '/webhooks', scope: 'webhooks:read', paged: false },
+  { id: 'list-seats', method: 'GET', auth: K, path: '/events/:id/seats', scope: 'tickets:read', paged: false },
+  { id: 'get-seat-reconciliation', method: 'GET', auth: K, path: '/events/:id/seat-reconciliation', scope: 'tickets:read', paged: false },
+  { id: 'list-waitlist', method: 'GET', auth: K, path: '/events/:id/waitlist', scope: 'orders:read', paged: true },
+  { id: 'list-orders', method: 'GET', auth: K, path: '/orders', scope: 'orders:read', paged: true },
+  { id: 'get-order', method: 'GET', auth: K, path: '/orders/:id', scope: 'orders:read', paged: false },
+  { id: 'list-invoices', method: 'GET', auth: K, path: '/invoices', scope: 'orders:read', paged: true },
+  { id: 'list-refunds', method: 'GET', auth: K, path: '/refunds', scope: 'orders:read', paged: true },
+  { id: 'list-webhooks', method: 'GET', auth: K, path: '/webhooks', scope: 'webhooks:read', paged: false },
   // Tickets sold on other platforms (mig 20261030120000). The first write
   // routes: each needs a :write scope (apiRoutes.test.ts).
-  { id: 'list-sales-counts', method: 'GET', path: '/sales-counts', scope: 'finance:read', paged: true },
-  { id: 'get-sales-count', method: 'GET', path: '/sales-counts/:id', scope: 'finance:read', paged: false },
-  { id: 'create-sales-count', method: 'POST', path: '/sales-counts', scope: 'finance:write', paged: false },
-  { id: 'update-sales-count', method: 'PUT', path: '/sales-counts/:id', scope: 'finance:write', paged: false },
-  { id: 'delete-sales-count', method: 'DELETE', path: '/sales-counts/:id', scope: 'finance:write', paged: false },
-  { id: 'list-event-sales-counts', method: 'GET', path: '/events/:id/sales-counts', scope: 'finance:read', paged: false },
-  { id: 'import-sales-counts', method: 'POST', path: '/events/:id/sales-counts/import', scope: 'finance:write', paged: false },
-  { id: 'find-eventbrite-event', method: 'GET', path: '/eventbrite-events/:id', scope: 'events:read', paged: false },
+  { id: 'list-sales-counts', method: 'GET', auth: K, path: '/sales-counts', scope: 'finance:read', paged: true },
+  { id: 'get-sales-count', method: 'GET', auth: K, path: '/sales-counts/:id', scope: 'finance:read', paged: false },
+  { id: 'create-sales-count', method: 'POST', auth: K, path: '/sales-counts', scope: 'finance:write', paged: false },
+  { id: 'update-sales-count', method: 'PUT', auth: K, path: '/sales-counts/:id', scope: 'finance:write', paged: false },
+  { id: 'delete-sales-count', method: 'DELETE', auth: K, path: '/sales-counts/:id', scope: 'finance:write', paged: false },
+  { id: 'list-event-sales-counts', method: 'GET', auth: K, path: '/events/:id/sales-counts', scope: 'finance:read', paged: false },
+  { id: 'import-sales-counts', method: 'POST', auth: K, path: '/events/:id/sales-counts/import', scope: 'finance:write', paged: false },
+  { id: 'find-eventbrite-event', method: 'GET', auth: K, path: '/eventbrite-events/:id', scope: 'events:read', paged: false },
 
   // Booking (mig 20261030100000, docs/booking.md).
-  { id: 'list-venues', method: 'GET', path: '/venues', scope: 'booking:read', paged: true, aliases: ['/venue_ownerships'] },
-  { id: 'create-venue', method: 'POST', path: '/venues', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships'] },
-  { id: 'get-venue', method: 'GET', path: '/venues/:id', scope: 'booking:read', paged: false, aliases: ['/venue_ownerships/:id'] },
-  { id: 'update-venue', method: 'PATCH', path: '/venues/:id', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships/:id'] },
-  { id: 'delete-venue', method: 'DELETE', path: '/venues/:id', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships/:id'] },
-  { id: 'list-venue-rooms', method: 'GET', path: '/venues/:id/rooms', scope: 'booking:read', paged: false },
-  { id: 'create-room', method: 'POST', path: '/venues/:id/rooms', scope: 'booking:write', paged: false },
-  { id: 'list-rooms', method: 'GET', path: '/rooms', scope: 'booking:read', paged: true },
-  { id: 'get-room', method: 'GET', path: '/rooms/:id', scope: 'booking:read', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
-  { id: 'update-room', method: 'PATCH', path: '/rooms/:id', scope: 'booking:write', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
-  { id: 'delete-room', method: 'DELETE', path: '/rooms/:id', scope: 'booking:write', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
-  { id: 'list-holds', method: 'GET', path: '/holds', scope: 'booking:read', paged: true },
-  { id: 'create-hold', method: 'POST', path: '/holds', scope: 'booking:write', paged: false },
-  { id: 'get-hold', method: 'GET', path: '/holds/:id', scope: 'booking:read', paged: false },
-  { id: 'update-hold', method: 'PATCH', path: '/holds/:id', scope: 'booking:write', paged: false },
-  { id: 'clear-hold', method: 'POST', path: '/holds/:id/clear', scope: 'booking:write', paged: false },
+  { id: 'list-venues', method: 'GET', auth: K, path: '/venues', scope: 'booking:read', paged: true, aliases: ['/venue_ownerships'] },
+  { id: 'create-venue', method: 'POST', auth: K, path: '/venues', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships'] },
+  { id: 'get-venue', method: 'GET', auth: K, path: '/venues/:id', scope: 'booking:read', paged: false, aliases: ['/venue_ownerships/:id'] },
+  { id: 'update-venue', method: 'PATCH', auth: K, path: '/venues/:id', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships/:id'] },
+  { id: 'delete-venue', method: 'DELETE', auth: K, path: '/venues/:id', scope: 'booking:write', paged: false, aliases: ['/venue_ownerships/:id'] },
+  { id: 'list-venue-rooms', method: 'GET', auth: K, path: '/venues/:id/rooms', scope: 'booking:read', paged: false },
+  { id: 'create-room', method: 'POST', auth: K, path: '/venues/:id/rooms', scope: 'booking:write', paged: false },
+  { id: 'list-rooms', method: 'GET', auth: K, path: '/rooms', scope: 'booking:read', paged: true },
+  { id: 'get-room', method: 'GET', auth: K, path: '/rooms/:id', scope: 'booking:read', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
+  { id: 'update-room', method: 'PATCH', auth: K, path: '/rooms/:id', scope: 'booking:write', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
+  { id: 'delete-room', method: 'DELETE', auth: K, path: '/rooms/:id', scope: 'booking:write', paged: false, aliases: ['/venues/:vid/rooms/:id'] },
+  { id: 'list-holds', method: 'GET', auth: K, path: '/holds', scope: 'booking:read', paged: true },
+  { id: 'create-hold', method: 'POST', auth: K, path: '/holds', scope: 'booking:write', paged: false },
+  { id: 'get-hold', method: 'GET', auth: K, path: '/holds/:id', scope: 'booking:read', paged: false },
+  { id: 'update-hold', method: 'PATCH', auth: K, path: '/holds/:id', scope: 'booking:write', paged: false },
+  { id: 'clear-hold', method: 'POST', auth: K, path: '/holds/:id/clear', scope: 'booking:write', paged: false },
   {
-    id: 'convert-hold', method: 'POST', path: '/holds/:id/convert-to-event', scope: 'booking:write', paged: false,
+    id: 'convert-hold', method: 'POST', auth: K, path: '/holds/:id/convert-to-event', scope: 'booking:write', paged: false,
     aliases: ['/holds/:id/convert_to_event', '/holds/:id/convert_to_confirm'],
   },
-  { id: 'get-calendar', method: 'GET', path: '/calendar', scope: 'booking:read', paged: false },
+  { id: 'get-calendar', method: 'GET', auth: K, path: '/calendar', scope: 'booking:read', paged: false },
   {
-    id: 'list-show-activities', method: 'GET', path: '/events/:id/show-activities', scope: 'booking:read', paged: true,
+    id: 'list-show-activities', method: 'GET', auth: K, path: '/events/:id/show-activities', scope: 'booking:read', paged: true,
     aliases: ['/events/:id/show_activities', '/confirms/:id/show_activities'],
   },
   {
-    id: 'create-show-activity', method: 'POST', path: '/events/:id/show-activities', scope: 'booking:write', paged: false,
+    id: 'create-show-activity', method: 'POST', auth: K, path: '/events/:id/show-activities', scope: 'booking:write', paged: false,
     aliases: ['/events/:id/show_activities', '/confirms/:id/show_activities'],
   },
   {
-    id: 'get-show-activity', method: 'GET', path: '/events/:id/show-activities/:aid', scope: 'booking:read', paged: false,
+    id: 'get-show-activity', method: 'GET', auth: K, path: '/events/:id/show-activities/:aid', scope: 'booking:read', paged: false,
     aliases: ['/events/:id/show_activities/:aid', '/confirms/:id/show_activities/:aid'],
   },
   {
-    id: 'update-show-activity', method: 'PATCH', path: '/events/:id/show-activities/:aid', scope: 'booking:write', paged: false,
+    id: 'update-show-activity', method: 'PATCH', auth: K, path: '/events/:id/show-activities/:aid', scope: 'booking:write', paged: false,
     aliases: ['/events/:id/show_activities/:aid', '/confirms/:id/show_activities/:aid'],
   },
   {
-    id: 'delete-show-activity', method: 'DELETE', path: '/events/:id/show-activities/:aid', scope: 'booking:write', paged: false,
+    id: 'delete-show-activity', method: 'DELETE', auth: K, path: '/events/:id/show-activities/:aid', scope: 'booking:write', paged: false,
     aliases: ['/events/:id/show_activities/:aid', '/confirms/:id/show_activities/:aid'],
   },
-  { id: 'list-event-notes', method: 'GET', path: '/events/:id/notes', scope: 'booking:read', paged: true },
-  { id: 'create-event-note', method: 'POST', path: '/events/:id/notes', scope: 'booking:write', paged: false },
-  { id: 'list-notes', method: 'GET', path: '/notes', scope: 'booking:read', paged: true },
-  { id: 'get-note', method: 'GET', path: '/notes/:id', scope: 'booking:read', paged: false },
-  { id: 'update-note', method: 'PATCH', path: '/notes/:id', scope: 'booking:write', paged: false },
-  { id: 'delete-note', method: 'DELETE', path: '/notes/:id', scope: 'booking:write', paged: false },
-  { id: 'list-event-contacts', method: 'GET', path: '/events/:id/contacts', scope: 'booking:read', paged: true },
-  { id: 'create-event-contact', method: 'POST', path: '/events/:id/contacts', scope: 'booking:write', paged: false },
-  { id: 'list-contacts', method: 'GET', path: '/event-contacts', scope: 'booking:read', paged: true, aliases: ['/calendar_event_contacts'] },
-  { id: 'get-contact', method: 'GET', path: '/event-contacts/:id', scope: 'booking:read', paged: false, aliases: ['/calendar_event_contacts/:id'] },
-  { id: 'update-contact', method: 'PATCH', path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
-  { id: 'delete-contact', method: 'DELETE', path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
+  { id: 'list-event-notes', method: 'GET', auth: K, path: '/events/:id/notes', scope: 'booking:read', paged: true },
+  { id: 'create-event-note', method: 'POST', auth: K, path: '/events/:id/notes', scope: 'booking:write', paged: false },
+  { id: 'list-notes', method: 'GET', auth: K, path: '/notes', scope: 'booking:read', paged: true },
+  { id: 'get-note', method: 'GET', auth: K, path: '/notes/:id', scope: 'booking:read', paged: false },
+  { id: 'update-note', method: 'PATCH', auth: K, path: '/notes/:id', scope: 'booking:write', paged: false },
+  { id: 'delete-note', method: 'DELETE', auth: K, path: '/notes/:id', scope: 'booking:write', paged: false },
+  { id: 'list-event-contacts', method: 'GET', auth: K, path: '/events/:id/contacts', scope: 'booking:read', paged: true },
+  { id: 'create-event-contact', method: 'POST', auth: K, path: '/events/:id/contacts', scope: 'booking:write', paged: false },
+  { id: 'list-contacts', method: 'GET', auth: K, path: '/event-contacts', scope: 'booking:read', paged: true, aliases: ['/calendar_event_contacts'] },
+  { id: 'get-contact', method: 'GET', auth: K, path: '/event-contacts/:id', scope: 'booking:read', paged: false, aliases: ['/calendar_event_contacts/:id'] },
+  { id: 'update-contact', method: 'PATCH', auth: K, path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
+  { id: 'delete-contact', method: 'DELETE', auth: K, path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
   // Series, collections, timed entry (mig 20261030150000, docs/series-timed-entry.md).
-  { id: 'list-series', method: 'GET', path: '/series', scope: 'events:read', paged: true },
-  { id: 'get-series', method: 'GET', path: '/series/:id', scope: 'events:read', paged: false },
-  { id: 'list-series-dates', method: 'GET', path: '/series/:id/dates', scope: 'events:read', paged: true },
-  { id: 'list-collections', method: 'GET', path: '/collections', scope: 'events:read', paged: true },
-  { id: 'get-collection', method: 'GET', path: '/collections/:id', scope: 'events:read', paged: false },
-  { id: 'get-timed-entry', method: 'GET', path: '/events/:id/timed-entry', scope: 'events:read', paged: false },
-  { id: 'list-slots', method: 'GET', path: '/events/:id/slots', scope: 'tickets:read', paged: false },
+  { id: 'list-series', method: 'GET', auth: K, path: '/series', scope: 'events:read', paged: true },
+  { id: 'get-series', method: 'GET', auth: K, path: '/series/:id', scope: 'events:read', paged: false },
+  { id: 'list-series-dates', method: 'GET', auth: K, path: '/series/:id/dates', scope: 'events:read', paged: true },
+  { id: 'list-collections', method: 'GET', auth: K, path: '/collections', scope: 'events:read', paged: true },
+  { id: 'get-collection', method: 'GET', auth: K, path: '/collections/:id', scope: 'events:read', paged: false },
+  { id: 'get-timed-entry', method: 'GET', auth: K, path: '/events/:id/timed-entry', scope: 'events:read', paged: false },
+  { id: 'list-slots', method: 'GET', auth: K, path: '/events/:id/slots', scope: 'tickets:read', paged: false },
+  // Artists and lineups (mig 20261030110000, docs/listing-feed.md).
+  { id: 'list-artists', method: 'GET', auth: K, path: '/artists', scope: 'events:read', paged: true },
+  { id: 'create-artist', method: 'POST', auth: K, path: '/artists', scope: 'events:write', paged: false },
+  { id: 'get-artist', method: 'GET', auth: K, path: '/artists/:id', scope: 'events:read', paged: false },
+  { id: 'update-artist', method: 'PATCH', auth: K, path: '/artists/:id', scope: 'events:write', paged: false },
+  { id: 'merge-artist', method: 'POST', auth: K, path: '/artists/:id/merge', scope: 'events:write', paged: false },
+  { id: 'list-artist-events', method: 'GET', auth: K, path: '/artists/:id/events', scope: 'events:read', paged: true },
+  { id: 'get-lineup', method: 'GET', auth: K, path: '/events/:id/lineup', scope: 'events:read', paged: false },
+  { id: 'set-lineup', method: 'PUT', auth: K, path: '/events/:id/lineup', scope: 'events:write', paged: false },
+  // Listing-feed shared keys: minting one publishes the org's feed to a partner.
+  { id: 'list-listing-keys', method: 'GET', auth: K, path: '/listing-keys', scope: 'org:admin', paged: false },
+  { id: 'create-listing-key', method: 'POST', auth: K, path: '/listing-keys', scope: 'org:admin', paged: false },
+  { id: 'revoke-listing-key', method: 'DELETE', auth: K, path: '/listing-keys/:id', scope: 'org:admin', paged: false },
+  // The public listing feed (shared key). /public/confirms is the same feed
+  // under Opendate's name, for partners that already read Opendate.
+  { id: 'public-list-events', method: 'GET', auth: 'shared_key', path: '/public/events', scope: null, paged: 'opendate' },
+  { id: 'public-get-event', method: 'GET', auth: 'shared_key', path: '/public/events/:id', scope: null, paged: false },
+  { id: 'public-list-confirms', method: 'GET', auth: 'shared_key', path: '/public/confirms', scope: null, paged: 'opendate' },
+  { id: 'public-get-confirm', method: 'GET', auth: 'shared_key', path: '/public/confirms/:id', scope: null, paged: false },
 ];
 
-/** Methods exos-api answers. */
+/** Methods the API answers (anything else is 405). */
 export const API_METHODS: readonly ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+/** True for a path under the shared-key family (/public/…). */
+export function isSharedKeyPath(path: string): boolean {
+  return path === '/public' || path.startsWith('/public/');
+}
 
 export interface RouteMatch {
   route: ApiRoute;

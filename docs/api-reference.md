@@ -2,8 +2,10 @@
 
 A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
 site, reporting, booking tools. Everything is read-only except the sales counts (tickets sold on other
-platforms) and booking (venues, rooms, holds, the show schedule, staff notes and contacts), which partners
-can also write (docs/booking.md). The full reference, with every endpoint, parameter and example, is the public page
+platforms), booking (venues, rooms, holds, the show schedule, staff notes and contacts; docs/booking.md) and
+artists, lineups and listing-feed shared keys, which partners can also write (a `:write` scope, or `org:admin`
+for shared keys); plus a public listing feed for listing sites under `/v1/public/…` (shared-key auth,
+`docs/listing-feed.md`). The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
 - **Base URL:** `https://<project-ref>.supabase.co/functions/v1/exos-api`, paths under `/v1` (`/v1/events`). Each
@@ -12,8 +14,9 @@ can also write (docs/booking.md). The full reference, with every endpoint, param
   (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page, `booking.ts` the booking
   bodies). Pure TypeScript, so vitest imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap), `20261030120000` (sales counts), `20261030100000` (booking). SQL harnesses:
-  `tests/exos/test_api_scopes.sql`, `tests/exos/test_sales_counts.sql`, `tests/exos/test_booking.sql`.
+  the 10-key cap), `20261030120000` (sales counts), `20261030100000` (booking), `20261030110000` (artists,
+  lineups, listing feed). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_sales_counts.sql`,
+  `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`.
 - **Writes:** reads are GET. The sales counts (`POST /v1/sales-counts`, `PUT` / `DELETE
   /v1/sales-counts/:id`, `POST /v1/events/:id/sales-counts/import`) need `finance:write`; they call
   service-role RPCs (`exos_api_sales_count_put` / `_delete`) that re-check the event or row belongs to the key's
@@ -41,14 +44,14 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
   answer: the API returns personal data).
 - Errors are `{ "error": "…" }`: `400` bad paging, filter or body, `401` missing or invalid key, `403` scope,
   `404` unknown path or another org's id, `405` a method the path doesn't answer (`Allow` lists the ones it
-  does), `409` a write conflict, `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body
+  does), `409` a write conflict (incl. a taken permalink, a merged artist, the shared-key cap), `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body
   that is neither JSON nor form-encoded, `422` a CSV import with errors, `500`, `503`.
 - Bodies are read through `_shared/api/body.ts` (`readCapped`: counted while streaming, never read in full past
   the cap).
 
 ## Writes
 
-Sales counts and booking routes write (POST / PUT / PATCH / DELETE, JSON body, a `:write` scope). The function
+Sales counts, booking, artists, lineups and listing keys write (POST / PUT / PATCH / DELETE, JSON body, a `:write` scope). The function
 runs with the service role, so every query names the key's org itself. Hold writes call the `_exos_hold_*` SQL
 functions (levels, promotion and convert in one transaction, `hold.*` webhooks); the other tables are written as
 rows and their triggers and checks validate them. The SQL raises with fixed codes and `bookingDbError()`
@@ -56,10 +59,19 @@ rows and their triggers and checks validate them. The SQL raises with fixed code
 Opendate-style spellings answer the same routes through `aliases` in `routes.ts` (`/holds/:id/convert_to_confirm`,
 `/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`).
 
+Artists, lineups and shared keys call service-role SQL functions that take the key's org explicitly
+(`_exos_artist_save`, `_exos_artist_merge`, `_exos_lineup_save`, `_exos_listing_key_create` / `_revoke`); their
+SQLSTATEs map to HTTP in `rpcError()` (after `bookingDbError()`).
+
+The listing feed (`/v1/public/events`, alias `/v1/public/confirms`) is the one route family without an API key:
+`auth: 'shared_key'` in `routes.ts`, its own handler (`listingFeed()`), Opendate's
+`{ current_page, per_page, total_entries, total_pages, collection }` envelope (`paged: 'opendate'`), CORS `*`,
+`Cache-Control: public, max-age=60`, an ETag, and its own 120/min bucket per key.
+
 ## Adding a route
 
-1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, path, scope (`:read` for GET, `:write` otherwise),
-   paged, and any aliases.
+1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, auth, path, scope (`:read` for GET, `:write`
+   otherwise), paged, and any aliases.
 2. A `case` for that id in `handle()` in `exos-api/index.ts`. Select explicit columns; never secrets (barcode
    secrets, webhook secrets, reserved emails). Scope every query to the key's org.
 3. An endpoint in the right `docs/api/<area>.json` with the same `id`, the path under `/v1`, the same `scope`,

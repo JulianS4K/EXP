@@ -37,7 +37,7 @@ reviewed and added to its allowlist.
 Legend: **OK** = intended and properly checked; **Revoked** = internal helper,
 client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 
-### Callable by anon (23 flagged)
+### Callable by anon (24 flagged)
 
 | Function | Verdict | Why |
 |---|---|---|
@@ -59,10 +59,11 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_event_seating`, `exos_public_event_seats` (mig 20261030140000) | OK | Reserved seating, published events only. The layout (stage, section boxes, which tiers are seated) and, per seat, id / section / row / number / label / tier / position / accessibility flags and a plain `available` boolean. No holder, ticket, hold or claim data; staff status is `exos_event_seat_status` (signed-in, org roles). Seat holds are written only by `exos_hold_seats` (service role, `exos-checkout`) |
 | `exos_public_series`, `exos_public_org_series`, `exos_public_collection` (mig 20261030150000) | OK | Public series and collection pages: active series / published collections, and only their upcoming **published** events, through one column list (`_exos_public_event_json`: no status, counts or buyer data). Nothing for drafts |
 | `exos_public_timed_entry`, `exos_public_event_slots` (mig 20261030150000) | OK | A timed event's slot config and what is left per slot (live holds count as taken), for published or cancelled events; a draft's only for its org's staff (`_exos_timed_visible`). At most 62 days per call. No buyer data |
+| `exos_public_lineups` (mig 20261030110000) | OK (anon + authenticated) | Lineups of published events only (at most 100 ids per call): slot position, act type, set time, and the artist's name, permalink, photo and Spotify id, all of which the event page shows. Never bio, links, org or drafts' lineups |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
 | `exos_public_sales_count_total` (mig 20261030120000) | OK | Tickets sold on other platforms, one number per **published** event (at most 200 ids a call); drafts answer nothing. Never the platforms, amounts, ticket types or notes, which stay staff-only. The same kind of number as the public `tickets_sold`. In the H3 allowlist |
 
-### Callable by authenticated (131 flagged)
+### Callable by authenticated (136 flagged)
 
 Grouped by the check they rely on. All pin `search_path`.
 
@@ -151,6 +152,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_hold_create`, `exos_hold_update`, `exos_hold_clear`, `exos_hold_convert` (mig 20261030100000) | OK | Booking holds (calendar pencils, not the checkout's `exos_create_hold` cart holds; `docs/booking.md`). Owner / manager of the hold's org; "no such hold" and "not yours" are the same 42501. They call the `_exos_hold_*` cores (**service role only**, also what exos-api calls with the key's org), which take a per-org advisory lock, renumber every touched line and enqueue `hold.*` webhooks. `exos_holds` / `exos_hold_positions` have no client write grant at all; `_exos_holds_page`, `_exos_booking_calendar`, `_exos_hold_json` are service role only. Venues, rooms, show schedule, notes and contacts are plain RLS tables (staff roles per table) whose definer triggers set `org_id` from the parent and refuse moves across orgs; an event can only link its own org's venue, and only convert sets its hold links |
 | `exos_series_*` (create, generate, publish, cancel_date, propagate, update, cancel, delete, attach_event, detach_event), `exos_set_timed_entry`, `exos_clear_timed_entry`, `exos_set_event_slot` (mig 20261030150000) | OK | Owner / manager of the series' or event's org (`exos_has_org_role`), looked up from the row; another org's id answers "not found" (42501) |
 | `exos_event_slot_report`, `exos_collection_event_ids`, `exos_event_door_slots`, `exos_admit_outside_window` (mig 20261030150000) | OK | Org staff (report, collection preview); door roles plus `exos_can_door_event` (door registry, "admit anyway"). `exos_attach_hold_slot` is service role only (exos-checkout); `_exos_slot_commit`, `_exos_slot_report` and the other `_exos_*` helpers have no client grant |
+| `exos_artist_save`, `exos_artist_merge`, `exos_lineup_save`, `exos_listing_key_create`, `exos_listing_key_revoke` (mig 20261030110000) | OK | Org role from the row, never from the caller: artists and lineups owner / manager / content (merge owner / manager), shared keys owner only; an unknown or foreign id gets the same refusal. They call the `_exos_*` cores, which are service-role only (exos-api passes the API key's org) and check that every artist and event belongs to that org; a trigger refuses a cross-org lineup slot. Over exos-api the shared-key cores also require the calling API key's creator to be an active owner (`_exos_api_key_owner_ok`), and revoking or deleting an API key revokes the shared keys it minted (trigger on `exos_api_keys`). Shared keys are stored as SHA-256 hashes (`key_hash` has no client column grant); `exos_listing_feed_source` (service role) answers only the key's org's published, listed events and redacts secret venues |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

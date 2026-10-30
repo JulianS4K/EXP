@@ -131,6 +131,7 @@ for m in \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
          20261030100000_exos_booking \
+         20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
          20261030150000_exos_series_timed_entry \
@@ -300,6 +301,7 @@ for m in \
          20261029160000_exos_fixed_block \
          20261029170000_exos_event_import \
          20261030100000_exos_booking \
+         20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
          20261030150000_exos_series_timed_entry \
@@ -354,3 +356,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_sales_cou
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_seating.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_booking.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_series_timed_entry.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_artists_feed.sql"

@@ -133,6 +133,8 @@ BEGIN
        -- published series / collections / timed-entry slots only (mig 20261030150000)
        'exos_public_series', 'exos_public_org_series', 'exos_public_collection',
        'exos_public_timed_entry', 'exos_public_event_slots',
+       -- published events' lineups for the event page / widget (mig 20261030110000)
+       'exos_public_lineups',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
