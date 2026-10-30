@@ -1,6 +1,6 @@
 # Partner API (exos-api)
 
-A read-only REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
+A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
 site, reporting. The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
@@ -10,7 +10,8 @@ site, reporting. The full reference, with every endpoint, parameter and example,
   (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page). Pure TypeScript, so vitest
   imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap). SQL harness: `tests/exos/test_api_scopes.sql`.
+  the 10-key cap), `20261031120000` (fans, tags, refund requests; `fans:read` / `fans:write`, docs/fans.md). SQL
+  harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_fans.sql`.
 - **Deploy:** `exos-api` takes an API key, not a Supabase JWT, so it is deployed with `--no-verify-jwt`.
 
 ## Auth and scopes
@@ -32,7 +33,10 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
 - 120 requests per key per minute; over it, `429` with `Retry-After`. If the limiter fails, `503` (no limiter, no
   answer: the API returns personal data).
 - Errors are `{ "error": "…" }`: `400` bad paging or filter, `401` missing or invalid key, `403` scope, `404`
-  unknown path or another org's id, `405` anything but GET, `500`, `503`.
+  unknown path or another org's id, `405` a method the API never answers, `409` a clash (duplicate tag or fan
+  email), `413` a body over 64 KB, `500`, `503`.
+- Writes (fan contacts and tags only) take a JSON or form-encoded body, read with a streaming 64 KB cap
+  (`_shared/api/body.ts`). They never touch payments or a fan's consent.
 
 ## Adding a route
 

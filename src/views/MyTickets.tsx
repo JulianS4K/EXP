@@ -18,6 +18,7 @@ import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
 import MyCalendarFeed from '../components/MyCalendarFeed';
+import MyRefundAsks from '../components/MyRefundAsks';
 import WalletButtons, { useAvailableWallets } from '../components/WalletButtons';
 import { walletEligible } from '../lib/walletButtons';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
@@ -309,6 +310,9 @@ export default function MyTickets() {
             )}
           </div>
         )}
+
+        {/* Refund requests the buyer made from a ticket page (mig 20261031120000). */}
+        <MyRefundAsks className="mb-16" />
 
         {/* Date changed: refund or give back, until the organizer's deadline. */}
         {offers.length > 0 && (

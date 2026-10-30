@@ -54,6 +54,7 @@ transactional, **M** follow-up (opt-out). Render: **SQL** (html row) or **TS** (
 | `refund-issued` | A refund row reaches `succeeded` (`exos_order_refunds` trigger; Stripe webhook, organizer refunds, auto-refunds) | T | per refund row | TS: amount, progress for a partial refund, order reference |
 | `waitlist-open` | Waitlist offer (code + hours to use it) | T | per offer | SQL |
 | `event-announcement` | Organizer announcement to holders | T | per announcement | SQL |
+| `signup-confirm` | A signup-form submission (`_exos_signup_submit`, mig 20261031120000; docs/fans.md) | T | per submission (`signup-confirm:<submission id>`); 3 submissions a day per address and org | TS: org name, form title, the confirm link `/signup/confirm?t=<64-hex token>` (only its hash is stored, 7 days). Sent even when the address is already on the list, so the form never tells anyone who is subscribed. No account needed |
 | `checkout-abandoned` | Cron `exos_send_checkout_reminders`: checkout expired 1-24h ago, seats left | M | per buyer + event, forever | SQL |
 | `post-event` | Cron `exos_send_mail_followups`: event ended 12h-3d ago | M | per event + holder | TS: thanks, "follow <org>" (unless following), up to 3 next events |
 

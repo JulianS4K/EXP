@@ -56,6 +56,9 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_promoter` | OK | Public promoter page: name, code, socials only if `allow_tagging` |
 | `exos_public_table_tiers` | OK | Public table tiers of published events only |
 | `exos_transfer_claim_preview` | OK | By transfer id (UUIDv4): event title, image, tier and status, no emails. Claiming still needs the key or the addressed account |
+| `exos_signup_form_public` (mig 20261031120000) | OK | An **active** signup form's public text: org name, title, intro, button, which fields it asks for, and the email / SMS consent wording. Nothing about any fan, no org id or tag ids. Paused / archived forms answer null |
+| `exos_signup_confirm` (mig 20261031120000) | OK | 64-hex confirm token (two UUIDv4s) from the confirm mail; only its SHA-256 is stored and it expires after 7 days. Puts the submission's own fan on the org's email list (the one write the consent guard trigger allows, flagged for that statement only). Answers ok, the org name and whether texts wait for a signed-in confirm; no email, name or phone. The page needs a click, so a mail scanner can't confirm |
+| `exos_signup_unsubscribe` (mig 20261031120000) | OK | 64-hex per-fan unsubscribe token; only sets the opt-out on that fan's org list. Answers ok and the org name |
 
 ### Callable by authenticated (131 flagged)
 
@@ -134,6 +137,11 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_org_fans`, `exos_org_fan`, `exos_org_refund_asks` (mig 20261031120000) | OK | Owner / manager / finance of the org (`exos_has_org_role`). Fan rows: email, names, account yes / no, order counts, tags and consent **as read-only facts** (list state, follows, the ad choice, the global opt-out, texts with a masked number); never the unsubscribe token, phone or barcode secret. Another org's fan id is not found |
+| `exos_org_fan_save`, `exos_org_fan_discard`, `exos_org_fans_export`, `exos_tag_save`, `exos_tag_delete`, `exos_tag_apply`, `exos_tag_remove`, `exos_signup_forms_list`, `exos_signup_form_save` (mig 20261031120000) | OK | Owner / manager only. Fan saves take names (and email on create) and refuse any consent key; the `exos_fans_consent_guard` trigger refuses consent changes from every writer outside the fan's own confirm / unsubscribe. Tagged records must be the org's (trigger). Export: logged in `exos_fan_exports`, 3 a minute and 20 a day per org |
+| `exos_org_tags`, `exos_org_tagged`, `exos_org_tag_filter` (mig 20261031120000) | OK | Owner / manager / finance / content: tag names and which records carry them |
+| `exos_signup_confirm_sms`, `exos_my_refund_asks_all`, `exos_my_ticket_bundles` (mig 20261031120000) | OK | Self. Texts: a valid, confirmed signup token **and** a signed-in account (the `exos_sms_opt_in` rule), 10 sign-ups a day per account; stores the exact consent words the form showed. Asks: the caller's own. Bundles: tickets the caller holds, no barcode secret |
+| `_exos_signup_submit`, `_exos_fans_page`, `_exos_fan_detail`, `_exos_fan_save`, `_exos_fan_discard`, `_exos_tag_*`, `_exos_tagged_item_delete`, `exos_api_refund_asks`, `exos_signup_sweep` (mig 20261031120000) | Service role | `exos-signup` (anon form posts: hashed-IP and per-form limits, honeypot, optional captcha, answers the same for every address) and `exos-api` (org from the key, `fans:*` / `events:*` / `orders:read` scopes). No client EXECUTE |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and

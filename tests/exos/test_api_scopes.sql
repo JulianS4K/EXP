@@ -34,12 +34,14 @@ DECLARE
   i       int;
 BEGIN
   -- S1
-  IF cardinality(public.exos_api_scope_names()) <> 15
+  -- 15 scopes (mig 20261027090000), 17 once fans:read / fans:write exist
+  -- (mig 20261031120000); org:admin stays last either way.
+  IF cardinality(public.exos_api_scope_names()) NOT IN (15, 17)
      OR (public.exos_api_scope_names())[1] <> 'events:read'
-     OR (public.exos_api_scope_names())[15] <> 'org:admin' THEN
+     OR (public.exos_api_scope_names())[cardinality(public.exos_api_scope_names())] <> 'org:admin' THEN
     RAISE EXCEPTION 'S1 FAIL: %', public.exos_api_scope_names();
   END IF;
-  RAISE NOTICE 'S1 ok: 15 scopes';
+  RAISE NOTICE 'S1 ok: % scopes', cardinality(public.exos_api_scope_names());
 
   -- S2
   PERFORM set_config('app.uid', 'a5000000-0000-0000-0000-0000000000a1', true);

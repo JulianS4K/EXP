@@ -44,8 +44,27 @@ describe('matchRoute', () => {
     }
     // Only GET /me is reachable without a scope.
     expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // The API is read-only: no route needs a write scope yet.
-    expect(ROUTES.every((r) => r.scope === null || r.scope.endsWith(':read'))).toBe(true);
+    // Every read needs a read scope; every write a write scope.
+    for (const r of ROUTES.filter((x) => x.scope)) {
+      if (r.method === 'GET') expect(r.scope!.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
+      else expect(r.scope!.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
+    }
+  });
+
+  it('routes the fan, tag and refund-request paths', () => {
+    expect(matchRoute('GET', '/fans/lookup')?.route.id).toBe('lookup-fans');
+    expect(matchRoute('GET', '/fans/f1')?.params).toEqual({ id: 'f1' });
+    expect(matchRoute('POST', '/fans')?.route.id).toBe('create-fan');
+    expect(matchRoute('PATCH', '/fans/f1')?.route.id).toBe('update-fan');
+    expect(matchRoute('DELETE', '/fans/f1')?.route.id).toBe('discard-fan');
+    expect(matchRoute('PUT', '/fans/f1')).toBeNull();
+    expect(matchRoute('POST', '/tagged-items')?.route.scope).toBe('events:write');
+    expect(matchRoute('GET', '/refund-requests')?.route.scope).toBe('orders:read');
+    // Fan data is its own scope: orders:read doesn't reach it, fans:write covers fans:read.
+    expect(hasScope(['orders:read'], 'fans:read')).toBe(false);
+    expect(hasScope(['fans:write'], 'fans:read')).toBe(true);
+    expect(hasScope(['read'], 'fans:read')).toBe(true);
+    expect(hasScope(['read'], 'fans:write')).toBe(false);
   });
 });
 
