@@ -24,7 +24,10 @@
 --   G11 commerce orders: gift card + donation fulfil once; amount mismatch fails;
 --      refund voids the card / refunds the donation
 --   G12 cross-org isolation
+--   G3b door staff: fixed-amount products only, per-card and per-day caps
+--      (exos_platform_settings), issuer + POS drawer recorded, closed drawer refused
 --   G13 ledger invariant: every card's balance = the sum of its ledger
+--   G14 the Exos fee owed on a non-Stripe gift card part (exos_fee_owed_cents)
 --   psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/test_gift_cards_giving.sql
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -159,6 +162,17 @@ END $$;
 
 -- G3 -------------------------------------------------------------------------
 CREATE TEMP TABLE c6 (k text PRIMARY KEY, v text);
+-- G3b fixtures: lower scanner caps, an open and a closed POS drawer.
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('gift_card_scanner_card_cap_cents', '5000'),
+  ('gift_card_scanner_day_cap_cents', '6000')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+INSERT INTO public.exos_pos_drawer_sessions (id, org_id, event_id, status) VALUES
+  ('c6000000-0000-0000-0000-0000000000f1', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-0000000000e1', 'open'),
+  ('c6000000-0000-0000-0000-0000000000f2', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-0000000000e1', 'open');
+UPDATE public.exos_pos_drawer_sessions SET status = 'closed', closed_at = now() WHERE id = 'c6000000-0000-0000-0000-0000000000f2';
+DO $$ BEGIN
+  ASSERT (SELECT status FROM public.exos_pos_drawer_sessions WHERE id = 'c6000000-0000-0000-0000-0000000000f2') = 'closed', 'G3b fixture: drawer closed';
+END $$;
 GRANT ALL ON c6 TO authenticated, service_role, anon;
 SET ROLE authenticated;
 DO $$
@@ -183,10 +197,41 @@ BEGIN
   r := public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 10000, 'comp');
   INSERT INTO c6 VALUES ('code2', r->>'code'), ('card2', r->>'card_id');
 
-  -- Scanner: cash yes, comp no.
+  -- Scanner (G3b): a fixed-amount product, cash or check, under the per-card
+  -- and per-day caps (lowered here: 5000 per card, 6000 a day), with the drawer.
   PERFORM pg_temp.act('c6000000-0000-0000-0000-0000000000a3');
-  r := public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2000, 'cash');
+  r := public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2500, 'cash',
+         'c6000000-0000-0000-0000-00000000f001', 'usd', NULL, NULL, NULL, NULL, 'till-s1', 'box_office',
+         'c6000000-0000-0000-0000-0000000000f1');
   INSERT INTO c6 VALUES ('code3', r->>'code'), ('card3', r->>'card_id');
+  ASSERT (r->>'issued_by') = 'c6000000-0000-0000-0000-0000000000a3' AND (r->>'pos_drawer_id') = 'c6000000-0000-0000-0000-0000000000f1',
+    'G3b: issuer and drawer recorded';
+  refused := false;
+  BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2000, 'cash');
+  EXCEPTION WHEN insufficient_privilege THEN refused := true; END;
+  ASSERT refused, 'G3b: scanner can''t issue an open amount (no product)';
+  refused := false;
+  BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2000, 'cash', 'c6000000-0000-0000-0000-00000000f002');
+  EXCEPTION WHEN insufficient_privilege THEN refused := true; END;
+  ASSERT refused, 'G3b: scanner can''t use an open-amount product';
+  refused := false;
+  BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 10000, 'cash', 'c6000000-0000-0000-0000-00000000f001');
+  EXCEPTION WHEN insufficient_privilege THEN refused := true; END;
+  ASSERT refused, 'G3b: over the per-card cap';
+  r := public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2500, 'check', 'c6000000-0000-0000-0000-00000000f001');
+  refused := false;
+  BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2500, 'cash', 'c6000000-0000-0000-0000-00000000f001');
+  EXCEPTION WHEN insufficient_privilege THEN refused := true; END;
+  ASSERT refused, 'G3b: over the daily cap (2500 + 2500 + 2500 > 6000)';
+  -- A retry of a recorded sale still answers (no new limit spent).
+  r := public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2500, 'cash',
+         'c6000000-0000-0000-0000-00000000f001', 'usd', NULL, NULL, NULL, NULL, 'till-s1');
+  ASSERT NOT (r->>'fresh')::boolean AND r->>'card_id' = (SELECT v FROM c6 WHERE k = 'card3'), 'G3b: retry over the cap returns the card';
+  refused := false;
+  BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2500, 'cash',
+          'c6000000-0000-0000-0000-00000000f001', 'usd', NULL, NULL, NULL, NULL, NULL, 'box_office', 'c6000000-0000-0000-0000-0000000000f2');
+  EXCEPTION WHEN invalid_parameter_value THEN refused := true; END;
+  ASSERT refused, 'G3b: a closed drawer is refused';
   refused := false;
   BEGIN PERFORM public.exos_gift_card_issue('c6000000-0000-0000-0000-000000000001', 2000, 'comp');
   EXCEPTION WHEN insufficient_privilege THEN refused := true; END;
@@ -224,6 +269,7 @@ DECLARE q jsonb; i int; code text := (SELECT v FROM c6 WHERE k = 'code1');
 BEGIN
   q := public.exos_gift_card_quote(code, 'g4-a', 'c6000000-0000-0000-0000-000000000001', 'usd', 3000);
   ASSERT q->>'error' IS NULL AND (q->>'applicable_cents')::int = 3000 AND (q->>'balance_cents')::int = 5000, 'G4: quote ' || q::text;
+  ASSERT q->>'source' = 'box_office' AND NOT (q->>'fee_paid_at_sale')::boolean, 'G4: a box-office card never paid the Exos fee';
   q := public.exos_gift_card_quote(code, 'g4-a', 'c6000000-0000-0000-0000-000000000001', 'usd', 9000);
   ASSERT (q->>'applicable_cents')::int = 5000, 'G4: applicable is the balance';
   q := public.exos_gift_card_quote(code, 'g4-a', 'c6000000-0000-0000-0000-000000000002', 'usd', 100);
@@ -504,6 +550,10 @@ BEGIN
   ASSERT (SELECT source = 'online' AND payment_method = 'card' AND balance_cents = 2500 AND recipient_email = 'c6-friend@x.com'
             FROM public.exos_gift_cards WHERE id = card), 'G11: card fields';
   ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'gift-card-issued' AND to_email = 'c6-friend@x.com') = 1, 'G11: code mailed to the recipient';
+  -- The code is only in the mail: the quote says this card's sale paid the Exos fee.
+  ASSERT (public.exos_gift_card_quote((SELECT substring(html from '([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})')
+            FROM public.exos_mail WHERE template = 'gift-card-issued' AND to_email = 'c6-friend@x.com'), 'g11', NULL, NULL, 100)
+          ->>'fee_paid_at_sale')::boolean, 'G11: an online Stripe card paid the fee at sale';
   st := public.exos_commerce_fulfill('cs_c6_bad', 'pi_c6_bad', 2400);
   ASSERT st = 'failed' AND NOT EXISTS (SELECT 1 FROM public.exos_gift_cards WHERE issue_key = 'cs_c6_bad'), 'G11: amount mismatch fails, no card';
   st := public.exos_commerce_fulfill('cs_c6_dn', 'pi_c6_dn', 5150);
@@ -570,6 +620,20 @@ BEGIN
   ASSERT q->>'error' = 'gift card not found', 'G12: the old code stops working';
   q := public.exos_gift_card_quote(r->>'code', 'g12', NULL, NULL, 100);
   ASSERT (q->>'balance_cents')::int = 3000, 'G12: the new code has the balance';
+END $$;
+
+-- G14 ------------------------------------------------------------------------
+-- The fee owed on a non-Stripe gift card part is recorded on the order.
+DO $$
+BEGIN
+  ASSERT (SELECT exos_fee_owed_cents FROM public.exos_checkout_sessions WHERE session_id = 'c6-s3') = 0, 'G14: defaults to 0';
+  UPDATE public.exos_checkout_sessions SET exos_fee_owed_cents = 120 WHERE session_id = 'c6-s3';
+  BEGIN
+    UPDATE public.exos_checkout_sessions SET exos_fee_owed_cents = -1 WHERE session_id = 'c6-s3';
+    RAISE EXCEPTION 'G14: negative fee owed accepted';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  RAISE NOTICE 'OK  G14 fee owed recorded';
 END $$;
 
 -- G13 ------------------------------------------------------------------------

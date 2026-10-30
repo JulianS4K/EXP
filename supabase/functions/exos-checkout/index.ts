@@ -65,7 +65,7 @@ import {
   EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit, exosFeeBpsAt, isFeeFreeAt,
 } from "../_shared/platformFee.ts";
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
-import { giftCardApplied, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
+import { giftCardApplied, giftCardOrderFee, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -435,19 +435,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     : `ip:${await hashIp(clientIp((h) => req.headers.get(h)), Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!)}`;
   let giftCents = 0;
   let giftLast4 = "";
+  // Only a card bought online through Stripe paid the Exos fee when it was sold.
+  let giftFeePaidAtSale = false;
   if (giftCode) {
     const { data: gq, error: gqErr } = await sb.rpc("exos_gift_card_quote", {
       p_code: giftCode, p_bucket: giftBucket, p_org_id: ev.org_id, p_currency: currency, p_amount_cents: amountCents,
     });
     if (gqErr) return json({ error: "could not check the gift card, try again" }, 503);
-    const q = gq as { error?: string | null; applicable_cents?: number; last4?: string } | null;
+    const q = gq as { error?: string | null; applicable_cents?: number; last4?: string; fee_paid_at_sale?: boolean } | null;
     if (q?.error) return json({ error: q.error }, 409);
     giftCents = giftCardApplied(amountCents, Number(q?.applicable_cents ?? 0));
     if (giftCents <= 0) return json({ error: "this gift card can't pay for this order" }, 409);
     giftLast4 = String(q?.last4 ?? "");
+    giftFeePaidAtSale = q?.fee_paid_at_sale === true;
   }
-  // What the card is charged. The Exos application fee is on this part only:
-  // the gift card's own sale already paid it.
+  // What the card is charged. The Exos fee also covers the gift card part
+  // unless the card's own online sale already paid it (giftCardOrderFee).
   const chargeCents = amountCents - giftCents;
   const giftFull = giftCents > 0 && chargeCents === 0;
   const commerceRecord: Record<string, unknown> = {
@@ -470,11 +473,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     bps: Number(Deno.env.get("EXOS_STRIPE_FEE_BPS") ?? String(STRIPE_CARD_FEE.bps)),
     fixedCents: Number(Deno.env.get("EXOS_STRIPE_FEE_FIXED_CENTS") ?? String(STRIPE_CARD_FEE.fixedCents)),
   };
-  const applicationFee = checkoutApplicationFeeCents(chargeCents, { bps: feeBps, card: cardFee });
+  // exos: gift cards — a box-office / comp / API card never paid the Exos fee,
+  // so its part of the order owes it too: added to the application fee as far
+  // as the card charge allows, the rest recorded as owed (exos_fee_owed_cents;
+  // all of it on an order such a card pays in full). Without a gift card this
+  // is exactly checkoutApplicationFeeCents / checkoutFeeSplit as before.
+  const giftFee = giftCardOrderFee(chargeCents, giftCents, giftFeePaidAtSale, { bps: feeBps, card: cardFee });
+  const applicationFee = giftCents > 0 ? giftFee.applicationFeeCents : checkoutApplicationFeeCents(chargeCents, { bps: feeBps, card: cardFee });
   // The same fee, broken down for the order record (mig 20260929131000).
   // Recorded only, never sent to Stripe: application_fee_amount stays
   // applicationFee above.
-  const feeSplit = checkoutFeeSplit(chargeCents, { bps: feeBps, card: cardFee });
+  const feeSplit = giftCents > 0 ? giftFee : checkoutFeeSplit(chargeCents, { bps: feeBps, card: cardFee });
   const feeRecord = feeSplit.applicationFeeCents === applicationFee
     ? {
       application_fee_cents: feeSplit.applicationFeeCents,
@@ -482,6 +491,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       card_fee_est_cents: feeSplit.cardFeeEstCents,
       fee_bps: feeSplit.feeBps,
       fee_free: isFeeFreeAt(feeFreeUntil, feeNow),
+      ...(giftFee.owedCents > 0 ? { exos_fee_owed_cents: giftFee.owedCents } : {}),
     }
     : {};
 
@@ -669,7 +679,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       addons: addonsForSession.length > 0 ? addonsForSession : null,
       voucher_id: voucherId, tax_cents: recordedTax > 0 ? recordedTax : null, promoter_id: promoterId ?? null,
       attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,
-      ...checkoutRecord, ...commerceRecord, ...feeRecord0,
+      ...checkoutRecord, ...commerceRecord, ...feeRecord, ...feeRecord0,
     });
     if (gInsErr) {
       console.error("exos-checkout: gift card order not recorded", gInsErr.message);

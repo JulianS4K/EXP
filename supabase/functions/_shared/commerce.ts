@@ -6,6 +6,8 @@
 // The SQL side (mig 20261030130000) checks the same code format
 // (exos_gift_card_check_ok); the test runs the same vectors.
 
+import { checkoutFeeSplit, exosFeeCents, type CardFee, type CheckoutFeeSplit } from './platformFee.ts';
+
 export const GIFT_CARD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** Stripe's smallest card charge in a two-decimal currency (USD, EUR, GBP, CAD...). */
@@ -67,6 +69,39 @@ export function giftCardApplied(totalCents: number, applicableCents: number, min
   const rest = total - avail;
   if (rest >= minCharge) return avail;
   return Math.max(0, total - minCharge);
+}
+
+/**
+ * The Exos fee on an order a gift card pays part of. The card charge pays the
+ * usual application fee (Exos fee + Stripe's card fee, checkoutFeeSplit). A
+ * gift card bought online through Stripe already paid the Exos fee when it was
+ * sold, so its part owes nothing more; any other card (box office cash / check,
+ * comp, API) owes the Exos fee on its part. That is added to the application
+ * fee as far as the card charge leaves room (Stripe refuses a fee above the
+ * charge); the rest is `owedCents`, recorded on the order for settlement.
+ * The Exos fee is computed on the combined amount, so splitting an order
+ * never changes it by a rounding cent.
+ *
+ * One helper on purpose: an event-level rate (the fee-free small-event rule,
+ * exosFeeBpsForEvent) only has to supply `opts.bps`.
+ */
+export function giftCardOrderFee(
+  chargeCents: number, giftCents: number, giftFeePaidAtSale: boolean, opts: { bps: number; card: CardFee },
+): CheckoutFeeSplit & { owedCents: number; giftExosFeeCents: number } {
+  const split = checkoutFeeSplit(chargeCents, opts);
+  const unpaid = giftFeePaidAtSale ? 0 : Math.max(0, Math.trunc(giftCents));
+  const charge = Math.max(0, Math.trunc(chargeCents));
+  const giftExos = exosFeeCents(charge + unpaid, opts.bps) - exosFeeCents(charge, opts.bps);
+  const room = Math.max(0, charge - split.applicationFeeCents);
+  const onCharge = Math.min(giftExos, room);
+  return {
+    applicationFeeCents: split.applicationFeeCents + onCharge,
+    exosFeeCents: split.exosFeeCents + onCharge,
+    cardFeeEstCents: split.cardFeeEstCents,
+    feeBps: split.feeBps,
+    giftExosFeeCents: giftExos,
+    owedCents: giftExos - onCharge,
+  };
 }
 
 /** A donation amount from a form or a request: whole cents, 1.00 to 100,000.00. */

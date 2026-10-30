@@ -145,8 +145,10 @@ export default function OrgGiftCardsPanel({ orgId, canEdit, canSell }: Props) {
           <h3 className={`${labelCls} mb-2`}>Box office sale</h3>
           <div className="grid grid-cols-2 gap-2">
             <select className={inputCls} value={sale.productId} onChange={(e) => setSale({ ...sale, productId: e.target.value })}>
-              <option value="">Any amount (no product)</option>
-              {products.filter((p) => p.active !== false).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {canEdit ? <option value="">Any amount (no product)</option> : <option value="">Pick a product…</option>}
+              {/* Door staff sell fixed-amount products only, under the per-card / per-day caps. */}
+              {products.filter((p) => p.active !== false && (canEdit || p.amount_type === 'fixed'))
+                .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <input className={inputCls} placeholder="Amount" inputMode="decimal" value={sale.amount} onChange={(e) => setSale({ ...sale, amount: e.target.value })} />
             <select className={inputCls} value={sale.method} onChange={(e) => setSale({ ...sale, method: e.target.value as typeof sale.method })}>

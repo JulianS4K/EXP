@@ -17,7 +17,8 @@
 --              = order value, not just the card part), exos_record_price_charged
 --              (the gift card part counts as paid)
 --           N: trigger exos_checkout_commerce on exos_checkout_sessions
--- Pre-reqs: 20261027100000 (fee rules) and everything before it.
+-- Pre-reqs: 20261027100000 (fee rules) and everything before it, incl.
+--           20260929074000 (POS drawers, for box-office reconciliation).
 --
 -- Money: integer minor units everywhere. A gift card is a payment method, not a
 -- discount: fees and tax are computed on the full price, then the card pays what
@@ -152,11 +153,17 @@ CREATE TABLE IF NOT EXISTS public.exos_gift_cards (
   -- external sale id (unique per org).
   issue_key       text CHECK (issue_key IS NULL OR issue_key ~ '^[A-Za-z0-9_:.-]{1,200}$'),
   issued_by       uuid,
+  -- The open POS drawer a box-office card was sold from (till reconciliation).
+  pos_drawer_id   uuid REFERENCES public.exos_pos_drawer_sessions (id) ON DELETE SET NULL,
   expires_at      timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT exos_gift_cards_balance_le_initial CHECK (balance_cents <= initial_cents)
 );
+-- (Re-run safe for a database that has the table from an earlier draft.)
+ALTER TABLE public.exos_gift_cards ADD COLUMN IF NOT EXISTS pos_drawer_id uuid
+  REFERENCES public.exos_pos_drawer_sessions (id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS exos_gift_cards_issuer_idx ON public.exos_gift_cards (org_id, issued_by, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS exos_gift_cards_issue_key_uq ON public.exos_gift_cards (org_id, issue_key) WHERE issue_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS exos_gift_cards_org_idx ON public.exos_gift_cards (org_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS exos_gift_cards_purchaser_idx ON public.exos_gift_cards (purchaser_uid) WHERE purchaser_uid IS NOT NULL;
@@ -440,37 +447,91 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_gift_card_issue(uuid, uuid, integer, text, text, text, text, uuid, uuid, text, text, text, text, boolean)
   FROM PUBLIC, anon, authenticated;
 
--- Staff: a box-office or dashboard sale (cash, check) or a comp. Owner and
--- manager may record any method; door staff (scanner) only cash or check.
--- p_external_id (the till's sale id) makes a retry return the same card (without
--- the code: it was shown once).
+-- Platform settings (exos_platform_settings, jsonb values) read as an integer.
+CREATE OR REPLACE FUNCTION public._exos_setting_int(p_key text, p_default integer)
+RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT coalesce((SELECT CASE WHEN jsonb_typeof(value) = 'number' THEN (value #>> '{}')::numeric::int
+                               WHEN jsonb_typeof(value) = 'string' AND (value #>> '{}') ~ '^[0-9]{1,9}$' THEN (value #>> '{}')::int END
+                     FROM public.exos_platform_settings WHERE key = p_key), p_default);
+$$;
+REVOKE ALL ON FUNCTION public._exos_setting_int(text, integer) FROM PUBLIC, anon, authenticated;
+
+-- Defaults for door-staff gift card sales (conservative; the platform can raise
+-- them in exos_platform_settings).
+INSERT INTO public.exos_platform_settings (key, value) VALUES
+  ('gift_card_scanner_card_cap_cents', '20000'),
+  ('gift_card_scanner_day_cap_cents', '50000')
+ON CONFLICT (key) DO NOTHING;
+
+-- Staff: a box-office or dashboard sale (cash, check) or a comp.
+--   * Owner and manager: any method, any amount (a product's amounts, or an
+--     open amount without a product).
+--   * Door staff (scanner): cash or check only, a FIXED-amount product only,
+--     at most gift_card_scanner_card_cap_cents per card and
+--     gift_card_scanner_day_cap_cents per scanner per org in 24 hours. Stored
+--     value is money: a scanner can't mint an arbitrary amount.
+-- Every card records issued_by and, when given, the open POS drawer it was
+-- sold from (p_drawer_id, exos_pos_drawer_sessions), so box-office cards
+-- reconcile against the till. p_external_id (the till's sale id) makes a retry
+-- return the same card (without the code: it was shown once).
+DROP FUNCTION IF EXISTS public.exos_gift_card_issue(uuid, integer, text, uuid, text, text, text, text, text, text, text);
 CREATE OR REPLACE FUNCTION public.exos_gift_card_issue(
   p_org_id uuid, p_amount_cents integer, p_payment_method text,
   p_product_id uuid DEFAULT NULL, p_currency text DEFAULT 'usd',
   p_recipient_email text DEFAULT NULL, p_recipient_name text DEFAULT NULL, p_message text DEFAULT NULL,
-  p_purchaser_email text DEFAULT NULL, p_external_id text DEFAULT NULL, p_source text DEFAULT 'box_office')
+  p_purchaser_email text DEFAULT NULL, p_external_id text DEFAULT NULL, p_source text DEFAULT 'box_office',
+  p_drawer_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v_mgr boolean := public.exos_has_org_role(p_org_id, ARRAY['owner', 'manager']) OR public.exos_is_admin();
+        v_key text := CASE WHEN p_external_id IS NULL THEN NULL ELSE 'ext:' || p_external_id END;
+        v_type text; v_day int; v_res jsonb;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'sign in' USING ERRCODE = '42501'; END IF;
   IF p_payment_method NOT IN ('cash', 'check', 'comp', 'card') THEN
     RAISE EXCEPTION 'payment method must be cash, check, comp or card' USING ERRCODE = '22023';
   END IF;
   IF p_source NOT IN ('box_office', 'dashboard') THEN RAISE EXCEPTION 'bad source' USING ERRCODE = '22023'; END IF;
+  IF NOT v_mgr AND NOT public.exos_has_org_role(p_org_id, ARRAY['scanner']) THEN
+    RAISE EXCEPTION 'not allowed' USING ERRCODE = '42501';
+  END IF;
+  -- A retry of a recorded sale: the same card, no new limits spent.
+  IF v_key IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_gift_cards WHERE org_id = p_org_id AND issue_key = v_key) THEN
+    RETURN public._exos_gift_card_issue(p_org_id, p_product_id, p_amount_cents, p_currency, p_source, p_payment_method,
+      v_key, auth.uid(), NULL, NULL, NULL, NULL, NULL, false);
+  END IF;
+  IF p_drawer_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM public.exos_pos_drawer_sessions d WHERE d.id = p_drawer_id AND d.org_id = p_org_id AND d.status = 'open') THEN
+    RAISE EXCEPTION 'that drawer isn''t open for this organization' USING ERRCODE = '22023';
+  END IF;
   IF NOT v_mgr THEN
-    IF NOT (public.exos_has_org_role(p_org_id, ARRAY['scanner']) AND p_payment_method IN ('cash', 'check')) THEN
-      RAISE EXCEPTION 'not allowed' USING ERRCODE = '42501';
+    IF p_payment_method NOT IN ('cash', 'check') THEN RAISE EXCEPTION 'not allowed' USING ERRCODE = '42501'; END IF;
+    SELECT amount_type INTO v_type FROM public.exos_gift_card_products WHERE id = p_product_id AND org_id = p_org_id AND active;
+    IF v_type IS DISTINCT FROM 'fixed' THEN
+      RAISE EXCEPTION 'door staff sell fixed-amount gift card products only' USING ERRCODE = '42501';
+    END IF;
+    IF p_amount_cents > public._exos_setting_int('gift_card_scanner_card_cap_cents', 20000) THEN
+      RAISE EXCEPTION 'over the per-card limit for door staff: ask a manager' USING ERRCODE = '42501';
+    END IF;
+    -- One scanner's sales are counted under a lock, so two at once can't pass the cap.
+    PERFORM pg_advisory_xact_lock(hashtextextended('gc-scanner:' || p_org_id::text || ':' || auth.uid()::text, 0));
+    SELECT coalesce(sum(initial_cents), 0) INTO v_day FROM public.exos_gift_cards
+     WHERE org_id = p_org_id AND issued_by = auth.uid() AND created_at > now() - interval '24 hours';
+    IF v_day + p_amount_cents > public._exos_setting_int('gift_card_scanner_day_cap_cents', 50000) THEN
+      RAISE EXCEPTION 'over the daily gift card limit for door staff: ask a manager' USING ERRCODE = '42501';
     END IF;
   END IF;
   IF NOT public.exos_rate_hit('gc-issue:' || auth.uid()::text, 30) THEN
     RAISE EXCEPTION 'too many gift cards a minute' USING ERRCODE = '54000';
   END IF;
-  RETURN public._exos_gift_card_issue(p_org_id, p_product_id, p_amount_cents, p_currency, p_source, p_payment_method,
-    CASE WHEN p_external_id IS NULL THEN NULL ELSE 'ext:' || p_external_id END, auth.uid(), NULL, p_purchaser_email,
-    p_recipient_email, p_recipient_name, p_message, true);
+  v_res := public._exos_gift_card_issue(p_org_id, p_product_id, p_amount_cents, p_currency, p_source, p_payment_method,
+    v_key, auth.uid(), NULL, p_purchaser_email, p_recipient_email, p_recipient_name, p_message, true);
+  IF p_drawer_id IS NOT NULL THEN
+    UPDATE public.exos_gift_cards SET pos_drawer_id = p_drawer_id WHERE id = (v_res->>'card_id')::uuid;
+  END IF;
+  RETURN v_res || jsonb_build_object('issued_by', auth.uid(), 'pos_drawer_id', p_drawer_id);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_gift_card_issue(uuid, integer, text, uuid, text, text, text, text, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_gift_card_issue(uuid, integer, text, uuid, text, text, text, text, text, text, text) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exos_gift_card_issue(uuid, integer, text, uuid, text, text, text, text, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_gift_card_issue(uuid, integer, text, uuid, text, text, text, text, text, text, text, uuid) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Look up, quote, hold, capture, release
@@ -518,6 +579,10 @@ BEGIN
   IF (f.card).id IS NULL THEN RETURN jsonb_build_object('error', f.err); END IF;
   SELECT name INTO v_org FROM public.exos_orgs WHERE id = (f.card).org_id;
   RETURN jsonb_build_object('error', f.err, 'last4', (f.card).last4, 'currency', (f.card).currency,
+    -- Only a card bought online through Stripe paid the Exos fee when it was sold;
+    -- spending any other card (cash, check, comp, api) owes the fee on its part.
+    'source', (f.card).source, 'payment_method', (f.card).payment_method,
+    'fee_paid_at_sale', (f.card).source = 'online' AND (f.card).payment_method = 'card',
     'balance_cents', (f.card).balance_cents, 'initial_cents', (f.card).initial_cents, 'org_id', (f.card).org_id,
     'org_name', v_org, 'expires_at', (f.card).expires_at,
     'applicable_cents', CASE WHEN f.err IS NOT NULL THEN 0
@@ -579,6 +644,7 @@ BEGIN
   VALUES (p_session_id, c.id, c.org_id, p_amount_cents);
   PERFORM public._exos_gift_card_move(c.id, 'redeem', -p_amount_cents, p_session_id, p_session_id, NULL, 'held for checkout');
   RETURN jsonb_build_object('card_id', c.id, 'last4', c.last4, 'amount_cents', p_amount_cents,
+    'source', c.source, 'fee_paid_at_sale', c.source = 'online' AND c.payment_method = 'card',
     'balance_cents', c.balance_cents - p_amount_cents, 'fresh', true);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_gift_card_hold(text, text, integer, text, uuid, text) FROM PUBLIC, anon, authenticated;
@@ -1033,7 +1099,12 @@ GRANT EXECUTE ON FUNCTION public.exos_donations_export(uuid, uuid) TO authentica
 ALTER TABLE public.exos_checkout_sessions
   ADD COLUMN IF NOT EXISTS gift_card_cents integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS donation_cents integer NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS donation_campaign_id uuid REFERENCES public.exos_giving_campaigns (id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS donation_campaign_id uuid REFERENCES public.exos_giving_campaigns (id) ON DELETE SET NULL,
+  -- The Exos fee on a gift card part that never paid it (a box-office, comp or
+  -- API card) and that the card charge's application fee couldn't carry (all of
+  -- it on an order the card pays in full). Owed by the organizer: settlements
+  -- and payouts deduct it (docs/gift-cards.md "Platform fee").
+  ADD COLUMN IF NOT EXISTS exos_fee_owed_cents integer NOT NULL DEFAULT 0 CHECK (exos_fee_owed_cents >= 0);
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_checkout_sessions_commerce_chk') THEN
     ALTER TABLE public.exos_checkout_sessions ADD CONSTRAINT exos_checkout_sessions_commerce_chk CHECK (

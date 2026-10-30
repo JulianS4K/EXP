@@ -47,8 +47,12 @@ an error instead of raising, so the rate-limit hit isn't rolled back).
   `exos_commerce_fulfill` issues the card (idempotent per Stripe session) and mails the code to the recipient, or to
   the buyer when there's no recipient.
 - **Box office / dashboard** (`exos_gift_card_issue`): owner and manager record cash, check, comp or a card taken on
-  their own terminal; door staff (scanner) cash or check only. `p_external_id` (the till's sale id) makes a retry
-  return the same card.
+  their own terminal, any amount. Door staff (scanner) may only sell a **fixed-amount product** for cash or check, at
+  most `gift_card_scanner_card_cap_cents` per card (default 200.00) and `gift_card_scanner_day_cap_cents` per scanner
+  per org in 24 hours (default 500.00), both in `exos_platform_settings`; one scanner's sales are counted under a lock.
+  Every card records `issued_by` and, when the till passes it, the open POS drawer (`pos_drawer_id`,
+  `exos_pos_drawer_sessions`), so box-office cards reconcile against the drawer. `p_external_id` (the till's sale id)
+  makes a retry return the same card (and spends no limit).
 
 Selling a gift card isn't event revenue; spending it is (the tickets carry the full price, see below).
 
@@ -68,7 +72,16 @@ Selling a gift card isn't event revenue; spending it is (the tickets carry the f
 5. `exos_fulfill_checkout` **captures** the hold inside its all-or-nothing block, in the same transaction as the
    tickets; a missing or released hold fails the order.
 
-The Exos application fee is on the card charge only: the gift card's own sale already paid it.
+### Platform fee
+
+Only a card **bought online through Stripe** paid the Exos fee when it was sold (the quote and the hold return
+`source` and `fee_paid_at_sale`). Spending any other card (box office cash / check, comp, API) owes the Exos fee on
+its part: `giftCardOrderFee` (`_shared/commerce.ts`) adds it to the card charge's application fee as far as Stripe
+allows (never more than the charge), and records the rest on the order as `exos_fee_owed_cents`. An order such a card
+pays in full (no Stripe charge) is **not refused**: the whole fee is recorded as owed, for settlements and payouts to
+deduct. The Exos fee is computed on the combined amount, so splitting an order never moves it by a cent. The rate
+comes from one place (`opts.bps`), so an event-level rule (the fee-free small-event rule) only has to supply it.
+Settlements and payouts don't read `exos_fee_owed_cents` yet.
 
 Tickets keep `price_paid` = the order's value (card + gift card, without donation and add-ons), so reports and
 refund shares are unchanged. The invoice total is the order's value too, and the price-disclosure record counts the

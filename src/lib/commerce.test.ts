@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
 
 import {
-  GIFT_CARD_ALPHABET, campaignProgress, coverFeesCents, donationsCsv, formatGiftCardCode, giftCardApplied,
+  GIFT_CARD_ALPHABET, campaignProgress, giftCardOrderFee, coverFeesCents, donationsCsv, formatGiftCardCode, giftCardApplied,
   giftCardCheckOk, majorToCents, makeGiftCardCode, memberPriceApplies, memberUnitCents, membershipStatusFromStripe,
   normalizeGiftCardCode, parseDonationCents, passCovers, passCreditsLeft, roundUpDonationCents,
 } from './commerce';
@@ -66,6 +66,52 @@ describe('giftCardApplied', () => {
         expect(a).toBeLessThanOrEqual(Math.min(t, Math.max(b, 0)));
         if (a > 0) expect(rest === 0 || rest >= 50).toBe(true);
       }
+    }
+  });
+});
+
+describe('giftCardOrderFee (platform fee on the gift card part)', () => {
+  const card = { bps: 290, fixedCents: 30 };
+  it('without a gift card it is the usual checkout fee', async () => {
+    const { checkoutFeeSplit } = await import('../../supabase/functions/_shared/platformFee.ts');
+    const f = giftCardOrderFee(4000, 0, false, { bps: 300, card });
+    expect(f.applicationFeeCents).toBe(checkoutFeeSplit(4000, { bps: 300, card }).applicationFeeCents);
+    expect(f.owedCents).toBe(0);
+  });
+  it('an online Stripe card already paid the Exos fee: only the card charge pays', () => {
+    const f = giftCardOrderFee(3000, 5000, true, { bps: 300, card });
+    expect(f.giftExosFeeCents).toBe(0);
+    expect(f.applicationFeeCents).toBe(90 + 117); // 3% + 2.9% + 30c of 30.00
+    expect(f.owedCents).toBe(0);
+  });
+  it('a box-office / comp card owes the Exos fee on its part, on the combined amount', () => {
+    const f = giftCardOrderFee(3000, 5000, false, { bps: 300, card });
+    expect(f.giftExosFeeCents).toBe(240 - 90); // 3% of 80.00 minus 3% of 30.00
+    expect(f.applicationFeeCents).toBe(90 + 117 + 150);
+    expect(f.exosFeeCents).toBe(240);
+    expect(f.owedCents).toBe(0);
+  });
+  it('more than the charge can carry is recorded as owed; a full gift order owes it all', () => {
+    const small = giftCardOrderFee(100, 50000, false, { bps: 300, card });
+    expect(small.applicationFeeCents).toBeLessThanOrEqual(100);
+    expect(small.owedCents).toBeGreaterThan(0);
+    const full = giftCardOrderFee(0, 8000, false, { bps: 300, card });
+    expect(full.applicationFeeCents).toBe(0);
+    expect(full.owedCents).toBe(240);
+    expect(giftCardOrderFee(0, 8000, true, { bps: 300, card }).owedCents).toBe(0);
+  });
+  it('the fee-free window (bps 0) owes nothing', () => {
+    expect(giftCardOrderFee(0, 8000, false, { bps: 0, card }).owedCents).toBe(0);
+  });
+  it('nothing is lost: collected + owed = the charge\'s own Exos fee + the gift part\'s, and Stripe never gets more than the charge', async () => {
+    const { checkoutFeeSplit } = await import('../../supabase/functions/_shared/platformFee.ts');
+    for (const [c, g] of [[0, 1999], [50, 5000], [1234, 999], [99999, 1], [3000, 0], [60, 60]]) {
+      const f = giftCardOrderFee(c, g, false, { bps: 300, card });
+      const base = checkoutFeeSplit(c, { bps: 300, card });
+      expect(f.exosFeeCents + f.owedCents).toBe(base.exosFeeCents + f.giftExosFeeCents);
+      expect(f.giftExosFeeCents).toBe(Math.floor(((c + g) * 300 + 5000) / 10000) - Math.floor((c * 300 + 5000) / 10000));
+      expect(f.applicationFeeCents).toBeLessThanOrEqual(c);
+      expect(f.applicationFeeCents).toBe(f.exosFeeCents + f.cardFeeEstCents);
     }
   });
 });

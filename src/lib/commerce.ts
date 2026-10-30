@@ -97,13 +97,15 @@ export async function issueGiftCard(input: {
   orgId: string; amountCents: number; paymentMethod: 'cash' | 'check' | 'comp' | 'card';
   productId?: string | null; currency?: string; recipientEmail?: string; recipientName?: string; message?: string;
   externalId?: string; source?: 'box_office' | 'dashboard';
+  /** The open POS drawer the sale went into (till reconciliation). */
+  drawerId?: string;
 }): Promise<{ card_id: string; code: string | null; last4: string; balance_cents: number; fresh: boolean }> {
   const { data, error } = await supabase.rpc('exos_gift_card_issue', {
     p_org_id: input.orgId, p_amount_cents: input.amountCents, p_payment_method: input.paymentMethod,
     p_product_id: input.productId ?? null, p_currency: input.currency ?? 'usd',
     p_recipient_email: input.recipientEmail || null, p_recipient_name: input.recipientName || null,
     p_message: input.message || null, p_purchaser_email: null, p_external_id: input.externalId || null,
-    p_source: input.source ?? 'box_office',
+    p_source: input.source ?? 'box_office', p_drawer_id: input.drawerId ?? null,
   });
   if (error) throw error;
   return data as { card_id: string; code: string | null; last4: string; balance_cents: number; fresh: boolean };
