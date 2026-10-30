@@ -9,6 +9,8 @@
 --
 -- Touches:  R: FUNCTION exos_event_buy_link (section 1)
 --           R: FUNCTION exos_api_scope_names (section 2)
+--           R: FUNCTION exos_role_token_scopes (section 3)
+--           R: FUNCTION _exos_api_key_creator_is_owner (section 4)
 -- Pre-reqs: every exos migration before this one.
 -- ============================================================================
 
@@ -66,3 +68,48 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.exos_api_scope_names() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_api_scope_names() TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 3. User-token scopes per role (20261031130500, developer platform).
+--    Written against the 15-scope list: the owner, who may grant everything,
+--    was missing refunds:write, fans:read and fans:write (section 2). The
+--    owner gets the full list again; the other roles are unchanged (a
+--    manager / finance member's token gains no fan or refund scope here: that
+--    is a product decision, not an integration one). Must equal ROLE_SCOPES
+--    in supabase/functions/_shared/api/credentials.ts (src/lib/credentials.test.ts
+--    reads the latest definition).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.exos_role_token_scopes(p_role text)
+RETURNS text[] LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp AS $$
+  SELECT CASE p_role
+    WHEN 'owner' THEN ARRAY['events:read', 'events:write', 'orders:read', 'refunds:write', 'fans:read', 'fans:write',
+                            'tickets:read', 'tickets:write', 'checkin:write', 'booking:read', 'booking:write',
+                            'finance:read', 'finance:write', 'commerce:read', 'commerce:write', 'webhooks:read',
+                            'webhooks:write', 'org:admin']
+    WHEN 'manager' THEN ARRAY['events:read', 'events:write', 'orders:read', 'tickets:read', 'tickets:write',
+                              'checkin:write', 'booking:read', 'booking:write', 'finance:read', 'finance:write',
+                              'commerce:read', 'commerce:write']
+    WHEN 'finance' THEN ARRAY['events:read', 'orders:read', 'tickets:read', 'booking:read', 'finance:read',
+                              'finance:write', 'commerce:read']
+    WHEN 'content' THEN ARRAY['events:read', 'events:write', 'booking:read']
+    WHEN 'scanner' THEN ARRAY['events:read', 'tickets:read', 'checkin:write']
+    ELSE ARRAY[]::text[]
+  END
+$$;
+REVOKE ALL ON FUNCTION public.exos_role_token_scopes(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_role_token_scopes(text) TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 4. One "is this API key's creator an owner" check.
+--    20261030110000 (artists, listing keys) added _exos_api_key_owner_ok and
+--    20261031130000 (partner sales) _exos_api_key_creator_is_owner, with the
+--    same body. exos-api now calls _exos_api_key_owner_ok only; the partner
+--    functions still call the other name, so it stays and delegates (one
+--    rule to change). Same signature and grants as before.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public._exos_api_key_creator_is_owner(p_org_id uuid, p_api_key_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT public._exos_api_key_owner_ok(p_org_id, p_api_key_id)
+$$;
+REVOKE ALL ON FUNCTION public._exos_api_key_creator_is_owner(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_api_key_creator_is_owner(uuid, uuid) TO service_role;

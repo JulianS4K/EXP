@@ -3,7 +3,7 @@
 // map must equal exos_role_token_scopes(), and the redirect URI rule
 // _exos_redirect_uri_ok(). docs/developer-platform.md.
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,8 +14,18 @@ import { SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 
 const MIGRATION = path.resolve(__dirname, '../../supabase/migrations/20261031130500_exos_developer_platform.sql');
 
+/** The last migration (by timestamp) defining exos_role_token_scopes() (the
+ *  build-phase integration, mig 20261101000000, redefines it). */
+function latestRoleScopesSql(): string {
+  const dir = path.dirname(MIGRATION);
+  const hits = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+    .map((f) => readFileSync(path.join(dir, f), 'utf8'))
+    .filter((sql) => sql.includes('FUNCTION public.exos_role_token_scopes(p_role text)'));
+  return hits[hits.length - 1] ?? '';
+}
+
 function sqlRoleScopes(): Record<string, string[]> {
-  const sql = readFileSync(MIGRATION, 'utf8');
+  const sql = latestRoleScopesSql();
   const fn = /FUNCTION public\.exos_role_token_scopes\(p_role text\)[\s\S]*?SELECT CASE p_role([\s\S]*?)ELSE ARRAY/.exec(sql);
   if (!fn) throw new Error('exos_role_token_scopes() not found in the migration');
   const out: Record<string, string[]> = {};
