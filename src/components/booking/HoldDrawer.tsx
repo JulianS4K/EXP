@@ -10,6 +10,7 @@ import { ArrowDown, ArrowUp, CalendarCheck, Plus, Trash2, X } from 'lucide-react
 import Dialog from '../Dialog';
 import { useToast } from '../../context/ToastContext';
 import { clearHold, convertHold, createHold, updateHold, type NewNight } from '../../lib/bookingApi';
+import { createOffer } from '../../lib/offersApi';
 import { lineFor, placeLabel, type Hold, type HoldPosition, type HoldRental, type Room, type Venue } from '../../lib/booking';
 import { RelationshipBadge, field, label } from './VenueManager';
 
@@ -130,6 +131,20 @@ export default function HoldDrawer({ canEdit, orgId, target, venues, rooms, hold
     } catch (err) {
       fail(err, 'Could not clear the hold.');
     } finally {
+      setBusy(false);
+    }
+  };
+
+  // An offer from this hold: its nights, venue, room, first artist and (for a
+  // rented room) a Venue rental budget line (docs/offers-settlements.md).
+  const makeOffer = async () => {
+    if (!hold) return;
+    setBusy(true);
+    try {
+      const o = await createOffer(orgId, { hold_id: hold.id });
+      navigate(`/orgs/${orgId}/offers/${o.id}`);
+    } catch (err) {
+      fail(err, 'Could not make the offer (an artist is needed: add one to the hold first).');
       setBusy(false);
     }
   };
@@ -304,6 +319,12 @@ export default function HoldDrawer({ canEdit, orgId, target, venues, rooms, hold
                 <Plus className="w-4 h-4" aria-hidden="true" /> Add night
               </button>
             </form>
+          ) : null}
+
+          {canEdit && active.length > 0 ? (
+            <button type="button" disabled={busy} onClick={makeOffer} className="text-xs font-black uppercase text-brand-primary hover:underline mr-4">
+              Make offer
+            </button>
           ) : null}
 
           {canEdit && active.length > 0 ? (

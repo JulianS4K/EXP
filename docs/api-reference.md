@@ -2,7 +2,8 @@
 
 A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
 site, reporting, booking tools. Everything is read-only except the sales counts (tickets sold on other
-platforms), booking (venues, rooms, holds, the show schedule, staff notes and contacts; docs/booking.md) and
+platforms), booking (venues, rooms, holds, the show schedule, staff notes and contacts; docs/booking.md),
+offers, budgets, deals, finance, settlements and P&L (docs/offers-settlements.md) and
 artists, lineups and listing-feed shared keys, which partners can also write (a `:write` scope, or `org:admin`
 for shared keys); plus a public listing feed for listing sites under `/v1/public/…` (shared-key auth,
 `docs/listing-feed.md`). The full reference, with every endpoint, parameter and example, is the public page
@@ -15,8 +16,10 @@ for shared keys); plus a public listing feed for listing sites under `/v1/public
   bodies). Pure TypeScript, so vitest imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
   the 10-key cap), `20261030120000` (sales counts), `20261030100000` (booking), `20261030110000` (artists,
-  lineups, listing feed). SQL harnesses: `tests/exos/test_api_scopes.sql`, `tests/exos/test_sales_counts.sql`,
-  `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`.
+  lineups, listing feed), `20261031100000` / `20261031100500` (offers, budgets, pools, deals, finance,
+  settlements, P&L, ticket counts; `docs/offers-settlements.md`). SQL harnesses: `tests/exos/test_api_scopes.sql`,
+  `tests/exos/test_sales_counts.sql`, `tests/exos/test_booking.sql`, `tests/exos/test_artists_feed.sql`,
+  `tests/exos/test_offers_settlements.sql`.
 - **Writes:** reads are GET. The sales counts (`POST /v1/sales-counts`, `PUT` / `DELETE
   /v1/sales-counts/:id`, `POST /v1/events/:id/sales-counts/import`) need `finance:write`; they call
   service-role RPCs (`exos_api_sales_count_put` / `_delete`) that re-check the event or row belongs to the key's
@@ -57,7 +60,10 @@ functions (levels, promotion and convert in one transaction, `hold.*` webhooks);
 rows and their triggers and checks validate them. The SQL raises with fixed codes and `bookingDbError()`
 (`_shared/api/booking.ts`) maps them: `22023` → 400, `P0002` → 404, `23505` / `55000` / `54000` → 409.
 Opendate-style spellings answer the same routes through `aliases` in `routes.ts` (`/holds/:id/convert_to_confirm`,
-`/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`).
+`/venue_ownerships`, `/confirms/:id/show_activities`, `/calendar_event_contacts`, `/v3_offers…`, `/v3_offer_pools`,
+`/confirms/:id/settlements/summary`, `/confirms/:id/finance_items`, `/general_ledger_codes`). Offer, budget, finance and
+settlement routes live in `exos-api/finance.ts` (bodies in `_shared/api/finance.ts`); the offer and settlement PDFs
+and the P&L CSV are the only non-JSON answers besides the sales-count handlers (the handler returns a `Response`).
 
 Artists, lineups and shared keys call service-role SQL functions that take the key's org explicitly
 (`_exos_artist_save`, `_exos_artist_merge`, `_exos_lineup_save`, `_exos_listing_key_create` / `_revoke`); their

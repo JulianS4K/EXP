@@ -118,6 +118,18 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
       to_date: [{ currency: 'usd', tickets: 13, gross_cents: 7500, fee_cents: 150, exos_fee_cents: 225, net_cents: 7125, gross_not_reported: 9, net_not_reported: 9 }],
     },
   },
+  'offer-sent': {
+    org, token: TOKEN, marketing: false,
+    offer: { id: EV2, title: 'Night <One>', artist_name: 'Band <x>', dates: ['2026-11-19'], venue: 'Club <1>', currency: 'USD',
+      terms: { deal_type: 'versus', guarantee_cents: 100000, percentage: 85, bonuses: [{ sold: 400, amount_cents: 25000 }], deposit_cents: 50000 },
+      expires_at: '2026-11-07T15:00:00+00:00', agent_name: 'Ann <7f>' },
+  },
+  'settlement-finalized': { org, event: event(), token: TOKEN, marketing: false },
+  'ticket-counts': {
+    org, recipient_name: 'Ann <7f>', optout_token: TOKEN, marketing: false,
+    counts: { event: event(), currency: 'USD', tiers: [{ name: 'GA <early>', paid: 300, comps: 10, gross_cents: 600000 }], paid_sold: 300,
+      comps: 10, sold_last_24h: 12, gross_cents: 600000, capacity: 500, attendance_percent: 64, sold_elsewhere: [{ currency: 'USD', sold: 20, gross_cents: 40000 }] },
+  },
 };
 
 function ok(template: string, payload: unknown = PAYLOADS[template], app: string | null = APP) {
@@ -348,5 +360,28 @@ describe('renderTemplate', () => {
     const r = ok('post-event');
     const m = renderMail(r.html, `{{app_url}}/unsubscribe?t=${TOKEN}`, APP);
     expect(m).toEqual({ ok: true, html: r.html, headers: { 'List-Unsubscribe': `<${APP}/unsubscribe?t=${TOKEN}>` } });
+  });
+});
+
+describe('offers, settlements and ticket counts', () => {
+  it('offer-sent: the terms in words and a token link to the offer', () => {
+    const r = ok('offer-sent');
+    expect(r.subject).toBe('Offer from Org <7f> & Co: Band <x>, Thursday, November 19');
+    expect(r.html).toContain('$1,000.00 versus 85% of net after expenses');
+    expect(r.html).toContain(`${APP}/offer/${EV2}?t=${TOKEN}`);
+    expect(r.html).toContain('through Exos');
+    expect(renderTemplate('offer-sent', { ...PAYLOADS['offer-sent'], token: 'short' }, APP).ok).toBe(false);
+  });
+
+  it('settlement-finalized: a token link to the settlement', () => {
+    expect(ok('settlement-finalized').html).toContain(`/settlement/${EV}?t=${TOKEN}`);
+  });
+
+  it('ticket-counts: numbers, capacity, sold elsewhere and the opt-out link', () => {
+    const r = ok('ticket-counts');
+    expect(r.subject).toMatch(/\(300 sold\)$/);
+    expect(r.html).toContain('64% of 500 capacity');
+    expect(r.html).toContain('20 sold elsewhere');
+    expect(r.html).toContain(`/ticket-counts/opt-out?t=${TOKEN}`);
   });
 });

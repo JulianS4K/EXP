@@ -15,6 +15,8 @@
 // function runs with the service role, so RLS does not scope it.
 // Artists, lineups and listing-feed shared keys (mig 20261030110000) write
 // through service-role SQL functions that take the key's org explicitly.
+// Offers, budgets, deals, finance items, settlements and P&L (migs
+// 20261031100000 / 100500) are handled in ./finance.ts (handleFinance).
 //
 // Scopes (mig 20261027090000, _shared/api/scopes.ts): each route needs one
 // (_shared/api/routes.ts). Keys made before scopes carry the legacy `read`,
@@ -39,6 +41,11 @@
 //   Artists: GET/POST /artists, GET/PATCH /artists/:id, POST
 //   /artists/:id/merge, GET /artists/:id/events, GET/PUT /events/:id/lineup;
 //   GET/POST /listing-keys, DELETE /listing-keys/:id.
+//   offers and finance (./finance.ts, docs/offers-settlements.md): /offers,
+//   /offer-templates, /budgets, /budget-lines, /offer-pools, /offer-imports,
+//   /deals, /finance-categories, /gl-codes, /events/:id/finance-items,
+//   /finance-items, /events/:id/settlement[/finalize|/reopen|/pdf],
+//   /events/:id/profit-and-loss, /profit-and-loss, /events/:id/ticket-counts.
 //
 // commerce:read (migs 20261030130000 / 130500): /gift-card-products,
 // /gift-cards[/:id], /giving-campaigns[/:id], /donations,
@@ -75,6 +82,7 @@ import {
 } from "../_shared/listingFeed/feed.ts";
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
+import { type FinDeps, handleFinance } from "./finance.ts";
 
 const RATE_LIMIT = 120; // requests per key per minute
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -199,7 +207,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const match = matchRoute(method, path);
   if (!match || match.route.auth !== "api_key") {
     const allow = allowedMethods(path);
-    if (allow.length) return json({ error: "method not allowed" }, 405, { allow: allow.join(", ") });
+    if (!match && allow.length) return json({ error: "method not allowed" }, 405, { allow: allow.join(", ") });
     return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
   }
   const scopes = (keyRow.scopes ?? []) as string[];
@@ -222,7 +230,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         : {},
     };
     const out = await handle(match.route, ctx);
-    if (out instanceof Response) return out;
+    if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Created) return json(out.body, 201);
     return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
@@ -1126,8 +1134,19 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       return { data: { id, revoked: true } };
     }
   }
+  // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
+  const fin = await handleFinance(route.id, c, FIN_DEPS);
+  if (fin !== undefined) return fin;
   throw new ApiError(404, "not found");
 }
+
+const FIN_DEPS: FinDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
 
 /** A path parameter as a UUID; anything else is simply not found. */
 function uuidParam(c: Ctx, name: string, what: string): string {
@@ -1169,6 +1188,7 @@ function search(q: URLSearchParams, ...names: string[]): string | null {
   }
   return null;
 }
+
 
 // deno-lint-ignore no-explicit-any
 async function rpc(sb: SupabaseClient, fn: string, args: Record<string, unknown>): Promise<any> {

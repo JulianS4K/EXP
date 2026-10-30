@@ -147,7 +147,7 @@ interface Out {
   subject: string;
   body: string;
   /** who this mail is for: sets the footer */
-  audience: "buyer" | "organizer";
+  audience: "buyer" | "organizer" | "partner";
   orgName?: string;
 }
 
@@ -197,6 +197,29 @@ function totalsLine(totals: Obj[]): { tickets: number; text: string } {
   const tickets = totals.reduce((n, t) => n + num(t, "tickets", 0), 0);
   const money = totals.map((t) => formatMoney(num(t, "gross_cents", 0), str(t, "currency", "usd"))).join(" + ");
   return { tickets, text: `${tickets} ticket${tickets === 1 ? "" : "s"}${money ? `, ${money}` : ""}` };
+}
+
+// Offers, settlements, ticket counts (migs 20261031100000 / 20261031100500).
+// These go to people outside the org (agents, tour accountants): links carry
+// a 64-hex token and an id that must be a UUID.
+function token(p: Obj, k: string): string {
+  const v = p[k];
+  if (typeof v !== "string" || !TOKEN.test(v)) throw new PayloadError(`${k} missing`);
+  return v;
+}
+/** "$1,000.00 versus 85% of net after expenses" (deal terms as stored). */
+function dealLine(t: Obj, cur: string): string {
+  const g = formatMoney(num(t, "guarantee_cents", 0), cur);
+  const pct = `${num(t, "percentage", 0)}%`;
+  switch (opt(t, "deal_type")) {
+    case "versus": return `${g} versus ${pct} of net after expenses`;
+    case "plus": return `${g} plus ${pct} of net above the split point`;
+    case "door": return num(t, "guarantee_cents", 0) > 0 ? `${pct} of net box office, ${g} minimum` : `${pct} of net box office`;
+    default: return `${g} flat`;
+  }
+}
+function showDay(d: unknown): string {
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? formatDay(`${d}T12:00:00Z`) : "";
 }
 
 // ── templates ───────────────────────────────────────────────────────────────
@@ -743,12 +766,93 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
         button(ctx, `/orgs/${o.id}/channels`, "All channels"),
     };
   },
+  "offer-sent": (ctx) => {
+    const o = org(ctx.p);
+    const offer = obj(ctx.p, "offer");
+    const id = uuid(offer, "id");
+    const t = token(ctx.p, "token");
+    const cur = str(offer, "currency", "USD");
+    const terms: Obj = isObj(offer.terms) ? offer.terms : {};
+    const dates = (Array.isArray(offer.dates) ? offer.dates : []).map(showDay).filter(Boolean);
+    const venue = opt(offer, "venue");
+    const expires = opt(offer, "expires_at");
+    const agent = opt(offer, "agent_name");
+    const artist = str(offer, "artist_name", "your artist");
+    const bonuses = list(terms, "bonuses").map((b) => `${formatMoney(num(b, "amount_cents", 0), cur)} at ${num(b, "sold", 0)} tickets`);
+    const rows: [string, string][] = [["Dates", dates.join("; ") || "To be confirmed"]];
+    if (venue) rows.push(["Venue", venue]);
+    rows.push(["Deal", dealLine(terms, cur)]);
+    if (bonuses.length) rows.push(["Bonuses", bonuses.join("; ")]);
+    if (num(terms, "deposit_cents", 0) > 0) rows.push(["Deposit", formatMoney(num(terms, "deposit_cents", 0), cur)]);
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Offer from ${o.name}: ${artist}${dates[0] ? `, ${dates[0]}` : ""}`,
+      body:
+        `<p>${agent ? `${esc(agent)}, ` : ""}${esc(o.name)} sent an offer for ${esc(artist)}.</p>` +
+        `<table style="border-collapse:collapse;font-size:14px">${rows.map(([k, v]) =>
+          `<tr><td style="padding:2px 12px 2px 0;color:#666">${esc(k)}</td><td style="padding:2px 0">${esc(v)}</td></tr>`).join("")}</table>` +
+        `<p>Read the full offer and accept or decline it here (no account needed):</p>` +
+        button(ctx, `/offer/${id}?t=${t}`, "Review the offer") +
+        (expires ? `<p style="color:#666;font-size:13px">The offer expires ${esc(formatWhen(expires))}.</p>` : ""),
+    };
+  },
+
+  "settlement-finalized": (ctx) => {
+    const o = org(ctx.p);
+    const ev = event(ctx.p);
+    const t = token(ctx.p, "token");
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Settlement: ${ev.name}`,
+      body:
+        `<p>${esc(o.name)} finalized the settlement for this show:</p>` + eventBlock(ev) +
+        button(ctx, `/settlement/${ev.id}?t=${t}`, "See the settlement") +
+        `<p style="color:#666;font-size:13px">The page has the box office, each act's deal worked through and the venue's share, with a PDF.</p>`,
+    };
+  },
+
+  "ticket-counts": (ctx) => {
+    const o = org(ctx.p);
+    const c = obj(ctx.p, "counts");
+    const ev = event(c);
+    const cur = str(c, "currency", "USD");
+    const t = token(ctx.p, "optout_token");
+    const tiers = list(c, "tiers").map((r) =>
+      `<tr><td style="padding:2px 12px 2px 0">${esc(str(r, "name", "Tickets"))}</td>` +
+      `<td style="padding:2px 12px 2px 0;text-align:right">${num(r, "paid", 0)}</td>` +
+      `<td style="padding:2px 0;text-align:right">${num(r, "comps", 0)}</td></tr>`).join("");
+    const elsewhere = list(c, "sold_elsewhere").map((x) =>
+      `${num(x, "sold", 0)} sold elsewhere (${esc(formatMoney(num(x, "gross_cents", 0), str(x, "currency", cur)))})`);
+    const pct = c.attendance_percent === null || c.attendance_percent === undefined ? null : num(c, "attendance_percent", 0);
+    const cap = num(c, "capacity", 0);
+    const who = opt(ctx.p, "recipient_name");
+    return {
+      audience: "partner",
+      orgName: o.name,
+      subject: `Ticket counts: ${ev.name} (${num(c, "paid_sold", 0)} sold)`,
+      body:
+        `<p>${who ? `${esc(who)}, here` : "Here"} are the latest numbers from ${esc(o.name)}:</p>` +
+        eventBlock(ev) +
+        (tiers ? `<table style="border-collapse:collapse;font-size:14px"><tr><th style="text-align:left;padding:2px 12px 2px 0">Ticket type</th>` +
+          `<th style="text-align:right;padding:2px 12px 2px 0">Sold</th><th style="text-align:right;padding:2px 0">Comps</th></tr>${tiers}</table>` : "") +
+        `<p><strong>${num(c, "paid_sold", 0)} sold</strong>, ${num(c, "comps", 0)} comps, ` +
+        `${esc(formatMoney(num(c, "gross_cents", 0), cur))} gross; ${num(c, "sold_last_24h", 0)} in the last 24 hours.` +
+        (pct !== null && cap > 0 ? ` ${pct}% of ${cap} capacity.` : "") + `</p>` +
+        (elsewhere.length ? `<p>${elsewhere.join("<br>")}</p>` : "") +
+        `<p style="color:#888;font-size:12px"><a href="${href(ctx, `/ticket-counts/opt-out?t=${t}`)}">Stop these emails</a> for this show.</p>`,
+    };
+  },
 };
 
 export const PAYLOAD_TEMPLATES = Object.keys(RENDERERS);
 
 function footer(ctx: Ctx, out: Out): string {
   const lines: string[] = [];
+  if (out.audience === "partner") {
+    lines.push(`You're getting this from ${esc(out.orgName ?? "an organizer")} through Exos.`);
+  }
   if (out.audience === "organizer") {
     lines.push(out.orgName
       ? `You're getting this because you help run ${esc(out.orgName)} on Exos.`
