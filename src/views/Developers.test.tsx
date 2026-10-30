@@ -30,7 +30,13 @@ describe('Developers', () => {
     expect(listOrders.textContent).toContain('/v1/orders');
     expect(screen.getByTestId('scopes-table').textContent).toContain('All read access');
     expect(screen.getByRole('link', { name: /openapi\.json/i }).getAttribute('href')).toMatch(/openapi\.json$/);
-  });
+    // The listing feed authenticates with a shared key in the query string.
+    const feed = container.querySelector('article#public-list-events')!;
+    expect(feed.textContent).toContain('shared_key=$EXOS_SHARED_KEY');
+    expect(feed.textContent).not.toContain('Authorization: Bearer');
+    // Writes show their JSON body.
+    expect(container.querySelector('article#create-artist')!.textContent).toContain('-X POST');
+  }, 20_000);
 
   it('says so when the spec cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));

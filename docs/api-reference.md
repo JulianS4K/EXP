@@ -1,7 +1,9 @@
 # Partner API (exos-api)
 
-A read-only REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
-site, reporting. The full reference, with every endpoint, parameter and example, is the public page
+A REST API over one organization's data, for integrations: CRM and spreadsheet sync, a venue's own
+site, reporting. Read-only except artists, lineups and listing-feed shared keys (`POST`/`PATCH`/`PUT`/`DELETE`
+with a `:write` scope or `org:admin`), plus a public listing feed for listing sites under `/v1/public/…`
+(shared-key auth, `docs/listing-feed.md`). The full reference, with every endpoint, parameter and example, is the public page
 **`/developers`** (`/bridge/developers`), generated from `docs/api/*.json`; `openapi.json` sits next to it.
 
 - **Base URL:** `https://<project-ref>.supabase.co/functions/v1/exos-api`, paths under `/v1` (`/v1/events`). Each
@@ -10,7 +12,8 @@ site, reporting. The full reference, with every endpoint, parameter and example,
   (`routes.ts` the route table, `scopes.ts` the scopes, `paging.ts` page/per_page). Pure TypeScript, so vitest
   imports the same files.
 - **Migrations:** `20260616200000` (keys, webhooks), `20260925020000` (rate limiter), `20261027090000` (scopes,
-  the 10-key cap). SQL harness: `tests/exos/test_api_scopes.sql`.
+  the 10-key cap), `20261030110000` (artists, lineups, listing feed). SQL harnesses: `tests/exos/test_api_scopes.sql`,
+  `tests/exos/test_artists_feed.sql`.
 - **Deploy:** `exos-api` takes an API key, not a Supabase JWT, so it is deployed with `--no-verify-jwt`.
 
 ## Auth and scopes
@@ -31,12 +34,20 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
   `{ data, meta: { page, per_page, total, total_pages } }`. Unpaged lists answer `{ data }`.
 - 120 requests per key per minute; over it, `429` with `Retry-After`. If the limiter fails, `503` (no limiter, no
   answer: the API returns personal data).
-- Errors are `{ "error": "…" }`: `400` bad paging or filter, `401` missing or invalid key, `403` scope, `404`
-  unknown path or another org's id, `405` anything but GET, `500`, `503`.
+- Errors are `{ "error": "…" }`: `400` bad paging, filter or body, `401` missing or invalid key, `403` scope, `404`
+  unknown path or another org's id, `405` a method the API doesn't answer, `409` a write conflict (taken permalink,
+  merged artist, key cap), `413` a body over 64 KB, `500`, `503`.
+- Writes call service-role SQL functions that take the key's org explicitly (`_exos_artist_save`,
+  `_exos_artist_merge`, `_exos_lineup_save`, `_exos_listing_key_create` / `_revoke`); their SQLSTATEs map to HTTP in
+  `rpcError()` (`22023` → 400, `P0002` → 404, `23505` / `55000` / `54000` → 409).
+- The listing feed (`/v1/public/events`, alias `/v1/public/confirms`) is the one route family without an API key:
+  `auth: 'shared_key'` in `routes.ts`, its own handler (`listingFeed()`), Opendate's
+  `{ current_page, per_page, total_entries, total_pages, collection }` envelope (`paged: 'opendate'`), CORS `*`,
+  `Cache-Control: public, max-age=60`, an ETag, and its own 120/min bucket per key.
 
 ## Adding a route
 
-1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, path, scope, paged.
+1. A row in `ROUTES` (`_shared/api/routes.ts`): id, method, path, auth, scope, paged.
 2. A `case` for that id in `handle()` in `exos-api/index.ts`. Select explicit columns; never secrets (barcode
    secrets, webhook secrets, reserved emails). Scope every query to the key's org.
 3. An endpoint in the right `docs/api/<area>.json` with the same `id`, the path under `/v1`, the same `scope`,
