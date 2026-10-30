@@ -32,6 +32,16 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+      # The partner API reference (docs/api/*.json) against the route table,
+      # and the Opendate coverage table (docs/opendate-coverage.json) against
+      # both: every Opendate endpoint accounted for, every Exos route it names
+      # real and documented, docs/opendate-coverage.md current.
+      - name: API reference (api-spec --check)
+        run: node scripts/api-spec.mjs --check
+
+      - name: Opendate coverage
+        run: node scripts/check-opendate-coverage.mjs
+
       - name: Build (Vite)
         # Placeholder Supabase keys — the build succeeds without a live connection.
         env:

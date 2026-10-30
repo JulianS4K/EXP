@@ -1,0 +1,3651 @@
+{
+ "source": "Opendate API v2 catalog (455 endpoints): category, method and path only",
+ "statuses": {
+  "route": "an Exos partner-API route does the same (named in exos)",
+  "equivalent": "Exos does it another way (another route shape, a signed-in RPC, an edge function or the dashboard)",
+  "not_applicable": "doesn't apply to Exos (platform-internal, another vendor's product, or a deliberate no)",
+  "planned": "not built yet"
+ },
+ "endpoints": [
+  {
+   "category": "authorization",
+   "method": "GET",
+   "path": "/oauth/authorize",
+   "status": "equivalent",
+   "exos": "exos-oauth GET /authorize",
+   "reason": "OAuth 2.1 code + PKCE on the exos-oauth function, not exos-api"
+  },
+  {
+   "category": "authorization",
+   "method": "POST",
+   "path": "/oauth/token",
+   "status": "not_applicable",
+   "exos": "not built: no password grant",
+   "reason": "Apps never see a password: use the code flow or a personal access token"
+  },
+  {
+   "category": "authorization",
+   "method": "POST",
+   "path": "/oauth/revoke",
+   "status": "equivalent",
+   "exos": "exos-oauth POST /revoke",
+   "reason": "Token revocation on the exos-oauth function (+ /introspect)"
+  },
+  {
+   "category": "authorization",
+   "method": "POST",
+   "path": "/oauth/token",
+   "status": "equivalent",
+   "exos": "exos-oauth POST /token (grant_type=refresh_token)",
+   "reason": "Refresh tokens rotate, with reuse detection"
+  },
+  {
+   "category": "users",
+   "method": "POST",
+   "path": "/api/v2/users",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): sign up is its endpoint, not a partner API"
+  },
+  {
+   "category": "users",
+   "method": "POST",
+   "path": "/api/v2/users/register",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): registration is its endpoint, not a partner API"
+  },
+  {
+   "category": "users",
+   "method": "PUT",
+   "path": "/api/v2/users/{id}",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): profile update is its endpoint, not a partner API"
+  },
+  {
+   "category": "users",
+   "method": "DELETE",
+   "path": "/api/v2/users/{id}",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): account deletion is its endpoint, not a partner API"
+  },
+  {
+   "category": "users",
+   "method": "GET",
+   "path": "/api/v2/users/current",
+   "status": "equivalent",
+   "exos": "GET /v1/me",
+   "reason": "Names the credential and, for a user token, its user and live role"
+  },
+  {
+   "category": "users",
+   "method": "POST",
+   "path": "/api/v2/users/reset_password",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): password reset is its endpoint, not a partner API"
+  },
+  {
+   "category": "users",
+   "method": "POST",
+   "path": "/api/v2/users/resend_confirmation_email",
+   "status": "not_applicable",
+   "exos": "Supabase Auth",
+   "reason": "Accounts are Supabase Auth (GoTrue): confirmation mail is its endpoint, not a partner API"
+  },
+  {
+   "category": "team_memberships",
+   "method": "GET",
+   "path": "/api/v2/team_memberships",
+   "status": "equivalent",
+   "exos": "GET /v1/me/memberships",
+   "reason": "A user token's organizations"
+  },
+  {
+   "category": "team_memberships",
+   "method": "PUT",
+   "path": "/api/v2/team_memberships/{id}/switch",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "A token is pinned to one organization, so there is nothing to switch"
+  },
+  {
+   "category": "teams",
+   "method": "GET",
+   "path": "/api/v2/teams/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/team",
+   "reason": "The credential's organization"
+  },
+  {
+   "category": "teams",
+   "method": "PATCH",
+   "path": "/api/v2/teams/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/team",
+   "reason": "The credential's organization"
+  },
+  {
+   "category": "team_members",
+   "method": "GET",
+   "path": "/api/v2/teams/{team_id}/team_memberships",
+   "status": "equivalent",
+   "exos": "GET /v1/team/members",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_members",
+   "method": "PATCH",
+   "path": "/api/v2/teams/{team_id}/team_memberships/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/team/members/:id",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_members",
+   "method": "DELETE",
+   "path": "/api/v2/teams/{team_id}/team_memberships/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/team/members/:id",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_invitations",
+   "method": "GET",
+   "path": "/api/v2/teams/{team_id}/invitations",
+   "status": "equivalent",
+   "exos": "GET /v1/team/invitations",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_invitations",
+   "method": "POST",
+   "path": "/api/v2/teams/{team_id}/invitations",
+   "status": "equivalent",
+   "exos": "POST /v1/team/invitations",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_invitations",
+   "method": "DELETE",
+   "path": "/api/v2/teams/{team_id}/invitations/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/team/invitations/:id",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "team_roles",
+   "method": "GET",
+   "path": "/api/v2/teams/{team_id}/roles",
+   "status": "equivalent",
+   "exos": "GET /v1/team/roles",
+   "reason": "Team = the organization"
+  },
+  {
+   "category": "personal_access_tokens",
+   "method": "POST",
+   "path": "/api/v2/personal_access_tokens",
+   "status": "equivalent",
+   "exos": "Profile → Developer (exos_create_personal_token)",
+   "reason": "Signed in only: a token can't mint tokens"
+  },
+  {
+   "category": "personal_access_tokens",
+   "method": "DELETE",
+   "path": "/api/v2/personal_access_tokens/current",
+   "status": "route",
+   "exos": "DELETE /v1/personal-access-tokens/current",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "staffing_kiosk_devices",
+   "method": "GET",
+   "path": "/api/v2/staffing/kiosk_venues",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Staffing kiosks (clock in / out) are not an Exos product"
+  },
+  {
+   "category": "staffing_kiosk_devices",
+   "method": "POST",
+   "path": "/api/v2/staffing/kiosk_devices",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Staffing kiosks (clock in / out) are not an Exos product"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms",
+   "status": "route",
+   "exos": "GET /v1/events",
+   "reason": "Opendate's confirms are Exos events"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id",
+   "reason": "Confirm = event"
+  },
+  {
+   "category": "events",
+   "method": "POST",
+   "path": "/api/v2/confirms",
+   "status": "route",
+   "exos": "POST /v1/events",
+   "reason": "Runs the dashboard's create (exos_api_write)"
+  },
+  {
+   "category": "events",
+   "method": "PATCH",
+   "path": "/api/v2/confirms/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/events/:id",
+   "reason": "Confirm = event"
+  },
+  {
+   "category": "events",
+   "method": "POST",
+   "path": "/api/v2/confirms/{id}/publish",
+   "status": "route",
+   "exos": "POST /v1/events/:id/publish",
+   "reason": "Confirm = event"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/publish_blockers",
+   "status": "route",
+   "exos": "GET /v1/events/:id/publish-blockers",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/description",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id",
+   "reason": "The description is a field of the event"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/similars",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "No similar-events model yet"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/profit_and_loss",
+   "status": "route",
+   "exos": "GET /v1/events/:id/profit-and-loss",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/toast_summary",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Toast POS integration; Exos has its own POS (GET /v1/pos/items)"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/{id}/cash_summary",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Box-office cash totals per event are in the dashboard report, not the API yet"
+  },
+  {
+   "category": "events",
+   "method": "GET",
+   "path": "/api/v2/confirms/recommendations",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "No recommendation model yet"
+  },
+  {
+   "category": "events_database",
+   "method": "GET",
+   "path": "/api/v2/events",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's industry events database (other promoters' shows); Exos has no such data set. GET /v1/events is the org's own"
+  },
+  {
+   "category": "events_database",
+   "method": "GET",
+   "path": "/api/v2/events/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's industry events database; see GET /v1/events for the org's own"
+  },
+  {
+   "category": "holds",
+   "method": "GET",
+   "path": "/api/v2/holds",
+   "status": "route",
+   "exos": "GET /v1/holds",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "holds",
+   "method": "GET",
+   "path": "/api/v2/holds/{id}",
+   "status": "route",
+   "exos": "GET /v1/holds/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "holds",
+   "method": "POST",
+   "path": "/api/v2/holds",
+   "status": "route",
+   "exos": "POST /v1/holds",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "holds",
+   "method": "PATCH",
+   "path": "/api/v2/holds/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/holds/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "holds",
+   "method": "POST",
+   "path": "/api/v2/holds/{id}/clear",
+   "status": "route",
+   "exos": "POST /v1/holds/:id/clear",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "holds",
+   "method": "POST",
+   "path": "/api/v2/holds/{id}/convert_to_confirm",
+   "status": "route",
+   "exos": "POST /v1/holds/:id/convert-to-event",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "artists",
+   "method": "GET",
+   "path": "/api/v2/artists",
+   "status": "route",
+   "exos": "GET /v1/artists",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "artists",
+   "method": "GET",
+   "path": "/api/v2/artists/{id}",
+   "status": "route",
+   "exos": "GET /v1/artists/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "artists",
+   "method": "POST",
+   "path": "/api/v2/artists",
+   "status": "route",
+   "exos": "POST /v1/artists",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venues",
+   "method": "GET",
+   "path": "/api/v2/venues",
+   "status": "route",
+   "exos": "GET /v1/venues",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venues",
+   "method": "GET",
+   "path": "/api/v2/venues/{id}",
+   "status": "route",
+   "exos": "GET /v1/venues/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "GET",
+   "path": "/api/v2/venue_ownerships",
+   "status": "route",
+   "exos": "GET /v1/venues",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "GET",
+   "path": "/api/v2/venue_ownerships/{id}",
+   "status": "route",
+   "exos": "GET /v1/venues/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "GET",
+   "path": "/api/v2/venue_ownerships/{id}/app_downloaded",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate-app install check; Exos has no venue app"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "POST",
+   "path": "/api/v2/venue_ownerships",
+   "status": "route",
+   "exos": "POST /v1/venues",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "PATCH",
+   "path": "/api/v2/venue_ownerships/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/venues/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "venue_ownerships",
+   "method": "DELETE",
+   "path": "/api/v2/venue_ownerships/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/venues/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "rooms",
+   "method": "GET",
+   "path": "/api/v2/rooms",
+   "status": "route",
+   "exos": "GET /v1/rooms",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "rooms",
+   "method": "GET",
+   "path": "/api/v2/rooms/{id}",
+   "status": "route",
+   "exos": "GET /v1/rooms/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "ticket_types",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_types",
+   "status": "route",
+   "exos": "GET /v1/events/:id/ticket-types",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_types",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_types/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id/ticket-types/:tier",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_types",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_types",
+   "status": "route",
+   "exos": "POST /v1/events/:id/ticket-types",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_types",
+   "method": "PATCH",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_types/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/events/:id/ticket-types/:tier",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_types",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_types/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/events/:id/ticket-types/:tier",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "add_ons",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/add_ons",
+   "status": "route",
+   "exos": "GET /v1/events/:id/add-ons",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "add_ons",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/add_ons/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id/add-ons/:addon",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "custom_charge_types",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/custom_charge_types",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Custom charges are fee rules (docs/fees.md)"
+  },
+  {
+   "category": "custom_charge_types",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/custom_charge_types/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Fee rules come as one list per event"
+  },
+  {
+   "category": "promo_codes",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes",
+   "status": "route",
+   "exos": "GET /v1/events/:id/promo-codes",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "promo_codes",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id/promo-codes/:code",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "promo_codes",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes/lookup",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/promo-codes?code=",
+   "reason": "Look a code up by name with the list filter"
+  },
+  {
+   "category": "promo_codes",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes",
+   "status": "route",
+   "exos": "POST /v1/events/:id/promo-codes",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "promo_codes",
+   "method": "PATCH",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/events/:id/promo-codes/:code",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "promo_codes",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/promo_codes/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/events/:id/promo-codes/:code",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "tickets",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/tickets",
+   "status": "route",
+   "exos": "GET /v1/events/:id/attendees",
+   "reason": "The event's tickets (also GET /v1/tickets?event_id=)"
+  },
+  {
+   "category": "tickets",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}",
+   "status": "equivalent",
+   "exos": "GET /v1/tickets/:id",
+   "reason": "By ticket id: Exos barcodes rotate (GET /v1/scan-lookups/:code reads a scanned code)"
+  },
+  {
+   "category": "tickets",
+   "method": "PUT",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Ticket edits (attendee name) are dashboard / holder actions; no API write yet"
+  },
+  {
+   "category": "tickets",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}/print",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Thermal printing (FGL) for Opendate's box-office printers; Exos tickets are mobile / PDF"
+  },
+  {
+   "category": "tickets",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}/fgl",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "FGL printer language; not used by Exos"
+  },
+  {
+   "category": "tickets",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/check_in",
+   "status": "equivalent",
+   "exos": "POST /v1/tickets/:id/check-in",
+   "reason": "By ticket id; a scanned code is resolved with GET /v1/scan-lookups/:code"
+  },
+  {
+   "category": "tickets",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/tickets/check_out",
+   "status": "equivalent",
+   "exos": "POST /v1/tickets/:id/check-out",
+   "reason": "By ticket id"
+  },
+  {
+   "category": "orders",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/orders",
+   "status": "equivalent",
+   "exos": "GET /v1/orders?event_id=",
+   "reason": "Orders filtered by event"
+  },
+  {
+   "category": "orders",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/orders/:id",
+   "reason": "Orders are org-wide ids"
+  },
+  {
+   "category": "orders",
+   "method": "PUT",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Order edits (buyer details) are dashboard actions; no API write yet"
+  },
+  {
+   "category": "orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}/print",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Thermal printing (FGL); not used by Exos"
+  },
+  {
+   "category": "orders",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}/fgl",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "FGL printer language; not used by Exos"
+  },
+  {
+   "category": "orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}/send_receipt",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Receipts are mailed at fulfilment; a resend is a dashboard action, not an API route yet"
+  },
+  {
+   "category": "orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}/check_in",
+   "status": "equivalent",
+   "exos": "POST /v1/orders/:id/check-in",
+   "reason": "Order ids are org-wide"
+  },
+  {
+   "category": "orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/orders/{id}/check_out",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/build",
+   "status": "route",
+   "exos": "POST /v1/events/:id/organizer-reservations/build",
+   "reason": "Preview"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations",
+   "status": "route",
+   "exos": "POST /v1/events/:id/organizer-reservations",
+   "reason": "Box office / kiosk credential"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "PUT",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}",
+   "status": "route",
+   "exos": "PUT /v1/events/:id/organizer-reservations/:token",
+   "reason": "Same operation"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}",
+   "status": "route",
+   "exos": "DELETE /v1/events/:id/organizer-reservations/:token",
+   "reason": "Same operation"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/complete",
+   "status": "route",
+   "exos": "POST /v1/events/:id/organizer-reservations/:token/complete",
+   "reason": "Idempotent"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions",
+   "status": "planned",
+   "exos": "gift_card_code on exos-checkout",
+   "reason": "Gift cards pay online orders (exos-checkout); not on API reservations yet"
+  },
+  {
+   "category": "organizer_ticket_reservations",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "See gift_card_redemptions above"
+  },
+  {
+   "category": "organizer_orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_orders/build",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/organizer-reservations/build",
+   "reason": "An organizer order is a reservation completed at once"
+  },
+  {
+   "category": "organizer_orders",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/organizer_orders",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/organizer-reservations + …/:token/complete",
+   "reason": "Reserve, then complete"
+  },
+  {
+   "category": "guest_lists",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/guest_list_entries",
+   "status": "equivalent",
+   "exos": "GET /v1/guest-lists/:id/guests",
+   "reason": "Exos has named guest lists per event (GET /v1/events/:id/guest-lists)"
+  },
+  {
+   "category": "guest_lists",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/guest_list_preview",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Pasted-names preview is client-side in the dashboard"
+  },
+  {
+   "category": "guest_lists",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/guest_list_entries",
+   "status": "equivalent",
+   "exos": "POST /v1/guest-lists/:id/guests",
+   "reason": "Per guest list"
+  },
+  {
+   "category": "guest_lists",
+   "method": "PATCH",
+   "path": "/api/v2/confirms/{confirm_id}/guest_list_entries/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/guests/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "guest_lists",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/guest_list_entries/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/guests/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "ticket_reservations",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_reservations",
+   "status": "route",
+   "exos": "GET /v1/events/:id/ticket-reservations",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_reservations",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/ticket_reservations/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id/ticket-reservations/:token",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticket_transfers",
+   "method": "GET",
+   "path": "/api/v2/orders/{order_id}/ticket_transfers/new",
+   "status": "equivalent",
+   "exos": "exos_transfer_* (buyer, signed in)",
+   "reason": "Transfers are the holder's action in the app, not a partner API"
+  },
+  {
+   "category": "ticket_transfers",
+   "method": "POST",
+   "path": "/api/v2/orders/{order_id}/ticket_transfers",
+   "status": "equivalent",
+   "exos": "exos_transfer_* (buyer, signed in)",
+   "reason": "Transfers are the holder's action in the app"
+  },
+  {
+   "category": "scan_lookups",
+   "method": "GET",
+   "path": "/api/v2/scan_lookups/{code}",
+   "status": "route",
+   "exos": "GET /v1/scan-lookups/:code",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "fans",
+   "method": "GET",
+   "path": "/api/v2/fans",
+   "status": "route",
+   "exos": "GET /v1/fans",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "fans",
+   "method": "GET",
+   "path": "/api/v2/fans/{id}",
+   "status": "route",
+   "exos": "GET /v1/fans/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "fans",
+   "method": "GET",
+   "path": "/api/v2/fans/{id}/organizer_detail",
+   "status": "equivalent",
+   "exos": "GET /v1/fans/:id",
+   "reason": "One payload: orders, money, consent, tags, signups"
+  },
+  {
+   "category": "fans",
+   "method": "POST",
+   "path": "/api/v2/fans",
+   "status": "route",
+   "exos": "POST /v1/fans",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "fans",
+   "method": "GET",
+   "path": "/api/v2/fans/lookup",
+   "status": "route",
+   "exos": "GET /v1/fans/lookup",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "fans",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/fans/recommendations",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "No recommendation model yet (docs/fans.md)"
+  },
+  {
+   "category": "fans",
+   "method": "PUT",
+   "path": "/api/v2/fans/{id}/update_marketing_subscriptions",
+   "status": "not_applicable",
+   "exos": "deliberately not provided",
+   "reason": "Consent changes only by the fan (unsubscribe link, profile, SMS STOP)"
+  },
+  {
+   "category": "membership_scans",
+   "method": "POST",
+   "path": "/api/v2/membership_scans",
+   "status": "equivalent",
+   "exos": "exos_membership_scan (door staff, signed in)",
+   "reason": "Door scans are a signed-in staff action, not a partner route"
+  },
+  {
+   "category": "memberships",
+   "method": "GET",
+   "path": "/api/v2/memberships",
+   "status": "route",
+   "exos": "GET /v1/memberships",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "memberships",
+   "method": "POST",
+   "path": "/api/v2/memberships/:membership_id/gift",
+   "status": "equivalent",
+   "exos": "exos_membership_gift (dashboard); buy_membership with gift_to_email",
+   "reason": "No partner write route yet"
+  },
+  {
+   "category": "memberships",
+   "method": "DELETE",
+   "path": "/api/v2/memberships/:membership_id/gift",
+   "status": "equivalent",
+   "exos": "exos_membership_cancel_gift",
+   "reason": "No partner write route yet"
+  },
+  {
+   "category": "membership_reservations",
+   "method": "POST",
+   "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations",
+   "status": "not_applicable",
+   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
+   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+  },
+  {
+   "category": "membership_reservations",
+   "method": "DELETE",
+   "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations/{token}",
+   "status": "not_applicable",
+   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
+   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+  },
+  {
+   "category": "membership_reservations",
+   "method": "POST",
+   "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations/{token}/complete",
+   "status": "not_applicable",
+   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
+   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+  },
+  {
+   "category": "membership_products",
+   "method": "GET",
+   "path": "/api/v2/membership_products",
+   "status": "route",
+   "exos": "GET /v1/membership-products",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "membership_products",
+   "method": "GET",
+   "path": "/api/v2/membership_products/{id}",
+   "status": "route",
+   "exos": "GET /v1/membership-products/:id",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "membership_products",
+   "method": "POST",
+   "path": "/api/v2/membership_products",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard create; no partner write route yet"
+  },
+  {
+   "category": "membership_products",
+   "method": "PATCH",
+   "path": "/api/v2/membership_products/{id}",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard update; no partner write route yet"
+  },
+  {
+   "category": "membership_products",
+   "method": "POST",
+   "path": "/api/v2/membership_products/{id}/publish",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard publish (active on); no partner write route yet"
+  },
+  {
+   "category": "membership_products",
+   "method": "POST",
+   "path": "/api/v2/membership_products/{id}/unpublish",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard unpublish (active off); no partner write route yet"
+  },
+  {
+   "category": "membership_products",
+   "method": "POST",
+   "path": "/api/v2/membership_products/{id}/archive",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard archive (archived_at); no partner write route yet"
+  },
+  {
+   "category": "gift_card_sales",
+   "method": "GET",
+   "path": "/api/v2/gift_card_products",
+   "status": "route",
+   "exos": "GET /v1/gift-card-products",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "gift_card_sales",
+   "method": "GET",
+   "path": "/api/v2/gift_card_products/{gift_card_product_id}/quote",
+   "status": "equivalent",
+   "exos": "exos_gift_card_quote (exos-checkout / exos-commerce)",
+   "reason": "Amounts are fixed or a range: the quote is the amount"
+  },
+  {
+   "category": "gift_card_sales",
+   "method": "POST",
+   "path": "/api/v2/gift_card_products/{gift_card_product_id}/gift_card_orders",
+   "status": "equivalent",
+   "exos": "buy_gift_card (exos-commerce); exos_gift_card_issue (box office)",
+   "reason": "No partner write route yet"
+  },
+  {
+   "category": "gift_card_sales",
+   "method": "GET",
+   "path": "/api/v2/gift_card_products/{gift_card_product_id}/gift_card_orders/{token}",
+   "status": "equivalent",
+   "exos": "GET /v1/gift-cards/:id",
+   "reason": "With its ledger"
+  },
+  {
+   "category": "giving_campaigns",
+   "method": "GET",
+   "path": "/api/v2/giving_campaigns",
+   "status": "route",
+   "exos": "GET /v1/giving-campaigns",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "giving_campaigns",
+   "method": "GET",
+   "path": "/api/v2/giving_campaigns/{id}",
+   "status": "route",
+   "exos": "GET /v1/giving-campaigns/:id",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/giving_campaigns/{giving_campaign_id}/donations",
+   "status": "equivalent",
+   "exos": "donate (exos-commerce); add-a-donation on exos-checkout",
+   "reason": "Stripe Checkout"
+  },
+  {
+   "category": "giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/giving_campaigns/{giving_campaign_id}/offline_donations",
+   "status": "equivalent",
+   "exos": "exos_record_offline_donation (dashboard)",
+   "reason": "No partner write route yet"
+  },
+  {
+   "category": "giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/giving_campaigns/{giving_campaign_id}/recurring_donations",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Recurring giving would reuse the membership subscriptions"
+  },
+  {
+   "category": "refunds",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/refunds",
+   "status": "equivalent",
+   "exos": "GET /v1/refunds?event_id=",
+   "reason": "Refunds filtered by event"
+  },
+  {
+   "category": "refunds",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/refunds/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/refunds/:id",
+   "reason": "Refund ids are org-wide"
+  },
+  {
+   "category": "settlements",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/settlements/summary",
+   "status": "route",
+   "exos": "GET /v1/events/:id/settlement",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_items",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/finance_items",
+   "status": "route",
+   "exos": "GET /v1/events/:id/finance-items",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_items",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/finance_items/{id}",
+   "status": "route",
+   "exos": "GET /v1/finance-items/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_items",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/finance_items",
+   "status": "route",
+   "exos": "POST /v1/events/:id/finance-items",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_items",
+   "method": "PUT",
+   "path": "/api/v2/confirms/{confirm_id}/finance_items/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/finance-items/:id",
+   "reason": "PATCH instead of PUT"
+  },
+  {
+   "category": "finance_categories",
+   "method": "GET",
+   "path": "/api/v2/finance_categories",
+   "status": "route",
+   "exos": "GET /v1/finance-categories",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_categories",
+   "method": "GET",
+   "path": "/api/v2/finance_categories/{id}",
+   "status": "route",
+   "exos": "GET /v1/finance-categories/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_categories",
+   "method": "POST",
+   "path": "/api/v2/finance_categories",
+   "status": "route",
+   "exos": "POST /v1/finance-categories",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "finance_categories",
+   "method": "PUT",
+   "path": "/api/v2/finance_categories/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/finance-categories/:id",
+   "reason": "PATCH instead of PUT"
+  },
+  {
+   "category": "finance_categories",
+   "method": "DELETE",
+   "path": "/api/v2/finance_categories/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/finance-categories/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offers",
+   "method": "GET",
+   "path": "/api/v2/offers",
+   "status": "route",
+   "exos": "GET /v1/offers",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offers",
+   "method": "GET",
+   "path": "/api/v2/offers/{id}",
+   "status": "route",
+   "exos": "GET /v1/offers/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offers",
+   "method": "POST",
+   "path": "/api/v2/offers",
+   "status": "route",
+   "exos": "POST /v1/offers",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offer_imports",
+   "method": "GET",
+   "path": "/api/v2/offer_imports",
+   "status": "route",
+   "exos": "GET /v1/offer-imports",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offer_imports",
+   "method": "GET",
+   "path": "/api/v2/offer_imports/{id}",
+   "status": "route",
+   "exos": "GET /v1/offer-imports/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offer_imports",
+   "method": "POST",
+   "path": "/api/v2/offer_imports",
+   "status": "route",
+   "exos": "POST /v1/offer-imports",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "offer_imports",
+   "method": "POST",
+   "path": "/api/v2/offer_imports/{id}/select_sheets",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Imports are CSV, mapped in the browser; no multi-sheet workbooks"
+  },
+  {
+   "category": "offer_imports",
+   "method": "DELETE",
+   "path": "/api/v2/offer_imports/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/offer-imports/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "GET",
+   "path": "/api/v2/v3_offers",
+   "status": "route",
+   "exos": "GET /v1/offers",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "GET",
+   "path": "/api/v2/v3_offers/{id}",
+   "status": "route",
+   "exos": "GET /v1/offers/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "POST",
+   "path": "/api/v2/v3_offers",
+   "status": "route",
+   "exos": "POST /v1/offers",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "PATCH",
+   "path": "/api/v2/v3_offers/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/offers/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "DELETE",
+   "path": "/api/v2/v3_offers/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/offers/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "POST",
+   "path": "/api/v2/v3_offers/{id}/send_offer",
+   "status": "route",
+   "exos": "POST /v1/offers/:id/send",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "POST",
+   "path": "/api/v2/v3_offers/{id}/accept",
+   "status": "route",
+   "exos": "POST /v1/offers/:id/accept",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offers",
+   "method": "POST",
+   "path": "/api/v2/v3_offers/{id}/decline",
+   "status": "route",
+   "exos": "POST /v1/offers/:id/decline",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budgets",
+   "status": "route",
+   "exos": "GET /v1/budgets",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budgets/{id}",
+   "status": "route",
+   "exos": "GET /v1/budgets/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "PATCH",
+   "path": "/api/v2/v3_budgets/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/budgets/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_line_items",
+   "status": "equivalent",
+   "exos": "GET /v1/budgets/:id/lines",
+   "reason": "Lines are read per budget"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_line_items/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/budgets/:id/lines",
+   "reason": "Lines are read per budget"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "POST",
+   "path": "/api/v2/v3_budget_line_items",
+   "status": "equivalent",
+   "exos": "POST /v1/budgets/:id/lines",
+   "reason": "Added to a budget"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "PATCH",
+   "path": "/api/v2/v3_budget_line_items/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/budget-lines/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "DELETE",
+   "path": "/api/v2/v3_budget_line_items/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/budget-lines/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_bonuses",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.bonuses)",
+   "reason": "Bonuses are part of an offer's deal terms, not records of their own"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_bonuses/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.bonuses)",
+   "reason": "Bonuses are part of an offer's deal terms, not records of their own"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "POST",
+   "path": "/api/v2/v3_budget_bonuses",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.bonuses)",
+   "reason": "Bonuses are part of an offer's deal terms, not records of their own"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "PATCH",
+   "path": "/api/v2/v3_budget_bonuses/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.bonuses)",
+   "reason": "Bonuses are part of an offer's deal terms, not records of their own"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "DELETE",
+   "path": "/api/v2/v3_budget_bonuses/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.bonuses)",
+   "reason": "Bonuses are part of an offer's deal terms, not records of their own"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_deposits",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.deposit_cents); PATCH /v1/events/:id/settlement (deposits paid)",
+   "reason": "A deposit is a term of the offer, marked paid on the settlement"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_budget_deposits/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.deposit_cents); PATCH /v1/events/:id/settlement (deposits paid)",
+   "reason": "A deposit is a term of the offer, marked paid on the settlement"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "POST",
+   "path": "/api/v2/v3_budget_deposits",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.deposit_cents); PATCH /v1/events/:id/settlement (deposits paid)",
+   "reason": "A deposit is a term of the offer, marked paid on the settlement"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "PATCH",
+   "path": "/api/v2/v3_budget_deposits/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.deposit_cents); PATCH /v1/events/:id/settlement (deposits paid)",
+   "reason": "A deposit is a term of the offer, marked paid on the settlement"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "DELETE",
+   "path": "/api/v2/v3_budget_deposits/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id (terms.deposit_cents); PATCH /v1/events/:id/settlement (deposits paid)",
+   "reason": "A deposit is a term of the offer, marked paid on the settlement"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_deal_brackets",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "GET",
+   "path": "/api/v2/v3_deal_brackets/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "POST",
+   "path": "/api/v2/v3_deal_brackets",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "PATCH",
+   "path": "/api/v2/v3_deal_brackets/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+  },
+  {
+   "category": "v3_budgets",
+   "method": "DELETE",
+   "path": "/api/v2/v3_deal_brackets/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_pools/{id}",
+   "status": "route",
+   "exos": "GET /v1/offer-pools/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "POST",
+   "path": "/api/v2/v3_offer_pools",
+   "status": "route",
+   "exos": "POST /v1/offer-pools",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "PATCH",
+   "path": "/api/v2/v3_offer_pools/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/offer-pools/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_contacts",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/contacts; GET /v1/event-contacts",
+   "reason": "An offer's agent is on the offer; show contacts are event contacts"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_contacts/{id}",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/contacts; GET /v1/event-contacts",
+   "reason": "An offer's agent is on the offer; show contacts are event contacts"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "POST",
+   "path": "/api/v2/v3_offer_contacts",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/contacts; GET /v1/event-contacts",
+   "reason": "An offer's agent is on the offer; show contacts are event contacts"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "PATCH",
+   "path": "/api/v2/v3_offer_contacts/{id}",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/contacts; GET /v1/event-contacts",
+   "reason": "An offer's agent is on the offer; show contacts are event contacts"
+  },
+  {
+   "category": "v3_offer_pools",
+   "method": "DELETE",
+   "path": "/api/v2/v3_offer_contacts/{id}",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/contacts; GET /v1/event-contacts",
+   "reason": "An offer's agent is on the offer; show contacts are event contacts"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_templates",
+   "status": "route",
+   "exos": "GET /v1/offer-templates",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_templates/{id}",
+   "status": "route",
+   "exos": "GET /v1/offer-templates/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "POST",
+   "path": "/api/v2/v3_offer_templates",
+   "status": "route",
+   "exos": "POST /v1/offer-templates",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "PATCH",
+   "path": "/api/v2/v3_offer_templates/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/offer-templates/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "DELETE",
+   "path": "/api/v2/v3_offer_templates/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/offer-templates/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "POST",
+   "path": "/api/v2/v3_offer_templates/{id}/apply_template",
+   "status": "route",
+   "exos": "POST /v1/offer-templates/:id/apply",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_blueprints",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's offer blueprints (PDF / workbook layouts) aren't built; templates are GET /v1/offer-templates"
+  },
+  {
+   "category": "v3_offer_templates",
+   "method": "GET",
+   "path": "/api/v2/v3_offer_blueprints/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Offer blueprints aren't built; see GET /v1/offer-templates/:id"
+  },
+  {
+   "category": "tags",
+   "method": "GET",
+   "path": "/api/v2/tags",
+   "status": "route",
+   "exos": "GET /v1/tags",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "tags",
+   "method": "GET",
+   "path": "/api/v2/tags/{id}",
+   "status": "route",
+   "exos": "GET /v1/tags/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "tags",
+   "method": "POST",
+   "path": "/api/v2/tags",
+   "status": "route",
+   "exos": "POST /v1/tags",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "tags",
+   "method": "PUT",
+   "path": "/api/v2/tags/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/tags/:id",
+   "reason": "PATCH instead of PUT"
+  },
+  {
+   "category": "tags",
+   "method": "DELETE",
+   "path": "/api/v2/tags/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/tags/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "tagged_items",
+   "method": "GET",
+   "path": "/api/v2/tagged_items",
+   "status": "route",
+   "exos": "GET /v1/tagged-items",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "tagged_items",
+   "method": "GET",
+   "path": "/api/v2/tagged_items/{id}",
+   "status": "route",
+   "exos": "GET /v1/tagged-items/:id",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "tagged_items",
+   "method": "POST",
+   "path": "/api/v2/tagged_items",
+   "status": "route",
+   "exos": "POST /v1/tagged-items",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "tagged_items",
+   "method": "PUT",
+   "path": "/api/v2/tagged_items/{id}",
+   "status": "not_applicable",
+   "exos": "not provided",
+   "reason": "An assignment has nothing to edit: delete and create"
+  },
+  {
+   "category": "tagged_items",
+   "method": "DELETE",
+   "path": "/api/v2/tagged_items/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/tagged-items/:id",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "canonical_tags",
+   "method": "GET",
+   "path": "/api/v2/canonical_tags",
+   "status": "route",
+   "exos": "GET /v1/canonical-tags",
+   "reason": "Same resource, Exos spelling"
+  },
+  {
+   "category": "fee_rules",
+   "method": "GET",
+   "path": "/api/v2/fee_rules",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Per event (the org's rules in effect there)"
+  },
+  {
+   "category": "fee_rules",
+   "method": "GET",
+   "path": "/api/v2/fee_rules/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Per event list"
+  },
+  {
+   "category": "show_activities",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/show_activities",
+   "status": "route",
+   "exos": "GET /v1/events/:id/show-activities",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "show_activities",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/show_activities/{id}",
+   "status": "route",
+   "exos": "GET /v1/events/:id/show-activities/:aid",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "show_activities",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/show_activities",
+   "status": "route",
+   "exos": "POST /v1/events/:id/show-activities",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "show_activities",
+   "method": "PATCH",
+   "path": "/api/v2/confirms/{confirm_id}/show_activities/{id}",
+   "status": "route",
+   "exos": "PATCH /v1/events/:id/show-activities/:aid",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "show_activities",
+   "method": "DELETE",
+   "path": "/api/v2/confirms/{confirm_id}/show_activities/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/events/:id/show-activities/:aid",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "ticketing_configurations",
+   "method": "GET",
+   "path": "/api/v2/confirms/{confirm_id}/ticketing_configuration",
+   "status": "route",
+   "exos": "GET /v1/events/:id/ticketing-configuration",
+   "reason": "Confirm = event, Exos spelling"
+  },
+  {
+   "category": "ticketing_configurations",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/ticketing_configuration",
+   "status": "equivalent",
+   "exos": "POST /v1/holds/:id/convert-to-event",
+   "reason": "Ticketing comes from the hold / offer when it converts; GET …/ticketing-configuration reads it"
+  },
+  {
+   "category": "offline_check_in_activities",
+   "method": "POST",
+   "path": "/api/v2/confirms/{confirm_id}/offline_check_in_activities",
+   "status": "route",
+   "exos": "POST /v1/events/:id/offline-check-ins",
+   "reason": "Offline scan uploads"
+  },
+  {
+   "category": "notes",
+   "method": "GET",
+   "path": "/api/v2/notes",
+   "status": "route",
+   "exos": "GET /v1/notes",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "notes",
+   "method": "GET",
+   "path": "/api/v2/notes/{id}",
+   "status": "route",
+   "exos": "GET /v1/notes/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "calendar_event_contacts",
+   "method": "GET",
+   "path": "/api/v2/calendar_event_contacts",
+   "status": "route",
+   "exos": "GET /v1/event-contacts",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "calendar_event_contacts",
+   "method": "GET",
+   "path": "/api/v2/calendar_event_contacts/{id}",
+   "status": "route",
+   "exos": "GET /v1/event-contacts/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "food_and_beverage_items",
+   "method": "GET",
+   "path": "/api/v2/food_and_beverage_items",
+   "status": "route",
+   "exos": "GET /v1/pos/items",
+   "reason": "Exos POS catalog (docs/pos.md)"
+  },
+  {
+   "category": "food_and_beverage_items",
+   "method": "GET",
+   "path": "/api/v2/food_and_beverage_items/{id}",
+   "status": "route",
+   "exos": "GET /v1/pos/items/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "food_and_beverage_items",
+   "method": "POST",
+   "path": "/api/v2/food_and_beverage_items",
+   "status": "route",
+   "exos": "POST /v1/pos/items",
+   "reason": "Same operation"
+  },
+  {
+   "category": "food_and_beverage_items",
+   "method": "PUT",
+   "path": "/api/v2/food_and_beverage_items/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/pos/items/:id",
+   "reason": "PATCH instead of PUT"
+  },
+  {
+   "category": "manual_ticket_counts",
+   "method": "GET",
+   "path": "/api/v2/manual_ticket_counts",
+   "status": "route",
+   "exos": "GET /v1/sales-counts",
+   "reason": "Tickets sold on other platforms"
+  },
+  {
+   "category": "manual_ticket_counts",
+   "method": "GET",
+   "path": "/api/v2/manual_ticket_counts/{id}",
+   "status": "route",
+   "exos": "GET /v1/sales-counts/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "manual_ticket_counts",
+   "method": "POST",
+   "path": "/api/v2/manual_ticket_counts",
+   "status": "route",
+   "exos": "POST /v1/sales-counts",
+   "reason": "Same operation"
+  },
+  {
+   "category": "manual_ticket_counts",
+   "method": "PUT",
+   "path": "/api/v2/manual_ticket_counts/{id}",
+   "status": "route",
+   "exos": "PUT /v1/sales-counts/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "manual_ticket_counts",
+   "method": "DELETE",
+   "path": "/api/v2/manual_ticket_counts/{id}",
+   "status": "route",
+   "exos": "DELETE /v1/sales-counts/:id",
+   "reason": "Same operation"
+  },
+  {
+   "category": "inbound_submissions",
+   "method": "POST",
+   "path": "/api/v2/inbound_submissions",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+  },
+  {
+   "category": "inbound_submissions",
+   "method": "GET",
+   "path": "/api/v2/inbound_submissions",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+  },
+  {
+   "category": "inbound_submissions",
+   "method": "GET",
+   "path": "/api/v2/inbound_submissions/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+  },
+  {
+   "category": "inbound_submissions",
+   "method": "DELETE",
+   "path": "/api/v2/inbound_submissions/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+  },
+  {
+   "category": "eventbrite_events",
+   "method": "GET",
+   "path": "/api/v2/eventbrite_events/{eventbrite_id}/find_confirm",
+   "status": "route",
+   "exos": "GET /v1/eventbrite-events/:id",
+   "reason": "Linked event by Eventbrite id"
+  },
+  {
+   "category": "public_events",
+   "method": "GET",
+   "path": "/api/v2/public/confirms",
+   "status": "route",
+   "exos": "GET /v1/public/confirms",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_events",
+   "method": "GET",
+   "path": "/api/v2/public/confirms/{id}",
+   "status": "route",
+   "exos": "GET /v1/public/confirms/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_website_event_series",
+   "method": "GET",
+   "path": "/api/v2/public/website_event_series",
+   "status": "equivalent",
+   "exos": "exos_public_series / exos_public_org_series",
+   "reason": "Public series pages (docs/series-timed-entry.md); GET /v1/series with a key"
+  },
+  {
+   "category": "public_website_event_series",
+   "method": "GET",
+   "path": "/api/v2/public/website_event_series/{id}",
+   "status": "equivalent",
+   "exos": "exos_public_series",
+   "reason": "Public series page"
+  },
+  {
+   "category": "public_ticket_types",
+   "method": "GET",
+   "path": "/api/v2/public/confirms/{confirm_id}/ticket_types",
+   "status": "route",
+   "exos": "GET /v1/public/confirms/:id/ticket_types",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/public/confirms/{confirm_id}/ticket_reservations",
+   "status": "route",
+   "exos": "POST /v1/public/confirms/:id/ticket_reservations",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_ticket_reservations",
+   "method": "PUT",
+   "path": "/api/v2/public/confirms/{confirm_id}/ticket_reservations/{token}",
+   "status": "route",
+   "exos": "PUT /v1/public/confirms/:id/ticket_reservations/:token",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_ticket_reservations",
+   "method": "DELETE",
+   "path": "/api/v2/public/confirms/{confirm_id}/ticket_reservations/{token}",
+   "status": "route",
+   "exos": "DELETE /v1/public/confirms/:id/ticket_reservations/:token",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_ticket_reservations",
+   "method": "POST",
+   "path": "/api/v2/public/confirms/{confirm_id}/ticket_reservations/{token}/complete",
+   "status": "route",
+   "exos": "POST /v1/public/confirms/:id/ticket_reservations/:token/complete",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_orders",
+   "method": "GET",
+   "path": "/api/v2/public/orders",
+   "status": "route",
+   "exos": "GET /v1/public/orders",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_orders",
+   "method": "GET",
+   "path": "/api/v2/public/orders/{id}",
+   "status": "route",
+   "exos": "GET /v1/public/orders/:id",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_orders",
+   "method": "GET",
+   "path": "/api/v2/public/orders/{order_id}/ticket_pdfs",
+   "status": "route",
+   "exos": "GET /v1/public/orders/:id/ticket_pdfs",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_orders",
+   "method": "GET",
+   "path": "/api/v2/public/orders/{order_id}/ticket_pdfs/{ticket_id}",
+   "status": "route",
+   "exos": "GET /v1/public/orders/:id/ticket_pdfs/:ticket",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_comps",
+   "method": "POST",
+   "path": "/api/v2/public/confirms/{confirm_id}/comps",
+   "status": "route",
+   "exos": "POST /v1/public/confirms/:id/comps",
+   "reason": "Same path (Opendate spelling)"
+  },
+  {
+   "category": "public_fans",
+   "method": "POST",
+   "path": "/api/v2/public/fans",
+   "status": "equivalent",
+   "exos": "POST /functions/v1/exos-signup",
+   "reason": "With a signup form id"
+  },
+  {
+   "category": "public_signup_form_submissions",
+   "method": "POST",
+   "path": "/forms/{uuid}/submissions",
+   "status": "equivalent",
+   "exos": "POST /functions/v1/exos-signup/forms/{uuid}/submissions",
+   "reason": "Same field names; custom answers not built"
+  },
+  {
+   "category": "public_tixel_waitlist_signups",
+   "method": "POST",
+   "path": "/api/v2/public/tixel/waitlist_signups",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Inbound Tixel webhook; Exos has no Tixel integration (its waitlist is exos_waitlist)"
+  },
+  {
+   "category": "public_refund_requests",
+   "method": "GET",
+   "path": "/api/v2/public/orders/{order_id}/refund_request",
+   "status": "equivalent",
+   "exos": "exos_my_refund_asks (signed in)",
+   "reason": "The payer signed in, not shared key + typed email"
+  },
+  {
+   "category": "public_refund_requests",
+   "method": "POST",
+   "path": "/api/v2/public/orders/{order_id}/refund_request",
+   "status": "equivalent",
+   "exos": "exos_ask_refund (signed in)",
+   "reason": "Per ticket, within the refund policy"
+  },
+  {
+   "category": "public_confirm_fan_infos",
+   "method": "GET",
+   "path": "/api/v2/public/confirm_fan_infos/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/public/events/:id; exos_public_events",
+   "reason": "Lookup by order number isn't offered"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/public/discovery/confirms",
+   "status": "equivalent",
+   "exos": "exos_public_events; GET /v1/public/events",
+   "reason": "Public view / listing feed"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/public/discovery/confirms/{id}",
+   "status": "equivalent",
+   "exos": "exos_public_events + exos_public_tiers",
+   "reason": "Public view"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/public/venues",
+   "status": "equivalent",
+   "exos": "exos_public_orgs",
+   "reason": "Exos organizers are the venues"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/public/venues/{id}",
+   "status": "equivalent",
+   "exos": "exos_public_orgs + public events",
+   "reason": "Same operation"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/public/search",
+   "status": "equivalent",
+   "exos": "exos_public_events / exos_public_orgs (ilike)",
+   "reason": "No search RPC needed"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/tickets",
+   "status": "equivalent",
+   "exos": "exos_tickets (RLS: the holder)",
+   "reason": "The signed-in fan's tickets"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/tickets/{barcode}",
+   "status": "equivalent",
+   "exos": "exos_tickets by id + exos_ticket_barcode_secrets",
+   "reason": "Keyed by id: codes rotate"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/tickets/{barcode}/pkpass",
+   "status": "equivalent",
+   "exos": "exos-wallet POST /pass { kind: \"apple\" }",
+   "reason": "Same operation"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/ticket_bundles",
+   "status": "equivalent",
+   "exos": "exos_my_ticket_bundles()",
+   "reason": "Tickets grouped by event"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/ticket_bundles/{calendar_event_id}",
+   "status": "equivalent",
+   "exos": "exos_my_ticket_bundles(event_id)",
+   "reason": "Same operation"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/memberships",
+   "status": "equivalent",
+   "exos": "exos_my_memberships()",
+   "reason": "Signed-in RPC (docs/memberships.md)"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/memberships/{token}",
+   "status": "equivalent",
+   "exos": "exos_my_memberships()",
+   "reason": "Signed-in RPC"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/season_passes",
+   "status": "equivalent",
+   "exos": "exos_my_passes()",
+   "reason": "Season passes and flex packs are passes (mig 20261030130500)"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/season_passes/{id}",
+   "status": "equivalent",
+   "exos": "exos_my_passes()",
+   "reason": "Same operation"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/season_passes/{id}/pkpass",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Wallet passes exist for tickets, not yet for season passes"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/season_passes/{id}/google_wallet_url",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Wallet passes exist for tickets, not yet for season passes"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/passes",
+   "status": "equivalent",
+   "exos": "exos_my_passes()",
+   "reason": "Flex packs"
+  },
+  {
+   "category": "fan_app",
+   "method": "GET",
+   "path": "/api/v2/users/current/passes/{id}",
+   "status": "equivalent",
+   "exos": "exos_my_passes()",
+   "reason": "Same operation"
+  },
+  {
+   "category": "admin_events",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms",
+   "status": "equivalent",
+   "exos": "GET /v1/events",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_events",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_events",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms",
+   "status": "equivalent",
+   "exos": "POST /v1/events",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_events",
+   "method": "PATCH",
+   "path": "/api/v2/admin/confirms/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/events/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_events",
+   "method": "DELETE",
+   "path": "/api/v2/admin/confirms/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API"
+  },
+  {
+   "category": "admin_events",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms/{id}/description",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_orders",
+   "method": "GET",
+   "path": "/api/v2/admin/orders",
+   "status": "equivalent",
+   "exos": "GET /v1/orders",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_orders",
+   "method": "GET",
+   "path": "/api/v2/admin/orders/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/orders/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_tickets",
+   "method": "GET",
+   "path": "/api/v2/admin/tickets",
+   "status": "equivalent",
+   "exos": "GET /v1/tickets",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_tickets",
+   "method": "GET",
+   "path": "/api/v2/admin/tickets/{barcode}",
+   "status": "equivalent",
+   "exos": "GET /v1/tickets/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_ticket_types",
+   "method": "GET",
+   "path": "/api/v2/admin/ticket_types",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/ticket-types",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_ticket_types",
+   "method": "GET",
+   "path": "/api/v2/admin/ticket_types/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/ticket-types/:tier",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_ticket_types",
+   "method": "POST",
+   "path": "/api/v2/admin/ticket_types",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/ticket-types",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_ticket_types",
+   "method": "PATCH",
+   "path": "/api/v2/admin/ticket_types/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/events/:id/ticket-types/:tier",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_ticket_types",
+   "method": "DELETE",
+   "path": "/api/v2/admin/ticket_types/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/events/:id/ticket-types/:tier",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_refunds",
+   "method": "GET",
+   "path": "/api/v2/admin/refunds",
+   "status": "equivalent",
+   "exos": "GET /v1/refunds",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_refunds",
+   "method": "GET",
+   "path": "/api/v2/admin/refunds/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/refunds/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_payment_disputes",
+   "method": "GET",
+   "path": "/api/v2/admin/payment_disputes",
+   "status": "equivalent",
+   "exos": "GET /v1/disputes",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_payment_disputes",
+   "method": "GET",
+   "path": "/api/v2/admin/payment_disputes/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/disputes/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_payouts",
+   "method": "GET",
+   "path": "/api/v2/admin/payouts",
+   "status": "equivalent",
+   "exos": "GET /v1/payouts",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_payouts",
+   "method": "GET",
+   "path": "/api/v2/admin/payouts/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/payouts/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_holds",
+   "method": "GET",
+   "path": "/api/v2/admin/holds",
+   "status": "equivalent",
+   "exos": "GET /v1/holds",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_holds",
+   "method": "GET",
+   "path": "/api/v2/admin/holds/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/holds/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_holds",
+   "method": "POST",
+   "path": "/api/v2/admin/holds",
+   "status": "equivalent",
+   "exos": "POST /v1/holds",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_holds",
+   "method": "PATCH",
+   "path": "/api/v2/admin/holds/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/holds/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_holds",
+   "method": "DELETE",
+   "path": "/api/v2/admin/holds/{id}",
+   "status": "equivalent",
+   "exos": "POST /v1/holds/:id/clear",
+   "reason": "A hold is cleared (its nights released), not deleted"
+  },
+  {
+   "category": "admin_venues",
+   "method": "GET",
+   "path": "/api/v2/admin/venues",
+   "status": "equivalent",
+   "exos": "GET /v1/venues",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_venues",
+   "method": "GET",
+   "path": "/api/v2/admin/venues/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/venues/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_venues",
+   "method": "PUT",
+   "path": "/api/v2/admin/venues/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/venues/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_venues",
+   "method": "GET",
+   "path": "/api/v2/admin/venues/lookup_key_data",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's venue data-key lookup (back office)"
+  },
+  {
+   "category": "admin_teams",
+   "method": "GET",
+   "path": "/api/v2/admin/teams",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: every customer team"
+  },
+  {
+   "category": "admin_teams",
+   "method": "PATCH",
+   "path": "/api/v2/admin/teams/:id",
+   "status": "equivalent",
+   "exos": "PATCH /v1/team",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_teams",
+   "method": "POST",
+   "path": "/api/v2/admin/teams/:team_id/demo_marketing",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal demo seeding"
+  },
+  {
+   "category": "admin_artists",
+   "method": "GET",
+   "path": "/api/v2/admin/artists",
+   "status": "equivalent",
+   "exos": "GET /v1/artists",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_artists",
+   "method": "PUT",
+   "path": "/api/v2/admin/artists/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/artists/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_announcements",
+   "method": "GET",
+   "path": "/api/v2/admin/announcements",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: product announcements to customers"
+  },
+  {
+   "category": "admin_announcements",
+   "method": "GET",
+   "path": "/api/v2/admin/announcements/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: product announcements to customers"
+  },
+  {
+   "category": "admin_announcements",
+   "method": "POST",
+   "path": "/api/v2/admin/announcements",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: product announcements to customers"
+  },
+  {
+   "category": "admin_announcements",
+   "method": "PUT",
+   "path": "/api/v2/admin/announcements/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: product announcements to customers"
+  },
+  {
+   "category": "admin_announcements",
+   "method": "DELETE",
+   "path": "/api/v2/admin/announcements/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: product announcements to customers"
+  },
+  {
+   "category": "admin_reporting_rows",
+   "method": "GET",
+   "path": "/api/v2/admin/reporting_rows",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Order reporting rows (a flat export) are the dashboard CSV exports; no API route yet"
+  },
+  {
+   "category": "admin_reporting_rows",
+   "method": "GET",
+   "path": "/api/v2/admin/reporting_rows/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "See reporting_rows"
+  },
+  {
+   "category": "admin_order_financials",
+   "method": "GET",
+   "path": "/api/v2/admin/order_financials",
+   "status": "equivalent",
+   "exos": "GET /v1/orders (fee split on each order)",
+   "reason": "Each order carries its fee split (mig 20260929131000)"
+  },
+  {
+   "category": "admin_order_financials",
+   "method": "GET",
+   "path": "/api/v2/admin/order_financials/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/orders/:id",
+   "reason": "The fee split is on the order"
+  },
+  {
+   "category": "admin_add_ons",
+   "method": "GET",
+   "path": "/api/v2/admin/add_ons",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/add-ons",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_add_ons",
+   "method": "GET",
+   "path": "/api/v2/admin/add_ons/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/add-ons/:addon",
+   "reason": "Per event, in the key's org"
+  },
+  {
+   "category": "admin_custom_charge_types",
+   "method": "GET",
+   "path": "/api/v2/admin/custom_charge_types",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Custom charges are fee rules"
+  },
+  {
+   "category": "admin_custom_charge_types",
+   "method": "GET",
+   "path": "/api/v2/admin/custom_charge_types/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Custom charges are fee rules"
+  },
+  {
+   "category": "admin_additional_stripe_fees",
+   "method": "GET",
+   "path": "/api/v2/admin/additional_stripe_fees",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal Stripe fee reconciliation"
+  },
+  {
+   "category": "admin_additional_stripe_fees",
+   "method": "GET",
+   "path": "/api/v2/admin/additional_stripe_fees/{balance_transaction_id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal Stripe fee reconciliation"
+  },
+  {
+   "category": "admin_opendate_customers",
+   "method": "GET",
+   "path": "/api/v2/admin/opendate_customers",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: Opendate's customer list"
+  },
+  {
+   "category": "admin_opendate_customers",
+   "method": "GET",
+   "path": "/api/v2/admin/opendate_customers/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal: Opendate's customer list"
+  },
+  {
+   "category": "admin_venue_ownerships",
+   "method": "GET",
+   "path": "/api/v2/admin/venue_ownerships",
+   "status": "equivalent",
+   "exos": "GET /v1/venues",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_website_keys",
+   "method": "GET",
+   "path": "/api/v2/admin/website_keys",
+   "status": "equivalent",
+   "exos": "GET /v1/listing-keys",
+   "reason": "Website keys are listing-feed shared keys (docs/listing-feed.md)"
+  },
+  {
+   "category": "admin_website_keys",
+   "method": "GET",
+   "path": "/api/v2/admin/website_keys/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/listing-keys",
+   "reason": "Website keys are listing-feed shared keys (docs/listing-feed.md)"
+  },
+  {
+   "category": "admin_website_keys",
+   "method": "POST",
+   "path": "/api/v2/admin/website_keys",
+   "status": "equivalent",
+   "exos": "POST /v1/listing-keys",
+   "reason": "Website keys are listing-feed shared keys (docs/listing-feed.md)"
+  },
+  {
+   "category": "admin_website_keys",
+   "method": "PATCH",
+   "path": "/api/v2/admin/website_keys/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/listing-keys/:id + POST /v1/listing-keys",
+   "reason": "Website keys are listing-feed shared keys (docs/listing-feed.md)"
+  },
+  {
+   "category": "admin_website_keys",
+   "method": "DELETE",
+   "path": "/api/v2/admin/website_keys/:id",
+   "status": "equivalent",
+   "exos": "DELETE /v1/listing-keys/:id",
+   "reason": "Revokes a listing-feed shared key"
+  },
+  {
+   "category": "admin_webflow_sync_failures",
+   "method": "GET",
+   "path": "/api/v2/admin/webflow_sync_failures",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal Webflow sync monitor"
+  },
+  {
+   "category": "admin_raw_events",
+   "method": "POST",
+   "path": "/api/v2/admin/raw_events",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal event ingestion"
+  },
+  {
+   "category": "admin_roles",
+   "method": "GET",
+   "path": "/api/v2/admin/roles",
+   "status": "equivalent",
+   "exos": "GET /v1/team/roles",
+   "reason": "The roles an organization hands out"
+  },
+  {
+   "category": "admin_team_invitations",
+   "method": "POST",
+   "path": "/api/v2/admin/teams/{team_id}/invitations",
+   "status": "equivalent",
+   "exos": "POST /v1/team/invitations",
+   "reason": "Owner credential"
+  },
+  {
+   "category": "admin_api_keys",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/api_keys",
+   "status": "equivalent",
+   "exos": "Org settings → Developer (exos_list_api_keys)",
+   "reason": "Not over the API, so a key can't mint keys"
+  },
+  {
+   "category": "admin_api_keys",
+   "method": "POST",
+   "path": "/api/v2/admin/teams/{team_id}/api_keys",
+   "status": "equivalent",
+   "exos": "Org settings → Developer (exos_create_api_key)",
+   "reason": "Not over the API"
+  },
+  {
+   "category": "admin_api_keys",
+   "method": "DELETE",
+   "path": "/api/v2/admin/teams/{team_id}/api_keys/{id}",
+   "status": "equivalent",
+   "exos": "Org settings → Developer (exos_revoke_api_key)",
+   "reason": "Not over the API"
+  },
+  {
+   "category": "admin_fans",
+   "method": "GET",
+   "path": "/api/v2/admin/fans",
+   "status": "equivalent",
+   "exos": "GET /v1/fans",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_fans",
+   "method": "GET",
+   "path": "/api/v2/admin/fans/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/fans/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_fans",
+   "method": "POST",
+   "path": "/api/v2/admin/fans",
+   "status": "equivalent",
+   "exos": "POST /v1/fans",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_fans",
+   "method": "PATCH",
+   "path": "/api/v2/admin/fans/:id",
+   "status": "equivalent",
+   "exos": "PATCH /v1/fans/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_fans",
+   "method": "DELETE",
+   "path": "/api/v2/admin/fans/:id",
+   "status": "equivalent",
+   "exos": "DELETE /v1/fans/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_organizations",
+   "method": "GET",
+   "path": "/api/v2/admin/organizations",
+   "status": "not_applicable",
+   "exos": "exos_create_org and the dashboard",
+   "reason": "Platform admin tooling, not a partner API (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_organizations",
+   "method": "GET",
+   "path": "/api/v2/admin/organizations/:id",
+   "status": "not_applicable",
+   "exos": "exos_create_org and the dashboard",
+   "reason": "Platform admin tooling, not a partner API (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_organizations",
+   "method": "POST",
+   "path": "/api/v2/admin/organizations",
+   "status": "not_applicable",
+   "exos": "exos_create_org and the dashboard",
+   "reason": "Platform admin tooling, not a partner API (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_organizations",
+   "method": "PATCH",
+   "path": "/api/v2/admin/organizations/:id",
+   "status": "not_applicable",
+   "exos": "exos_create_org and the dashboard",
+   "reason": "Platform admin tooling, not a partner API (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_organizations",
+   "method": "DELETE",
+   "path": "/api/v2/admin/organizations/:id",
+   "status": "not_applicable",
+   "exos": "exos_create_org and the dashboard",
+   "reason": "Platform admin tooling, not a partner API (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "GET",
+   "path": "/api/v2/admin/giving_campaigns",
+   "status": "equivalent",
+   "exos": "GET /v1/giving-campaigns",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "GET",
+   "path": "/api/v2/admin/giving_campaigns/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/giving-campaigns/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/admin/giving_campaigns",
+   "status": "planned",
+   "exos": "Org settings → Giving",
+   "reason": "Dashboard only; no partner write route yet"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "PATCH",
+   "path": "/api/v2/admin/giving_campaigns/:id",
+   "status": "planned",
+   "exos": "Org settings → Giving",
+   "reason": "Dashboard only; no partner write route yet"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/admin/giving_campaigns/:id/activate",
+   "status": "planned",
+   "exos": "active on (Org settings)",
+   "reason": "Dashboard only; no partner write route yet"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "POST",
+   "path": "/api/v2/admin/giving_campaigns/:id/complete",
+   "status": "planned",
+   "exos": "active off / ends_at (Org settings)",
+   "reason": "Dashboard only; no partner write route yet"
+  },
+  {
+   "category": "admin_giving_campaigns",
+   "method": "DELETE",
+   "path": "/api/v2/admin/giving_campaigns/:id",
+   "status": "planned",
+   "exos": "Org settings → Giving",
+   "reason": "Dashboard only; no partner write route yet"
+  },
+  {
+   "category": "admin_donations",
+   "method": "GET",
+   "path": "/api/v2/admin/donations",
+   "status": "equivalent",
+   "exos": "GET /v1/donations",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_donations",
+   "method": "GET",
+   "path": "/api/v2/admin/donations/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/donations",
+   "reason": "Listed (and exported with exos_donations_export)"
+  },
+  {
+   "category": "admin_donations",
+   "method": "POST",
+   "path": "/api/v2/admin/donations",
+   "status": "equivalent",
+   "exos": "exos_record_offline_donation",
+   "reason": "Dashboard; no partner write route yet"
+  },
+  {
+   "category": "admin_donations",
+   "method": "DELETE",
+   "path": "/api/v2/admin/donations/:id",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Offline donations are corrected, not deleted, in the dashboard"
+  },
+  {
+   "category": "admin_donations",
+   "method": "POST",
+   "path": "/api/v2/admin/donations/:donation_id/offline_refund",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Offline donation refunds are not recorded yet"
+  },
+  {
+   "category": "admin_deals",
+   "method": "GET",
+   "path": "/api/v2/admin/deals",
+   "status": "equivalent",
+   "exos": "GET /v1/deals",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_deals",
+   "method": "GET",
+   "path": "/api/v2/admin/deals/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/deals/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_deals",
+   "method": "POST",
+   "path": "/api/v2/admin/deals",
+   "status": "equivalent",
+   "exos": "POST /v1/deals",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_deals",
+   "method": "PATCH",
+   "path": "/api/v2/admin/deals/:id",
+   "status": "equivalent",
+   "exos": "PATCH /v1/deals/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_deals",
+   "method": "DELETE",
+   "path": "/api/v2/admin/deals/:id",
+   "status": "equivalent",
+   "exos": "DELETE /v1/deals/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "GET",
+   "path": "/api/v2/admin/event_series",
+   "status": "equivalent",
+   "exos": "GET /v1/series",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "GET",
+   "path": "/api/v2/admin/event_series/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/series/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "POST",
+   "path": "/api/v2/admin/event_series",
+   "status": "equivalent",
+   "exos": "exos_series_create (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "PATCH",
+   "path": "/api/v2/admin/event_series/:id",
+   "status": "equivalent",
+   "exos": "exos_series_update (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "POST",
+   "path": "/api/v2/admin/event_series/:id/cancel",
+   "status": "equivalent",
+   "exos": "exos_series_cancel (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "DELETE",
+   "path": "/api/v2/admin/event_series/:id",
+   "status": "equivalent",
+   "exos": "exos_series_delete (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "POST",
+   "path": "/api/v2/admin/event_series/:event_series_id/event_series_events",
+   "status": "equivalent",
+   "exos": "exos_series_attach_event / exos_series_generate (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_event_series",
+   "method": "DELETE",
+   "path": "/api/v2/admin/event_series/:event_series_id/event_series_events/:id",
+   "status": "equivalent",
+   "exos": "exos_series_detach_event / exos_series_cancel_date (dashboard)",
+   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+  },
+  {
+   "category": "admin_gift_up_giftcards",
+   "method": "GET",
+   "path": "/api/v2/admin/gift_up_giftcards",
+   "status": "equivalent",
+   "exos": "GET /v1/gift-cards",
+   "reason": "Exos's own gift cards (no Gift Up!)"
+  },
+  {
+   "category": "admin_gift_up_giftcards",
+   "method": "GET",
+   "path": "/api/v2/admin/gift_up_giftcards/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/gift-cards/:id",
+   "reason": "Exos's own gift cards"
+  },
+  {
+   "category": "admin_gift_up_giftcards",
+   "method": "POST",
+   "path": "/api/v2/admin/gift_up_giftcards/bulk",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Importing legacy gift cards is not built"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "GET",
+   "path": "/api/v2/admin/membership_products",
+   "status": "equivalent",
+   "exos": "GET /v1/membership-products",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "GET",
+   "path": "/api/v2/admin/membership_products/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/membership-products/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "POST",
+   "path": "/api/v2/admin/membership_products",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard create; no partner write route yet"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "PATCH",
+   "path": "/api/v2/admin/membership_products/:id",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard update; no partner write route yet"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "POST",
+   "path": "/api/v2/admin/membership_products/:id/publish",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard publish; no partner write route yet"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "POST",
+   "path": "/api/v2/admin/membership_products/:id/unpublish",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard unpublish; no partner write route yet"
+  },
+  {
+   "category": "admin_membership_products",
+   "method": "POST",
+   "path": "/api/v2/admin/membership_products/:id/archive",
+   "status": "planned",
+   "exos": "Org settings → Memberships",
+   "reason": "Dashboard archive; no partner write route yet"
+  },
+  {
+   "category": "admin_memberships",
+   "method": "GET",
+   "path": "/api/v2/admin/memberships",
+   "status": "equivalent",
+   "exos": "GET /v1/memberships",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_memberships",
+   "method": "GET",
+   "path": "/api/v2/admin/memberships/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/memberships/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_memberships",
+   "method": "POST",
+   "path": "/api/v2/admin/memberships",
+   "status": "planned",
+   "exos": "exos_membership_gift (comp)",
+   "reason": "Importing members is not built; staff comp one with exos_membership_gift"
+  },
+  {
+   "category": "admin_memberships",
+   "method": "PATCH",
+   "path": "/api/v2/admin/memberships/:id",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Member renames are the holder's; no staff route yet"
+  },
+  {
+   "category": "admin_memberships",
+   "method": "POST",
+   "path": "/api/v2/admin/memberships/:id/cancel",
+   "status": "equivalent",
+   "exos": "exos-commerce cancel / Stripe customer portal",
+   "reason": "Cancelling a subscription goes through Stripe"
+  },
+  {
+   "category": "admin_external_identities",
+   "method": "GET",
+   "path": "/api/v2/admin/external_identities",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Exos uses Supabase Auth identities (docs/developer-platform.md)"
+  },
+  {
+   "category": "admin_external_identities",
+   "method": "POST",
+   "path": "/api/v2/admin/external_identities/bulk",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Exos uses Supabase Auth identities"
+  },
+  {
+   "category": "admin_imported_ledger_entries",
+   "method": "GET",
+   "path": "/api/v2/admin/imported_ledger_entries",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Importing accounting ledgers is not built"
+  },
+  {
+   "category": "admin_imported_ledger_entries",
+   "method": "POST",
+   "path": "/api/v2/admin/imported_ledger_entries/bulk",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Importing accounting ledgers is not built"
+  },
+  {
+   "category": "admin_imported_ledger_entries",
+   "method": "DELETE",
+   "path": "/api/v2/admin/imported_ledger_entries/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Importing accounting ledgers is not built"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "GET",
+   "path": "/api/v2/admin/migrated_attendees",
+   "status": "equivalent",
+   "exos": "exos_door_imports (Tickets sold somewhere else)",
+   "reason": "Imported attendee lists are door imports (mig 20261013090000); dashboard"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "GET",
+   "path": "/api/v2/admin/migrated_attendees/:id",
+   "status": "equivalent",
+   "exos": "exos_door_imports",
+   "reason": "Dashboard"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "POST",
+   "path": "/api/v2/admin/migrated_attendees",
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/sales-counts/import; door imports",
+   "reason": "Counts over the API; attendee rows through the dashboard import"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "POST",
+   "path": "/api/v2/admin/migrated_attendees/bulk",
+   "status": "equivalent",
+   "exos": "door imports (CSV, dashboard)",
+   "reason": "One event at a time, like Opendate"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "PATCH",
+   "path": "/api/v2/admin/migrated_attendees/:id",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Editing an imported row is not built (re-import)"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "DELETE",
+   "path": "/api/v2/admin/migrated_attendees/:id",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Deleting one imported row is not built (re-import)"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "POST",
+   "path": "/api/v2/admin/migrated_attendees/:id/rebook",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "seats.io rebooking; Exos seating is in-house"
+  },
+  {
+   "category": "admin_migrated_attendees",
+   "method": "PATCH",
+   "path": "/api/v2/admin/migrated_attendees/:migrated_attendee_id/tickets/:ticket_id/seat",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "seats.io seat moves for imports; Exos seating is in-house"
+  },
+  {
+   "category": "admin_seat_reconciliations",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms/:confirm_id/seat_reconciliation",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/seat-reconciliation",
+   "reason": "Same check for Exos seating (docs/seating.md)"
+  },
+  {
+   "category": "admin_seat_reconciliations",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms/:confirm_id/seat_reconciliation/release_orphans",
+   "status": "equivalent",
+   "exos": "exos_release_orphan_seats (dashboard)",
+   "reason": "Owners / managers; not over the API"
+  },
+  {
+   "category": "admin_offers",
+   "method": "GET",
+   "path": "/api/v2/admin/offers",
+   "status": "equivalent",
+   "exos": "GET /v1/offers",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_offers",
+   "method": "GET",
+   "path": "/api/v2/admin/offers/:id",
+   "status": "equivalent",
+   "exos": "GET /v1/offers/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_offers",
+   "method": "POST",
+   "path": "/api/v2/admin/offers",
+   "status": "equivalent",
+   "exos": "POST /v1/offers",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_offers",
+   "method": "PATCH",
+   "path": "/api/v2/admin/offers/:id",
+   "status": "equivalent",
+   "exos": "PATCH /v1/offers/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_offers",
+   "method": "DELETE",
+   "path": "/api/v2/admin/offers/:id",
+   "status": "equivalent",
+   "exos": "DELETE /v1/offers/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_v3_offers",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_offers",
+   "status": "equivalent",
+   "exos": "GET /v1/offers",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_v3_offers",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_offers/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/offers/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_v3_offers",
+   "method": "PATCH",
+   "path": "/api/v2/admin/teams/{team_id}/v3_offers/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal provenance stamp"
+  },
+  {
+   "category": "admin_offer_source_creation",
+   "method": "PATCH",
+   "path": "/api/v2/admin/teams/{team_id}/offers/{id}",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Platform-internal provenance stamp"
+  },
+  {
+   "category": "admin_prisms",
+   "method": "GET",
+   "path": "/api/v2/admin/prisms",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's Prism integration (a separate booking product)"
+  },
+  {
+   "category": "admin_prisms",
+   "method": "GET",
+   "path": "/api/v2/admin/prisms/:id",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's Prism integration (a separate booking product)"
+  },
+  {
+   "category": "admin_prisms",
+   "method": "POST",
+   "path": "/api/v2/admin/prisms",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's Prism integration (a separate booking product)"
+  },
+  {
+   "category": "admin_prisms",
+   "method": "PATCH",
+   "path": "/api/v2/admin/prisms/:id",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's Prism integration (a separate booking product)"
+  },
+  {
+   "category": "admin_prisms",
+   "method": "DELETE",
+   "path": "/api/v2/admin/prisms/:id",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate's Prism integration (a separate booking product)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "GET",
+   "path": "/api/v2/admin/general_ledger_codes",
+   "status": "equivalent",
+   "exos": "GET /v1/gl-codes",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "GET",
+   "path": "/api/v2/admin/general_ledger_codes/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/gl-codes/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "POST",
+   "path": "/api/v2/admin/general_ledger_codes",
+   "status": "equivalent",
+   "exos": "POST /v1/gl-codes",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "PATCH",
+   "path": "/api/v2/admin/general_ledger_codes/{id}",
+   "status": "equivalent",
+   "exos": "PATCH /v1/gl-codes/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "DELETE",
+   "path": "/api/v2/admin/general_ledger_codes/{id}",
+   "status": "equivalent",
+   "exos": "DELETE /v1/gl-codes/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "PATCH",
+   "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "DELETE",
+   "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_backfills",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms/{confirm_id}/tax_payment_backfills",
+   "status": "not_applicable",
+   "exos": "n/a",
+   "reason": "Opendate import cleanup (tax rows for migrated tickets)"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "GET",
+   "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components",
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/fee-rules",
+   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "POST",
+   "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components",
+   "status": "equivalent",
+   "exos": "Event fee rules (Edit event → Fees)",
+   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "PATCH",
+   "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components/{id}",
+   "status": "equivalent",
+   "exos": "Event fee rules (Edit event → Fees)",
+   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+  },
+  {
+   "category": "admin_general_ledger_codes",
+   "method": "DELETE",
+   "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components/{id}",
+   "status": "equivalent",
+   "exos": "Event fee rules (Edit event → Fees)",
+   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/event_templates",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Event templates are not built (events are copied)"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/event_templates/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Event templates are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/offer_templates",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/offer_templates/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_offer_templates",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_offer_templates/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_budget_templates",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates",
+   "reason": "Budget templates are part of offer templates"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/v3_budget_templates/{id}",
+   "status": "equivalent",
+   "exos": "GET /v1/offer-templates/:id",
+   "reason": "Budget templates are part of offer templates"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/note_templates",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Note templates are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/note_templates/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Note templates are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Rental invoices are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "GET",
+   "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Rental invoices are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "POST",
+   "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Rental invoices are not built"
+  },
+  {
+   "category": "admin_template_inventory",
+   "method": "PATCH",
+   "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}",
+   "status": "planned",
+   "exos": "n/a",
+   "reason": "Rental invoices are not built"
+  }
+ ]
+}

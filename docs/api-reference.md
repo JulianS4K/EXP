@@ -148,3 +148,7 @@ that answers the path (`publicAuthAt()` in `routes.ts`); an unknown `/public/…
 paging, every documented endpoint routed. `scripts/api-spec.mjs` validates the docs (`npm run api-spec -- --check`)
 and writes `public/api-spec.json` + `public/openapi.json` (gitignored); the Vite plugin in `vite.config.ts` runs it
 on every build and in dev, and a spec that does not validate fails the build.
+
+If the route answers an Opendate endpoint, point its entry in `docs/opendate-coverage.json` at it (`status:
+"route"`, `exos: "<METHOD> /v1/<path>"`) and regenerate the summary with `node scripts/check-opendate-coverage.mjs
+--write`. CI runs the check: every Opendate endpoint accounted for, every route it names real and documented.
