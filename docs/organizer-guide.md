@@ -450,6 +450,31 @@ Posh tells Exos about every sale.
   replayed once the parser is fixed. Posh documents no signature, so the secret URL is the only check: keep it
   private. Details: `docs/marketplace/posh.md`.
 
+### Selling a block for DICE, Shotgun, RA or your box office (fixed block)
+
+Selling mainly on a platform Exos can't connect to? Give Exos a fixed block of tickets to sell, and keep the rest
+there.
+
+- **On the other platform**, lower the public capacity by the block (for example 1000 to 900 for a block of 100).
+  Exos can't change anything there, so this step is yours.
+- **Edit event → Selling a block for another platform → Sell a block**: name the platform (and paste its event
+  page if you like), enter the block for each ticket type, and pick when unsold tickets go back (empty = 24 hours
+  before doors). The block is the ticket type's capacity, and every ticket type needs one (no unlimited types on a
+  block event). You can change the blocks and the time until the release; a block can't go below what it sold.
+- **Exos sells the block** on its event page, your tracking links and discovery, and on marketplaces only if the
+  block qualifies for resale: the block counts as the event's size, so a block of 150 or less is the free tier (no
+  Exos fee, never resold), and a bigger one resells only once you opt in.
+- **Last call** works on the block: near the end of it, marketplaces hand their seats back and Exos keeps selling
+  the rest itself (Exos is the seller of its block).
+- **At the release time** (or **Release now**) Exos stops selling the block and shows, per ticket type, how many to
+  put back on sale on the other platform; the owner and managers also get it by email. Tickets still in a
+  checkout or on a marketplace at that moment are counted separately: any that don't sell show on the event
+  dashboard as "came back since", to put back as well. A release can't be undone, and the block can't be turned
+  off after it.
+- **At the door**, tickets sold on Exos are on the door list as usual; import the other platform's attendee
+  export for the rest (*Tickets sold somewhere else*).
+- The event dashboard shows the block sold / left and the release time, then the counts once released.
+
 ### Selling on another platform (pretix, hi.events, Luma, Eventbrite)
 
 You can keep your ticket shop where it is and use Exos for the event page, marketing and the door.

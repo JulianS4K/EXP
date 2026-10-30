@@ -172,6 +172,8 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
   pool is released (at once when the opt-in is withdrawn).
 - Last call (mig `20261029100000`): near sell-out the event leaves the feed
   and its pool plans to 0, so only the primary checkout sells the rest.
+- A released fixed block (mig `20261029160000`) leaves the feed the same way,
+  its pool planned to 0.
 - A ticket type with no split isn't on the feed. Not splittable: free
   ticket types (resale marketplaces don't sell them), table types, types with
   no capacity, and events whose overall cap is below the types' sum.
@@ -206,6 +208,8 @@ Albert reads and pushes on. Exos writes nothing to S4K or Automatiq.
     (buffer max(one pack, L)), so Exos sells the last set.
   - `eventbrite` (needs an Eventbrite link): on ticket types mapped to Eventbrite, the
     last L free seats are held off Exos checkout and Eventbrite's capacity includes them.
+  - `external` (a fixed block for a platform Exos can't sync, mig `20261029160000`):
+    the block's codes are Exos's, so the listing rows say `exos`.
 - **How Albert reads it:** like Terminal-2's N2S feed. The table syncs by diff (a quiet
   minute writes nothing), has `REPLICA IDENTITY FULL` and is in the `supabase_realtime`
   publication. Albert signs in as a dedicated integration user linked to the S4K
