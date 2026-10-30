@@ -134,12 +134,33 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows |
+| `exos_event_publish_blockers`, `exos_publish_event` | OK | Event's org: owner / manager / content read the blockers, owner / manager publish (mig 20261031110000) |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
 webhook workers, `exos_record_*`, `exos_refund_*`, wallet / calendar / MCP
 service functions, `_exos_*` internals) was already revoked from anon and
 authenticated and is service-role or owner only.
+
+### Partner API writes (exos_api_write)
+
+The partner API (`exos-api`, service role) writes through one definer
+function, `exos_api_write(key, action, target, args, idempotency_key)`
+(mig 20261031110000; service_role only, its `_exos_api_*` helpers no grant at
+all). It loads the API key (not revoked), re-checks the key's scope for the
+action, and requires the key's creator to still be an active member of the
+key's org. It then sets the transaction's JWT claims (`request.jwt.claims`,
+`request.jwt.claim.sub` / `role` / `email`) to that member, so `auth.uid()`
+inside the dashboard's RPCs is the creator and their role *now* decides, and
+puts the previous claims back before returning. Every target (event, ticket
+type, order, ticket, list, guest, item) is pinned to the key's org before any
+RPC runs, so a creator who is staff of several orgs, or a platform admin,
+can't reach another org through a key. Table writes the dashboard does under
+RLS (events, ticket types, add-ons, POS items) check the same roles as the
+policy and write only whitelisted columns; server-owned columns are refused.
+Each write is logged in `exos_api_writes` (owner / manager can read their
+org's rows); refunds and comps are flagged `money_moving`. Tests:
+`tests/exos/test_core_api.sql` (C1-C16), races: `tests/exos/race_core_api.sh`.
 
 ### Search path
 

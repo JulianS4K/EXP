@@ -22,11 +22,16 @@ describe('matchRoute', () => {
     expect(matchRoute('GET', '/events')?.route.id).toBe('list-events');
     expect(matchRoute('GET', '/orders/cs_test_1')?.params).toEqual({ id: 'cs_test_1' });
     expect(matchRoute('get', '/me')?.route.id).toBe('me');
+    expect(matchRoute('POST', '/events')?.route.id).toBe('create-event');
+    expect(matchRoute('PATCH', '/events/e1/ticket-types/t1')?.params).toEqual({ id: 'e1', tier: 't1' });
+    expect(matchRoute('POST', '/orders/cs_1/refunds')?.route.id).toBe('create-refund');
+    expect(matchRoute('GET', '/orders/cs_1/refunds')).toBeNull();
   });
 
   it('refuses unknown paths, other methods and malformed escapes', () => {
     expect(matchRoute('GET', '/events/abc/secrets')).toBeNull();
-    expect(matchRoute('POST', '/events')).toBeNull();
+    expect(matchRoute('PUT', '/events')).toBeNull();
+    expect(matchRoute('DELETE', '/events/abc')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();
     expect(matchRoute('GET', '/')).toBeNull();
@@ -44,8 +49,13 @@ describe('matchRoute', () => {
     }
     // Only GET /me is reachable without a scope.
     expect(ROUTES.filter((r) => r.scope === null).map((r) => r.id)).toEqual(['me']);
-    // The API is read-only: no route needs a write scope yet.
-    expect(ROUTES.every((r) => r.scope === null || r.scope.endsWith(':read'))).toBe(true);
+    // Reads need a :read scope (or none, /me); writes a :write scope or org:admin.
+    for (const r of ROUTES) {
+      if (r.method === 'GET') expect(r.scope === null || r.scope.endsWith(':read') || r.scope === 'org:admin', r.id).toBe(true);
+      else expect(r.scope?.endsWith(':write') || r.scope === 'org:admin', r.id).toBe(true);
+    }
+    // Money: only refunds:write refunds, and nothing else needs it.
+    expect(ROUTES.filter((r) => r.scope === 'refunds:write').map((r) => r.id)).toEqual(['create-refund']);
   });
 });
 

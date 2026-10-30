@@ -1,0 +1,1590 @@
+{
+  "file": "event-management",
+  "name": "Event management",
+  "order": 15,
+  "description": "Create, edit and publish events, and manage their ticket types, add-ons and promo codes. Every write runs through the same SQL as the dashboard, as the member who created the API key: it needs that member's role now (owner or manager, as in the dashboard) as well as the route's scope, and it is recorded in the write log (GET /v1/api-writes). Writes take a JSON body, either the fields themselves or wrapped ({ \"event\": { … } }); form-encoded bodies work too. Any write may send an Idempotency-Key header to make a resend safe.",
+  "endpoints": [
+    {
+      "auth": "api_key",
+      "id": "create-event",
+      "method": "POST",
+      "path": "/v1/events",
+      "summary": "Create an event",
+      "description": "Creates a draft event in the key's organization, optionally with its ticket types. Publishing is a separate step (POST /v1/events/:id/publish), which checks the publish blockers. Writable fields: name, description, slug, starts_at, doors_at, ends_at, timezone (IANA), currency, venue_name, venue_location, venue_address (object), category, genres, subgenres, image_url, total_tickets, purchase_limits (object), summary, description_md, faq, video_url, min_age, refund_policy, policy_notes, format (in_person / online / hybrid), what_to_bring, noindex, allow_holder_release, release_cutoff_hours, accessibility, door_name_checkin. Server-owned fields (status, org, tickets_sold, …) are refused with 400 rather than ignored. The answer includes the event's publish_blockers.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "event",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The event's fields (or send them unwrapped). name is required.",
+          "example": {
+            "name": "Rooftop Sessions",
+            "starts_at": "2027-01-16T01:00:00Z",
+            "timezone": "America/New_York",
+            "venue_name": "The Loft"
+          }
+        },
+        {
+          "name": "ticket_types",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 50 ticket types to create with it: { name, price, capacity, ticket_type, visibility, … } (see Create a ticket type).",
+          "example": [
+            {
+              "name": "GA",
+              "price": 25,
+              "capacity": 150
+            }
+          ]
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "event": {
+          "name": "Rooftop Sessions",
+          "starts_at": "2027-01-16T01:00:00Z",
+          "doors_at": "2027-01-16T00:00:00Z",
+          "timezone": "America/New_York",
+          "venue_name": "The Loft",
+          "venue_location": "Brooklyn, NY",
+          "total_tickets": 150
+        },
+        "ticket_types": [
+          {
+            "name": "GA",
+            "price": 25,
+            "capacity": 150
+          }
+        ]
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: the draft event, its ticket types and its publish blockers.",
+          "example": {
+            "data": {
+              "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Rooftop Sessions",
+              "slug": "rooftop-sessions",
+              "status": "draft",
+              "starts_at": "2027-01-16T01:00:00+00:00",
+              "doors_at": "2027-01-16T00:00:00+00:00",
+              "ends_at": null,
+              "timezone": "America/New_York",
+              "currency": "USD",
+              "venue_name": "The Loft",
+              "venue_location": "Brooklyn, NY",
+              "tickets_sold": 0,
+              "total_tickets": 150,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "tiers": [
+                {
+                  "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+                  "name": "GA",
+                  "description": null,
+                  "price": 25,
+                  "capacity": 150,
+                  "sold": 0,
+                  "ticket_type": "paid",
+                  "visibility": "public",
+                  "sales_start": null,
+                  "sales_end": null,
+                  "sort_order": 0
+                }
+              ],
+              "publish_blockers": [
+                {
+                  "code": "stripe_not_connected",
+                  "field": null,
+                  "message": "Paid tickets need a connected Stripe account that can take payments (Org settings → Payouts)."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "unknown or read-only field: status"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-event",
+      "method": "PATCH",
+      "path": "/v1/events/:id",
+      "summary": "Update an event",
+      "description": "Changes the given fields and leaves the rest. Same writable fields as Create an event; status changes go through publish / unpublish. Changing the start of an event with tickets sold follows the dashboard's date-change rules.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "event",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change (or send them unwrapped).",
+          "example": {
+            "venue_name": "The Annex"
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "event": {
+          "venue_name": "The Annex",
+          "doors_at": "2027-01-15T23:30:00Z"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Rooftop Sessions",
+              "slug": "rooftop-sessions",
+              "status": "draft",
+              "starts_at": "2027-01-16T01:00:00+00:00",
+              "doors_at": "2027-01-16T00:00:00+00:00",
+              "ends_at": null,
+              "timezone": "America/New_York",
+              "currency": "USD",
+              "venue_name": "The Annex",
+              "venue_location": "Brooklyn, NY",
+              "tickets_sold": 0,
+              "total_tickets": 150,
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "tiers": [
+                {
+                  "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+                  "name": "GA",
+                  "description": null,
+                  "price": 25,
+                  "capacity": 150,
+                  "sold": 0,
+                  "ticket_type": "paid",
+                  "visibility": "public",
+                  "sales_start": null,
+                  "sales_end": null,
+                  "sort_order": 0
+                }
+              ],
+              "publish_blockers": [
+                {
+                  "code": "stripe_not_connected",
+                  "field": null,
+                  "message": "Paid tickets need a connected Stripe account that can take payments (Org settings → Payouts)."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "an event needs a name"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-publish-blockers",
+      "method": "GET",
+      "path": "/v1/events/:id/publish-blockers",
+      "summary": "Get publish blockers",
+      "description": "What stops the event from going live, as { code, field, message }. Codes: event_cancelled, missing_name, missing_start, starts_in_past, ends_before_start, doors_after_start, missing_timezone, missing_venue (in-person and hybrid events), no_ticket_types and stripe_not_connected (paid tickets without a Stripe account that can take payments); the last two only for events sold on Exos. The dashboard's publish button uses the same list.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "publishable": false,
+              "blockers": [
+                {
+                  "code": "missing_venue",
+                  "field": "venue_name",
+                  "message": "Add a venue (or make the event online)."
+                },
+                {
+                  "code": "stripe_not_connected",
+                  "field": null,
+                  "message": "Paid tickets need a connected Stripe account that can take payments (Org settings → Payouts)."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "publish-event",
+      "method": "POST",
+      "path": "/v1/events/:id/publish",
+      "summary": "Publish an event",
+      "description": "Puts a draft event on sale, if nothing blocks it. With blockers the answer is 409 with the list, and the event stays a draft. Publishing a published event is a no-op. Publishing sends the same notifications (webhook event.published, followers' mail) as the dashboard.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "published",
+              "published": true,
+              "blockers": []
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Something blocks publishing; blockers lists it.",
+          "example": {
+            "error": "the event can't be published yet",
+            "blockers": [
+              {
+                "code": "missing_venue",
+                "field": "venue_name",
+                "message": "Add a venue (or make the event online)."
+              },
+              {
+                "code": "stripe_not_connected",
+                "field": null,
+                "message": "Paid tickets need a connected Stripe account that can take payments (Org settings → Payouts)."
+              }
+            ],
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "draft",
+              "published": false,
+              "blockers": [
+                {
+                  "code": "missing_venue",
+                  "field": "venue_name",
+                  "message": "Add a venue (or make the event online)."
+                },
+                {
+                  "code": "stripe_not_connected",
+                  "field": null,
+                  "message": "Paid tickets need a connected Stripe account that can take payments (Org settings → Payouts)."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "unpublish-event",
+      "method": "POST",
+      "path": "/v1/events/:id/unpublish",
+      "summary": "Unpublish an event",
+      "description": "Moves a published event back to draft (off sale, out of listings), like \"Move to draft\" in the dashboard. Tickets already sold stay valid. A cancelled event stays cancelled.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "draft"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-ticketing-configuration",
+      "method": "GET",
+      "path": "/v1/events/:id/ticketing-configuration",
+      "summary": "Get ticketing configuration",
+      "description": "How the event sells and admits: currency, purchase limits, holder release, where tickets are sold (ticket_backend: exos or a linked platform), name check-in at the door, fee settings (whether the organization's fee rules apply) and the check-in lists.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "published",
+              "currency": "USD",
+              "timezone": "America/New_York",
+              "total_tickets": 150,
+              "tickets_sold": 42,
+              "purchase_limits": {
+                "maxPerOrder": 8,
+                "maxPerAccount": 8
+              },
+              "allow_holder_release": true,
+              "release_cutoff_hours": 0,
+              "door_name_checkin": "staff",
+              "ticket_backend": "exos",
+              "external_ticket_url": null,
+              "fee_settings": {
+                "inherit_org_rules": true,
+                "skipped_org_rule_ids": []
+              },
+              "check_in_lists": [
+                {
+                  "id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+                  "name": "Main door",
+                  "tier_ids": [],
+                  "allow_reentry": false,
+                  "valid_from": null,
+                  "valid_until": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "list-event-fee-rules",
+      "method": "GET",
+      "path": "/v1/events/:id/fee-rules",
+      "summary": "List an event's fee rules",
+      "description": "The fee rules (custom charges) that apply to the event: its own and the organization's it inherits, in the order they apply. recipient passed_on is folded into the all-in price the buyer sees; absorbed comes out of revenue. Amounts are in cents; percent is a percentage. See docs/fees.md.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "rule_id": "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b",
+                "rule_event_id": null,
+                "name": "Facility fee",
+                "recipient": "passed_on",
+                "kind": "facility",
+                "calc": "flat",
+                "percent": null,
+                "amount_cents": 200,
+                "cap_cents": null,
+                "per": "ticket",
+                "taxable": true,
+                "applies_to_addons": false,
+                "tier_ids": null,
+                "rank": 1
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-ticket-type",
+      "method": "GET",
+      "path": "/v1/events/:id/ticket-types/:tier",
+      "summary": "Get a ticket type",
+      "description": "One ticket type of the event. price is in the event's currency (major unit); capacity 0 means unlimited.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "tier",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket type's id. One of another organization answers 404.",
+          "example": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "VIP",
+              "description": "Balcony",
+              "price": 80,
+              "capacity": 20,
+              "sold": 0,
+              "ticket_type": "paid",
+              "visibility": "public",
+              "sales_start": null,
+              "sales_end": null,
+              "sort_order": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket type in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket type not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-ticket-type",
+      "method": "POST",
+      "path": "/v1/events/:id/ticket-types",
+      "summary": "Create a ticket type",
+      "description": "Adds a ticket type. Writable fields: name (required), description, price (major unit), capacity (0 = unlimited), ticket_type (paid, free, donation), visibility (public, hidden), sales_start, sales_end, sort_order, price_schedule ([{ startsAt, price }]), accessible, accessible_note, market_split.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "ticket_type",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields (or send them unwrapped).",
+          "example": {
+            "name": "VIP",
+            "price": 80,
+            "capacity": 20
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "ticket_type": {
+          "name": "VIP",
+          "description": "Balcony",
+          "price": 80,
+          "capacity": 20
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "VIP",
+              "description": "Balcony",
+              "price": 80,
+              "capacity": 20,
+              "sold": 0,
+              "ticket_type": "paid",
+              "visibility": "public",
+              "sales_start": null,
+              "sales_end": null,
+              "sort_order": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "a ticket type needs a name"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-ticket-type",
+      "method": "PATCH",
+      "path": "/v1/events/:id/ticket-types/:tier",
+      "summary": "Update a ticket type",
+      "description": "Changes the given fields (same as Create a ticket type). sold is the server's and is refused.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "tier",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket type's id. One of another organization answers 404.",
+          "example": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f"
+        },
+        {
+          "name": "ticket_type",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change.",
+          "example": {
+            "price": 90
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "ticket_type": {
+          "price": 90,
+          "visibility": "hidden"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "VIP",
+              "description": "Balcony",
+              "price": 90,
+              "capacity": 20,
+              "sold": 0,
+              "ticket_type": "paid",
+              "visibility": "hidden",
+              "sales_start": null,
+              "sales_end": null,
+              "sort_order": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "unknown or read-only field: sold"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket type in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket type not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "delete-ticket-type",
+      "method": "DELETE",
+      "path": "/v1/events/:id/ticket-types/:tier",
+      "summary": "Delete a ticket type",
+      "description": "Removes a ticket type that has no tickets. One with tickets answers 409: hide it instead (visibility hidden).",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "tier",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket type's id. One of another organization answers 404.",
+          "example": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b7e2d4c-5a61-4f38-9e2d-1c3b4a5d6e7f",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket type in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "ticket type not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The ticket type has tickets.",
+          "example": {
+            "error": "this ticket type has tickets; hide it instead"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-add-on",
+      "method": "GET",
+      "path": "/v1/events/:id/add-ons/:addon",
+      "summary": "Get an add-on",
+      "description": "One add-on of the event (parking, merch, …).",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "addon",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The add-on's id. One of another organization answers 404.",
+          "example": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Parking",
+              "description": null,
+              "price": 15,
+              "capacity": 40,
+              "sold": 0,
+              "max_per_order": 2,
+              "visibility": "public",
+              "sort_order": 0
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such add-on in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "add-on not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-add-on",
+      "method": "POST",
+      "path": "/v1/events/:id/add-ons",
+      "summary": "Create an add-on",
+      "description": "Adds an add-on. Writable fields: name (required), description, price (major unit, 0 or more), capacity (0 = unlimited), max_per_order, visibility (public, hidden), image_url, sort_order.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "add_on",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields (or send them unwrapped).",
+          "example": {
+            "name": "Parking",
+            "price": 15,
+            "capacity": 40
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "add_on": {
+          "name": "Parking",
+          "price": 15,
+          "capacity": 40,
+          "max_per_order": 2
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Parking",
+              "description": null,
+              "price": 15,
+              "capacity": 40,
+              "sold": 0,
+              "max_per_order": 2,
+              "visibility": "public",
+              "sort_order": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "an add-on needs a name"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-add-on",
+      "method": "PATCH",
+      "path": "/v1/events/:id/add-ons/:addon",
+      "summary": "Update an add-on",
+      "description": "Changes the given fields (same as Create an add-on).",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "addon",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The add-on's id. One of another organization answers 404.",
+          "example": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "add_on",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change.",
+          "example": {
+            "price": 12
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "add_on": {
+          "price": 12
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Parking",
+              "description": null,
+              "price": 12,
+              "capacity": 40,
+              "sold": 0,
+              "max_per_order": 2,
+              "visibility": "public",
+              "sort_order": 0
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such add-on in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "add-on not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A value the add-on can't take (a negative price, …).",
+          "example": {
+            "error": "new row for relation \"exos_event_addons\" violates check constraint"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "delete-add-on",
+      "method": "DELETE",
+      "path": "/v1/events/:id/add-ons/:addon",
+      "summary": "Delete an add-on",
+      "description": "Removes an add-on nobody has bought. A sold add-on answers 409: hide it instead.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "addon",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The add-on's id. One of another organization answers 404.",
+          "example": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such add-on in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "add-on not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The add-on has been sold.",
+          "example": {
+            "error": "this add-on has been sold; hide it instead"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "get-promo-code",
+      "method": "GET",
+      "path": "/v1/events/:id/promo-codes/:code",
+      "summary": "Get a promo code",
+      "description": "One promo code of the event, by id. To look a code up by name, list with ?code=. The email a code is reserved for is never returned.",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "code",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The promo code's id. One of another organization answers 404.",
+          "example": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934",
+              "code": "LOFTFAM",
+              "tier_id": null,
+              "max_uses": 50,
+              "used_count": 0,
+              "discount_percent": 20,
+              "discount_amount": null,
+              "price_override": null,
+              "valid_until": null,
+              "comment": "Friends of the venue",
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "link_label": null,
+              "link_channel": null,
+              "link_clicks": 0
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such promo code in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "promo code not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "create-promo-code",
+      "method": "POST",
+      "path": "/v1/events/:id/promo-codes",
+      "summary": "Create a promo code",
+      "description": "Issues a promo code through the dashboard's voucher function: one of discount_percent (more than 0, less than 100), discount_amount (major unit) or price_override; tier_id limits it to one ticket type. code is optional (3-32 letters, digits, - or _; one is generated otherwise) and unique per event. max_uses defaults to 1, valid_hours sets an expiry, reserved_email holds it for one buyer, bypass_capacity (default true, as in the dashboard) lets it sell past a sold-out type. For free tickets use comps.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "promo_code",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "code, tier_id, discount_percent | discount_amount | price_override, max_uses, valid_hours, comment, reserved_email, bypass_capacity (or send them unwrapped).",
+          "example": {
+            "code": "LOFTFAM",
+            "discount_percent": 20,
+            "max_uses": 50
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "promo_code": {
+          "code": "LOFTFAM",
+          "discount_percent": 20,
+          "max_uses": 50,
+          "comment": "Friends of the venue"
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934",
+              "code": "LOFTFAM",
+              "tier_id": null,
+              "max_uses": 50,
+              "used_count": 0,
+              "discount_percent": 20,
+              "discount_amount": null,
+              "price_override": null,
+              "valid_until": null,
+              "comment": "Friends of the venue",
+              "created_at": "2026-10-30T14:05:11.204+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "pick one of a set price, a percent off or an amount off"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The code exists on this event.",
+          "example": {
+            "error": "code LOFTFAM is already used on this event"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "update-promo-code",
+      "method": "PATCH",
+      "path": "/v1/events/:id/promo-codes/:code",
+      "summary": "Update a promo code",
+      "description": "Changes max_uses, valid_until, comment or link_label. The discount itself can't change: delete the code and issue a new one.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "code",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The promo code's id. One of another organization answers 404.",
+          "example": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934"
+        },
+        {
+          "name": "promo_code",
+          "location": "body",
+          "type": "object",
+          "required": true,
+          "description": "The fields to change.",
+          "example": {
+            "max_uses": 100
+          }
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "promo_code": {
+          "max_uses": 100,
+          "valid_until": "2026-12-31T23:59:00Z"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934",
+              "code": "LOFTFAM",
+              "tier_id": null,
+              "max_uses": 100,
+              "used_count": 0,
+              "discount_percent": 20,
+              "discount_amount": null,
+              "price_override": null,
+              "valid_until": null,
+              "comment": "Friends of the venue",
+              "created_at": "2026-10-30T14:05:11.204+00:00",
+              "link_label": null
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or value; the message names it.",
+          "example": {
+            "error": "unknown or read-only field: used_count"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such promo code in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "promo code not found"
+          }
+        }
+      ]
+    },
+    {
+      "auth": "api_key",
+      "id": "delete-promo-code",
+      "method": "DELETE",
+      "path": "/v1/events/:id/promo-codes/:code",
+      "summary": "Delete a promo code",
+      "description": "Removes the code; it stops working at checkout. Orders that used it keep their price.",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "code",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The promo code's id. One of another organization answers 404.",
+          "example": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "d6a4f5e7-8c91-42a3-9dc4-e5f607182934",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or the member who created the key can't do this in the dashboard (owner or manager), or has left the organization.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such promo code in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "promo code not found"
+          }
+        }
+      ]
+    }
+  ]
+}
