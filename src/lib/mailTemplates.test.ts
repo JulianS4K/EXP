@@ -65,6 +65,14 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     reason: 'fraudulent', status: 'lost', evidence_due_by: null, evidence_submitted: false,
     recovery_status: 'not_recovered', recovery_candidate_cents: 6500, marketing: false,
   },
+  'community-post': {
+    community: { id: ORG, name: 'Run <Club>', slug: 'bar-run-club' }, org_name: 'Org <7f>', marketing: true, unsubscribe_token: TOKEN,
+    post: { id: EV2, title: 'Route <x>', body: `${EVIL}\n\nSee you`, members_only: true },
+  },
+  'community-event': {
+    community: { id: ORG, name: 'Run <Club>', slug: 'bar-run-club' }, org_name: 'Org <7f>', marketing: true, unsubscribe_token: TOKEN,
+    event: { ...event(), members_only: false, early_access_until: '2026-09-30T00:00:00+00:00' },
+  },
   'org-weekly-summary': {
     org, from: '2026-09-21T00:00:00+00:00', to: '2026-09-28T00:00:00+00:00', marketing: true, unsubscribe_token: TOKEN,
     events: [{ id: EV, name: 'Show', currency: 'usd', orders: 3, tickets: 5, gross_cents: 40000 }],
@@ -254,5 +262,27 @@ describe('renderTemplate', () => {
     const r = ok('post-event');
     const m = renderMail(r.html, `{{app_url}}/unsubscribe?t=${TOKEN}`, APP);
     expect(m).toEqual({ ok: true, html: r.html, headers: { 'List-Unsubscribe': `<${APP}/unsubscribe?t=${TOKEN}>` } });
+  });
+});
+
+describe('community mails (mig 20261031200000)', () => {
+  it('community-post: escaped, links to the community, per-community settings link', () => {
+    const r = ok('community-post');
+    expect(r.subject).toBe('Run <Club>: Route <x>');
+    expect(r.html).toContain('&lt;script&gt;');
+    expect(r.html).toContain(`${APP}/c/bar-run-club#post-${EV2}`);
+    expect(r.html).toContain(`${APP}/c/bar-run-club?settings=1`);
+    expect(r.html).toContain('For members of Run &lt;Club&gt;');
+    expect(r.html).toContain(`${APP}/unsubscribe?t=${TOKEN}`);
+  });
+  it('community-event: early access line and ticket link', () => {
+    const r = ok('community-event');
+    expect(r.subject).toBe('Run <Club>: Show <One> & "Friends"');
+    expect(r.html).toContain('Members get early access until');
+    expect(r.html).toContain(`${APP}/event/${EV}`);
+  });
+  it('refuses a slug that could point a link elsewhere', () => {
+    const bad = { ...PAYLOADS['community-post'], community: { id: ORG, name: 'x', slug: '../../evil' } };
+    expect(renderTemplate('community-post', bad, APP)).toMatchObject({ ok: false });
   });
 });

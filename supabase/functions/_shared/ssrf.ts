@@ -40,11 +40,16 @@ export async function urlIsBlocked(
   return null;
 }
 
+// Through globalThis so this file also loads under Node (vitest imports it via
+// _shared/activitypub/fetchGuard.ts); there the resolver is always injected.
+type DnsResolver = { resolveDns(host: string, kind: "A" | "AAAA"): Promise<string[]> };
+
 async function resolveAll(host: string): Promise<string[]> {
   const out: string[] = [];
+  const dns = (globalThis as unknown as { Deno: DnsResolver }).Deno;
   for (const kind of ["A", "AAAA"] as const) {
     try {
-      out.push(...await Deno.resolveDns(host, kind));
+      out.push(...await dns.resolveDns(host, kind));
     } catch {
       /* this record type may not exist — rely on the other */
     }

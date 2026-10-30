@@ -34,6 +34,7 @@ import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
 import FeeRulesEditor from '../components/FeeRulesEditor';
+import OrgCommunitiesPanel from '../components/OrgCommunitiesPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -607,6 +608,9 @@ export default function OrgSettings() {
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <FeeRulesEditor orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
+
+            {/* Communities: members, hosts, posts, moderation, federation (mig 20261031200000). Owner / manager. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <OrgCommunitiesPanel orgId={org.id} />}
 
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />
