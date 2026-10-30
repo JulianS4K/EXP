@@ -26,9 +26,10 @@
 //
 // Endpoints (all scoped to the key's org; each also under /v1): the table in
 // _shared/api/routes.ts. GET /me, /events…, /events/:id/{seats,
-// seat-reconciliation, sales-counts}, /orders…, /invoices, /refunds,
-// /webhooks, /sales-counts, /eventbrite-events/:id; sales-count writes (POST
-// /sales-counts, PUT + DELETE /sales-counts/:id, POST
+// seat-reconciliation, sales-counts, timed-entry, slots}, /orders…,
+// /invoices, /refunds, /webhooks, /sales-counts, /eventbrite-events/:id,
+// /series, /series/:id, /series/:id/dates, /collections, /collections/:id;
+// sales-count writes (POST /sales-counts, PUT + DELETE /sales-counts/:id, POST
 // /events/:id/sales-counts/import); booking: /venues, /rooms, /holds,
 // /calendar, /events/:id/show-activities, /events/:id/notes,
 // /events/:id/contacts, /notes, /event-contacts (GET / POST / PATCH / DELETE
@@ -758,6 +759,105 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       await found(sb.from("exos_event_contacts").delete().eq("org_id", orgId).eq("id", id).select("id").maybeSingle(), "contact");
       return { data: { id, deleted: true } };
     }
+
+    // -- Series, collections, timed entry (mig 20261030150000) --------------
+    case "list-series": {
+      let q = sb.from("exos_event_series").select(SERIES_COLS, { count: "exact" }).eq("org_id", orgId);
+      const status = c.q.get("status");
+      if (status !== null) {
+        if (!SERIES_STATUSES.has(status)) throw new ApiError(400, "status must be active, archived or cancelled.");
+        q = q.eq("status", status);
+      }
+      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+    }
+
+    case "get-series": {
+      const id = idParam(c, "series not found");
+      const { data: s, error } = await sb.from("exos_event_series").select(SERIES_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!s) throw new ApiError(404, "series not found");
+      const [occ, evs] = await Promise.all([
+        sb.from("exos_series_occurrences").select(OCCURRENCE_COLS).eq("series_id", id).order("occ_date").limit(500),
+        sb.from("exos_events").select("id, status, tickets_sold, total_tickets").eq("series_id", id).eq("org_id", orgId),
+      ]);
+      for (const r of [occ, evs]) if (r.error) throw r.error;
+      const events = (evs.data ?? []) as { id: string; status: string; tickets_sold: number; total_tickets: number }[];
+      const ids = events.map((e) => e.id);
+      let gross = 0;
+      if (ids.length > 0) {
+        const { data: orders, error: oErr } = await sb.from("exos_checkout_sessions").select("amount_cents")
+          .eq("org_id", orgId).eq("status", "fulfilled").in("event_id", ids);
+        if (oErr) throw oErr;
+        gross = (orders ?? []).reduce((n, o) => n + Number((o as { amount_cents: number }).amount_cents ?? 0), 0);
+      }
+      const capped = events.filter((e) => e.total_tickets > 0);
+      return {
+        data: {
+          ...(s as unknown as Record<string, unknown>),
+          summary_stats: {
+            events_in_series: events.length,
+            events_cancelled: events.filter((e) => e.status === "cancelled").length,
+            tickets_sold: events.reduce((n, e) => n + (e.tickets_sold ?? 0), 0),
+            gross_cents: gross,
+            average_capacity_sold: capped.length
+              ? Math.round((capped.reduce((n, e) => n + e.tickets_sold / e.total_tickets, 0) / capped.length) * 1000) / 1000
+              : null,
+          },
+          schedule: occ.data ?? [],
+        },
+      };
+    }
+
+    case "list-series-dates": {
+      const id = idParam(c, "series not found");
+      const { data: s, error } = await sb.from("exos_event_series").select("id").eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!s) throw new ApiError(404, "series not found");
+      return paged(await sb.from("exos_series_occurrences").select(OCCURRENCE_COLS, { count: "exact" })
+        .eq("series_id", id).order("occ_date").range(page.from, page.to), page);
+    }
+
+    case "list-collections":
+      return paged(await sb.from("exos_collections").select(COLLECTION_COLS, { count: "exact" })
+        .eq("org_id", orgId).order("sort_order").order("created_at").order("id").range(page.from, page.to), page);
+
+    case "get-collection": {
+      const id = idParam(c, "collection not found");
+      const { data: col, error } = await sb.from("exos_collections").select(COLLECTION_COLS)
+        .eq("org_id", orgId).eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!col) throw new ApiError(404, "collection not found");
+      // Membership resolved in SQL (manual list or rule), drafts included.
+      const { data: memberIds, error: mErr } = await sb.rpc("_exos_collection_event_ids", { p_collection_id: id, p_public: false });
+      if (mErr) throw mErr;
+      const ids = ((memberIds ?? []) as unknown[]).map((x) => String(typeof x === "object" && x ? Object.values(x)[0] : x));
+      const { data: evs, error: eErr } = ids.length
+        ? await sb.from("exos_events").select(EVENT_LIST_COLS).eq("org_id", orgId).in("id", ids).order("starts_at")
+        : { data: [], error: null };
+      if (eErr) throw eErr;
+      return { data: { ...(col as unknown as Record<string, unknown>), events: evs ?? [] } };
+    }
+
+    case "get-timed-entry": {
+      const id = await ownEvent(c);
+      const { data: te, error } = await sb.from("exos_timed_entry")
+        .select("event_id, tier_ids, slot_minutes, capacity, tier_capacity, entry_window_minutes, early_entry_minutes, " +
+          "hours, start_date, end_date, closed_dates, version, updated_at")
+        .eq("event_id", id).maybeSingle();
+      if (error) throw error;
+      if (!te) throw new ApiError(404, "this event has no timed entry");
+      return { data: te };
+    }
+
+    case "list-slots": {
+      const id = await ownEvent(c);
+      const from = dateParam(c.q, "from");
+      const to = dateParam(c.q, "to");
+      const { data, error } = await sb.rpc("_exos_slot_report", { p_event_id: id, p_from: from, p_to: to });
+      if (error) throw error;
+      return { data: data ?? [] };
+    }
   }
   throw new ApiError(404, "not found");
 }
@@ -829,6 +929,27 @@ async function found(p: PromiseLike<{ data: any; error: unknown }>, what: string
 function pagedMap(r: { data: any; error: any; count: number | null }, page: Page, fn: (row: any) => unknown) {
   const out = paged(r, page);
   return { ...out, data: (out.data as unknown[]).map(fn) };
+}
+
+const SERIES_COLS = "id, name, kind, status, description, image_url, template_event_id, timezone, rule, " +
+  "created_at, updated_at, cancelled_at";
+const SERIES_STATUSES = new Set(["active", "archived", "cancelled"]);
+const OCCURRENCE_COLS = "occ_date, occ_time, starts_at, event_id, status";
+const COLLECTION_COLS = "id, name, slug, description, image_url, mode, event_ids, rule_kind, rule_value, published, " +
+  "sort_order, created_at, updated_at";
+
+/** The :id path parameter as a UUID; anything else is simply not found. */
+function idParam(c: Ctx, notFound: string): string {
+  const id = c.params.id;
+  if (!UUID_RE.test(id)) throw new ApiError(404, notFound);
+  return id;
+}
+
+function dateParam(q: URLSearchParams, name: string): string | null {
+  const v = q.get(name);
+  if (v === null) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(v))) throw new ApiError(400, `${name} must be a date (YYYY-MM-DD).`);
+  return v;
 }
 
 /** The :id path parameter as an event id; anything but a UUID is simply not found. */

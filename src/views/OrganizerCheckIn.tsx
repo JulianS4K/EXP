@@ -107,6 +107,9 @@ import {
   type RosterProtection,
 } from '../lib/door/roster';
 import { fetchDoorEvent, pingServer } from '../lib/door/api';
+// timed entry (mig 20261030150000): "Admit anyway" outside a slot's entry window.
+import { admitOutsideWindow } from '../lib/seriesTimedApi';
+import { entryWindowMessage } from '../lib/slots';
 
 // The cached roster holds every ticket's barcode secret, so it is dropped
 // 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
@@ -1020,6 +1023,24 @@ export default function OrganizerCheckIn() {
       return;
     }
     pushScan(ticketId, name, 'DENIED');
+    // timed entry (mig 20261030150000): outside the ticket's slot window.
+    // Nothing is written until staff decide; "Admit anyway" records the
+    // override and the next scan of this ticket checks them in.
+    if (result.reason === 'outside-entry-window') {
+      const w = result as CheckInResult & { window?: 'early' | 'late'; entry_from?: string; entry_until?: string };
+      const now = serverNow();
+      const msg = w.window && w.entry_from && w.entry_until
+        ? entryWindowMessage({ ok: false, window: w.window, from: Date.parse(w.entry_from), until: Date.parse(w.entry_until) }, now)
+        : 'Outside this ticket’s entry window.';
+      setStatus('invalid-barcode');
+      setInvalidReason(`Outside entry window. ${msg}.`);
+      if (eventId && window.confirm(`${name || 'This ticket'}: ${msg}.\n\nAdmit anyway?`)) {
+        void admitOutsideWindow(ticketId, eventId)
+          .then(() => setInvalidReason(`Admit anyway recorded for ${name || 'this ticket'}. Scan the ticket again to check them in.`))
+          .catch((e: unknown) => setInvalidReason(`Could not record the override: ${e instanceof Error ? e.message : String(e)}`));
+      }
+      return;
+    }
     if (result.reason === 'used' || result.reason === 'already-inside') {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });

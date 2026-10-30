@@ -47,6 +47,9 @@ import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import AttendeeLookup from '../components/AttendeeLookup';
 import SmsPanel from '../components/SmsPanel';
 import PromoLinksPanel from '../components/PromoLinksPanel';
+// Series + timed entry (mig 20261030150000).
+import TimedEntryPanel from '../components/TimedEntryPanel';
+import SlotReport from '../components/SlotReport';
 import RefundAsksPanel from '../components/RefundAsksPanel';
 import LastCallBadge from '../components/LastCallBadge';
 import FixedBlockSummary from '../components/FixedBlockSummary';
@@ -268,6 +271,14 @@ export default function OrganizerEventReport() {
               the numbers ✦
             </span>
           </span>
+          {/* Series (mig 20261030150000): manage this event's series, or start one. */}
+          {canAct && (
+            <p className="mt-2 text-xs">
+              {event.seriesId
+                ? <button type="button" className="font-bold text-[#026cdf]" onClick={() => navigate(`/dashboard/series/${event.seriesId}`)}>Manage this series</button>
+                : <button type="button" className="font-bold text-[#026cdf]" onClick={() => navigate(`/dashboard/event/${event.id}/recurring`)}>Make it recurring</button>}
+            </p>
+          )}
         </div>
 
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
@@ -323,6 +334,12 @@ export default function OrganizerEventReport() {
         {/* Every ticket by channel, week + to date, fees as reported; the same
             numbers as the Monday report (mig 20261029120000). */}
         <ChannelSalesPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
+
+        {/* Timed entry: settings + the per-slot report (mig 20261030150000). */}
+        <TimedEntryPanel eventId={event.id} tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+          timezone={event.timezone} canManage={canAct} />
+        <SlotReport eventId={event.id} tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+          currency={currency} canManage={canAct} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">

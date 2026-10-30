@@ -130,6 +130,9 @@ BEGIN
        'exos_public_sales_count_total',
        -- a published event's seat layout and per-seat availability only (mig 20261030140000)
        'exos_public_event_seating', 'exos_public_event_seats',
+       -- published series / collections / timed-entry slots only (mig 20261030150000)
+       'exos_public_series', 'exos_public_org_series', 'exos_public_collection',
+       'exos_public_timed_entry', 'exos_public_event_slots',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)

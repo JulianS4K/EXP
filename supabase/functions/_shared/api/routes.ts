@@ -119,6 +119,14 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-contact', method: 'GET', path: '/event-contacts/:id', scope: 'booking:read', paged: false, aliases: ['/calendar_event_contacts/:id'] },
   { id: 'update-contact', method: 'PATCH', path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
   { id: 'delete-contact', method: 'DELETE', path: '/event-contacts/:id', scope: 'booking:write', paged: false, aliases: ['/calendar_event_contacts/:id'] },
+  // Series, collections, timed entry (mig 20261030150000, docs/series-timed-entry.md).
+  { id: 'list-series', method: 'GET', path: '/series', scope: 'events:read', paged: true },
+  { id: 'get-series', method: 'GET', path: '/series/:id', scope: 'events:read', paged: false },
+  { id: 'list-series-dates', method: 'GET', path: '/series/:id/dates', scope: 'events:read', paged: true },
+  { id: 'list-collections', method: 'GET', path: '/collections', scope: 'events:read', paged: true },
+  { id: 'get-collection', method: 'GET', path: '/collections/:id', scope: 'events:read', paged: false },
+  { id: 'get-timed-entry', method: 'GET', path: '/events/:id/timed-entry', scope: 'events:read', paged: false },
+  { id: 'list-slots', method: 'GET', path: '/events/:id/slots', scope: 'tickets:read', paged: false },
 ];
 
 /** Methods exos-api answers. */

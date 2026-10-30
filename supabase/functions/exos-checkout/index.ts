@@ -51,6 +51,13 @@
 // gives each ticket its seat. Seated orders always take a hold (no capacity
 // bypass) and a free seated order is issued here for signed-in buyers too.
 // Before the migration nothing is seated and seat_ids is refused.
+//
+// Timed entry (mig 20261030150000, docs/series-timed-entry.md): a ticket type
+// sold by time slot needs slot_id ('YYYYMMDDTHHMM'). The cart hold is put on
+// the slot (exos_attach_hold_slot, race-safe) and the slot rides on the
+// session row; fulfillment counts it in the same transaction as the tier. A
+// free timed ticket goes through the free path below for signed-in buyers too
+// (exos_claim_free_tickets can't pick a slot).
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -100,6 +107,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     consent?: string;
     // Reserved seating (mig 20261030140000): the picked seats of a seated tier.
     seat_ids?: unknown;
+    // timed entry (mig 20261030150000): the chosen time slot.
+    slot_id?: string;
   };
   try { p = await req.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
@@ -204,6 +213,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
         reason: "last_call", sells_on: row.sells_on, sells_on_url: row.sells_on_url ?? null,
       }, 409);
     }
+  }
+
+  // timed entry (mig 20261030150000): is this tier sold by time slot? Before
+  // the migration the table is missing: nothing is timed.
+  let timedSlot: string | null = null;
+  {
+    const { data: te, error: teErr } = await sb.from("exos_timed_entry").select("tier_ids").eq("event_id", event_id).maybeSingle();
+    if (teErr && !["42P01", "PGRST205"].includes(String(teErr.code))) {
+      console.error("exos-checkout: timed entry read failed", teErr.message);
+      return json({ error: "could not check time slots, try again" }, 503);
+    }
+    const timedTiers = (te as { tier_ids?: unknown } | null)?.tier_ids;
+    const timed = Array.isArray(timedTiers) && timedTiers.includes(tier_id);
+    const slotIn = typeof p.slot_id === "string" ? p.slot_id.trim() : "";
+    if (timed && !/^\d{8}T\d{4}$/.test(slotIn)) return json({ error: "pick a date and time slot", reason: "slot_required" }, 400);
+    if (!timed && slotIn) return json({ error: "this ticket type isn't sold by time slot" }, 400);
+    timedSlot = timed ? slotIn : null;
   }
 
   // Voucher (pretix-style access token) — validated server-side. May bypass a
@@ -531,9 +557,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   // Free: signed-in buyers use the app's free-claim path; a guest claims here
   // with just an email (below), through the same guest hold and limits.
-  // Reserved seating: free seats are issued here for everyone (the free-claim
-  // RPC can't hold seats).
-  const freeGuest = lineItems.length === 0 && (!buyerUid || seated);
+  // Reserved seating and timed entry: free seats, and a signed-in buyer's free
+  // timed ticket, are issued here for everyone (the free-claim RPC can't hold
+  // seats or pick a slot).
+  const freeGuest = lineItems.length === 0 && (!buyerUid || seated || timedSlot !== null);
   if (lineItems.length === 0 && !freeGuest) {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
   }
@@ -582,6 +609,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: holdErr.message || "not enough tickets available" }, 409);
     }
     holdId = hid as string;
+    // timed entry (mig 20261030150000): the hold also takes the slot places.
+    if (timedSlot) {
+      const { error: slotErr } = await sb.rpc("exos_attach_hold_slot", { p_hold_id: holdId, p_slot_id: timedSlot });
+      if (slotErr) {
+        await releaseHold(sb, holdId);
+        const msg = String(slotErr.message ?? "").replace(/^exos_attach_hold_slot: /, "");
+        return json({ error: msg || "that time slot is full", reason: "slot_unavailable" }, 409);
+      }
+    }
   }
 
   // Reserved seating: claim the picked seats for this hold (race-safe in SQL).
@@ -608,8 +644,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const sessionId = `free_${crypto.randomUUID()}`;
     const fInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
-      // Reserved seating: a signed-in buyer lands here only for free seats.
+      // Reserved seating / timed entry: a signed-in buyer lands here only for
+      // free seats or a free timed ticket; the order is theirs, not a guest's.
       buyer_uid: buyerUid, buyer_email: buyerEmail, guest: !buyerUid,
+      ...(timedSlot ? { slot_id: timedSlot } : {}),
       quantity, amount_cents: 0, currency, status: "pending",
       addons: addonsForSession.length > 0 ? addonsForSession : null,
       voucher_id: voucherId, promoter_id: promoterId ?? null,
@@ -667,6 +705,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       metadata: {
         exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
         exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
+        ...(timedSlot ? { exos_slot: timedSlot } : {}),
       },
     });
   } catch (e) {
@@ -683,6 +722,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     quantity, amount_cents: amountCents, currency, status: "pending",
     addons: addonsForSession.length > 0 ? addonsForSession : null,
     voucher_id: voucherId,
+    // timed entry (mig 20261030150000)
+    ...(timedSlot ? { slot_id: timedSlot } : {}),
     tax_cents: recordedTax > 0 ? recordedTax : null,
     promoter_id: promoterId ?? null,
     attribution: isEmptyAttribution(campaignTags) ? null : campaignTags,

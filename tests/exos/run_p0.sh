@@ -133,6 +133,7 @@ for m in \
          20261030100000_exos_booking \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
+         20261030150000_exos_series_timed_entry \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -301,6 +302,7 @@ for m in \
          20261030100000_exos_booking \
          20261030120000_exos_sales_counts \
          20261030140000_exos_seating \
+         20261030150000_exos_series_timed_entry \
          20261101000000_exos_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -351,3 +353,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_imp
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_sales_counts.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_seating.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_booking.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_series_timed_entry.sql"

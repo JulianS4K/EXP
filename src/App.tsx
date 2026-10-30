@@ -60,6 +60,11 @@ const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
+// Series, collections, timed entry (mig 20261030150000).
+const SeriesEditor = lazy(() => import('./views/SeriesEditor'));
+const SeriesManager = lazy(() => import('./views/SeriesManager'));
+const OrgCollections = lazy(() => import('./views/OrgCollections'));
+const CollectionPage = lazy(() => import('./views/CollectionPage'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
 const NotFound = lazy(() => import('./views/NotFound'));
@@ -174,6 +179,10 @@ export default function App() {
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />
+                    <Route path="/dashboard/event/:eventId/recurring" element={<SeriesEditor />} />
+                    <Route path="/dashboard/series/:seriesId" element={<SeriesManager />} />
+                    <Route path="/orgs/:orgId/collections" element={<OrgCollections />} />
+                    <Route path="/c/:orgSlug/:slug" element={<CollectionPage />} />
                     <Route path="/edit-event/:eventId" element={<EditEvent />} />
                     {/* Bridge multi-tenant org views (Sprint 1). */}
                     <Route path="/orgs" element={<Orgs />} />

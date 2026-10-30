@@ -56,6 +56,9 @@ import SubscribeCalendar from '../components/SubscribeCalendar';
 import { venueFeedLinks, venueKey } from '../lib/calendar';
 import SeatPicker from '../components/seating/SeatPicker';
 import { getSeatedTierIds } from '../lib/seatingApi';
+// Timed entry + series dates (mig 20261030150000).
+import SlotPicker from '../components/SlotPicker';
+import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } from '../lib/seriesTimedApi';
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -76,6 +79,23 @@ export default function EventDetails() {
   const [guestOpen, setGuestOpen] = useState(false);
   const [guestFree, setGuestFree] = useState(false);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
+  // Timed entry: the event's slot config (null = not timed) and the chosen slot.
+  const [timed, setTimed] = useState<PublicTimedEntry | null>(null);
+  const [slotId, setSlotId] = useState<string | null>(null);
+  // Series: this event's other published dates.
+  const [moreDates, setMoreDates] = useState<{ id: string; name: string; startsAt: string }[]>([]);
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    getPublicTimedEntry(event.id).then((c) => { if (live) setTimed(c); })
+      .catch((err) => console.warn('timed entry unavailable:', err));
+    if (event.seriesId) {
+      listPublicSeriesDates(event.seriesId, event.id).then((d) => { if (live) setMoreDates(d); })
+        .catch((err) => console.warn('series dates unavailable:', err));
+    }
+    return () => { live = false; };
+  }, [event?.id, event?.seriesId]);
+  const slotTier = !!timed && !!selectedTierId && timed.tierIds.includes(selectedTierId);
   // Phone buy bar: shown while the buy card is off screen.
   const buyCardRef = useRef<HTMLDivElement>(null);
   const [buyInView, setBuyInView] = useState(false);
@@ -378,6 +398,7 @@ export default function EventDetails() {
         attribution,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
+        slotId: slotTier ? slotId : null,
       });
       clearPrefill(event.id);
       setGuestOpen(false);
@@ -415,6 +436,7 @@ export default function EventDetails() {
         guestEmail,
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
+        slotId: slotTier ? slotId : null,
       });
       clearPrefill(event.id);
       if (event.orgId) {
@@ -454,6 +476,11 @@ export default function EventDetails() {
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
     if (paidNotOnSale) {
       toast({ kind: 'info', title: t('event.comingSoonTitle'), message: t('event.comingSoon') });
+      return;
+    }
+    // Timed entry: a slot first (mig 20261030150000).
+    if (slotTier && !slotId) {
+      toast({ kind: 'info', message: 'Pick a date and time slot first.' });
       return;
     }
     if (!user) {
@@ -501,6 +528,13 @@ export default function EventDetails() {
         return;
       }
       await goToCheckout(tier.id);
+      return;
+    }
+
+    // A free timed ticket: issued through exos-checkout's free path, which
+    // takes the slot (the free-claim RPC can't).
+    if (slotTier) {
+      await claimFreeGuest(tier.id, user.email ?? '');
       return;
     }
 
@@ -1115,6 +1149,27 @@ export default function EventDetails() {
                        </button>
                        );
                      })}
+                  </div>
+                )}
+
+                {/* Timed entry: date + time slot for the chosen ticket type. */}
+                {slotTier && timed && selectedTierId && (
+                  <SlotPicker eventId={event.id} config={timed} tierId={selectedTierId} quantity={seatedSelected ? Math.max(seatSel.length, 1) : quantity}
+                    value={slotId} onChange={setSlotId} />
+                )}
+
+                {/* Series: the other dates of this show. */}
+                {moreDates.length > 0 && (
+                  <div className="mb-8">
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">More dates</p>
+                    <div className="flex flex-wrap gap-2">
+                      {moreDates.slice(0, 8).map((d) => (
+                        <button key={d.id} type="button" onClick={() => navigate(`/event/${d.id}`)}
+                          className="px-3 py-1.5 border border-white/10 hover:border-white/40 text-xs text-white">
+                          {formatInTz(new Date(d.startsAt), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
