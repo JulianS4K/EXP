@@ -22,6 +22,7 @@ import { normalizeArtistLinks } from '../lib/artistLinks';
 import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import TicketBackendPanel from '../components/TicketBackendPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
+import TierDistributionPanel from '../components/TierDistributionPanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
@@ -1684,6 +1685,8 @@ export default function EditEvent() {
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Distribution partners per ticket type (mig 20261031130000). */}
+        {eventId && <TierDistributionPanel eventId={eventId} orgId={eventData.orgId} />}
 
         {SHOW_MARKETPLACES && (<>
         {/* Marketplaces: pick them, then seats per ticket type (MarketplaceGrid). */}

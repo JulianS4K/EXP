@@ -1,0 +1,815 @@
+{
+  "file": "ticket-reservations",
+  "name": "Ticket reservations",
+  "order": 52,
+  "description": "Reservations hold seats for 10 minutes and become orders when completed. Partners make them through the partner contract; your own systems (a box office, a kiosk) make organizer reservations here with `tickets:write`, on the same core: any ticket type of the event, all-in prices, holds that count against every channel, and live-ticket links on completion (channel_source `api`). docs/partner-sales.md.",
+  "endpoints": [
+    {
+      "id": "list-ticket-reservations",
+      "method": "GET",
+      "path": "/v1/events/:id/ticket-reservations",
+      "summary": "List an event's reservations",
+      "description": "Partner and organizer reservations of the event, newest first, amounts in cents.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only reservations in this status.",
+          "example": "completed",
+          "enum": [
+            "active",
+            "completed",
+            "cancelled",
+            "expired"
+          ]
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+                "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+                "status": "completed",
+                "channel": "partner",
+                "channel_source": "partner:stubhub",
+                "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+                "quantity": 2,
+                "currency": "usd",
+                "subtotal_cents": 5000,
+                "fees_cents": 400,
+                "tax_cents": 0,
+                "total_cents": 5400,
+                "cash_paid_cents": 5400,
+                "first_name": "Jane",
+                "last_name": "Buyer",
+                "email": "jane@example.com",
+                "external_id": "SH-88231",
+                "expires_at": "2026-10-31T18:10:00+00:00",
+                "completed_at": "2026-10-31T18:03:00+00:00",
+                "cancelled_at": null,
+                "created_at": "2026-10-31T18:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-ticket-reservation",
+      "method": "GET",
+      "path": "/v1/events/:id/ticket-reservations/:token",
+      "summary": "Get a reservation",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+              "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+              "status": "completed",
+              "channel": "partner",
+              "channel_source": "partner:stubhub",
+              "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+              "quantity": 2,
+              "currency": "usd",
+              "subtotal_cents": 5000,
+              "fees_cents": 400,
+              "tax_cents": 0,
+              "total_cents": 5400,
+              "cash_paid_cents": 5400,
+              "first_name": "Jane",
+              "last_name": "Buyer",
+              "email": "jane@example.com",
+              "external_id": "SH-88231",
+              "expires_at": "2026-10-31T18:10:00+00:00",
+              "completed_at": "2026-10-31T18:03:00+00:00",
+              "cancelled_at": null,
+              "created_at": "2026-10-31T18:00:00+00:00",
+              "lines": [
+                {
+                  "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "name": "General admission",
+                  "quantity": 2,
+                  "unit_cents": 2500,
+                  "fees_cents": 400,
+                  "tax_cents": 0,
+                  "all_in_cents": 2700,
+                  "total_cents": 5400
+                }
+              ],
+              "ticket_ids": [
+                "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+              ]
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "Unknown token, or another event's.",
+          "example": {
+            "error": "reservation not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "build-organizer-reservation",
+      "method": "POST",
+      "path": "/v1/events/:id/organizer-reservations/build",
+      "summary": "Price a reservation",
+      "description": "What a reservation would cost, checked like a real one (availability, sales window), without holding anything.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "ticket_reservation[order_items_attributes]",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "1-10 lines of { ticket_type_id, quantity } (quantity 1-100, at most 100 tickets in all). JSON (nested or flat) and Rails-style form fields both work.",
+          "example": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "currency": "USD",
+              "order_items": [
+                {
+                  "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "name": "General admission",
+                  "quantity": 2,
+                  "price": 25.0,
+                  "fees_total": 4.0,
+                  "taxes_total": 0.0,
+                  "total": 54.0
+                }
+              ],
+              "subtotal": 50.0,
+              "fees_total": 4.0,
+              "taxes_total": 0.0,
+              "total": 54.0
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not enough seats left: nothing was held, don't charge your buyer.",
+          "example": {
+            "error": "sold out: General admission has 1 left",
+            "reason": "sold_out"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
+          "example": {
+            "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
+            "reason": "not_available"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "ticket_reservation": {
+          "order_items_attributes": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "create-organizer-reservation",
+      "method": "POST",
+      "path": "/v1/events/:id/organizer-reservations",
+      "summary": "Reserve tickets",
+      "description": "Holds the seats for 10 minutes. Any ticket type of the event (hidden ones too); never table types.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "ticket_reservation[order_items_attributes]",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "1-10 lines of { ticket_type_id, quantity } (quantity 1-100, at most 100 tickets in all). JSON (nested or flat) and Rails-style form fields both work.",
+          "example": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ]
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Held for 10 minutes.",
+          "example": {
+            "data": {
+              "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+              "status": "active",
+              "expires_at": "2026-10-31T18:10:00+00:00",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "currency": "USD",
+              "order_items": [
+                {
+                  "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "name": "General admission",
+                  "quantity": 2,
+                  "price": 25.0,
+                  "fees_total": 4.0,
+                  "taxes_total": 0.0,
+                  "total": 54.0
+                }
+              ],
+              "subtotal": 50.0,
+              "fees_total": 4.0,
+              "taxes_total": 0.0,
+              "total": 54.0,
+              "cash_paid": 54.0,
+              "should_send_ticket_email": false,
+              "first_name": null,
+              "last_name": null,
+              "email": null,
+              "stubhub_transaction_id": null,
+              "order_id": null,
+              "created_at": "2026-10-31T18:00:00+00:00",
+              "updated_at": "2026-10-31T18:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not enough seats left: nothing was held, don't charge your buyer.",
+          "example": {
+            "error": "sold out: General admission has 1 left",
+            "reason": "sold_out"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
+          "example": {
+            "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
+            "reason": "not_available"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "ticket_reservation": {
+          "order_items_attributes": [
+            {
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "quantity": 2
+            }
+          ],
+          "cash_paid": 54.0
+        }
+      }
+    },
+    {
+      "id": "update-organizer-reservation",
+      "method": "PUT",
+      "path": "/v1/events/:id/organizer-reservations/:token",
+      "summary": "Set the attendee",
+      "description": "Doesn't extend the hold.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+              "status": "active",
+              "expires_at": "2026-10-31T18:10:00+00:00",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "currency": "USD",
+              "order_items": [
+                {
+                  "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "name": "General admission",
+                  "quantity": 2,
+                  "price": 25.0,
+                  "fees_total": 4.0,
+                  "taxes_total": 0.0,
+                  "total": 54.0
+                }
+              ],
+              "subtotal": 50.0,
+              "fees_total": 4.0,
+              "taxes_total": 0.0,
+              "total": 54.0,
+              "cash_paid": null,
+              "should_send_ticket_email": false,
+              "first_name": "Jane",
+              "last_name": "Buyer",
+              "email": "jane@example.com",
+              "stubhub_transaction_id": null,
+              "order_id": null,
+              "created_at": "2026-10-31T18:00:00+00:00",
+              "updated_at": "2026-10-31T18:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 410,
+          "description": "The 10 minutes ran out: nothing was sold and the seats went back on sale. Reserve again.",
+          "example": {
+            "error": "This reservation expired; nothing was sold and the seats were released.",
+            "reason": "expired"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Completed or cancelled.",
+          "example": {
+            "error": "this reservation is completed"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel-organizer-reservation",
+      "method": "DELETE",
+      "path": "/v1/events/:id/organizer-reservations/:token",
+      "summary": "Cancel a reservation",
+      "description": "The seats go back on sale. Cancelling twice is fine.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+              "status": "cancelled",
+              "released": true
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already completed.",
+          "example": {
+            "error": "this reservation was completed; it can no longer be cancelled"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "complete-organizer-reservation",
+      "method": "POST",
+      "path": "/v1/events/:id/organizer-reservations/:token/complete",
+      "summary": "Complete a reservation",
+      "description": "Makes the order and its tickets once (idempotent). Each ticket comes with `delivery.url`, a signed link to the live ticket with its rotating door code.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token (rsv_…).",
+          "example": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ"
+        },
+        {
+          "name": "ticket_reservation[stubhub_transaction_id]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your own transaction id (at most 128 letters, digits or . _ - : # /); filter orders by it later.",
+          "example": "SH-88231"
+        },
+        {
+          "name": "ticket_reservation[first_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee first name (at most 60 characters).",
+          "example": "Jane"
+        },
+        {
+          "name": "ticket_reservation[last_name]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee last name.",
+          "example": "Buyer"
+        },
+        {
+          "name": "ticket_reservation[email]",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Attendee email.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[should_send_ticket_email]",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Email the buyer their live-ticket links when the reservation completes (needs an email). Default false: you deliver.",
+          "example": false
+        },
+        {
+          "name": "ticket_reservation[cash_paid]",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
+          "example": 54.0
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "The order. A repeat call answers 200 with the same order.",
+          "example": {
+            "data": {
+              "id": "0d9c8b7a-6f5e-4d3c-9b2a-1f0e9d8c7b6a",
+              "status": "completed",
+              "state": "paid",
+              "ticket_reservation_token": "rsv_Q2xhc3NpY19yZXNlcnZhdGlvbl90b2tlbl9leGFtcGxlMQ",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "confirm_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "calendar_event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "event_title": "Night Market",
+              "first_name": "Jane",
+              "last_name": "Buyer",
+              "email": "jane@example.com",
+              "stubhub_transaction_id": "SH-88231",
+              "external_order_id": "SH-88231",
+              "device_name": "Exos API",
+              "currency": "USD",
+              "subtotal": 50.0,
+              "fees_total": 4.0,
+              "taxes_total": 0.0,
+              "total": 54.0,
+              "cash_paid": 54.0,
+              "order_items": [
+                {
+                  "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "name": "General admission",
+                  "quantity": 2,
+                  "price": 25.0
+                }
+              ],
+              "tickets": [
+                {
+                  "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+                  "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "ticket_type_name": "General admission",
+                  "product_name": "General admission",
+                  "attendee_name": "Jane Buyer",
+                  "status": "active",
+                  "checked_in_at": null,
+                  "delivery": {
+                    "url": "https://tickets.example.com/bridge/t/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d#k=Zm9yX2RvY3NfZXhhbXBsZV9vbmx5X25vdF9hX3JlYWxfa2V5",
+                    "wallet": "from the live ticket page"
+                  }
+                }
+              ],
+              "created_at": "2026-10-31T18:03:00+00:00",
+              "updated_at": "2026-10-31T18:03:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 410,
+          "description": "The 10 minutes ran out: nothing was sold and the seats went back on sale. Reserve again.",
+          "example": {
+            "error": "This reservation expired; nothing was sold and the seats were released.",
+            "reason": "expired"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Cancelled.",
+          "example": {
+            "error": "this reservation was cancelled"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ]
+    }
+  ]
+}

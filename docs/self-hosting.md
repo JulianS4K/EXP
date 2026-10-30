@@ -41,7 +41,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
 `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
 `exos-channel-sync`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
-`exos-marketplace-sales`, `exos-mcp`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
+`exos-marketplace-sales`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
 `exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
 
 ## 3. Secrets (Project settings → Edge functions → Secrets)
@@ -58,6 +58,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `GOOGLE_MAPS_SERVER_KEY` | geocoding | optional |
 | `EXOS_GUEST_IP_SALT` | guest checkout | any long random string |
 | `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync + event mirroring | `on` to allow; each org also switches it on |
+| `EXOS_OAUTH_ISSUER`, `EXOS_OAUTH_DCR` | `exos-oauth`, `exos-mcp` (docs/developer-platform.md) | issuer defaults to `<SUPABASE_URL>/functions/v1/exos-oauth`; dynamic client registration stays off unless `EXOS_OAUTH_DCR=on` |
 | `EXOS_LUMA_ENABLED` | Luma at all | `on` to let Exos call Luma's API (needs the organizer's Luma Plus). Off: Luma is plugged in but never called |
 | `EXOS_LUMA_WRITES` | Luma event mirroring + capacity + comps | `on` to allow; each org also switches it on |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |

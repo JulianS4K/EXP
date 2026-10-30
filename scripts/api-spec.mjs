@@ -38,7 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-export const AUTH = ['api_key'];
+export const AUTH = ['api_key', 'partner_key'];
 export const LOCATIONS = ['path', 'query', 'body', 'header'];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const FILE_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -295,11 +295,14 @@ export function typeSchema(type, enumValues) {
 }
 
 const SECURITY = {
-  api_key: { type: 'http', scheme: 'bearer', bearerFormat: 'sk_live_…', description: 'Organization API key, created in Org settings → Developer.' },
+  api_key: { type: 'http', scheme: 'bearer', bearerFormat: 'sk_live_… / exos_pat_… / exos_oat_…', description: 'Organization API key (Org settings → Developer), personal access token (Profile → Developer) or OAuth access token.' },
+  partner_key: { type: 'apiKey', in: 'query', name: 'shared_key', description: 'Distribution partner key (dk_live_…), one per partner, minted by an organization owner. Also accepted as the X-Shared-Key header or a bearer token.' },
 };
 
 function operation(e, category) {
-  const scopeLine = e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
+  const scopeLine = e.auth === 'partner_key'
+    ? 'Authenticated with a distribution partner key.'
+    : e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
   const op = {
     operationId: e.id,
     summary: e.summary,
