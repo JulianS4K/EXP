@@ -59,6 +59,9 @@ const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const NotFound = lazy(() => import('./views/NotFound'));
+const MyGroups = lazy(() => import('./views/MyGroups'));
+const GroupChat = lazy(() => import('./views/GroupChat'));
+const OrgGroups = lazy(() => import('./views/OrgGroups'));
 const Notifications = lazy(() => import('./views/Notifications'));
 const ResetPassword = lazy(() => import('./views/ResetPassword'));
 const AuthCallback = lazy(() => import('./views/AuthCallback'));
@@ -179,6 +182,9 @@ export default function App() {
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />
+                    <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
+                    <Route path="/groups" element={<MyGroups />} />
+                    <Route path="/groups/:groupId" element={<GroupChat />} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />
