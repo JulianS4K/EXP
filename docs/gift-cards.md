@@ -105,6 +105,31 @@ key)` (idempotent per key, never more than was taken).
 **Refunding a gift card purchase** (Stripe refund of the `buy_gift_card` payment): `exos_commerce_refund` voids what
 is left on the card. Whatever was already spent stays spent.
 
+## Imported cards (mig 20261102110000)
+
+`POST /v1/gift-cards/import` (or Org → Giving tables → Imported gift cards, owner / manager) brings in cards sold
+elsewhere, Gift Up! first: up to 500 a batch, each with its own code (6-64 letters and digits; dashes and spaces
+ignored), balance, optional original value, currency, expiry and recipient. Only hashes of the code are stored
+(`external_code_hash`, and a per-org `code_hash`). A card already imported from the same source (same org, same
+code) is a duplicate and is left alone; a code imported from another source in the same org is refused; a batch
+resent with the same key answers its first result (`exos_gift_card_imports`). Each card's balance is one `issue`
+ledger row.
+
+An imported card pays like any card: `_exos_gift_card_find` looks a code up among the org's imported cards when it
+isn't an Exos code. It has `source = 'import'`, `payment_method = 'external'`, so it **never paid the Exos fee at
+sale** and the fee is owed on what it pays (as for box-office cards, above). A code two organizations both imported
+is only found at that organizer's checkout. Short imported codes are guessable: the 10-a-minute lookup limit applies.
+
+## On reservations (mig 20261102110000)
+
+`POST /v1/events/:id/organizer-reservations/:token/gift-card-redemptions` takes a card's balance for an active
+organizer reservation (at most what is due), `DELETE …/:rid` gives it back. Completing the reservation captures
+it; cancelling it or letting it expire gives it back (trigger on `exos_partner_reservations`). The reservation and
+then the card are locked for every change, so two reservations can't overdraw one card
+(`tests/exos/race_gift_cards.sh`). Card errors answer `{ error }` (422) instead of raising, so guesses count against
+the rate limit. Each redemption records whether the card paid the Exos fee at sale (`fee_paid_at_sale`). Checkout
+still refuses a gift card with PayPal (409).
+
 ## Not covered yet
 
 - A card taken at the door for a gift card sale through Stripe Terminal (box office cards are recorded as

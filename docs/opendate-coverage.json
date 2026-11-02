@@ -763,17 +763,17 @@
    "category": "organizer_ticket_reservations",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions",
-   "status": "planned",
-   "exos": "gift_card_code on exos-checkout",
-   "reason": "Gift cards pay online orders (exos-checkout); not on API reservations yet"
+   "status": "route",
+   "exos": "POST /v1/events/:id/organizer-reservations/:token/gift-card-redemptions",
+   "reason": "Balance held on the reservation; captured on complete, given back on cancel / expiry"
   },
   {
    "category": "organizer_ticket_reservations",
    "method": "DELETE",
    "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "See gift_card_redemptions above"
+   "status": "route",
+   "exos": "DELETE /v1/events/:id/organizer-reservations/:token/gift-card-redemptions/:rid",
+   "reason": "Gives the held amount back"
   },
   {
    "category": "organizer_orders",
@@ -1107,9 +1107,9 @@
    "category": "giving_campaigns",
    "method": "POST",
    "path": "/api/v2/giving_campaigns/{giving_campaign_id}/recurring_donations",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Recurring giving would reuse the membership subscriptions"
+   "status": "route",
+   "exos": "POST /v1/giving-campaigns/:id/recurring-donations",
+   "reason": "Stripe subscription via Checkout; one donation per paid invoice; cancel with DELETE /v1/recurring-donations/:id"
   },
   {
    "category": "refunds",
@@ -2883,41 +2883,41 @@
    "category": "admin_giving_campaigns",
    "method": "POST",
    "path": "/api/v2/admin/giving_campaigns",
-   "status": "planned",
-   "exos": "Org settings → Giving",
-   "reason": "Dashboard only; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/giving-campaigns",
+   "reason": "Per organization with the key's org; created as a draft (Org settings → Giving tables too)"
   },
   {
    "category": "admin_giving_campaigns",
    "method": "PATCH",
    "path": "/api/v2/admin/giving_campaigns/:id",
-   "status": "planned",
-   "exos": "Org settings → Giving",
-   "reason": "Dashboard only; no partner write route yet"
+   "status": "equivalent",
+   "exos": "PATCH /v1/giving-campaigns/:id",
+   "reason": "Per organization with the key's org"
   },
   {
    "category": "admin_giving_campaigns",
    "method": "POST",
    "path": "/api/v2/admin/giving_campaigns/:id/activate",
-   "status": "planned",
-   "exos": "active on (Org settings)",
-   "reason": "Dashboard only; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/giving-campaigns/:id/activate",
+   "reason": "Per organization with the key's org"
   },
   {
    "category": "admin_giving_campaigns",
    "method": "POST",
    "path": "/api/v2/admin/giving_campaigns/:id/complete",
-   "status": "planned",
-   "exos": "active off / ends_at (Org settings)",
-   "reason": "Dashboard only; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/giving-campaigns/:id/complete",
+   "reason": "Per organization; also cancels its monthly gifts in Stripe"
   },
   {
    "category": "admin_giving_campaigns",
    "method": "DELETE",
    "path": "/api/v2/admin/giving_campaigns/:id",
-   "status": "planned",
-   "exos": "Org settings → Giving",
-   "reason": "Dashboard only; no partner write route yet"
+   "status": "equivalent",
+   "exos": "DELETE /v1/giving-campaigns/:id",
+   "reason": "Only with no donations (409: complete it instead)"
   },
   {
    "category": "admin_donations",
@@ -2947,17 +2947,17 @@
    "category": "admin_donations",
    "method": "DELETE",
    "path": "/api/v2/admin/donations/:id",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Offline donations are corrected, not deleted, in the dashboard"
+   "status": "equivalent",
+   "exos": "DELETE /v1/donations/:id",
+   "reason": "Offline donations with no payment only (409 otherwise); kept in the donation ledger"
   },
   {
    "category": "admin_donations",
    "method": "POST",
    "path": "/api/v2/admin/donations/:donation_id/offline_refund",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Offline donation refunds are not recorded yet"
+   "status": "equivalent",
+   "exos": "POST /v1/donations/:id/offline-refund",
+   "reason": "Ledger row, never calls Stripe, idempotent per reference"
   },
   {
    "category": "admin_deals",
@@ -3083,9 +3083,9 @@
    "category": "admin_gift_up_giftcards",
    "method": "POST",
    "path": "/api/v2/admin/gift_up_giftcards/bulk",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Importing legacy gift cards is not built"
+   "status": "equivalent",
+   "exos": "POST /v1/gift-cards/import",
+   "reason": "Generic import of external gift cards (Gift Up! and others); dedupe per org, source and code"
   },
   {
    "category": "admin_membership_products",

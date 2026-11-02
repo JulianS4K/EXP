@@ -86,6 +86,8 @@ const OfferRespond = lazy(() => import('./views/OfferRespond'));
 const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
 const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
 const OrgFans = lazy(() => import('./views/OrgFans'));
+// claude/exos-gap-giving: giving tables (mig 20261102110000).
+const OrgGiving = lazy(() => import('./views/OrgGiving'));
 const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const NotFound = lazy(() => import('./views/NotFound'));
@@ -233,6 +235,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
                     <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
                     <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
+                    <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />
                     <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
                     <Route path="/groups" element={<MyGroups />} />
                     <Route path="/groups/:groupId" element={<GroupChat />} />

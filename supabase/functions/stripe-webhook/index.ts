@@ -53,6 +53,14 @@
 //                    Both API shapes (subscription.current_period_end and
 //                    items.data[].current_period_end; invoice.subscription and
 //                    invoice.parent.subscription_details.subscription) are read.
+//   exos: monthly gifts (mig 20261102110000, _shared/recurringDonation.ts):
+//                    metadata.exos_kind recurring_donation is a commerce order
+//                    (completed -> the plan gets its subscription); invoice.paid
+//                    -> exos_recurring_donation_invoice records one donation per
+//                    invoice (idempotent on the invoice id); invoice.payment_failed
+//                    -> past_due; customer.subscription.updated / .deleted ->
+//                    exos_recurring_donation_sync; a full refund of a later
+//                    monthly charge -> exos_recurring_donation_refund.
 //
 // Fee actuals (mig 20260929131000): after a settled session is fulfilled and
 // its payment recorded, Stripe's actual fee, the platform net, the transfer
@@ -86,7 +94,7 @@ import { recordFeeActuals } from "../_shared/feeActuals.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
 
 // exos: commerce orders (exos-commerce). Stripe metadata.exos_kind values.
-const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership"]);
+const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership", "recurring_donation"]);
 
 // exos: fulfil a settled commerce session; auto-refund one the database refused
 // (sold out pass, amount mismatch). Throws on transient errors (-> 500, retry).
@@ -505,6 +513,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
             }
             break;
           }
+          // exos: a later monthly gift charge (mig 20261102110000).
+          if (obj.object === "charge") {
+            const ch = obj as Stripe.Charge;
+            if (ch.refunded || (ch.amount_refunded ?? 0) >= (ch.amount ?? 0)) {
+              const { data: n, error: rdErr } = await sb.rpc("exos_recurring_donation_refund", { p_payment_intent: pi });
+              if (rdErr && rdErr.code !== "PGRST202") {
+                console.error(`stripe-webhook: monthly gift refund failed for PI ${pi}`, rdErr);
+                return new Response("refund handling error", { status: 500 });
+              }
+              if (Number(n ?? 0) > 0) break;
+            }
+          }
           console.error(`stripe-webhook: ${event.type} — no session for PI ${pi}`);
           break;
         }
@@ -610,6 +630,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
           console.error(`stripe-webhook: membership sync failed for ${sync.p_subscription_id}`, error);
           return new Response("membership sync error", { status: 500 });
         }
+        // exos: monthly gifts (mig 20261102110000). Not one of ours -> ignored in SQL.
+        const gift = event.type === "invoice.paid"
+          ? await sb.rpc("exos_recurring_donation_invoice", recurringInvoiceArgs(event, "paid"))
+          : await sb.rpc("exos_recurring_donation_sync", {
+            p_subscription_id: sync.p_subscription_id, p_event: sync.p_event, p_status: sync.p_status,
+          });
+        if (gift.error && gift.error.code !== "PGRST202") {
+          console.error(`stripe-webhook: monthly gift sync failed for ${sync.p_subscription_id}`, gift.error);
+          return new Response("monthly gift sync error", { status: 500 });
+        }
+        break;
+      }
+
+      // exos: a monthly gift's charge failed (Stripe retries on its schedule).
+      case "invoice.payment_failed": {
+        const args = recurringInvoiceArgs(event, "failed");
+        if (!args.p_subscription_id && !args.p_recurring_id) break;
+        const { error } = await sb.rpc("exos_recurring_donation_invoice", args);
+        if (error && error.code !== "PGRST202") {
+          console.error(`stripe-webhook: monthly gift failure record failed for ${args.p_invoice_id}`, error);
+          return new Response("monthly gift sync error", { status: 500 });
+        }
         break;
       }
 
@@ -655,5 +697,37 @@ function membershipSyncArgs(event: Stripe.Event): {
     p_status: typeof s.status === "string" ? s.status : null,
     p_period_end: iso(s.current_period_end ?? s.items?.data?.[0]?.current_period_end),
     p_cancel_at_period_end: typeof s.cancel_at_period_end === "boolean" ? s.cancel_at_period_end : null,
+  };
+}
+
+// exos: exos_recurring_donation_invoice arguments for invoice.paid /
+// invoice.payment_failed. The plan id comes from the subscription metadata
+// Stripe copies onto the invoice (both API shapes); the SQL falls back to the
+// subscription id, and ignores an invoice that is neither.
+function recurringInvoiceArgs(event: Stripe.Event, kind: "paid" | "failed") {
+  // deno-lint-ignore no-explicit-any
+  const inv = event.data.object as any;
+  const sub = typeof inv.subscription === "string" ? inv.subscription
+    : inv.subscription?.id ?? inv.parent?.subscription_details?.subscription ?? null;
+  const meta = inv.subscription_details?.metadata ?? inv.parent?.subscription_details?.metadata ?? {};
+  const rid = typeof meta?.exos_recurring_id === "string" && /^[0-9a-f-]{36}$/i.test(meta.exos_recurring_id)
+    ? meta.exos_recurring_id : null;
+  const pi = typeof inv.payment_intent === "string" ? inv.payment_intent : inv.payment_intent?.id ?? null;
+  const line = inv.lines?.data?.[0];
+  const end = line?.period?.end ?? inv.period_end;
+  return {
+    p_recurring_id: rid,
+    p_subscription_id: typeof sub === "string" ? sub : null,
+    p_customer_id: typeof inv.customer === "string" ? inv.customer : inv.customer?.id ?? null,
+    p_invoice_id: String(inv.id ?? ""),
+    p_payment_intent: pi,
+    p_amount_cents: kind === "paid" ? Number(inv.amount_paid ?? 0) : Number(inv.amount_due ?? 0),
+    p_currency: typeof inv.currency === "string" ? inv.currency : null,
+    p_period_end: typeof end === "number" ? new Date(end * 1000).toISOString() : null,
+    p_event: kind,
+    p_event_key: event.id,
+    p_failure: kind === "failed"
+      ? `payment failed (attempt ${Number(inv.attempt_count ?? 1)})`
+      : null,
   };
 }

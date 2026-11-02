@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Gift, HeartHandshake } from 'lucide-react';
 import {
-  checkoutDonationOption, formatGiftCardCode, giftCardCheckOk, majorToCents, normalizeGiftCardCode,
+  checkoutDonationOption, formatGiftCardCode, giftCardCheckOk, majorToCents, normalizeAnyGiftCardCode, normalizeGiftCardCode,
   roundUpDonationCents, type GivingCampaign,
 } from '../lib/commerce';
 import { formatCurrency } from '../lib/utils';
@@ -44,11 +44,15 @@ export default function CheckoutExtras({ orgId, currency, orderCents, onChange }
     return () => { live = false; };
   }, [orgId, currency]);
 
-  const codeOk = code.trim() === '' || giftCardCheckOk(code);
+  // An Exos code (check character right) or an imported one (mig 20261102110000:
+  // 6-64 letters and digits, kept as the other provider issued it). A 16-letter
+  // Exos-looking code with a wrong check character is still flagged.
+  const exosShaped = normalizeGiftCardCode(code) !== null;
+  const codeOk = code.trim() === '' || giftCardCheckOk(code) || (!exosShaped && normalizeAnyGiftCardCode(code) !== null);
   useEffect(() => {
     const v: CheckoutExtrasValue = {};
-    const norm = normalizeGiftCardCode(code);
-    if (norm && giftCardCheckOk(norm)) v.giftCardCode = norm;
+    const norm = normalizeAnyGiftCardCode(code);
+    if (norm && (giftCardCheckOk(norm) || normalizeGiftCardCode(norm) === null)) v.giftCardCode = norm;
     if (campaign && donation && donation >= 100) v.donation = { campaign_id: campaign.id, amount_cents: donation };
     onChange(v);
     // eslint-disable-next-line react-hooks/exhaustive-deps
