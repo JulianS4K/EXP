@@ -4,7 +4,8 @@
 // leaderboard of tickets + gross per promoter. Every free and paid ticket
 // bought through a promoter's links carries their code. Commissions (mig
 // 20260926020000): per-promoter terms, owed / paid, and recording payouts, in
-// PromoterCommissionPanel.
+// PromoterCommissionPanel. Mig 20261102150000: step terms, idempotent
+// settling, and Stripe payouts to promoters behind the owner's switch here.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -18,10 +19,11 @@ import { typedCode } from '../lib/shareLinks';
 import { cleanHandle, type SocialHandles } from '../lib/socialTags';
 import { publicUrl, formatCurrency } from '../lib/utils';
 import {
-  codeFromName, linkInBioPath, listPromoterEventTerms, listPromoters, orgPromoterCommissions, orgPromoterStats,
-  setPromoterStatus, upsertPromoter,
-  type Promoter, type PromoterCommissionSummary, type PromoterEventTerms, type PromoterStat,
+  codeFromName, getPromoterStripeTransfers, linkInBioPath, listPromoterEventTerms, listPromoterPayoutAccounts, listPromoterSteps,
+  listPromoters, orgPromoterCommissions, orgPromoterStats, setPromoterStatus, setPromoterStripeTransfers, upsertPromoter,
+  type Promoter, type PromoterCommissionSummary, type PromoterEventTerms, type PromoterStat, type PromoterStepRow,
 } from '../lib/promoters';
+import { stepFrom } from '../lib/commissions';
 
 export default function OrgPromoters() {
   const { orgId } = useParams();
@@ -42,12 +44,17 @@ export default function OrgPromoters() {
   const [overrides, setOverrides] = useState<PromoterEventTerms[]>([]);
   const [events, setEvents] = useState<{ id: string; title: string }[]>([]);
   const [canWrite, setCanWrite] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [stripeOn, setStripeOn] = useState(false);
+  const [steps, setSteps] = useState<Map<string, PromoterStepRow>>(new Map());
+  const [accounts, setAccounts] = useState<Map<string, boolean>>(new Map());
   const [openId, setOpenId] = useState<string | null>(null);
   useEffect(() => {
     if (orgId) getOrganization(orgId).then((o) => setOrgSlug(o?.slug ?? null)).catch(() => {});
     if (orgId) listOrgEvents(orgId).then((es) => setEvents(es.map((e) => ({ id: e.id, title: e.title })))).catch(() => {});
     if (orgId && user?.uid) {
-      getUserRoleInOrg(orgId, user.uid).then((r) => setCanWrite(r === 'owner' || r === 'manager')).catch(() => setCanWrite(false));
+      getUserRoleInOrg(orgId, user.uid).then((r) => { setCanWrite(r === 'owner' || r === 'manager'); setIsOwner(r === 'owner'); })
+        .catch(() => { setCanWrite(false); setIsOwner(false); });
     }
   }, [orgId, user?.uid]);
 
@@ -64,6 +71,11 @@ export default function OrgPromoters() {
       ]);
       setCommissions(cs);
       setOverrides(ov);
+      // Steps + Stripe payouts need mig 20261102150000 (each read falls back quietly).
+      const [st2, on, acc] = await Promise.all([listPromoterSteps(orgId), getPromoterStripeTransfers(orgId), listPromoterPayoutAccounts(orgId)]);
+      setSteps(new Map(st2.map((x) => [x.promoterId, x])));
+      setStripeOn(on);
+      setAccounts(acc);
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not load promoters.' });
     } finally {
@@ -149,6 +161,30 @@ export default function OrgPromoters() {
         </p>
       </form>
 
+      <div className="bg-[#111] border border-white/10 p-4 mb-8 flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="type text-[10px] uppercase tracking-widest text-brand-primary">Pay promoters through Stripe</p>
+          <p className="text-[11px] text-white/60">
+            {stripeOn
+              ? 'On. Promoters set up a Stripe payout account from their kit link; when you pay them here, the commission is taken from what Stripe paid you for those orders and sent to their bank.'
+              : 'Off. You pay promoters yourself (Venmo, cash) and record it here.'}
+            {!isOwner && ' Only the org owner can change this.'}
+          </p>
+        </div>
+        {isOwner && (
+          <button
+            onClick={async () => {
+              try { await setPromoterStripeTransfers(orgId!, !stripeOn); setStripeOn(!stripeOn); toast({ kind: 'success', message: !stripeOn ? 'Stripe payouts to promoters are on.' : 'Stripe payouts to promoters are off.' }); }
+              catch (err: any) { toast({ kind: 'error', message: err?.message || 'Could not change the setting.' }); }
+            }}
+            role="switch" aria-checked={stripeOn}
+            className={`px-4 py-2 text-[11px] font-black uppercase ${stripeOn ? 'bg-brand-primary text-black' : 'border border-white/20 text-white'}`}
+          >
+            {stripeOn ? 'Turn off' : 'Turn on'}
+          </button>
+        )}
+      </div>
+
       <h2 className="disp text-lg uppercase tracking-wide text-white mb-3 flex items-center gap-2"><Trophy className="w-4 h-4 text-brand-primary" /> Leaderboard</h2>
       {loading ? (
         <p className="type text-[11px] uppercase tracking-widest text-white/40">Loading…</p>
@@ -209,6 +245,9 @@ export default function OrgPromoters() {
                   events={events}
                   canWrite={canWrite}
                   onChanged={load}
+                  step={stepFrom(steps.get(p.id)?.after, steps.get(p.id)?.rateBps, steps.get(p.id)?.flatCents)}
+                  stripeOn={stripeOn}
+                  accountReady={accounts.get(p.id) === true}
                 />
               )}
               </div>

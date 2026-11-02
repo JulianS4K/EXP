@@ -10,6 +10,7 @@ import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { fetchTicketLink } from '../lib/developerPlatform';
 import { linkKeyFromHash, nextRefreshMs, stateMessage, type LinkView } from '../lib/ticketLink';
+import ClaimRsvpTicket from '../components/ClaimRsvpTicket';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -90,6 +91,8 @@ export default function LiveTicketLink() {
             <button type="button" className="flex-1 border border-white/20 px-3 py-2 text-[11px] uppercase tracking-widest" onClick={() => wallet('google')}>Google Wallet</button>
           </div>
           {walletMsg && <p className="text-[11px] text-amber-400">{walletMsg}</p>}
+          {/* Phone-RSVP tickets move into an account from here (mig 20261102150000). */}
+          <ClaimRsvpTicket ticketId={ticketId} linkKey={key} />
         </>
       )}
     </Frame>

@@ -126,7 +126,17 @@ tiers and discount codes, into a series of dates.
   - Add each promoter once and send them their private portal link. It shows their tickets and
     sales and has their kit.
   - Pause a promoter, or make a new link if one leaks.
-  - The leaderboard ranks everyone.
+  - The leaderboard ranks everyone. Promoters see it too on their portal: names and tickets, no money.
+  - **Commission.** A percent and/or a flat amount per paid ticket, after tax, with an optional **step**
+    ("10%, then 15% after 20 tickets"; counted per event). An event can have its own terms, step
+    included. Promoters watch their sales, earnings and payouts update live on their portal.
+  - **Paying them.** Pick the sales and record a payout you sent (Venmo, cash), or, once the org
+    **owner** turns on **Pay promoters through Stripe**, send it through Stripe: the promoter sets up a
+    free Stripe payout account from their portal, and the commission is taken back from what Stripe
+    paid you for those orders and sent to their bank. Only online Stripe sales can go this way, and
+    never for more than you received for them; door, PayPal and staff-issued sales are paid by hand.
+    Each payout is saved once even if you click twice. A Stripe payout that didn't go out can be sent
+    again or cancelled (its sales become unpaid again). Details: `docs/payouts.md`.
 - **Per-event campaigns.** Name a campaign and that becomes a promoter code.
   - Send each promoter their **kit link** (`/promoter/:eventId/:code`, no login needed). It gives
     them a buy-now link with the cart pre-filled, a story poster, and tracked links for Instagram,
@@ -641,6 +651,30 @@ Add lists in **Edit event → Venue & seating → Check-in lists** when the door
 - While online, the door refreshes its list every minute with only what changed since the last
   refresh, and downloads the whole list every 10 minutes (or when you tap **Download for offline**).
 
+### Phone RSVP (free events)
+
+Event report → **RSVP by phone** (owners and managers; events with a free ticket type). Turn it on, pick
+the free ticket type and how many plus-ones a guest may bring, and share the RSVP link
+(`/rsvp/:eventId`; the event page also shows **RSVP with your phone**, and `?promoter=` credits a
+promoter as usual).
+
+- The guest types a name and a mobile number. Exos texts them a 6-digit code from **your** Twilio or
+  Telnyx number (Integrations; sending must be live, the same switch as your text campaigns). If you
+  can't text, the page asks for an email and sends the code there. Neither: phone RSVP says it isn't
+  available.
+- The code works for 10 minutes and 5 tries. Then the guest gets their ticket link by text (and on
+  screen): the live QR code that changes every 30 seconds, no app, no account. Each plus-one gets
+  their own link to forward.
+- One RSVP per number per event: asking again resends the same tickets. Capacity, quotas and the
+  event cap apply; when it's full the page offers the waitlist. Numbers that replied STOP to your
+  texts get the code by email instead.
+- Limits stop bots: a few codes per number, per network and per event every few minutes, and a hidden
+  form field only bots fill in.
+- Signed in to Exos later, a guest can **Save to my Exos account** from the ticket link; the old link
+  stops working and the ticket shows in My tickets (transfers, wallet passes and the door as usual).
+- The panel lists who RSVP'd (name, plus-ones, last 4 digits). Only owners and managers see guests'
+  numbers.
+
 ### End-of-night door summary
 
 The event report's **Overview** has an **End-of-night door summary** (owners and managers also get a
@@ -655,6 +689,15 @@ The event report's **Overview** has an **End-of-night door summary** (owners and
 **Copy** puts it on the clipboard as plain text, for a message to the team or the venue. **CSV**
 downloads the same numbers. It has no buyer names or emails. Owners, managers, finance and the event's
 door staff can see it.
+
+### Money so far
+
+The event report's **Overview** starts with **Money so far** (owners, managers, finance), refreshed every
+minute: what came in online (gross, fees, refunds, your net, and how much in the last hour), the door
+(cash, card, tips), promoter commission still owed, and a take-home number (online net plus door, less
+commission owed). It also counts tickets (paid, free, by phone, comps) and check-ins. **Copy** gives a
+text for the group chat. Your Stripe money is already in your Stripe account; **Get paid now** on the
+Payouts page sends some of it to your bank today where Stripe allows it (below).
 
 ## 6. After a sale
 
@@ -693,6 +736,11 @@ them anyway).
   orders it covers and any clawbacks (a cancelled order that was already paid, taken off a later
   payout). **Export CSV** gives one row per payout line. Accounting-software export (QuickBooks, Xero)
   isn't built.
+- **Get paid now** (same page, org **owner** only, when the operator has switched it on): Stripe
+  normally pays your balance out on its schedule (in the US, usually two business days). Where Stripe
+  offers **Instant Payouts** for your account (an eligible debit card or bank, settled funds), you can
+  send part of the balance now. The page shows what's available and Stripe's fee (about 1.5%, at least
+  $0.50) before you confirm; the fee comes out of your Stripe balance. At most 5 a day.
 - Both screens are read-only. If your database doesn't have the money views yet, the Money section and
   the Payouts page stay hidden or say they aren't available.
 

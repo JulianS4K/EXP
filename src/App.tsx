@@ -26,6 +26,7 @@ const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
 const OrgArtists = lazy(() => import('./views/OrgArtists'));
 const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
+const PhoneRsvp = lazy(() => import('./views/PhoneRsvp'));
 const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
 const TicketDetail = lazy(() => import('./views/TicketDetail'));
@@ -196,6 +197,7 @@ export default function App() {
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
+                    <Route path="/rsvp/:eventId" element={<PhoneRsvp />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
                     <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
                     <Route path="/orgs/:orgId/artists" element={<OrgArtists />} />

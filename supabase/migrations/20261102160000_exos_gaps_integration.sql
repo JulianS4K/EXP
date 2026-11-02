@@ -2,9 +2,9 @@
 -- Migration 20261102160000 — Exos: gaps integration (2026-11-02)
 -- ============================================================================
 -- The gaps branches (memberships 20261102100000, giving 110000, finance
--- 120000, templates 130000, orders 140000) were written in parallel. None of
--- them redefines or patches a function another one also changes, so nothing
--- here undoes a sibling. This migration holds one security fix found while
+-- 120000, templates 130000, orders 140000) and the promoter wedge (150000)
+-- were written in parallel. None of them redefines or patches a function
+-- another one also changes, so nothing here undoes a sibling. This migration holds one security fix found while
 -- merging them.
 --
 -- 1. exos_delete_my_account: email-keyed effects only for a confirmed email.

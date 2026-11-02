@@ -157,6 +157,8 @@ BEGIN
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',
        'exos_promoter_limit_flags', 'exos_promoter_note_limit_flag', 'exos_promoter_add_guest',
        'exos_promoter_remove_guest', 'exos_promoter_set_guest_access_needs', 'exos_promoter_set_socials',
+       -- the org's promoters ranked by tickets: names + counts, kit token (mig 20261102150000)
+       'exos_promoter_leaderboard',
        -- signup forms (mig 20261031120000): an active form's public text, and
        -- the 64-hex confirm / unsubscribe tokens; none returns fan data
        'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',

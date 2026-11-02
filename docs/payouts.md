@@ -85,6 +85,86 @@ A payout left in `sending` by a crash is safe to resend: Stripe dedupes on the i
   the bank account, so top up the Stripe balance (or pay marketplace remittances into it) before going live.
 - Go live: set `EXOS_PAYOUTS_LIVE=true` after one dry-run looks right.
 
+## How Exos checkout money reaches organizers
+
+Exos checkouts are **destination charges**: the buyer pays the platform account, Stripe keeps the
+application fee (the Exos fee plus the card-fee estimate) on the platform and transfers the rest to the
+organizer's connected account in the same moment (`exos_order_payments.transfer_id`). From there Stripe
+pays the connected account's bank on the account's own payout schedule (in the US, daily on a two-day
+rolling basis by default; Standard accounts set their schedule in their Stripe dashboard). Exos never
+holds that money. The pieces below are built on top of that model and don't change it.
+
+## Instant payouts (organizers)
+
+Migration `20261102150000_exos_promoter_wedge.sql`, function `exos-instant-payouts`, pure rules
+`supabase/functions/_shared/payouts/instant.ts`. Tests: `tests/exos/test_promoter_wedge.sql` (PW10),
+`src/lib/promoterWedge.test.ts`. UI: **Get paid now** on `/orgs/:orgId/payouts` (`InstantPayoutPanel`).
+
+- **Who:** the org **owner** only (the function checks the JWT and membership; the SQL re-checks).
+- **What:** a Stripe Instant Payout (`POST /v1/payouts`, `method: instant`, `Stripe-Account: <org's
+  connected account>`) from the account's `instant_available` balance. Stripe decides eligibility (an
+  instant-capable debit card or bank, settled funds); the quote says so when there's nothing to send.
+- **Fee:** shown before confirming. Estimate = max(`EXOS_INSTANT_PAYOUT_FEE_MIN_CENTS` (50),
+  ceil(amount x `EXOS_INSTANT_PAYOUT_FEE_BPS` (150) / 10000)); Stripe's actual fee on the payout is the
+  real one and comes out of the account balance, so the amount offered is capped so amount + fee fits.
+- **Ledger:** `exos_org_instant_payouts`, one row per request, recorded before Stripe is called
+  (`exos_instant_payout_begin`, idempotent per `(org, key)`, at most 5 a day), then `sent` with the
+  payout id or `failed` with Stripe's message. The Stripe call carries the same idempotency key. Owner and
+  finance read their org's rows (RLS).
+- **Switch:** off unless `EXOS_INSTANT_PAYOUTS=on`; the panel hides when off.
+- **Account type:** this works for connected accounts whose payouts the platform may manage (Express /
+  Custom, `EXOS_CONNECT_ACCOUNT_TYPE=express`). A Standard account manages its own payouts, and Stripe may
+  refuse the call; the panel shows Stripe's message. Operator decision: whether to move new orgs to Express.
+
+## Promoter payouts
+
+Same migration; function `exos-promoter-payouts`; pure rules
+`supabase/functions/_shared/payouts/promoterTransfers.ts`. Tests: PW1-PW9, `src/lib/promoterWedge.test.ts`.
+The commission ledger itself is `20260926020000` (accrual per paid ticket, reversal on refund,
+clawback netting).
+
+- **Terms:** percent and/or flat per ticket, an optional **step** after N tickets at an event
+  (`exos_set_promoter_step`), per-event overrides that replace the whole default. A ticket's place is
+  counted when it accrues, under a lock per promoter and event.
+- **Settle** (`exos_settle_promoter`, owner / manager): the selected accrued sales of one currency, less
+  outstanding clawbacks; the amount must match. Idempotent per `(promoter, key)`. `via = 'manual'` records
+  money paid outside Exos (as `exos_record_promoter_payout` did); `via = 'stripe'` creates a payout in
+  `transfer_status = 'pending'`.
+- **Stripe mode needs** the org owner's switch (`exos_org_promoter_payouts.stripe_transfers`, set with
+  `exos_set_promoter_stripe_transfers`) and a promoter payout account with the `transfers` capability
+  active (`exos_promoter_stripe_accounts`). The promoter creates it from their portal: `POST
+  /exos-promoter-payouts/onboard` (kit token) makes a Stripe **Express** account (idempotency key per
+  promoter) and returns the onboarding link; `/status` refreshes the state on return.
+- **Funding (the cap):** the settle plans `exos_promoter_payout_funding` lines, one per order the
+  commission is taken from. Every selected sale must come from a Stripe order with a succeeded payment and
+  a transfer id (door, PayPal and staff-issued sales are paid manually). Per order, the line is at most the
+  selected commission from that order **and** at most what the organizer still holds from it: amount -
+  application fee - succeeded refunds - funding already planned or taken by other payouts. The lines add up
+  to the payout amount, or the settle is refused. So Exos never transfers more than the commission the
+  organizer received.
+- **Send** (`POST /exos-promoter-payouts/send`, owner / manager JWT): `exos_promoter_transfer_claim` leases
+  the payout (re-checks the role and the switch, refuses if the lines don't add up), then for each
+  planned line a **transfer reversal** of the organizer's order transfer (key `exos-pcf:<payout>:<order>`),
+  then one **transfer** to the promoter's account (key `exos-pct:<payout>`, `transfer_group
+  exos-promoter-payout-<id>`). Marked `sent` only with the transfer id and every line taken; any Stripe
+  error marks `failed` with the message. Retrying is safe: the keys make each call happen once.
+- **Dry run by default:** unless `EXOS_PROMOTER_TRANSFERS=on` a send records `dry_run` and moves nothing.
+- **Cancel** (`/cancel`): a Stripe payout not yet `sent` can be cancelled. Money already taken from the
+  organizer goes back to their connected account first (one transfer, key `exos-pcr:<payout>`); then
+  `exos_promoter_payout_cancel` releases the lines, returns the sales to unpaid and re-opens the
+  clawbacks it had netted.
+- **What the promoter sees** (`exos_promoter_earnings`, refreshed every 30 seconds on `/p/:token`): owed,
+  paid, on its way (a Stripe payout not yet sent), their sales and per-event terms, and payouts with status.
+- **Refunds after a payout** are clawbacks, netted from the next payout as before; a Stripe payout's
+  amount is already net of them.
+
+Operator setup (all operator-gated): apply `20261102150000`; deploy `exos-promoter-payouts`,
+`exos-instant-payouts` and `exos-rsvp` with `--no-verify-jwt` (they check JWTs / tokens themselves and
+answer CORS only for `EXOS_REDIRECT_ORIGINS`, except `exos-rsvp`, which is public like `exos-signup`);
+secrets `STRIPE_SECRET_KEY`, `EXOS_REDIRECT_ORIGINS`, `EXOS_APP_URL`, `EXOS_GUEST_IP_SALT`; switches
+`EXOS_PROMOTER_TRANSFERS`, `EXOS_INSTANT_PAYOUTS` (both off by default). Stripe Connect must allow Express
+accounts for promoters on the platform.
+
 ## Disputes (chargebacks)
 
 Exos checkouts are destination charges, so a chargeback is opened against the **Exos platform's** Stripe account:
