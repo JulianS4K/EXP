@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 140 | 30.8% |
-| equivalent | 209 | 45.9% |
-| **covered (route + equivalent)** | **349** | **76.7%** |
+| route | 143 | 31.4% |
+| equivalent | 217 | 47.7% |
+| **covered (route + equivalent)** | **360** | **79.1%** |
 | not_applicable | 58 | 12.7% |
-| planned | 48 | 10.5% |
+| planned | 37 | 8.1% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **66** of the 270 rows in the route table
+Exos routes beyond Opendate: **70** of the 285 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -52,7 +52,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | promo_codes | 6 | 5 | 1 | 0 | 0 |
 | tickets | 7 | 1 | 3 | 2 | 1 |
 | orders | 8 | 0 | 3 | 2 | 3 |
-| organizer_ticket_reservations | 7 | 5 | 0 | 0 | 2 |
+| organizer_ticket_reservations | 7 | 7 | 0 | 0 | 0 |
 | organizer_orders | 2 | 0 | 2 | 0 | 0 |
 | guest_lists | 5 | 0 | 4 | 0 | 1 |
 | ticket_reservations | 2 | 2 | 0 | 0 | 0 |
@@ -64,7 +64,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | membership_reservations | 3 | 0 | 0 | 3 | 0 |
 | membership_products | 7 | 7 | 0 | 0 | 0 |
 | gift_card_sales | 4 | 1 | 3 | 0 | 0 |
-| giving_campaigns | 5 | 2 | 2 | 0 | 1 |
+| giving_campaigns | 5 | 3 | 2 | 0 | 0 |
 | refunds | 2 | 0 | 2 | 0 | 0 |
 | settlements | 1 | 1 | 0 | 0 | 0 |
 | finance_items | 4 | 3 | 1 | 0 | 0 |
@@ -132,11 +132,11 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_api_keys | 3 | 0 | 3 | 0 | 0 |
 | admin_fans | 5 | 0 | 5 | 0 | 0 |
 | admin_organizations | 5 | 0 | 0 | 5 | 0 |
-| admin_giving_campaigns | 7 | 0 | 2 | 0 | 5 |
-| admin_donations | 5 | 0 | 3 | 0 | 2 |
+| admin_giving_campaigns | 7 | 0 | 7 | 0 | 0 |
+| admin_donations | 5 | 0 | 5 | 0 | 0 |
 | admin_deals | 5 | 0 | 5 | 0 | 0 |
 | admin_event_series | 8 | 0 | 8 | 0 | 0 |
-| admin_gift_up_giftcards | 3 | 0 | 2 | 0 | 1 |
+| admin_gift_up_giftcards | 3 | 0 | 3 | 0 | 0 |
 | admin_membership_products | 7 | 0 | 7 | 0 | 0 |
 | admin_memberships | 5 | 0 | 5 | 0 | 0 |
 | admin_external_identities | 2 | 0 | 0 | 2 | 0 |
@@ -161,11 +161,8 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | orders | `PUT /api/v2/confirms/{confirm_id}/orders/{id}` | Order edits (buyer details) are dashboard actions; no API write yet |
 | orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/send_receipt` | Receipts are mailed at fulfilment; a resend is a dashboard action, not an API route yet |
 | orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/check_out` | Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet |
-| organizer_ticket_reservations | `POST /api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions` | Gift cards pay online orders (exos-checkout); not on API reservations yet |
-| organizer_ticket_reservations | `DELETE /api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions/{id}` | See gift_card_redemptions above |
 | guest_lists | `POST /api/v2/confirms/{confirm_id}/guest_list_preview` | Pasted-names preview is client-side in the dashboard |
 | fans | `GET /api/v2/confirms/{confirm_id}/fans/recommendations` | No recommendation model yet (docs/fans.md) |
-| giving_campaigns | `POST /api/v2/giving_campaigns/{giving_campaign_id}/recurring_donations` | Recurring giving would reuse the membership subscriptions |
 | v3_budgets | `GET /api/v2/v3_deal_brackets` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
 | v3_budgets | `GET /api/v2/v3_deal_brackets/{id}` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
 | v3_budgets | `POST /api/v2/v3_deal_brackets` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
@@ -178,14 +175,6 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_events | `DELETE /api/v2/admin/confirms/{id}` | Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API |
 | admin_reporting_rows | `GET /api/v2/admin/reporting_rows` | Order reporting rows (a flat export) are the dashboard CSV exports; no API route yet |
 | admin_reporting_rows | `GET /api/v2/admin/reporting_rows/{id}` | See reporting_rows |
-| admin_giving_campaigns | `POST /api/v2/admin/giving_campaigns` | Dashboard only; no partner write route yet |
-| admin_giving_campaigns | `PATCH /api/v2/admin/giving_campaigns/:id` | Dashboard only; no partner write route yet |
-| admin_giving_campaigns | `POST /api/v2/admin/giving_campaigns/:id/activate` | Dashboard only; no partner write route yet |
-| admin_giving_campaigns | `POST /api/v2/admin/giving_campaigns/:id/complete` | Dashboard only; no partner write route yet |
-| admin_giving_campaigns | `DELETE /api/v2/admin/giving_campaigns/:id` | Dashboard only; no partner write route yet |
-| admin_donations | `DELETE /api/v2/admin/donations/:id` | Offline donations are corrected, not deleted, in the dashboard |
-| admin_donations | `POST /api/v2/admin/donations/:donation_id/offline_refund` | Offline donation refunds are not recorded yet |
-| admin_gift_up_giftcards | `POST /api/v2/admin/gift_up_giftcards/bulk` | Importing legacy gift cards is not built |
 | admin_imported_ledger_entries | `GET /api/v2/admin/imported_ledger_entries` | Importing accounting ledgers is not built |
 | admin_imported_ledger_entries | `POST /api/v2/admin/imported_ledger_entries/bulk` | Importing accounting ledgers is not built |
 | admin_imported_ledger_entries | `DELETE /api/v2/admin/imported_ledger_entries/{id}` | Importing accounting ledgers is not built |

@@ -139,6 +139,7 @@ import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
+import { GIVING_ROUTES, handleGiving } from "./giving.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
@@ -197,7 +198,7 @@ const GIFT_CARD_COLS =
   "issued_by, pos_drawer_id, expires_at, created_at";
 const CAMPAIGN_COLS =
   "id, name, slug, description, currency, goal_cents, starts_at, ends_at, active, checkout_add_on, round_up, " +
-  "suggested_cents, created_at";
+  "suggested_cents, created_at, completed_at";
 const MEMBERSHIP_PRODUCT_COLS =
   "id, name, price_cents, currency, billing, duration_days, discount_percent, presale, free_tickets_per_period, " +
   "guest_allowance, household_seats, giftable, active, status, archived_at, created_at";
@@ -433,6 +434,12 @@ const PLATFORM_ROUTES = new Set([
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
+  if (GIVING_ROUTES.has(route.id)) {
+    return await handleGiving(route, {
+      sb, orgId, credId: c.cred.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
@@ -657,17 +664,22 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       const ids = list.map((x) => x.id);
       const totals = new Map<string, { raised_cents: number; donation_count: number }>();
       if (ids.length > 0) {
-        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents")
+        // Net of offline refunds (refunded_cents, mig 20261102110000).
+        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents, refunded_cents")
           .eq("org_id", orgId).eq("status", "received").in("campaign_id", ids);
         if (dErr) throw dErr;
-        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number }[]) {
+        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number; refunded_cents?: number }[]) {
           const t = totals.get(d.campaign_id) ?? { raised_cents: 0, donation_count: 0 };
-          t.raised_cents += d.amount_cents;
+          t.raised_cents += Math.max(0, d.amount_cents - (d.refunded_cents ?? 0));
           t.donation_count += 1;
           totals.set(d.campaign_id, t);
         }
       }
-      const out = list.map((x) => ({ ...x, ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }) }));
+      const out = list.map((x) => ({
+        ...x,
+        status: (x as { completed_at?: string | null }).completed_at ? "completed" : (x as { active?: boolean }).active ? "active" : "draft",
+        ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }),
+      }));
       if (route.id === "get-giving-campaign") {
         if (out.length === 0) throw new ApiError(404, "campaign not found");
         return { data: out[0] };

@@ -1,0 +1,1694 @@
+{
+  "file": "giving-writes",
+  "name": "Giving and gift card writes",
+  "order": 41,
+  "description": "Run giving campaigns (create, edit, activate, complete, delete), start and cancel donors' monthly gifts (Stripe subscriptions), delete an offline donation or record a refund paid outside Stripe, import gift cards sold elsewhere (Gift Up! and others), and apply gift cards to organizer reservations. Amounts ending in `_cents` are integers in the currency's minor unit. Campaign, donation, monthly-gift and import routes need `commerce:write` (`commerce:read` to list monthly gifts); gift cards on reservations need `tickets:write`, like the reservations themselves. These writes need an organization API key.",
+  "endpoints": [
+    {
+      "id": "create-giving-campaign",
+      "method": "POST",
+      "path": "/v1/giving-campaigns",
+      "summary": "Create a giving campaign",
+      "description": "Creates a campaign as a draft: it takes no gifts until POST /v1/giving-campaigns/{id}/activate. The body may be wrapped as {\"giving_campaign\": {...}}; an unknown field is a 400.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Campaign name, 1-120 characters (required to create). Opendate's `title` works too.",
+          "example": "Roof fund"
+        },
+        {
+          "name": "slug",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "URL slug, unique in the organization (default: from the name).",
+          "example": "roof-fund"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 5000 characters."
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "An https image URL."
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Three-letter currency, default usd. Fixed once the campaign has donations.",
+          "example": "usd"
+        },
+        {
+          "name": "goal_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Goal in minor units (0 = no goal). Opendate's `goal` in major units works too.",
+          "example": 500000
+        },
+        {
+          "name": "starts_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When the campaign opens (optional)."
+        },
+        {
+          "name": "ends_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When it closes (optional)."
+        },
+        {
+          "name": "active",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Taking gifts. A campaign created here starts as a draft (false); activate it with POST …/activate.",
+          "example": false
+        },
+        {
+          "name": "suggested_cents",
+          "location": "body",
+          "type": "integer[]",
+          "required": false,
+          "description": "Up to 8 suggested amounts in minor units.",
+          "example": [
+            1500,
+            3000
+          ]
+        },
+        {
+          "name": "cover_fees",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer donors to cover the card fees.",
+          "example": true
+        },
+        {
+          "name": "cover_fees_bps",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The cover-the-fees top-up in basis points (0-1000).",
+          "example": 300
+        },
+        {
+          "name": "checkout_add_on",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer it as add-a-donation at ticket checkout.",
+          "example": false
+        },
+        {
+          "name": "round_up",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer round-up at ticket checkout.",
+          "example": false
+        },
+        {
+          "name": "tax_receipt_text",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The receipt text (legal name, charity status, tax id)."
+        }
+      ],
+      "request_example": {
+        "giving_campaign": {
+          "name": "Roof fund",
+          "goal_cents": 500000,
+          "suggested_cents": [
+            1500,
+            3000
+          ]
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "name": "Roof fund",
+              "slug": "roof-fund",
+              "description": "A new roof for the hall.",
+              "image_url": null,
+              "currency": "usd",
+              "goal_cents": 500000,
+              "starts_at": null,
+              "ends_at": null,
+              "active": false,
+              "status": "draft",
+              "completed_at": null,
+              "suggested_cents": [
+                1500,
+                3000
+              ],
+              "cover_fees": true,
+              "cover_fees_bps": 300,
+              "checkout_add_on": false,
+              "round_up": false,
+              "tax_receipt_text": null,
+              "created_at": "2026-11-02T15:00:00+00:00",
+              "updated_at": "2026-11-02T15:00:00+00:00",
+              "raised_cents": 0,
+              "donation_count": 0,
+              "recurring_count": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A missing name, a bad field or type.",
+          "example": {
+            "error": "name is required"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Another campaign has that slug.",
+          "example": {
+            "error": "a campaign with the slug \"roof-fund\" already exists"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-giving-campaign",
+      "method": "PATCH",
+      "path": "/v1/giving-campaigns/{id}",
+      "summary": "Update a giving campaign",
+      "description": "Changes only the fields sent. A completed campaign can't be turned back on.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Campaign id.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Campaign name, 1-120 characters (required to create). Opendate's `title` works too.",
+          "example": "Roof fund"
+        },
+        {
+          "name": "slug",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "URL slug, unique in the organization (default: from the name).",
+          "example": "roof-fund"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 5000 characters."
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "An https image URL."
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Three-letter currency, default usd. Fixed once the campaign has donations.",
+          "example": "usd"
+        },
+        {
+          "name": "goal_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Goal in minor units (0 = no goal). Opendate's `goal` in major units works too.",
+          "example": 500000
+        },
+        {
+          "name": "starts_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When the campaign opens (optional)."
+        },
+        {
+          "name": "ends_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When it closes (optional)."
+        },
+        {
+          "name": "active",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Taking gifts. A campaign created here starts as a draft (false); activate it with POST …/activate.",
+          "example": false
+        },
+        {
+          "name": "suggested_cents",
+          "location": "body",
+          "type": "integer[]",
+          "required": false,
+          "description": "Up to 8 suggested amounts in minor units.",
+          "example": [
+            1500,
+            3000
+          ]
+        },
+        {
+          "name": "cover_fees",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer donors to cover the card fees.",
+          "example": true
+        },
+        {
+          "name": "cover_fees_bps",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The cover-the-fees top-up in basis points (0-1000).",
+          "example": 300
+        },
+        {
+          "name": "checkout_add_on",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer it as add-a-donation at ticket checkout.",
+          "example": false
+        },
+        {
+          "name": "round_up",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Offer round-up at ticket checkout.",
+          "example": false
+        },
+        {
+          "name": "tax_receipt_text",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The receipt text (legal name, charity status, tax id)."
+        }
+      ],
+      "request_example": {
+        "description": "A new roof for the hall.",
+        "round_up": true
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "name": "Roof fund",
+              "slug": "roof-fund",
+              "description": "A new roof for the hall.",
+              "image_url": null,
+              "currency": "usd",
+              "goal_cents": 500000,
+              "starts_at": null,
+              "ends_at": null,
+              "active": false,
+              "status": "draft",
+              "completed_at": null,
+              "suggested_cents": [
+                1500,
+                3000
+              ],
+              "cover_fees": true,
+              "cover_fees_bps": 300,
+              "checkout_add_on": false,
+              "round_up": true,
+              "tax_receipt_text": null,
+              "created_at": "2026-11-02T15:00:00+00:00",
+              "updated_at": "2026-11-02T15:00:00+00:00",
+              "raised_cents": 0,
+              "donation_count": 0,
+              "recurring_count": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or type.",
+          "example": {
+            "error": "unknown field: colour"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such campaign in the key's organization.",
+          "example": {
+            "error": "campaign not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A slug in use, or turning a completed campaign back on.",
+          "example": {
+            "error": "this campaign was completed; it can't take gifts again"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "activate-giving-campaign",
+      "method": "POST",
+      "path": "/v1/giving-campaigns/{id}/activate",
+      "summary": "Activate a giving campaign",
+      "description": "Opens the campaign: its public page, ticket checkout (when checkout_add_on) and monthly gifts take donations. Activating an active campaign is a no-op.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Campaign id.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "name": "Roof fund",
+              "slug": "roof-fund",
+              "description": "A new roof for the hall.",
+              "image_url": null,
+              "currency": "usd",
+              "goal_cents": 500000,
+              "starts_at": null,
+              "ends_at": null,
+              "active": true,
+              "status": "active",
+              "completed_at": null,
+              "suggested_cents": [
+                1500,
+                3000
+              ],
+              "cover_fees": true,
+              "cover_fees_bps": 300,
+              "checkout_add_on": false,
+              "round_up": false,
+              "tax_receipt_text": null,
+              "created_at": "2026-11-02T15:00:00+00:00",
+              "updated_at": "2026-11-02T15:00:00+00:00",
+              "raised_cents": 0,
+              "donation_count": 0,
+              "recurring_count": 0
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such campaign.",
+          "example": {
+            "error": "campaign not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Completed, or its ends_at has passed.",
+          "example": {
+            "error": "this campaign was completed; it can't take gifts again"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "complete-giving-campaign",
+      "method": "POST",
+      "path": "/v1/giving-campaigns/{id}/complete",
+      "summary": "Complete a giving campaign",
+      "description": "Closes the campaign for good: off the public page and checkout, and every monthly gift to it is cancelled in Stripe (the donor is charged no more). Donations already received stay. Idempotent.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Campaign id.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK. monthly_gifts_not_cancelled counts subscriptions Stripe didn't cancel (retry with DELETE /v1/recurring-donations/{id}).",
+          "example": {
+            "data": {
+              "id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "name": "Roof fund",
+              "slug": "roof-fund",
+              "description": "A new roof for the hall.",
+              "image_url": null,
+              "currency": "usd",
+              "goal_cents": 500000,
+              "starts_at": null,
+              "ends_at": null,
+              "active": false,
+              "status": "completed",
+              "completed_at": "2026-12-31T23:00:00+00:00",
+              "suggested_cents": [
+                1500,
+                3000
+              ],
+              "cover_fees": true,
+              "cover_fees_bps": 300,
+              "checkout_add_on": false,
+              "round_up": false,
+              "tax_receipt_text": null,
+              "created_at": "2026-11-02T15:00:00+00:00",
+              "updated_at": "2026-11-02T15:00:00+00:00",
+              "raised_cents": 0,
+              "donation_count": 0,
+              "recurring_count": 0
+            },
+            "monthly_gifts_cancelled": 3,
+            "monthly_gifts_not_cancelled": 0
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such campaign.",
+          "example": {
+            "error": "campaign not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-giving-campaign",
+      "method": "DELETE",
+      "path": "/v1/giving-campaigns/{id}",
+      "summary": "Delete a giving campaign",
+      "description": "Only a campaign with no donations and no monthly gifts. One that has any answers 409: complete it instead.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Campaign id.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Deleted.",
+          "example": {
+            "data": {
+              "id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such campaign.",
+          "example": {
+            "error": "campaign not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "It has donations.",
+          "example": {
+            "error": "this campaign has donations: complete it instead"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-recurring-donation",
+      "method": "POST",
+      "path": "/v1/giving-campaigns/{id}/recurring-donations",
+      "summary": "Start a monthly donation",
+      "description": "Opens a Stripe Checkout page for a donor's monthly gift to an active campaign; send the donor to checkout_url. The gift becomes active when they pay, every monthly charge is recorded as its own donation with a receipt, and a failed charge marks it past_due while Stripe retries. Also answers at /v1/giving-campaigns/{id}/recurring_donations. Needs the organizer's payment setup; answers 503 when payments aren't configured.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Campaign id.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The donor's email (receipts).",
+          "example": "sam@example.com"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": true,
+          "description": "The monthly gift, 100-10000000 minor units.",
+          "example": 2500
+        },
+        {
+          "name": "cover_fees",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Add the campaign's cover-the-fees top-up.",
+          "example": true
+        },
+        {
+          "name": "donor_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Name on the receipt."
+        },
+        {
+          "name": "anonymous",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Hide the donor's name from the organizer's public lists.",
+          "example": false
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 1000 characters."
+        },
+        {
+          "name": "success_url",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Where Stripe sends the donor after paying (an allowed origin).",
+          "example": "https://example.com/thanks"
+        },
+        {
+          "name": "cancel_url",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Where Stripe sends the donor on cancel.",
+          "example": "https://example.com/give"
+        }
+      ],
+      "request_example": {
+        "email": "sam@example.com",
+        "amount_cents": 2500,
+        "cover_fees": true,
+        "success_url": "https://example.com/thanks",
+        "cancel_url": "https://example.com/give"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: send the donor to checkout_url (valid 30 minutes).",
+          "example": {
+            "data": {
+              "recurring_donation_id": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8",
+              "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_a1b2c3",
+              "session_id": "cs_test_a1b2c3",
+              "amount_cents": 2500,
+              "cover_fees_cents": 75,
+              "currency": "usd",
+              "interval": "month",
+              "status": "pending"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad email, amount or redirect URL.",
+          "example": {
+            "error": "amount_cents must be whole cents between 100 and 10000000"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such active campaign.",
+          "example": {
+            "error": "campaign not found or not active"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The campaign isn't open, or the organizer's payments aren't set up.",
+          "example": {
+            "error": "organizer has not completed payment setup"
+          }
+        },
+        {
+          "status": 503,
+          "description": "Payments aren't configured.",
+          "example": {
+            "error": "payments aren't configured (STRIPE_SECRET_KEY unset)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-recurring-donations",
+      "method": "GET",
+      "path": "/v1/recurring-donations",
+      "summary": "List monthly donations",
+      "description": "The organization's monthly gifts, newest first (tiebreak on id).",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status.",
+          "example": "active",
+          "enum": [
+            "pending",
+            "active",
+            "past_due",
+            "cancelled",
+            "ended"
+          ]
+        },
+        {
+          "name": "campaign_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only gifts to this campaign.",
+          "example": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8",
+                "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+                "amount_cents": 2500,
+                "cover_fees_cents": 75,
+                "currency": "usd",
+                "interval": "month",
+                "status": "active",
+                "donor_name": "Sam Park",
+                "donor_email": "sam@example.com",
+                "anonymous": false,
+                "source": "api",
+                "current_period_end": "2026-12-02T15:00:00+00:00",
+                "last_paid_at": "2026-11-02T15:01:00+00:00",
+                "failed_payments": 0,
+                "cancel_requested_at": null,
+                "cancelled_at": null,
+                "created_at": "2026-11-02T15:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter or page.",
+          "example": {
+            "error": "status is invalid."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-recurring-donation",
+      "method": "GET",
+      "path": "/v1/recurring-donations/{id}",
+      "summary": "Get a monthly donation",
+      "description": "One monthly gift.",
+      "auth": "api_key",
+      "scope": "commerce:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Monthly gift id.",
+          "example": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8",
+              "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "amount_cents": 2500,
+              "cover_fees_cents": 75,
+              "currency": "usd",
+              "interval": "month",
+              "status": "active",
+              "donor_name": "Sam Park",
+              "donor_email": "sam@example.com",
+              "anonymous": false,
+              "source": "api",
+              "current_period_end": "2026-12-02T15:00:00+00:00",
+              "last_paid_at": "2026-11-02T15:01:00+00:00",
+              "failed_payments": 0,
+              "cancel_requested_at": null,
+              "cancelled_at": null,
+              "created_at": "2026-11-02T15:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such monthly gift in the key's organization.",
+          "example": {
+            "error": "recurring donation not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel-recurring-donation",
+      "method": "DELETE",
+      "path": "/v1/recurring-donations/{id}",
+      "summary": "Cancel a monthly donation",
+      "description": "Cancels the Stripe subscription now: no further charges. Donations already received stay. Cancelling twice is fine.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Monthly gift id.",
+          "example": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8f9a0b1c-2d3e-4f50-8172-93a4b5c6d7e8",
+              "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "amount_cents": 2500,
+              "cover_fees_cents": 75,
+              "currency": "usd",
+              "interval": "month",
+              "status": "cancelled",
+              "donor_name": "Sam Park",
+              "donor_email": "sam@example.com",
+              "anonymous": false,
+              "source": "api",
+              "current_period_end": "2026-12-02T15:00:00+00:00",
+              "last_paid_at": "2026-11-02T15:01:00+00:00",
+              "failed_payments": 0,
+              "cancel_requested_at": "2026-11-20T10:00:00+00:00",
+              "cancelled_at": "2026-11-20T10:00:00+00:00",
+              "created_at": "2026-11-02T15:00:00+00:00",
+              "donations_count": 1,
+              "donated_cents": 2500
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such monthly gift.",
+          "example": {
+            "error": "recurring donation not found"
+          }
+        },
+        {
+          "status": 502,
+          "description": "Stripe didn't cancel it; retry.",
+          "example": {
+            "error": "Stripe didn't cancel the subscription; try again"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-donation",
+      "method": "DELETE",
+      "path": "/v1/donations/{id}",
+      "summary": "Delete an offline donation",
+      "description": "Removes a cash, check or other gift recorded by hand that no payment stands behind (a mistake in the books). The deletion is kept in the donation ledger. A card or checkout donation, a monthly one, or one with a refund recorded answers 409: refund it instead.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Donation id.",
+          "example": "5e6f7081-92a3-4b4c-9d5e-6f708192a3b4"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Deleted.",
+          "example": {
+            "data": {
+              "id": "5e6f7081-92a3-4b4c-9d5e-6f708192a3b4",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such donation in the key's organization.",
+          "example": {
+            "error": "donation not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A payment stands behind it, or it has a refund.",
+          "example": {
+            "error": "only an offline donation with no payment behind it can be deleted: refund this one instead"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "offline-refund-donation",
+      "method": "POST",
+      "path": "/v1/donations/{id}/offline-refund",
+      "summary": "Record an offline refund",
+      "description": "Records money given back outside Stripe (cash, a check, a bank transfer). Exos never calls Stripe here. Each refund is a ledger row; the same reference (or Idempotency-Key) again changes nothing and answers 200; never more than is left. Once nothing is left the donation reads refunded. Also answers at /v1/donations/{id}/offline_refund.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Donation id.",
+          "example": "5e6f7081-92a3-4b4c-9d5e-6f708192a3b4"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "How much was given back (default: all that is left).",
+          "example": 3000
+        },
+        {
+          "name": "reference",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Your reference (check number...): the refund's idempotency key. Default: the Idempotency-Key header, else 'full'.",
+          "example": "chk-9001"
+        },
+        {
+          "name": "method",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "How it was paid back.",
+          "example": "check",
+          "enum": [
+            "cash",
+            "check",
+            "card",
+            "bank_transfer",
+            "other"
+          ]
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 1000 characters.",
+          "example": "half back"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Used as the reference when the body has none."
+        }
+      ],
+      "request_example": {
+        "amount_cents": 3000,
+        "reference": "chk-9001",
+        "method": "check",
+        "note": "half back"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Recorded.",
+          "example": {
+            "data": {
+              "id": "5e6f7081-92a3-4b4c-9d5e-6f708192a3b4",
+              "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "amount_cents": 10000,
+              "cover_fees_cents": 0,
+              "total_cents": 10000,
+              "refunded_cents": 3000,
+              "currency": "usd",
+              "method": "check",
+              "status": "received",
+              "donor_name": "Pat Lee",
+              "donor_email": "pat@example.com",
+              "anonymous": false,
+              "recurring_id": null,
+              "session_id": null,
+              "receipt_number": 12,
+              "refunded_at": null,
+              "created_at": "2026-10-01T18:00:00+00:00",
+              "refunds": [
+                {
+                  "amount_cents": 3000,
+                  "method": "check",
+                  "reference": "chk-9001",
+                  "note": "half back",
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 200,
+          "description": "Already recorded under this reference: nothing changed.",
+          "example": {
+            "data": {
+              "id": "5e6f7081-92a3-4b4c-9d5e-6f708192a3b4",
+              "campaign_id": "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f901",
+              "amount_cents": 10000,
+              "cover_fees_cents": 0,
+              "total_cents": 10000,
+              "refunded_cents": 3000,
+              "currency": "usd",
+              "method": "check",
+              "status": "received",
+              "donor_name": "Pat Lee",
+              "donor_email": "pat@example.com",
+              "anonymous": false,
+              "recurring_id": null,
+              "session_id": null,
+              "receipt_number": 12,
+              "refunded_at": null,
+              "created_at": "2026-10-01T18:00:00+00:00",
+              "refunds": [
+                {
+                  "amount_cents": 3000,
+                  "method": "check",
+                  "reference": "chk-9001",
+                  "note": "half back",
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad amount (more than is left) or reference.",
+          "example": {
+            "error": "amount_cents must be between 1 and 7000 (what is left of this donation)"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such donation.",
+          "example": {
+            "error": "donation not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already refunded.",
+          "example": {
+            "error": "this donation was already refunded"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "import-gift-cards",
+      "method": "POST",
+      "path": "/v1/gift-cards/import",
+      "summary": "Import gift cards",
+      "description": "Brings in gift cards sold elsewhere (Gift Up! and other providers): up to 500 a request. Each keeps its own code (6-64 letters and digits; dashes and spaces are ignored) and pays at checkout and on reservations like any Exos card. A code already imported from the same source is a duplicate and is left alone; a resend with the same Idempotency-Key answers the first result (200). Imported cards never paid the Exos fee when they were sold, so spending one owes it on its part, like a box-office card. Only a hash of each code is stored. Also answers at /v1/gift-cards/bulk and /v1/gift_up_giftcards/bulk.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "source",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Where the cards come from, 2-40 of a-z, 0-9 and _ (default gift_up).",
+          "example": "gift_up"
+        },
+        {
+          "name": "cards",
+          "location": "body",
+          "type": "object[]",
+          "required": true,
+          "description": "The cards (also accepted as gift_cards or giftcards). Each: code; balance_cents (or balance / remaining_value in major units); optional initial_cents (or initial_value), currency (default usd), expires_at (or expiry_date), recipient_email, recipient_name."
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Makes a resend of the same batch answer the first result."
+        }
+      ],
+      "request_example": {
+        "source": "gift_up",
+        "cards": [
+          {
+            "code": "GU-ABC123",
+            "balance_cents": 2500,
+            "initial_cents": 5000
+          },
+          {
+            "code": "GUZZ9900",
+            "remaining_value": "100.00",
+            "expiry_date": "2027-12-31"
+          }
+        ]
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Imported (per-row results).",
+          "example": {
+            "data": {
+              "import_id": "0a1b2c3d-4e5f-4061-8273-9a0b1c2d3e4f",
+              "fresh": true,
+              "source": "gift_up",
+              "row_count": 3,
+              "created": 1,
+              "duplicates": 1,
+              "errors": 1,
+              "imported_cents": 2500,
+              "rows": [
+                {
+                  "row": 1,
+                  "status": "created",
+                  "card_id": "7d8e9f00-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+                  "last4": "C123",
+                  "balance_cents": 2500,
+                  "currency": "usd"
+                },
+                {
+                  "row": 2,
+                  "status": "duplicate",
+                  "card_id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+                  "last4": "9900"
+                },
+                {
+                  "row": 3,
+                  "status": "error",
+                  "error": "code must be 6-64 letters and digits"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 200,
+          "description": "This batch was already imported (same Idempotency-Key): the first result.",
+          "example": {
+            "data": {
+              "import_id": "0a1b2c3d-4e5f-4061-8273-9a0b1c2d3e4f",
+              "fresh": false,
+              "source": "gift_up",
+              "row_count": 3,
+              "created": 1,
+              "duplicates": 1,
+              "errors": 1,
+              "imported_cents": 2500,
+              "rows": [
+                {
+                  "row": 1,
+                  "status": "created",
+                  "card_id": "7d8e9f00-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+                  "last4": "C123",
+                  "balance_cents": 2500,
+                  "currency": "usd"
+                },
+                {
+                  "row": 2,
+                  "status": "duplicate",
+                  "card_id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+                  "last4": "9900"
+                },
+                {
+                  "row": 3,
+                  "status": "error",
+                  "error": "code must be 6-64 letters and digits"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "No cards, more than 500, or a bad source.",
+          "example": {
+            "error": "at most 500 cards per request."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-reservation-gift-cards",
+      "method": "GET",
+      "path": "/v1/events/{id}/organizer-reservations/{token}/gift-card-redemptions",
+      "summary": "List a reservation's gift cards",
+      "description": "The gift cards on an organizer reservation and what is still due. held: on an active reservation; captured: spent when it completed; released: given back (removed, cancelled or expired).",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Event id (Opendate's confirm id).",
+          "example": "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token.",
+          "example": "rsv_Q2hhbmdlTWVJbk15UmVhbFRva2VuMTIzNDU2Nzg5MDE"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "total_cents": 4000,
+              "gift_card_cents": 1500,
+              "amount_due_cents": 2500,
+              "redemptions": [
+                {
+                  "id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+                  "last4": "7KQ2",
+                  "amount_cents": 1500,
+                  "status": "held",
+                  "fee_paid_at_sale": false,
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such organizer reservation of this event.",
+          "example": {
+            "error": "reservation not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-reservation-gift-card",
+      "method": "POST",
+      "path": "/v1/events/{id}/organizer-reservations/{token}/gift-card-redemptions",
+      "summary": "Apply a gift card to a reservation",
+      "description": "Takes up to amount_cents (default: all that is due) off a gift card for an active organizer reservation; the balance moves at once. Completing the reservation spends it; cancelling or letting it expire gives it back. Two reservations can't overdraw one card: each takes at most what is left. Several cards may go on one reservation, each once. Card problems (wrong code, no balance, another currency) answer 422 and count against a limit of 10 tries a minute. An Idempotency-Key makes a resend the same redemption. Also answers at Opendate's /v1/confirms/{id}/organizer_ticket_reservations/{token}/gift_card_redemptions.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Event id (Opendate's confirm id).",
+          "example": "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token.",
+          "example": "rsv_Q2hhbmdlTWVJbk15UmVhbFRva2VuMTIzNDU2Nzg5MDE"
+        },
+        {
+          "name": "code",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The gift card code (an Exos code or an imported one; also gift_card_code).",
+          "example": "7KQ2-ABCD-EFGH-JK9M"
+        },
+        {
+          "name": "amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "At most this much (default: what is due).",
+          "example": 1500
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Makes a resend the same redemption."
+        }
+      ],
+      "request_example": {
+        "gift_card_redemption": {
+          "code": "7KQ2-ABCD-EFGH-JK9M",
+          "amount_cents": 1500
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Applied.",
+          "example": {
+            "data": {
+              "total_cents": 4000,
+              "gift_card_cents": 1500,
+              "amount_due_cents": 2500,
+              "redemptions": [
+                {
+                  "id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+                  "last4": "7KQ2",
+                  "amount_cents": 1500,
+                  "status": "held",
+                  "fee_paid_at_sale": false,
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ],
+              "fresh": true,
+              "redemption_id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+              "last4": "7KQ2",
+              "amount_cents": 1500,
+              "card_balance_cents": 3500
+            }
+          }
+        },
+        {
+          "status": 200,
+          "description": "A resend with the same Idempotency-Key.",
+          "example": {
+            "data": {
+              "total_cents": 4000,
+              "gift_card_cents": 1500,
+              "amount_due_cents": 2500,
+              "redemptions": [
+                {
+                  "id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+                  "last4": "7KQ2",
+                  "amount_cents": 1500,
+                  "status": "held",
+                  "fee_paid_at_sale": false,
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ],
+              "fresh": false,
+              "redemption_id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "No code, or a bad amount.",
+          "example": {
+            "error": "code is required."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such organizer reservation of this event.",
+          "example": {
+            "error": "reservation not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The reservation isn't active, or gift cards already cover it.",
+          "example": {
+            "error": "gift cards already cover this reservation"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The card can't pay (not found, no balance, voided, expired, another currency or organizer, already on this reservation).",
+          "example": {
+            "error": "this gift card has no balance left",
+            "reason": "gift_card"
+          }
+        },
+        {
+          "status": 429,
+          "description": "Too many gift card tries in a minute.",
+          "example": {
+            "error": "too many gift card attempts, try again in a minute"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-reservation-gift-card",
+      "method": "DELETE",
+      "path": "/v1/events/{id}/organizer-reservations/{token}/gift-card-redemptions/{rid}",
+      "summary": "Remove a gift card from a reservation",
+      "description": "Gives the held amount back to the card at once. Removing one already given back changes nothing. A completed reservation keeps it (409): refund the gift card part instead. Also answers at Opendate's /v1/confirms/{id}/organizer_ticket_reservations/{token}/gift_card_redemptions/{rid}.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Event id (Opendate's confirm id).",
+          "example": "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b"
+        },
+        {
+          "name": "token",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The reservation token.",
+          "example": "rsv_Q2hhbmdlTWVJbk15UmVhbFRva2VuMTIzNDU2Nzg5MDE"
+        },
+        {
+          "name": "rid",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The redemption id (gcr_…).",
+          "example": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Given back.",
+          "example": {
+            "data": {
+              "redemption_id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+              "released_cents": 1500,
+              "status": "released",
+              "total_cents": 4000,
+              "gift_card_cents": 0,
+              "amount_due_cents": 4000,
+              "redemptions": [
+                {
+                  "id": "gcr_6b0f3c1d2e4a49b8a7c6d5e4f3a2b1c0",
+                  "last4": "7KQ2",
+                  "amount_cents": 1500,
+                  "status": "released",
+                  "fee_paid_at_sale": false,
+                  "created_at": "2026-11-02T15:00:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such reservation or redemption.",
+          "example": {
+            "error": "gift card redemption not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The reservation was completed.",
+          "example": {
+            "error": "this reservation was completed: refund the gift card part instead"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        }
+      ]
+    }
+  ]
+}

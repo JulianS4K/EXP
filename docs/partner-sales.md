@@ -116,5 +116,5 @@ in an order comes with `delivery.url`:
 | `GET /public/orders`, `/public/orders/{id}`, `…/ticket_pdfs[/{ticket_id}]` | same paths; links instead of PDFs |
 | `POST /public/confirms/{id}/comps` | same path; needs the comps scope |
 | `POST /confirms/{id}/organizer_ticket_reservations[/build]`, `PUT/DELETE …/{token}`, `…/{token}/complete` | `/v1/events/:id/organizer-reservations[/build]`, `…/:token`, `…/:token/complete` |
-| `…/organizer_ticket_reservations/{token}/gift_card_redemptions` | not built: Exos has no gift cards yet |
+| `POST/DELETE …/organizer_ticket_reservations/{token}/gift_card_redemptions[/{id}]` | `/v1/events/:id/organizer-reservations/:token/gift-card-redemptions[/:rid]` (+ `GET`); `docs/gift-cards.md` "On reservations" |
 | `GET /confirms/{id}/ticket_reservations[/{id}]` | `GET /v1/events/:id/ticket-reservations[/:token]` |

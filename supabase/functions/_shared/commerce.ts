@@ -20,6 +20,27 @@ export function normalizeGiftCardCode(code: unknown): string | null {
   return /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{16}$/.test(c) ? c : null;
 }
 
+/**
+ * A gift card imported from another provider (Gift Up! and the like, mig
+ * 20261102110000) keeps its own code: upper case without dashes or spaces,
+ * 6-64 letters and digits. null otherwise.
+ */
+export function normalizeExternalGiftCardCode(code: unknown): string | null {
+  if (typeof code !== 'string') return null;
+  const c = code.replace(/[\s-]/g, '').toUpperCase();
+  return /^[A-Z0-9]{6,64}$/.test(c) ? c : null;
+}
+
+/**
+ * The code to send to checkout: an Exos code (16 characters, check character
+ * right) or an imported one. A 16-character Exos-looking code with a wrong
+ * check character is still sent (an imported code can look like one); the
+ * server answers "check for a typo" when nothing matches.
+ */
+export function normalizeAnyGiftCardCode(code: unknown): string | null {
+  return normalizeGiftCardCode(code) ?? normalizeExternalGiftCardCode(code);
+}
+
 function luhnSum(chars: string, startFactor: 1 | 2): number {
   let f = startFactor;
   let s = 0;

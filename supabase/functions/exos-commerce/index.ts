@@ -20,6 +20,13 @@
 //   buy_membership { product_id, gift_to_email?, gift_message?, email?, success_url, cancel_url }
 //       -> { url, session_id }  (month / year: a subscription; once or a gift: one payment)
 //   membership_portal { membership_id, return_url } -> { url }  (holder only, subscriptions)
+//   donate_monthly { campaign_id, amount_cents, cover_fees?, anonymous?, donor_name?, note?,
+//                    success_url, cancel_url } -> { url, session_id, recurring_id }
+//       signed in: a monthly Stripe subscription (mig 20261102110000, _shared/recurringDonation.ts)
+//   cancel_recurring_donation { recurring_id } -> { recurring_donation }
+//       the donor, or the org's owner / manager / finance (exos_recurring_donation_can_cancel)
+//   complete_campaign { campaign_id } -> { campaign, not_cancelled }  (owner / manager)
+//       closes the campaign and cancels its monthly gifts in Stripe
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY, EXOS_REDIRECT_ORIGINS. Optional:
@@ -33,7 +40,8 @@ import { isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import { EXOS_FEE_BPS, STRIPE_CARD_FEE, checkoutApplicationFeeCents, exosFeeBpsAt } from "../_shared/platformFee.ts";
-import { coverFeesCents, normalizeGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
+import { coverFeesCents, normalizeAnyGiftCardCode, parseDonationCents } from "../_shared/commerce.ts";
+import { cancelMonthlyDonation, cancelSubscriptions, createMonthlyDonation } from "../_shared/recurringDonation.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,7 +68,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const bucket = user ? `u:${user.id}` : `ip:${await hashIp(clientIp((h) => req.headers.get(h)), salt)}`;
 
   if (p.action === "gift_card_balance") {
-    const code = normalizeGiftCardCode(p.code);
+    const code = normalizeAnyGiftCardCode(p.code);
     if (!code) return json({ error: "that gift card code isn't valid (check for a typo)" }, 400);
     const { data, error } = await sb.rpc("exos_gift_card_quote", { p_code: code, p_bucket: bucket });
     if (error) return json({ error: "could not check the gift card" }, 503);
@@ -94,8 +102,47 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
+  // exos: monthly gifts and campaign completion (mig 20261102110000). The
+  // caller's role is checked with their own JWT; the writes run as service.
+  if (p.action === "cancel_recurring_donation") {
+    if (!user) return json({ error: "sign in" }, 401);
+    const id = String(p.recurring_id ?? "");
+    if (!UUID_RE.test(id)) return json({ error: "missing recurring_id" }, 400);
+    const { data: ok } = await sbUser.rpc("exos_recurring_donation_can_cancel", { p_id: id });
+    if (ok !== true) return json({ error: "monthly gift not found" }, 404);
+    try {
+      return json({ recurring_donation: await cancelMonthlyDonation(sb, stripeClient(), null, id, "cancelled by " + user.id) });
+    } catch (e) {
+      const st = (e as { status?: number }).status ?? 500;
+      console.error("exos-commerce: cancel monthly gift failed", e);
+      return json({ error: (e as Error).message || "could not cancel" }, st);
+    }
+  }
+  if (p.action === "complete_campaign") {
+    if (!user) return json({ error: "sign in" }, 401);
+    const id = String(p.campaign_id ?? "");
+    if (!UUID_RE.test(id)) return json({ error: "missing campaign_id" }, 400);
+    const { data, error } = await sbUser.rpc("exos_giving_campaign_op", { p_op: "complete", p_id: id, p_body: {} });
+    if (error) return json({ error: error.message }, error.code === "42501" ? 403 : error.code === "P0002" ? 404 : 409);
+    const out = data as { campaign: unknown; cancel_subscriptions: string[] };
+    const left = await cancelSubscriptions(stripeClient(), out.cancel_subscriptions ?? []);
+    return json({ campaign: out.campaign, not_cancelled: left });
+  }
+
   if (!isAllowedRedirect(p.success_url, allowed) || !isAllowedRedirect(p.cancel_url, allowed)) {
     return json({ error: "redirect URL not allowed" }, 400);
+  }
+
+  if (p.action === "donate_monthly") {
+    if (!user) return json({ error: "sign in to give monthly (you can stop it any time from your account)" }, 401);
+    if (!UUID_RE.test(String(p.campaign_id ?? ""))) return json({ error: "missing campaign_id" }, 400);
+    const r = await createMonthlyDonation(sb, stripeClient(), (k) => Deno.env.get(k), {
+      campaignId: String(p.campaign_id), amountCents: p.amount_cents, coverFees: p.cover_fees === true,
+      anonymous: p.anonymous === true, donorName: p.donor_name, note: p.note, donorEmail: buyerEmail,
+      donorUid: user.id, successUrl: p.success_url, cancelUrl: p.cancel_url, source: "online",
+    });
+    if ("error" in r) return json({ error: r.error }, r.status);
+    return json({ url: r.url, session_id: r.session_id, recurring_id: r.recurring_id });
   }
 
   // Each purchase resolves to: the org, a currency, Stripe line items and the

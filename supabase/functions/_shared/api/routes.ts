@@ -404,6 +404,28 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-migrated-attendee', method: 'GET', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:read', paged: false, aliases: ['/migrated_attendees/:id'] },
   { id: 'update-migrated-attendee', method: 'PATCH', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:write', paged: false, aliases: ['/migrated_attendees/:id'] },
   { id: 'delete-migrated-attendee', method: 'DELETE', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:write', paged: false, aliases: ['/migrated_attendees/:id'] },
+  // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes,
+  // monthly gifts, gift cards on organizer reservations (exos-api/giving.ts).
+  { id: 'create-giving-campaign', method: 'POST', auth: K, path: '/giving-campaigns', scope: 'commerce:write', paged: false },
+  { id: 'update-giving-campaign', method: 'PATCH', auth: K, path: '/giving-campaigns/:id', scope: 'commerce:write', paged: false },
+  { id: 'activate-giving-campaign', method: 'POST', auth: K, path: '/giving-campaigns/:id/activate', scope: 'commerce:write', paged: false },
+  { id: 'complete-giving-campaign', method: 'POST', auth: K, path: '/giving-campaigns/:id/complete', scope: 'commerce:write', paged: false },
+  { id: 'delete-giving-campaign', method: 'DELETE', auth: K, path: '/giving-campaigns/:id', scope: 'commerce:write', paged: false },
+  { id: 'create-recurring-donation', method: 'POST', auth: K, path: '/giving-campaigns/:id/recurring-donations', scope: 'commerce:write', paged: false,
+    aliases: ['/giving-campaigns/:id/recurring_donations', '/giving_campaigns/:id/recurring_donations'] },
+  { id: 'list-recurring-donations', method: 'GET', auth: K, path: '/recurring-donations', scope: 'commerce:read', paged: true },
+  { id: 'get-recurring-donation', method: 'GET', auth: K, path: '/recurring-donations/:id', scope: 'commerce:read', paged: false },
+  { id: 'cancel-recurring-donation', method: 'DELETE', auth: K, path: '/recurring-donations/:id', scope: 'commerce:write', paged: false },
+  { id: 'delete-donation', method: 'DELETE', auth: K, path: '/donations/:id', scope: 'commerce:write', paged: false },
+  { id: 'offline-refund-donation', method: 'POST', auth: K, path: '/donations/:id/offline-refund', scope: 'commerce:write', paged: false,
+    aliases: ['/donations/:id/offline_refund'] },
+  { id: 'import-gift-cards', method: 'POST', auth: K, path: '/gift-cards/import', scope: 'commerce:write', paged: false,
+    aliases: ['/gift-cards/bulk', '/gift_up_giftcards/bulk'] },
+  { id: 'list-reservation-gift-cards', method: 'GET', auth: K, path: '/events/:id/organizer-reservations/:token/gift-card-redemptions', scope: 'tickets:read', paged: false },
+  { id: 'create-reservation-gift-card', method: 'POST', auth: K, path: '/events/:id/organizer-reservations/:token/gift-card-redemptions', scope: 'tickets:write', paged: false,
+    aliases: ['/events/:id/organizer-reservations/:token/gift_card_redemptions', '/confirms/:id/organizer_ticket_reservations/:token/gift_card_redemptions'] },
+  { id: 'delete-reservation-gift-card', method: 'DELETE', auth: K, path: '/events/:id/organizer-reservations/:token/gift-card-redemptions/:rid', scope: 'tickets:write', paged: false,
+    aliases: ['/events/:id/organizer-reservations/:token/gift_card_redemptions/:rid', '/confirms/:id/organizer_ticket_reservations/:token/gift_card_redemptions/:rid'] },
 ];
 
 /** Methods the API answers (anything else is 405). */

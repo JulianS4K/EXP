@@ -117,7 +117,7 @@ import {
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import {
-  giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeGiftCardCode, parseDonationCents,
+  giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeAnyGiftCardCode, parseDonationCents,
 } from "../_shared/commerce.ts";
 import { chargeTotalCents, stripeLineItems, type ChargeLine } from "../_shared/chargeLines.ts";
 import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
@@ -587,7 +587,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // exos: gift cards — quoted now (nothing reserved), held after the session
   // row exists. Rate-limited per account or hashed IP in SQL.
-  const giftCode = p.gift_card_code ? normalizeGiftCardCode(p.gift_card_code) : null;
+  const giftCode = p.gift_card_code ? normalizeAnyGiftCardCode(p.gift_card_code) /* exos: imported codes too (mig 20261102110000) */ : null;
   if (p.gift_card_code && !giftCode) return json({ error: "that gift card code isn't valid (check for a typo)" }, 400);
   const giftBucket = buyerUid
     ? `u:${buyerUid}`
