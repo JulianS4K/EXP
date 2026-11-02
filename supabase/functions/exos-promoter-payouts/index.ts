@@ -7,7 +7,10 @@
 //   POST /send    { payout_id }                         org owner / manager (JWT): fund + send a
 //                                                       Stripe payout the settle created
 //   POST /cancel  { payout_id }                         org owner / manager: cancel one that never
-//                                                       went out (taken money goes back to the org)
+//                                                       went out (taken money goes back to the org).
+//                                                       If a send was ever started, Stripe is asked
+//                                                       first (transfer_group + metadata): a transfer
+//                                                       found marks it sent and the cancel is refused
 //
 // Gates: the org owner's switch (exos_org_promoter_payouts.stripe_transfers)
 // and EXOS_PROMOTER_TRANSFERS=on. Off = dry run: /send records 'dry_run' and
@@ -31,7 +34,8 @@ import { readCapped } from "../_shared/api/body.ts";
 import { redactError } from "../_shared/log.ts";
 import { isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
-  amountToReturn, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
+  amountToReturn, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode,
+  type StripeReversalLite, type StripeTransferLite, type TransferClaim,
 } from "../_shared/payouts/promoterTransfers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,10 +154,18 @@ async function send(payoutId: string, user: string, stripe: Stripe, sb: Supabase
         { amount: line.amount_cents, metadata: { exos_promoter_payout_id: payoutId, exos_session_id: line.session_id } },
         { idempotencyKey: reversalKey(payoutId, line.session_id) },
       );
-      const { error: mErr } = await sb.rpc("exos_promoter_funding_mark", {
-        p_payout_id: payoutId, p_session_id: line.session_id, p_status: "taken", p_reversal_id: rev.id,
+      const marked = await durably(async () => {
+        const { data: ok, error: mErr } = await sb.rpc("exos_promoter_funding_mark", {
+          p_payout_id: payoutId, p_session_id: line.session_id, p_status: "taken", p_reversal_id: rev.id,
+        });
+        return !mErr && ok === true;
       });
-      if (mErr) throw mErr;
+      if (!marked) {
+        // The reversal happened but isn't recorded: stop here and leave the
+        // payout 'sending'; a cancel reconciles it with Stripe first.
+        console.error("exos-promoter-payouts: reversal not recorded", payoutId, line.session_id, rev.id);
+        return json({ status: "sending", error: "Stripe moved money but Exos couldn't record it yet. Try Send again." }, 500);
+      }
     }
     const tr = await stripe.transfers.create(
       {
@@ -163,7 +175,13 @@ async function send(payoutId: string, user: string, stripe: Stripe, sb: Supabase
       },
       { idempotencyKey: transferKey(payoutId) },
     );
-    await mark(sb, payoutId, "sent", tr.id);
+    // The transfer exists at Stripe: the 'sent' mark must stick. If it can't
+    // be written, answer an error and leave 'sending' (never 'failed', which
+    // would let the payout be cancelled and its sales paid again).
+    if (!(await durably(() => mark(sb, payoutId, "sent", tr.id)))) {
+      console.error("exos-promoter-payouts: sent not recorded", payoutId, tr.id);
+      return json({ status: "sending", transfer_id: tr.id, error: "Sent at Stripe, but not recorded yet. Try Send again." }, 500);
+    }
     return json({ status: "sent", transfer_id: tr.id });
   } catch (e) {
     const msg = stripeErrorText(e);
@@ -175,8 +193,36 @@ async function send(payoutId: string, user: string, stripe: Stripe, sb: Supabase
 async function cancel(payoutId: string, user: string, stripe: Stripe, sb: SupabaseClient) {
   const { data, error } = await sb.rpc("exos_promoter_transfer_claim", { p_payout_id: payoutId, p_user: user, p_purpose: "cancel" });
   if (error) throw error;
-  const claim = data as ({ ok: true } & TransferClaim) | { ok: false; error: string };
+  const claim = data as ({ ok: true; needs_reconcile?: boolean } & TransferClaim) | { ok: false; error: string };
   if ("error" in claim) return json({ error: claim.error }, claim.error === "not_found" ? 404 : 409);
+  if (claim.needs_reconcile) {
+    // A send was started: ask Stripe what happened before anything is undone.
+    try {
+      const transfers = await stripe.transfers.list({ transfer_group: `exos-promoter-payout-${payoutId}`, limit: 100 });
+      const reversals: Record<string, StripeReversalLite[]> = {};
+      for (const l of claim.lines.filter((x) => x.status === "planned")) {
+        const list = await stripe.transfers.listReversals(l.org_transfer_id, { limit: 100 });
+        reversals[l.session_id] = list.data.map((r) => ({ id: r.id, metadata: (r.metadata ?? {}) as Record<string, string> }));
+      }
+      const d = reconcileDecision(claim, transfers.data.map((t): StripeTransferLite => ({
+        id: t.id, destination: typeof t.destination === "string" ? t.destination : t.destination?.id ?? null,
+        metadata: (t.metadata ?? {}) as Record<string, string>,
+      })), reversals);
+      const { data: res, error: rErr } = await sb.rpc("exos_promoter_transfer_reconcile", {
+        p_payout_id: payoutId, p_transfer_id: d.transferId, p_reversals: d.reversals,
+      });
+      if (rErr) throw rErr;
+      if (res === "sent") return json({ status: "sent", transfer_id: d.transferId, error: "Stripe had already sent this payout; it stays paid." }, 409);
+      for (const r of d.reversals) {
+        const l = claim.lines.find((x) => x.session_id === r.session_id);
+        if (l) { l.status = "taken"; l.reversal_id = r.reversal_id; }
+      }
+    } catch (e) {
+      const msg = stripeErrorText(e);
+      await mark(sb, payoutId, "failed", null, `cancel: couldn't check Stripe: ${msg}`);
+      return json({ error: `Couldn't check Stripe before cancelling: ${msg}` }, 502);
+    }
+  }
   const back = amountToReturn(claim.lines);
   let returnId: string | null = null;
   if (back > 0) {
@@ -208,9 +254,10 @@ async function cancel(payoutId: string, user: string, stripe: Stripe, sb: Supaba
   return json({ status: "cancelled", returned_cents: back });
 }
 
-async function mark(sb: SupabaseClient, id: string, status: "sent" | "dry_run" | "failed", transferId: string | null = null, err: string | null = null) {
-  const { error } = await sb.rpc("exos_promoter_transfer_mark", { p_payout_id: id, p_status: status, p_transfer_id: transferId, p_error: err });
+async function mark(sb: SupabaseClient, id: string, status: "sent" | "dry_run" | "failed", transferId: string | null = null, err: string | null = null): Promise<boolean> {
+  const { data, error } = await sb.rpc("exos_promoter_transfer_mark", { p_payout_id: id, p_status: status, p_transfer_id: transferId, p_error: err });
   if (error) console.error("exos-promoter-payouts: mark failed", id, status, redactError(error));
+  return !error && data === true;
 }
 
 // The SPA's own origins only (EXOS_REDIRECT_ORIGINS), as exos-integrations does.

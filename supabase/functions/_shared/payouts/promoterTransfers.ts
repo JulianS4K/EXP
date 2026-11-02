@@ -74,3 +74,41 @@ export function stripeErrorText(e: unknown): string {
   const msg = String(any?.message ?? 'Stripe error').replace(/(sk|rk)_(live|test)_[A-Za-z0-9]+/g, '[key]');
   return `${any?.code ? `${any.code}: ` : ''}${msg}`.slice(0, 300);
 }
+
+export interface StripeTransferLite { id: string; destination?: string | null; metadata?: Record<string, string> | null }
+export interface StripeReversalLite { id: string; metadata?: Record<string, string> | null }
+
+/**
+ * Before a payout whose send was started may be cancelled: what Stripe really
+ * did. `transfers` are the transfers in the payout's transfer_group;
+ * `reversals` the reversals listed on each funding line's order transfer.
+ * The promoter transfer counts only if it went to the promoter's account and
+ * carries this payout's id (the organizer-return transfer doesn't count).
+ * A found transfer means the money went out: mark it sent, never cancel.
+ */
+export function reconcileDecision(
+  c: Pick<TransferClaim, 'payout_id' | 'destination' | 'lines'>,
+  transfers: StripeTransferLite[],
+  reversals: Record<string, StripeReversalLite[]>,
+): { action: 'mark_sent' | 'allow_cancel'; transferId: string | null; reversals: { session_id: string; reversal_id: string }[] } {
+  const ours = (m?: Record<string, string> | null) => m?.exos_promoter_payout_id === c.payout_id;
+  const tr = transfers.find((t) => ours(t.metadata) && t.metadata?.exos_return !== '1'
+    && !!c.destination && t.destination === c.destination && /^tr_[A-Za-z0-9]{1,64}$/.test(t.id));
+  const found: { session_id: string; reversal_id: string }[] = [];
+  for (const l of c.lines) {
+    if (l.status !== 'planned') continue;
+    const r = (reversals[l.session_id] ?? []).find((x) => ours(x.metadata) && x.metadata?.exos_session_id === l.session_id
+      && /^trr_[A-Za-z0-9]{1,64}$/.test(x.id));
+    if (r) found.push({ session_id: l.session_id, reversal_id: r.id });
+  }
+  return { action: tr ? 'mark_sent' : 'allow_cancel', transferId: tr?.id ?? null, reversals: found };
+}
+
+/** Retry a ledger write a few times; true once it reports success. */
+export async function durably(write: () => Promise<boolean>, tries = 3, waitMs = 250): Promise<boolean> {
+  for (let i = 0; i < tries; i++) {
+    try { if (await write()) return true; } catch { /* retry */ }
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs * (i + 1)));
+  }
+  return false;
+}
