@@ -293,12 +293,14 @@ export async function settlePromoter(input: {
 export interface PromoterPayoutRow {
   id: string; currency: string; amountCents: number; method: string; paidOn: string; via: 'manual' | 'stripe';
   transferStatus: string | null; transferError: string | null; rowCount: number;
+  /** Something to look at (e.g. Stripe sent after a cancel), mig 20261102150000. */
+  alert: string | null;
 }
 
 export async function listPromoterPayouts(promoterId: string): Promise<PromoterPayoutRow[]> {
   const { data, error } = await supabase
     .from('exos_promoter_payouts')
-    .select('id, currency, amount_cents, method, paid_on, via, transfer_status, transfer_error, row_count')
+    .select('id, currency, amount_cents, method, paid_on, via, transfer_status, transfer_error, row_count, alert')
     .eq('promoter_id', promoterId)
     .order('created_at', { ascending: false })
     .limit(20);
@@ -306,6 +308,7 @@ export async function listPromoterPayouts(promoterId: string): Promise<PromoterP
   return (data ?? []).map((r: any) => ({
     id: r.id, currency: r.currency, amountCents: r.amount_cents, method: r.method, paidOn: r.paid_on,
     via: r.via ?? 'manual', transferStatus: r.transfer_status ?? null, transferError: r.transfer_error ?? null, rowCount: r.row_count,
+    alert: r.alert ?? null,
   }));
 }
 

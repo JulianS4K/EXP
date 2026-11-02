@@ -157,17 +157,31 @@ clawback netting).
   whose metadata names this payout (and, for the transfer, the promoter's account; the organizer-return
   transfer doesn't count). A transfer found marks the payout `sent` and the cancel is refused; found
   reversals become `taken` lines that the cancel returns to the organizer; nothing found allows the cancel.
-- **Leases fence sends.** Every claim (`send`, `reconcile`, `cancel`) mints a new `lease_token` and
-  replaces the previous holder's. `send` calls `exos_promoter_lease_ok(payout, token)` right before each
-  reversal and before the transfer: it must still hold a send lease that hasn't run out (2 minutes,
-  extended per call, never past 8 minutes after the attempt began) on a payout that isn't cancelled.
-  A `cancel` or `reconcile` claim is refused while a send attempt is open (leased for send, no outcome,
-  under 10 minutes old), and the cancel's reconcile check and the cancel itself run under the cancel's
-  token. `dry_run` / `failed` marks need the current token, so a stale send can't change a payout
-  someone else has claimed; `sent` is always recorded.
+- **Bounded timing** (constants in `_shared/payouts/promoterTransfers.ts`, pinned to the SQL literals and
+  checked by `src/lib/promoterWedge.test.ts`): each Stripe call has a 15 s client timeout and no network
+  retries; each database call a 3 s timeout; a Stripe payout covers at most 10 orders. So one send (the
+  claim's answer, up to 10 reversals and the transfer, each preceded by a lease check, and durable marks
+  with up to 3 tries) takes at most 11 x 15 s + 45 x 3 s + 11 x 0.75 s = **308.25 s**, which is less than
+  the **6-minute** send lease (never extended), which is less than the **10 minutes** a cancel or
+  reconcile waits after a send began. The send also stops on its own clock before a call that couldn't
+  finish inside the lease.
+- **Leases fence sends.** Every claim (`send`, `reconcile`, `cancel`) mints a new `lease_token`;
+  `send` calls `exos_promoter_lease_ok` before each reversal and the transfer. `dry_run` / `failed`
+  marks need the current token. A `sent` mark always wins: if it lands after a cancel started (or
+  finished) it is recorded, restores the sales the cancel freed that are still unpaid, and sets the
+  payout's `alert` (shown in red on the payout in the dashboard), never dropped. A reversal recorded
+  after its line was released or returned also sets `alert`.
+- **Cancel is a fenced state machine.** The cancel claim moves the payout to `cancel_pending` under its
+  lease before any Stripe call (send refuses it from then on, also once a return key exists). After a
+  reconcile, `exos_promoter_return_begin` records the return transfer's key (`exos-pcr:<payout>`) and
+  amount and moves it to `return_pending`; the function then reuses a return already in the payout's
+  `transfer_group` or makes it with that key, records it (`exos_promoter_return_done`, which marks every
+  taken line returned in one statement, checked through `durably`), and finishes
+  (`exos_promoter_payout_cancel`). Any failure stops with an error, releases the lease and leaves the
+  payout fenced; running Cancel again resumes from the recorded state and never makes a second return.
 - **Retries reconcile first.** A send claim on a payout whose earlier attempt was never reconciled
-  answers `needs_reconcile`; the function then takes a `reconcile` lease, lists Stripe as above and, if
-  the transfer exists, marks the payout sent and creates nothing. Only then can a new send be claimed.
+  answers `needs_reconcile`; the function takes a `reconcile` lease, lists Stripe and, if the transfer
+  exists, marks the payout sent and creates nothing.
 - **Idempotency keys are per payout, not per attempt** (`exos-pct:<payout>`, `exos-pcf:<payout>:<order>`,
   `exos-pcr:<payout>`). Within Stripe's 24-hour window a repeated call returns the first result. After
   it Stripe forgets the key and would create a new object, which is why the reconcile before every retry

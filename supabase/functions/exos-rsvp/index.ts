@@ -28,6 +28,7 @@ import { clientIp, hashIp } from "../_shared/guest.ts";
 import { redactError } from "../_shared/log.ts";
 import { normalizeAppUrl } from "../_shared/mail-render.ts";
 import { sendSms, type SmsConfig } from "../_shared/sms/providers.ts";
+import { drainRsvpSms } from "../_shared/sms/rsvpOutbox.ts";
 import {
   codeText, honeypotAnswer, MAX_RSVP_BODY, maskPhone, parseRsvpRequest, RsvpInputError, smsAvailable, ticketsText,
 } from "../_shared/rsvp.ts";
@@ -81,17 +82,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       if (error) throw error;
       const r = data as { ok: boolean; error?: string; rsvp_id?: string; channel?: string; to?: string; code?: string;
-                          event_name?: string; max_plus_ones?: number;
-                          _resend?: { to: string; event_name?: string; urls: (string | null)[] } };
-      if (r._resend && cfg) {
-        // Sold out and this number already RSVP'd: its tickets go back by text
-        // to the number itself. The answer is the same generic "sold out".
-        const urls = r._resend.urls.filter((u): u is string => !!u);
-        if (urls.length) {
-          const sent = await sendSms(fetch, cfg, r._resend.to, ticketsText(r._resend.event_name, urls));
-          if (!("id" in sent)) console.error("exos-rsvp: resend text failed", sent.error);
-        }
-      }
+                          event_name?: string; max_plus_ones?: number };
+      // Every start schedules the resend drain the same way and never waits
+      // for it: a re-text for a number that already RSVP'd (queued by the
+      // SQL when the event is full) goes out off the request path.
+      background(drainRsvpSms(sb, live(), (org) => smsConfig(sb, org)).catch((e) => console.error("exos-rsvp: drain", redactError(e))));
       if (!r.ok) return json({ ok: false, error: r.error, max_plus_ones: r.max_plus_ones });
       if (r.channel === "sms") {
         const sent = cfg ? await sendSms(fetch, cfg, r.to!, codeText(r.event_name, r.code!)) : null;
@@ -127,6 +122,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ ok: false, error: "unavailable" }, 500);
   }
 });
+
+// Run after the response without delaying it (EdgeRuntime on Supabase).
+function background(p: Promise<unknown>): void {
+  const rt = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p);
+  else void p;
+}
 
 function live(): boolean {
   return Deno.env.get("EXOS_SMS_LIVE") === "on";

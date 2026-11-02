@@ -316,6 +316,8 @@ BEGIN
   ASSERT public.exos_promoter_transfer_reconcile(po, (c->>'lease_token')::uuid, 'tr_pwfound', '[{"session_id":"pw-w4","reversal_id":"trr_pwfound"}]') = 'sent',
          'PW7b: found at Stripe, so sent';
   ASSERT (SELECT transfer_status || ':' || stripe_transfer_id FROM public.exos_promoter_payouts WHERE id = po) = 'sent:tr_pwfound', 'PW7b: recorded';
+  ASSERT (SELECT alert FROM public.exos_promoter_payouts WHERE id = po) LIKE 'Stripe sent this payout (tr_pwfound) after it was cancel_pending%',
+         'PW7b: a sent found during a cancel raises an alert';
   ASSERT (SELECT status || ':' || reversal_id FROM public.exos_promoter_payout_funding WHERE payout_id = po) = 'taken:trr_pwfound', 'PW7b: reversal recorded';
   ASSERT NOT public.exos_promoter_payout_cancel(po, (c->>'lease_token')::uuid), 'PW7b: a sent payout is never cancelled';
   ASSERT public.exos_promoter_transfer_claim(po, '0f0f0000-0000-0000-0000-0000000000a1', 'cancel')->>'error' = 'sent', 'PW7b: no cancel claim';
@@ -365,6 +367,67 @@ BEGIN
   ASSERT public.exos_promoter_payout_cancel(po, (c4->>'lease_token')::uuid), 'PW7c: cancelled';
   ASSERT public.exos_promoter_transfer_claim(po, '0f0f0000-0000-0000-0000-0000000000a1')->>'error' = 'cancelled', 'PW7c: no send after cancel';
   RAISE NOTICE 'OK  PW7c retried sends reconcile first; leases fence stale sends';
+END $$;
+SELECT set_config('app.uid','',false);
+
+-- PW7d. Cancel is a fenced state machine: cancel_pending -> return_pending
+--       (key recorded first) -> cancelled. A failed mark mid-return leaves it
+--       fenced (no send); a retried cancel finishes with the same return.
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,status,promoter_id,application_fee_cents,exos_fee_cents,card_fee_est_cents) VALUES
+  ('pw-w6','0f0f0000-0000-0000-0000-0000000000e1','0f0f0000-0000-0000-0000-0000000000d1','0f0f0000-0000-0000-0000-000000000001','0f0f0000-0000-0000-0000-0000000000a5','pwbuyer@x.com',1,2000,'pending','pw-p',60,60,0);
+SELECT public.exos_fulfill_checkout('pw-w6');
+INSERT INTO public.exos_order_payments(session_id,org_id,event_id,payment_intent,amount_cents,currency,status,transfer_id) VALUES
+  ('pw-w6','0f0f0000-0000-0000-0000-000000000001','0f0f0000-0000-0000-0000-0000000000e1','pi_pww6',2000,'usd','succeeded','tr_pww6');
+SELECT set_config('app.uid','0f0f0000-0000-0000-0000-0000000000a1',false);
+DO $$
+DECLARE p uuid := current_setting('test.p')::uuid; ids uuid[]; amt int; r jsonb; c jsonb; c2 jsonb; b jsonb; b2 jsonb; po uuid;
+  u uuid := '0f0f0000-0000-0000-0000-0000000000a1';
+BEGIN
+  SELECT array_agg(x.id), sum(x.commission_cents) INTO ids, amt FROM public.exos_promoter_commissions x
+    JOIN public.exos_tickets t ON t.id = x.ticket_id WHERE t.order_ref = 'pw-w6';
+  r := public.exos_settle_promoter(p, ids, amt, 'x', 'key-stripe-0005', 'stripe');
+  po := (r->>'payout_id')::uuid;
+  c := public.exos_promoter_transfer_claim(po, u);
+  ASSERT public.exos_promoter_funding_mark(po, 'pw-w6', 'taken', 'trr_pww6'), 'PW7d: reversal taken';
+  ASSERT public.exos_promoter_transfer_mark(po, 'failed', NULL, 'transfer timed out', (c->>'lease_token')::uuid), 'PW7d: send failed';
+  -- Cancel: claim (-> cancel_pending, before any Stripe call), reconcile, record the return.
+  c := public.exos_promoter_transfer_claim(po, u, 'cancel');
+  ASSERT c->>'state' = 'cancel_pending' AND (SELECT transfer_status FROM public.exos_promoter_payouts WHERE id = po) = 'cancel_pending',
+         'PW7d: fenced before Stripe ' || c::text;
+  ASSERT public.exos_promoter_transfer_reconcile(po, (c->>'lease_token')::uuid, NULL,
+           '[{"session_id":"pw-w6","reversal_id":"trr_pww6"}]') = 'reconciled', 'PW7d: no transfer at Stripe';
+  b := public.exos_promoter_return_begin(po, (c->>'lease_token')::uuid);
+  ASSERT b->>'key' = 'exos-pcr:' || po AND (b->>'amount_cents')::int = amt, 'PW7d: return key + amount recorded first ' || b::text;
+  ASSERT (SELECT transfer_status FROM public.exos_promoter_payouts WHERE id = po) = 'return_pending', 'PW7d: return_pending';
+  -- The return transfer went out, but recording it failed (the function stopped with an error).
+  ASSERT public.exos_promoter_lease_release(po, (c->>'lease_token')::uuid), 'PW7d: lease released on error';
+  ASSERT public.exos_promoter_transfer_claim(po, u)->>'error' = 'cancelling', 'PW7d: a fenced payout refuses send';
+  BEGIN
+    PERFORM public.exos_promoter_payout_cancel(po, (c->>'lease_token')::uuid);
+    ASSERT false, 'PW7d: cancel before the return is recorded';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  -- Retried cancel: same key and amount (no second, different return); it records the found return and finishes.
+  c2 := public.exos_promoter_transfer_claim(po, u, 'cancel');
+  ASSERT c2->>'state' = 'return_pending' AND NOT (c2->>'needs_reconcile')::boolean AND c2->>'return_key' = b->>'key', 'PW7d: resume ' || c2::text;
+  ASSERT NOT public.exos_promoter_return_done(po, (c->>'lease_token')::uuid, 'tr_pwret1'), 'PW7d: the old lease can''t record';
+  b2 := public.exos_promoter_return_begin(po, (c2->>'lease_token')::uuid);
+  ASSERT b2->>'key' = b->>'key' AND b2->>'amount_cents' = b->>'amount_cents' AND (b2->>'resumed')::boolean, 'PW7d: same return ' || b2::text;
+  ASSERT public.exos_promoter_return_done(po, (c2->>'lease_token')::uuid, 'tr_pwret1'), 'PW7d: return recorded';
+  ASSERT public.exos_promoter_return_done(po, (c2->>'lease_token')::uuid, 'tr_pwret1'), 'PW7d: idempotent';
+  ASSERT NOT public.exos_promoter_return_done(po, (c2->>'lease_token')::uuid, 'tr_pwret2'), 'PW7d: no second return recorded';
+  ASSERT (SELECT status FROM public.exos_promoter_payout_funding WHERE payout_id = po) = 'returned', 'PW7d: line returned';
+  ASSERT public.exos_promoter_payout_cancel(po, (c2->>'lease_token')::uuid), 'PW7d: cancelled';
+  ASSERT public.exos_promoter_payout_cancel(po, (c2->>'lease_token')::uuid), 'PW7d: finishing again is a no-op';
+  ASSERT (SELECT return_transfer_id FROM public.exos_promoter_payouts WHERE id = po) = 'tr_pwret1', 'PW7d: one return';
+  ASSERT (SELECT status FROM public.exos_promoter_commissions WHERE id = ids[1]) = 'accrued', 'PW7d: sale unpaid again';
+  -- Last line of defence: a 'sent' that lands after the cancel wins and alerts.
+  ASSERT public.exos_promoter_transfer_mark(po, 'sent', 'tr_pwlate'), 'PW7d: late sent recorded';
+  ASSERT (SELECT transfer_status || ':' || coalesce(cancelled_at::text, 'live') FROM public.exos_promoter_payouts WHERE id = po) = 'sent:live',
+         'PW7d: sent wins';
+  ASSERT (SELECT alert FROM public.exos_promoter_payouts WHERE id = po) LIKE '%after it was cancelled; the organizer was also refunded (tr_pwret1)%',
+         'PW7d: alert ' || (SELECT alert FROM public.exos_promoter_payouts WHERE id = po);
+  ASSERT (SELECT status || ':' || payout_id FROM public.exos_promoter_commissions WHERE id = ids[1]) = 'paid:' || po, 'PW7d: its sale paid again';
+  RAISE NOTICE 'OK  PW7d fenced cancel state machine; late sent wins with an alert';
 END $$;
 SELECT set_config('app.uid','',false);
 
@@ -420,8 +483,8 @@ DECLARE b jsonb; tp uuid := current_setting('test.tp')::uuid; tr uuid := current
 BEGIN
   b := public.exos_promoter_leaderboard(tp);
   ASSERT (b->>'promoters')::int = 2, 'PW9: two active promoters in org A: ' || b::text;
-  ASSERT b->'rows'->0->>'name' = 'Promoter P' AND (b->'rows'->0->>'tickets')::int = 5 AND (b->'rows'->0->>'me')::boolean,
-         'PW9: P first with 5 tickets: ' || b::text;
+  ASSERT b->'rows'->0->>'name' = 'Promoter P' AND (b->'rows'->0->>'tickets')::int = 6 AND (b->'rows'->0->>'me')::boolean,
+         'PW9: P first with 6 tickets: ' || b::text;
   ASSERT position('Promoter R' in b::text) = 0 AND position('cents' in b::text) = 0 AND position('pw-p' in b::text) = 0,
          'PW9: no other org, money or codes';
   ASSERT public.exos_promoter_leaderboard(gen_random_uuid()) IS NULL, 'PW9: wrong token';
@@ -475,10 +538,10 @@ DO $$
 DECLARE m jsonb;
 BEGIN
   m := public.exos_event_money_so_far('0f0f0000-0000-0000-0000-0000000000e1');
-  ASSERT (m->'online'->>'orders')::int = 5 AND (m->'online'->>'gross_cents')::int = 14000, 'PW11: gross ' || m::text;
-  ASSERT (m->'online'->>'fees_cents')::int = 2350 AND (m->'online'->>'net_cents')::int = 11650, 'PW11: fees and net ' || m::text;
-  ASSERT (m->'tickets'->>'paid')::int = 7, 'PW11: paid tickets';
-  ASSERT (m->'promoters'->>'owed_cents')::int = 500 AND (m->'promoters'->>'paid_cents')::int = 1200,
+  ASSERT (m->'online'->>'orders')::int = 6 AND (m->'online'->>'gross_cents')::int = 16000, 'PW11: gross ' || m::text;
+  ASSERT (m->'online'->>'fees_cents')::int = 2410 AND (m->'online'->>'net_cents')::int = 13590, 'PW11: fees and net ' || m::text;
+  ASSERT (m->'tickets'->>'paid')::int = 8, 'PW11: paid tickets';
+  ASSERT (m->'promoters'->>'owed_cents')::int = 500 AND (m->'promoters'->>'paid_cents')::int = 1500,
          'PW11: commissions owed / paid ' || (m->'promoters')::text;
 END $$;
 RESET ROLE;
@@ -686,13 +749,15 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_mail WHERE to_email = 'em@x.com' AND template = 'ticket-issued'
            AND html LIKE '%/t/' || (first->'tickets'->0->>'id') || '#k=%') = 1, 'PW15b: Em''s own email gets her tickets again';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email IN ('other@x.com', 'never@x.com')), 'PW15b: nothing to other inboxes';
-  -- By text: the resend is internal to exos-rsvp (stripped), the answer is the same.
+  -- By text: the resend is queued in the outbox (sent off the request path); the answer is identical.
   full_sms := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Bea', '+12125550113', NULL, 0, NULL, true, NULL, 'https://exos.example');
   f := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Nev', '+12125550143', NULL, 0, NULL, true, NULL, 'https://exos.example');
-  ASSERT (full_sms - '_resend') = f AND f = '{"ok": false, "error": "sold_out"}'::jsonb, 'PW15b: same answer by text ' || full_sms::text;
-  ASSERT full_sms->'_resend'->>'to' = '+12125550113' AND full_sms->'_resend'->'urls'->>0 LIKE '%/t/' || current_setting('test.tk1') || '#k=%',
-         'PW15b: Bea''s links go to Bea''s phone';
-  ASSERT f->'_resend' IS NULL, 'PW15b: nothing to text for a number that never RSVP''d';
+  ASSERT full_sms = f AND f = '{"ok": false, "error": "sold_out"}'::jsonb, 'PW15b: same answer by text ' || full_sms::text;
+  ASSERT (SELECT count(*) FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550113' AND status = 'queued'
+           AND body LIKE '%/t/' || current_setting('test.tk1') || '#k=%') = 1, 'PW15b: Bea''s links queued for Bea''s phone';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550143'), 'PW15b: nothing for a number that never RSVP''d';
+  ASSERT (SELECT count(*) FROM public.exos_rsvp_sms_claim(10)) = 1, 'PW15b: the drain claims it';
+  ASSERT public.exos_rsvp_sms_mark((SELECT id FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550113'), 'sent'), 'PW15b: marked sent';
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = '0f0f0000-0000-0000-0000-0000000000d2') = 6, 'PW15b: resends mint nothing';
   RAISE NOTICE 'OK  PW15b answers don''t reveal an RSVP; no takeover; proven-channel resends';
 END $$;
@@ -794,7 +859,7 @@ BEGIN
    WHERE n.nspname = 'public' AND p.prosecdef
      AND p.proname IN ('_exos_pc_terms', '_exos_pc_reprice', 'exos_set_promoter_step', 'exos_promoter_unpaid',
                        'exos_settle_promoter', 'exos_set_promoter_stripe_transfers', 'exos_promoter_leaderboard',
-                       'exos_promoter_by_token', 'exos_record_promoter_stripe', 'exos_promoter_transfer_claim', 'exos_promoter_lease_ok', 'exos_promoter_transfer_reconcile',
+                       'exos_promoter_by_token', 'exos_record_promoter_stripe', 'exos_promoter_transfer_claim', 'exos_promoter_lease_ok', 'exos_promoter_transfer_reconcile', 'exos_promoter_lease_release', 'exos_promoter_return_begin', 'exos_promoter_return_done', 'exos_rsvp_sms_claim', 'exos_rsvp_sms_mark',
                        'exos_promoter_funding_mark', 'exos_promoter_transfer_mark', 'exos_promoter_payout_cancel',
                        'exos_instant_payout_begin', 'exos_instant_payout_mark', 'exos_event_money_so_far',
                        'exos_set_phone_rsvp', '_exos_phone_rsvp_offer', 'exos_phone_rsvp_info',
@@ -806,7 +871,7 @@ BEGIN
    WHERE n.nspname = 'public'
      AND p.proname IN ('_exos_pc_terms', '_exos_pc_reprice', 'exos_set_promoter_step', 'exos_promoter_unpaid',
                        'exos_settle_promoter', 'exos_set_promoter_stripe_transfers',
-                       'exos_promoter_by_token', 'exos_record_promoter_stripe', 'exos_promoter_transfer_claim', 'exos_promoter_lease_ok', 'exos_promoter_transfer_reconcile',
+                       'exos_promoter_by_token', 'exos_record_promoter_stripe', 'exos_promoter_transfer_claim', 'exos_promoter_lease_ok', 'exos_promoter_transfer_reconcile', 'exos_promoter_lease_release', 'exos_promoter_return_begin', 'exos_promoter_return_done', 'exos_rsvp_sms_claim', 'exos_rsvp_sms_mark',
                        'exos_promoter_funding_mark', 'exos_promoter_transfer_mark', 'exos_promoter_payout_cancel',
                        'exos_instant_payout_begin', 'exos_instant_payout_mark', 'exos_event_money_so_far',
                        'exos_set_phone_rsvp', '_exos_phone_rsvp_offer', 'exos_phone_rsvp_info',
@@ -818,7 +883,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public'
      AND p.proname IN ('_exos_pc_terms', '_exos_pc_reprice', 'exos_promoter_by_token', 'exos_record_promoter_stripe',
-                       'exos_promoter_transfer_claim', 'exos_promoter_transfer_reconcile', 'exos_promoter_lease_ok', 'exos_promoter_funding_mark', 'exos_promoter_transfer_mark',
+                       'exos_promoter_transfer_claim', 'exos_promoter_transfer_reconcile', 'exos_promoter_lease_ok', 'exos_promoter_lease_release', 'exos_promoter_return_begin', 'exos_promoter_return_done', 'exos_rsvp_sms_claim', 'exos_rsvp_sms_mark', 'exos_promoter_funding_mark', 'exos_promoter_transfer_mark',
                        'exos_promoter_payout_cancel', 'exos_instant_payout_begin', 'exos_instant_payout_mark',
                        '_exos_phone_rsvp_offer', 'exos_phone_rsvp_info', 'exos_phone_rsvp_start', 'exos_phone_rsvp_verify')
      AND has_function_privilege('authenticated', p.oid, 'EXECUTE');

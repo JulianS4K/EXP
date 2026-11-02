@@ -14,6 +14,12 @@ import { rsvpHeads, ticketPathFromUrl } from './phoneRsvp';
 import {
   codeSentText, codeText, honeypotAnswer, maskPhone, normalizeRsvpPhone, parseRsvpRequest, RsvpInputError, rsvpErrorMessage, smsAvailable, ticketsText,
 } from '../../supabase/functions/_shared/rsvp.ts';
+import { readFileSync } from 'node:fs';
+import {
+  CANCEL_AFTER_MS, DB_TIMEOUT_MS, findReturnTransfer, LEASE_MS, MAX_FUNDING_LINES, mayCallStripe, STRIPE_MAX_RETRIES,
+  STRIPE_TIMEOUT_MS, worstSendMs,
+} from '../../supabase/functions/_shared/payouts/promoterTransfers.ts';
+import { drainRsvpSms } from '../../supabase/functions/_shared/sms/rsvpOutbox.ts';
 import {
   amountToReturn, claimAction, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
 } from '../../supabase/functions/_shared/payouts/promoterTransfers.ts';
@@ -61,6 +67,9 @@ describe('settling', () => {
     expect(canSendOrCancel('stripe', 'sent')).toBe(false);
     expect(canSendOrCancel('stripe', 'cancelled')).toBe(false);
     expect(canSendOrCancel('manual', 'pending')).toBe(false);
+    // A half-finished cancel can be finished, never sent.
+    expect(canSendOrCancel('stripe', 'return_pending')).toBe(true);
+    expect(payoutStatusLabel('stripe', 'cancel_pending')).toMatch(/Cancelling/);
   });
 });
 
@@ -142,6 +151,50 @@ describe('promoter transfer plans', () => {
   it('keeps secrets out of Stripe error text', () => {
     expect(stripeErrorText({ code: 'balance_insufficient', message: 'No funds for sk_live_abc123' })).toBe('balance_insufficient: No funds for [key]');
     expect(stripeErrorText(null)).toBe('Stripe error');
+  });
+});
+
+describe('payout timing bounds', () => {
+  it('a whole send ends before its lease, and the lease before a cancel may start', () => {
+    expect(STRIPE_TIMEOUT_MS).toBe(15_000);
+    expect(STRIPE_MAX_RETRIES).toBeLessThanOrEqual(1);
+    expect(worstSendMs()).toBe(11 * 15_000 + 45 * DB_TIMEOUT_MS + 11 * 750);
+    expect(worstSendMs()).toBeLessThan(LEASE_MS);
+    expect(LEASE_MS).toBeLessThan(CANCEL_AFTER_MS);
+    expect(mayCallStripe(0)).toBe(true);
+    expect(mayCallStripe(LEASE_MS - STRIPE_TIMEOUT_MS)).toBe(false);
+    expect(mayCallStripe(-1)).toBe(false);
+  });
+  it('the SQL uses the same numbers', () => {
+    const sql = readFileSync(new URL('../../supabase/migrations/20261102150000_exos_promoter_wedge.sql', import.meta.url), 'utf8');
+    const claim = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.exos_promoter_transfer_claim'),
+                            sql.indexOf('CREATE OR REPLACE FUNCTION public.exos_promoter_lease_ok'));
+    expect(claim).toContain(`lease_until = now() + interval '${LEASE_MS / 60_000} minutes'`);
+    expect(claim).toContain(`po.send_started_at > now() - interval '${CANCEL_AFTER_MS / 60_000} minutes'`);
+    expect(sql).toContain(`WHERE payout_id = v_id) > ${MAX_FUNDING_LINES} THEN`);
+    const leaseOk = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.exos_promoter_lease_ok'),
+                              sql.indexOf('CREATE OR REPLACE FUNCTION public.exos_promoter_funding_mark'));
+    expect(leaseOk).not.toMatch(/SET\s+lease_until/);   // never extended
+  });
+  it('finds an earlier run\'s return transfer on a retried cancel', () => {
+    const m = { exos_promoter_payout_id: 'po1' };
+    expect(findReturnTransfer('po1', [{ id: 'tr_out', metadata: m }, { id: 'tr_ret', metadata: { ...m, exos_return: '1' } }])).toBe('tr_ret');
+    expect(findReturnTransfer('po1', [{ id: 'tr_out', metadata: m }])).toBeNull();
+    expect(findReturnTransfer('po1', [{ id: 'tr_x', metadata: { exos_promoter_payout_id: 'po2', exos_return: '1' } }])).toBeNull();
+  });
+  it('drains the RSVP resend outbox off the request path', async () => {
+    const calls: [string, Record<string, unknown>][] = [];
+    const sb = { rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.push([fn, args]);
+      return fn === 'exos_rsvp_sms_claim'
+        ? { data: [{ id: 'q1', org_id: 'o1', phone: '+12125550113', body: 'Your tickets' }], error: null }
+        : { data: true, error: null };
+    } };
+    const fake = (async () => new Response(JSON.stringify({ sid: 'SM1' }), { status: 201 })) as unknown as typeof fetch;
+    const cfg = { provider: 'twilio' as const, config: { account_sid: 'AC' + '0'.repeat(32), from: '+12125550000' }, secret: 's' };
+    expect(await drainRsvpSms(sb, true, async () => cfg, fake)).toEqual({ sent: 1, failed: 0 });
+    expect(calls.at(-1)).toEqual(['exos_rsvp_sms_mark', { p_id: 'q1', p_status: 'sent' }]);
+    expect(await drainRsvpSms(sb, false, async () => cfg, fake)).toEqual({ sent: 0, failed: 1 });
   });
 });
 

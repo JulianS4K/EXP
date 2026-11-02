@@ -16,7 +16,7 @@ import { Banknote, Percent, Send, TrendingUp, Trash2, XCircle } from 'lucide-rea
 import { useToast } from '../context/ToastContext';
 import { formatCurrency } from '../lib/utils';
 import {
-  bpsToPercent, canSendOrCancel, formatDateOnly, moneyToCents, newSettleKey, payoutNetCents, payoutStatusLabel,
+  bpsToPercent, canCancel, canSend, canSendOrCancel, formatDateOnly, moneyToCents, newSettleKey, payoutNetCents, payoutStatusLabel,
   percentToBps, termsLabel, tieredLabel, type StepTerms, type TransferStatus,
 } from '../lib/commissions';
 import {
@@ -306,16 +306,19 @@ function PayoutHistory({ promoterId, canWrite, stripeOn, onChanged }: {
             {payoutStatusLabel(r.via, r.transferStatus as TransferStatus | null)}
           </span>
           <span className="font-black text-white">{money(r.amountCents, r.currency)}</span>
+          {r.alert && <p role="alert" className="w-full text-[11px] text-rose-300">Needs a look: {r.alert}</p>}
           {canWrite && canSendOrCancel(r.via, r.transferStatus as TransferStatus | null) && (
             <>
-              {stripeOn && (
+              {stripeOn && canSend(r.via, r.transferStatus as TransferStatus | null) && (
                 <button onClick={() => void act(r.id, 'send')} disabled={busy === r.id} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-brand-primary disabled:opacity-40">
                   <Send className="w-3 h-3" /> Send
                 </button>
               )}
-              <button onClick={() => void act(r.id, 'cancel')} disabled={busy === r.id} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-white/50 hover:text-white disabled:opacity-40">
-                <XCircle className="w-3 h-3" /> Cancel
-              </button>
+              {canCancel(r.via, r.transferStatus as TransferStatus | null) && (
+                <button onClick={() => void act(r.id, 'cancel')} disabled={busy === r.id} className="inline-flex items-center gap-1 text-[11px] font-black uppercase text-white/50 hover:text-white disabled:opacity-40">
+                  <XCircle className="w-3 h-3" /> {r.transferStatus === 'cancel_pending' || r.transferStatus === 'return_pending' ? 'Finish cancel' : 'Cancel'}
+                </button>
+              )}
             </>
           )}
         </div>

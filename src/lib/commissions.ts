@@ -196,7 +196,7 @@ export function newSettleKey(rand: () => string = () => globalThis.crypto.random
   return `settle-${rand().replace(/[^A-Za-z0-9_-]/g, '')}`.slice(0, 80);
 }
 
-export type TransferStatus = 'pending' | 'sending' | 'sent' | 'dry_run' | 'failed' | 'cancelled';
+export type TransferStatus = 'pending' | 'sending' | 'sent' | 'dry_run' | 'failed' | 'cancel_pending' | 'return_pending' | 'cancelled';
 
 /** How a payout reads to the organizer. */
 export function payoutStatusLabel(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): string {
@@ -207,6 +207,8 @@ export function payoutStatusLabel(via: 'manual' | 'stripe', status: TransferStat
     case 'sending': return 'Sending…';
     case 'dry_run': return 'Dry run (nothing sent)';
     case 'failed': return 'Failed';
+    case 'cancel_pending': return 'Cancelling…';
+    case 'return_pending': return 'Returning money to you…';
     case 'cancelled': return 'Cancelled';
     default: return 'Unknown';
   }
@@ -214,5 +216,13 @@ export function payoutStatusLabel(via: 'manual' | 'stripe', status: TransferStat
 
 /** A Stripe payout the organizer can still send or cancel. */
 export function canSendOrCancel(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): boolean {
+  return canSend(via, status) || canCancel(via, status);
+}
+/** Send (again): not once a cancel has started. */
+export function canSend(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): boolean {
   return via === 'stripe' && (status === 'pending' || status === 'dry_run' || status === 'failed');
+}
+/** Cancel, or finish a cancel that stopped half way. */
+export function canCancel(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): boolean {
+  return canSend(via, status) || (via === 'stripe' && (status === 'cancel_pending' || status === 'return_pending'));
 }

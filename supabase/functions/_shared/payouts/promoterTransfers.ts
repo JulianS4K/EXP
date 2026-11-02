@@ -12,6 +12,50 @@
 
 export type TransfersMode = 'dry-run' | 'live';
 
+// --- Timing: every bound in one place ---------------------------------------
+// The SQL uses the same numbers as literals (the 6-minute lease, the 10-minute
+// cancel wait, at most 10 funding lines); src/lib/promoterWedge.test.ts pins
+// the literals to these constants and asserts
+//     worstSendMs() < LEASE_MS < CANCEL_AFTER_MS.
+/** Each Stripe call: one attempt, at most this long. */
+export const STRIPE_TIMEOUT_MS = 15_000;
+export const STRIPE_MAX_RETRIES = 0;
+/** Each database (PostgREST) call made by the function. */
+export const DB_TIMEOUT_MS = 3_000;
+/** At most this many reversals in one send (exos_settle_promoter refuses more). */
+export const MAX_FUNDING_LINES = 10;
+/** durably(): tries, and the wait before try n+1 is n x DURABLE_WAIT_MS. */
+export const DURABLE_TRIES = 3;
+export const DURABLE_WAIT_MS = 250;
+/** A send lease (claim) lasts this long and is never extended. */
+export const LEASE_MS = 6 * 60_000;
+/** A cancel / reconcile may start this long after a send began. */
+export const CANCEL_AFTER_MS = 10 * 60_000;
+
+/**
+ * The longest one send can take after its claim committed: the claim's
+ * answer; per Stripe call (each reversal, then the transfer) a lease check
+ * and the call; per reversal a durable funding mark; then a durable 'sent'.
+ */
+export function worstSendMs(): number {
+  const stripeCalls = MAX_FUNDING_LINES + 1;
+  const durableWrites = MAX_FUNDING_LINES + 1;
+  const dbCalls = 1 + stripeCalls + durableWrites * DURABLE_TRIES;
+  let waits = 0;
+  for (let i = 1; i < DURABLE_TRIES; i++) waits += i * DURABLE_WAIT_MS;
+  return stripeCalls * STRIPE_TIMEOUT_MS * (1 + STRIPE_MAX_RETRIES) + dbCalls * DB_TIMEOUT_MS + durableWrites * waits;
+}
+
+/** Belt and braces: may a Stripe call still start this long after the claim? */
+export function mayCallStripe(elapsedMs: number): boolean {
+  return elapsedMs >= 0 && elapsedMs + STRIPE_TIMEOUT_MS * (1 + STRIPE_MAX_RETRIES) + DB_TIMEOUT_MS * DURABLE_TRIES < LEASE_MS;
+}
+
+/** fetch with a hard timeout, for the Supabase client. */
+export function timedFetch(ms: number = DB_TIMEOUT_MS): typeof fetch {
+  return (input, init) => fetch(input, { ...(init ?? {}), signal: AbortSignal.timeout(ms) });
+}
+
 /** Money moves only with EXOS_PROMOTER_TRANSFERS exactly "on". */
 export function transfersMode(env: (name: string) => string | undefined): TransfersMode {
   return env('EXOS_PROMOTER_TRANSFERS') === 'on' ? 'live' : 'dry-run';
@@ -105,7 +149,7 @@ export function reconcileDecision(
 }
 
 /** Retry a ledger write a few times; true once it reports success. */
-export async function durably(write: () => Promise<boolean>, tries = 3, waitMs = 250): Promise<boolean> {
+export async function durably(write: () => Promise<boolean>, tries = DURABLE_TRIES, waitMs = DURABLE_WAIT_MS): Promise<boolean> {
   for (let i = 0; i < tries; i++) {
     try { if (await write()) return true; } catch { /* retry */ }
     if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs * (i + 1)));
@@ -127,4 +171,11 @@ export function claimAction(a: ClaimAnswer): 'proceed' | 'reconcile_first' | { s
   if (!/^[0-9a-f-]{36}$/i.test(String(a.lease_token ?? ''))) return { stop: 'no lease' };
   if (a.purpose !== 'send' && a.needs_reconcile) return 'reconcile_first';
   return 'proceed';
+}
+
+/** On a retried cancel: the return transfer an earlier run already made, if any. */
+export function findReturnTransfer(payoutId: string, transfers: StripeTransferLite[]): string | null {
+  const t = transfers.find((x) => x.metadata?.exos_promoter_payout_id === payoutId && x.metadata?.exos_return === '1'
+    && /^tr_[A-Za-z0-9]{1,64}$/.test(x.id));
+  return t?.id ?? null;
 }

@@ -23,6 +23,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { fillAppUrl, normalizeAppUrl } from "../_shared/mail-render.ts";
+import { drainRsvpSms } from "../_shared/sms/rsvpOutbox.ts";
 import { safeEqual, sendSms, type SmsConfig, telnyxInbound, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,7 +124,10 @@ async function drain(sb: SupabaseClient) {
       if (!r.retry) failed++;
     }
   }
-  return { ok: true, live, sent, dry_run: dry, failed };
+  // Phone-RSVP resends queued off the request path (mig 20261102150000).
+  const rsvp = await drainRsvpSms(sb, live, async (org) => (await config(sb, org, "twilio")) ?? (await config(sb, org, "telnyx")))
+    .catch(() => ({ sent: 0, failed: 0 }));
+  return { ok: true, live, sent, dry_run: dry, failed, rsvp_resends: rsvp };
 }
 
 function json(body: unknown, status = 200): Response {
