@@ -181,7 +181,7 @@ async function withPublicTiers(rows: any[]): Promise<Event[]> {
   return rows.map((r) => withLinkOut(mapEvent(r, byEvent.get(r.id) ?? []), los.get(r.id)));
 }
 
-// Link-out events (mig 20261029170000) have no Exos ticket types: their card
+// Link-out events (mig 20261029170500) have no Exos ticket types: their card
 // price is the imported lowest price. Only events another platform sells can
 // be link-outs, so the others cost no query.
 function linkOutsFor(rows: any[]): Promise<Map<string, PublicLinkOut>> {

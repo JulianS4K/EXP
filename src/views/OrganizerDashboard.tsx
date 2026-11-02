@@ -209,7 +209,7 @@ export default function OrganizerDashboard() {
           </div>
         </div>
 
-        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170000). */}
+        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170500). */}
         {activeOrg && (isAdmin || activeRole === 'owner' || activeRole === 'manager') && <ImportEventsPanel orgId={activeOrg.id} />}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">

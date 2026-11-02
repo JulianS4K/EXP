@@ -27,7 +27,7 @@
 // pricing rules both want the total up front. Offer URLs go to the Exos
 // checkout with that ticket type in the cart, tagged utm_source=google.
 //
-// Sold elsewhere (where to buy: exos_event_buy_link, mig 20261029170000):
+// Sold elsewhere (where to buy: exos_event_buy_link, mig 20261029170500):
 //   * a LINK-OUT event (imported from Eventbrite / Luma / Posh; Exos sells
 //     nothing) has no Exos ticket types. Its offers are the imported ticket
 //     types (else one "Tickets" offer at the lowest price), each with the

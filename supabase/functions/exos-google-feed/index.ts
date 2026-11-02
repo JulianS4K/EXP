@@ -10,7 +10,7 @@
 //
 // Every field is already public on the event page. Published events, plus
 // cancelled ones that were on sale and haven't started (as EventCancelled).
-// Where to buy comes from exos_feed_where_to_buy (mig 20261029170000): a
+// Where to buy comes from exos_feed_where_to_buy (mig 20261029170500): a
 // link-out event's offers go to the organizer's checkout with the imported
 // prices; before that migration every event sells on Exos, as before.
 // The feed is a snapshot: an event missing from it is removed.
@@ -107,7 +107,7 @@ async function readFeedInput(sb: SupabaseClient, now: Date) {
   const buy = new Map<string, WhereToBuy>();
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    // Where to buy (mig 20261029170000). Missing function (PGRST202 / 42883): all Exos.
+    // Where to buy (mig 20261029170500). Missing function (PGRST202 / 42883): all Exos.
     const { data: w, error: wErr } = await sb.rpc("exos_feed_where_to_buy", { p_event_ids: chunk });
     if (wErr && wErr.code !== "PGRST202" && wErr.code !== "42883") throw new Error(`where to buy: ${wErr.message}`);
     for (const r of (w ?? []) as WhereToBuy[]) buy.set(r.event_id, r);

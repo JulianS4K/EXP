@@ -22,7 +22,7 @@
 //     (every platform requires one).
 //   * brand: the organizer's name.
 //
-// Link-out events (imported from Eventbrite / Luma / Posh, mig 20261029170000;
+// Link-out events (imported from Eventbrite / Luma / Posh, mig 20261029170500;
 // Exos sells nothing): price = the imported lowest price, availability from
 // the re-checked source status (sold out = out of stock; cancelled or ended
 // at the source = left out), link = the organizer's checkout with the same

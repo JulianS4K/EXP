@@ -1,4 +1,4 @@
-// Edit event → for a link-out event (mig 20261029170000): where it's sold,
+// Edit event → for a link-out event (mig 20261029170500): where it's sold,
 // what the last check of the source found, and "Check now". Renders nothing
 // for an event Exos sells. Reads exos_event_imports (owner / manager /
 // finance by RLS).

@@ -129,7 +129,7 @@ for m in \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
-         20261029170000_exos_event_import \
+         20261029170500_exos_event_import \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
@@ -315,7 +315,7 @@ for m in \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
-         20261029170000_exos_event_import \
+         20261029170500_exos_event_import \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \

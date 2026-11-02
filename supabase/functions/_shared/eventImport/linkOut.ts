@@ -1,4 +1,4 @@
-// Link-out events in the feeds (mig 20261029170000). Where to buy is decided
+// Link-out events in the feeds (mig 20261029170500). Where to buy is decided
 // in ONE place, the SQL function exos_event_buy_link: the storefront reads it
 // through exos_public_event_sales / exos_public_link_outs, the Google and
 // calendar feeds through exos_feed_where_to_buy, the catalog feed through

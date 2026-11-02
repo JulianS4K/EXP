@@ -51,7 +51,7 @@ at least one public ticket type, and has an https image. Hidden (code-unlocked) 
 CSV is RFC 4180 (UTF-8, CRLF, fields with commas, quotes or line breaks quoted, quotes doubled); XML text is escaped
 and characters XML 1.0 forbids are removed.
 
-**Link-out events** (listed from Eventbrite, Luma or Posh, mig `20261029170000`; Exos sells nothing) have no Exos
+**Link-out events** (listed from Eventbrite, Luma or Posh, mig `20261029170500`; Exos sells nothing) have no Exos
 ticket types; the feed reads `exos_public_link_outs` (anon) instead:
 
 - price: the imported lowest price (`25.00 USD`); availability: `out of stock` when the source is sold out, else

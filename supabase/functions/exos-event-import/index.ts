@@ -1,4 +1,4 @@
-// exos-event-import — "List an event you sell elsewhere" (mig 20261029170000;
+// exos-event-import — "List an event you sell elsewhere" (mig 20261029170500;
 // docs/organizer-guide.md; spec §7.2). Creates LINK-OUT Exos events: listed
 // by Exos (event page, org page, discovery, Google / catalog / calendar
 // feeds), sold only on the organizer's own checkout. Exos sells nothing for

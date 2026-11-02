@@ -150,7 +150,7 @@ BEGIN
        -- last call and where to buy, nothing else (mig 20261029100000)
        'exos_public_event_sale',
        -- the public link-out view calls it as the reader: published link-out
-       -- events' checkout URL, status and display prices (mig 20261029170000)
+       -- events' checkout URL, status and display prices (mig 20261029170500)
        'exos_public_link_out',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',

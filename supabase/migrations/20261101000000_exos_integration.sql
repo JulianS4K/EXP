@@ -20,7 +20,7 @@
 -- 1. Where to buy for a fixed-block event at last call.
 --    20261029160000 (fixed block) made exos_public_event_sale treat
 --    primary_source 'external' as Exos: Exos sells its own block at last call.
---    20261029170000 (event import) rebuilt exos_public_event_sale on top of
+--    20261029170500 (event import) rebuilt exos_public_event_sale on top of
 --    exos_event_buy_link, whose last-call branch only excludes 'exos', so a
 --    block event at last call sent buyers to a NULL 'external' page.
 --    Kept: #63's single where-to-buy function (link-out, sold elsewhere, last
