@@ -116,6 +116,7 @@ export function rsvpErrorMessage(error: string | undefined, extra: { max_plus_on
     case 'locked': return 'Too many wrong codes. Start again to get a new one.';
     case 'expired': return 'That code expired. Start again to get a new one.';
     case 'used': return 'That code was already used. Check your texts for your ticket link.';
+    case 'already': return 'This number has already RSVP\'d. We can text the tickets to that phone: start again with texts, or use the email it RSVP\'d with.';
     case 'off': return 'RSVP by phone isn\'t open for this event.';
     case 'closed': return 'RSVPs for this event are closed.';
     case 'over': return 'This event is over.';

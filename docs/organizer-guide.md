@@ -665,7 +665,8 @@ promoter as usual).
 - The code works for 10 minutes and 5 tries. Then the guest gets their ticket link by text (and on
   screen): the live QR code that changes every 30 seconds, no app, no account. Each plus-one gets
   their own link to forward.
-- One RSVP per number per event: asking again resends the same tickets. Capacity, quotas and the
+- One RSVP per number per event: asking again resends the same tickets, but only by text to that
+  number, or to the same email that RSVP'd. Anyone else gets "already RSVP'd" and no links. Capacity, quotas and the
   event cap apply; when it's full the page offers the waitlist. Numbers that replied STOP to your
   texts get the code by email instead.
 - Limits stop bots: a few codes per number, per network and per event every few minutes, and a hidden

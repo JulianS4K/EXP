@@ -149,6 +149,14 @@ clawback netting).
   exos-promoter-payout-<id>`). Marked `sent` only with the transfer id and every line taken; any Stripe
   error marks `failed` with the message. Retrying is safe: the keys make each call happen once.
 - **Dry run by default:** unless `EXOS_PROMOTER_TRANSFERS=on` a send records `dry_run` and moves nothing.
+- **The ledger never forgets money that moved.** After a reversal or the transfer succeeds at Stripe, its
+  mark is retried; if it still can't be written the call answers an error and the payout stays
+  `sending` (never `failed`). Every send claim stamps `send_started_at`, and such a payout can't be
+  cancelled until it's **reconciled** (`exos_promoter_transfer_reconcile`): `/cancel` first lists the
+  transfers in `exos-promoter-payout-<id>` and the reversals on each order transfer, keeping only those
+  whose metadata names this payout (and, for the transfer, the promoter's account; the organizer-return
+  transfer doesn't count). A transfer found marks the payout `sent` and the cancel is refused; found
+  reversals become `taken` lines that the cancel returns to the organizer; nothing found allows the cancel.
 - **Cancel** (`/cancel`): a Stripe payout not yet `sent` can be cancelled. Money already taken from the
   organizer goes back to their connected account first (one transfer, key `exos-pcr:<payout>`); then
   `exos_promoter_payout_cancel` releases the lines, returns the sales to unpaid and re-opens the

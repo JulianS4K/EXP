@@ -15,7 +15,7 @@ import {
   codeText, honeypotAnswer, maskPhone, normalizeRsvpPhone, parseRsvpRequest, RsvpInputError, rsvpErrorMessage, smsAvailable, ticketsText,
 } from '../../supabase/functions/_shared/rsvp.ts';
 import {
-  amountToReturn, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
+  amountToReturn, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
 } from '../../supabase/functions/_shared/payouts/promoterTransfers.ts';
 import {
   checkInstantRequest, instantAvailable, instantEnabled, instantFeeCents, instantFeeConfig, maxInstantPayout,
@@ -97,6 +97,29 @@ describe('promoter transfer plans', () => {
     expect(transferKey('po1')).toBe('exos-pct:po1');
     expect(returnKey('po1')).toBe('exos-pcr:po1');
     expect(amountToReturn(claim().lines)).toBe(200);
+  });
+  it('reconciles before a cancel: a found transfer means sent, never cancel', () => {
+    const c = claim({ lines: [{ session_id: 'cs_1', org_transfer_id: 'tr_1', amount_cents: 700, status: 'planned', reversal_id: null }] });
+    const meta = { exos_promoter_payout_id: 'po1' };
+    // Nothing at Stripe: the cancel may go ahead.
+    expect(reconcileDecision(c, [], {})).toEqual({ action: 'allow_cancel', transferId: null, reversals: [] });
+    // A reversal went through but no transfer: record the reversal, cancel returns it.
+    expect(reconcileDecision(c, [], { cs_1: [{ id: 'trr_9', metadata: { ...meta, exos_session_id: 'cs_1' } }] }))
+      .toEqual({ action: 'allow_cancel', transferId: null, reversals: [{ session_id: 'cs_1', reversal_id: 'trr_9' }] });
+    // The promoter transfer exists: mark sent.
+    expect(reconcileDecision(c, [{ id: 'tr_out', destination: 'acct_P', metadata: meta }], {}).action).toBe('mark_sent');
+    // The organizer-return transfer, another payout's transfer, or another destination don't count.
+    expect(reconcileDecision(c, [{ id: 'tr_ret', destination: 'acct_P', metadata: { ...meta, exos_return: '1' } }], {}).action).toBe('allow_cancel');
+    expect(reconcileDecision(c, [{ id: 'tr_x', destination: 'acct_P', metadata: { exos_promoter_payout_id: 'po2' } }], {}).action).toBe('allow_cancel');
+    expect(reconcileDecision(c, [{ id: 'tr_y', destination: 'acct_Z', metadata: meta }], {}).action).toBe('allow_cancel');
+    // Another payout's reversal on the same order transfer isn't ours.
+    expect(reconcileDecision(c, [], { cs_1: [{ id: 'trr_8', metadata: { exos_promoter_payout_id: 'po2', exos_session_id: 'cs_1' } }] }).reversals).toEqual([]);
+  });
+  it('retries a ledger write and reports a write that never sticks', async () => {
+    let n = 0;
+    expect(await durably(async () => ++n >= 2, 3, 0)).toBe(true);
+    expect(await durably(async () => { throw new Error('db down'); }, 3, 0)).toBe(false);
+    expect(await durably(async () => false, 2, 0)).toBe(false);
   });
   it('keeps secrets out of Stripe error text', () => {
     expect(stripeErrorText({ code: 'balance_insufficient', message: 'No funds for sk_live_abc123' })).toBe('balance_insufficient: No funds for [key]');
@@ -208,7 +231,7 @@ describe('phone RSVP', () => {
   });
   it('has a message for every error the SQL answers', () => {
     for (const e of ['bad_phone', 'bad_name', 'bad_email', 'too_many_guests', 'sold_out', 'no_channel', 'rate_limited',
-                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over']) {
+                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over', 'already']) {
       expect(rsvpErrorMessage(e)).not.toBe(rsvpErrorMessage('???'));
     }
     expect(rsvpErrorMessage('wrong_code', { attempts_left: 1 })).toContain('1 try left');

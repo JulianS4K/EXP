@@ -265,7 +265,13 @@ BEGIN
   ASSERT (e->'totals'->0->>'paid_cents')::int = 700 AND (e->'totals'->0->>'processing_cents')::int = 300,
          'PW7: dry run shows as processing, not paid: ' || (e->'totals')::text;
   c := public.exos_promoter_transfer_claim((r->>'payout_id')::uuid, '0f0f0000-0000-0000-0000-0000000000a1', 'cancel');
-  ASSERT (c->>'ok')::boolean, 'PW7: claimed for cancel';
+  ASSERT (c->>'ok')::boolean AND (c->>'needs_reconcile')::boolean, 'PW7: claimed for cancel; a send was started ' || c::text;
+  -- Cancel is refused from 'sending' until Stripe has been checked.
+  BEGIN
+    PERFORM public.exos_promoter_payout_cancel((r->>'payout_id')::uuid);
+    ASSERT false, 'PW7: cancel before reconcile';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  ASSERT public.exos_promoter_transfer_reconcile((r->>'payout_id')::uuid, NULL) = 'reconciled', 'PW7: Stripe has nothing';
   ASSERT public.exos_promoter_payout_cancel((r->>'payout_id')::uuid), 'PW7: cancelled';
   ASSERT (SELECT status FROM public.exos_promoter_commissions WHERE id = ids[1]) = 'accrued', 'PW7: sale unpaid again';
   ASSERT (SELECT status FROM public.exos_promoter_payout_funding WHERE payout_id = (r->>'payout_id')::uuid) = 'released', 'PW7: funding released';
@@ -276,6 +282,35 @@ BEGIN
   -- A sent payout can't be cancelled.
   ASSERT NOT public.exos_promoter_payout_cancel(current_setting('test.po1')::uuid), 'PW7: sent stays sent';
   RAISE NOTICE 'OK  PW7 cancel returns sales; earnings split paid / processing';
+END $$;
+
+-- PW7b. The transfer went out but 'sent' was never recorded: reconcile marks
+--       it sent and the cancel is refused, so the sales can't be paid twice.
+DO $$
+DECLARE p uuid := current_setting('test.p')::uuid; ids uuid[]; r jsonb; c jsonb; po uuid;
+BEGIN
+  SELECT array_agg(c2.id) INTO ids FROM public.exos_promoter_commissions c2 JOIN public.exos_tickets t ON t.id = c2.ticket_id
+   WHERE t.order_ref = 'pw-w4';
+  r := public.exos_settle_promoter(p, ids, 300, 'x', 'key-stripe-0003', 'stripe');
+  po := (r->>'payout_id')::uuid;
+  c := public.exos_promoter_transfer_claim(po, '0f0f0000-0000-0000-0000-0000000000a1');
+  ASSERT (c->>'ok')::boolean, 'PW7b: send claimed';
+  -- (Stripe reversed and transferred; the function crashed before marking.)
+  UPDATE public.exos_promoter_payouts SET lease_until = now() - interval '1 second' WHERE id = po;
+  c := public.exos_promoter_transfer_claim(po, '0f0f0000-0000-0000-0000-0000000000a1', 'cancel');
+  ASSERT (c->>'needs_reconcile')::boolean, 'PW7b: reconcile required';
+  BEGIN
+    PERFORM public.exos_promoter_payout_cancel(po);
+    ASSERT false, 'PW7b: cancel from sending';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  ASSERT public.exos_promoter_transfer_reconcile(po, 'tr_pwfound', '[{"session_id":"pw-w4","reversal_id":"trr_pwfound"}]') = 'sent',
+         'PW7b: found at Stripe, so sent';
+  ASSERT (SELECT transfer_status || ':' || stripe_transfer_id FROM public.exos_promoter_payouts WHERE id = po) = 'sent:tr_pwfound', 'PW7b: recorded';
+  ASSERT (SELECT status || ':' || reversal_id FROM public.exos_promoter_payout_funding WHERE payout_id = po) = 'taken:trr_pwfound', 'PW7b: reversal recorded';
+  ASSERT NOT public.exos_promoter_payout_cancel(po), 'PW7b: a sent payout is never cancelled';
+  ASSERT public.exos_promoter_transfer_claim(po, '0f0f0000-0000-0000-0000-0000000000a1', 'cancel')->>'error' = 'sent', 'PW7b: no cancel claim';
+  ASSERT (SELECT bool_and(status = 'paid' AND payout_id = po) FROM public.exos_promoter_commissions WHERE id = ANY (ids)), 'PW7b: sales stay paid';
+  RAISE NOTICE 'OK  PW7b reconcile before cancel: a sent transfer stays sent';
 END $$;
 SELECT set_config('app.uid','',false);
 
@@ -389,7 +424,7 @@ BEGIN
   ASSERT (m->'online'->>'orders')::int = 4 AND (m->'online'->>'gross_cents')::int = 12000, 'PW11: gross ' || m::text;
   ASSERT (m->'online'->>'fees_cents')::int = 2290 AND (m->'online'->>'net_cents')::int = 9710, 'PW11: fees and net ' || m::text;
   ASSERT (m->'tickets'->>'paid')::int = 6, 'PW11: paid tickets';
-  ASSERT (m->'promoters'->>'owed_cents')::int = 500 AND (m->'promoters'->>'paid_cents')::int = 900,
+  ASSERT (m->'promoters'->>'owed_cents')::int = 200 AND (m->'promoters'->>'paid_cents')::int = 1200,
          'PW11: commissions owed / paid ' || (m->'promoters')::text;
 END $$;
 RESET ROLE;
@@ -548,6 +583,55 @@ BEGIN
   RAISE NOTICE 'OK  PW15 capacity holds under a race';
 END $$;
 
+-- PW15b. RSVP takeover: a victim's number with the attacker's email gets no
+--        tickets; the legitimate resend (same phone by text, or the exact
+--        email that confirmed it) still works, even when the event is full.
+DO $$
+DECLARE r jsonb; v jsonb; rid uuid := gen_random_uuid(); first jsonb;
+BEGIN
+  -- Bea (+12125550113) confirmed by text in PW14. Texts unavailable (or her
+  -- number replied STOP): the email fallback is refused for her number.
+  r := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Mallory', '+12125550113', 'mallory@evil.com', 0, NULL, false);
+  ASSERT r->>'error' = 'already' AND r->'rsvp_id' IS NULL, 'PW15b: email fallback refused for an RSVP''d number ' || r::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'mallory@evil.com'), 'PW15b: no code mailed';
+  -- Even a pending email row (written some other way) can't pull the links at verify.
+  INSERT INTO public.exos_phone_rsvps (id, org_id, event_id, tier_id, guest_name, phone, email, channel, code_hash, code_expires_at)
+  VALUES (rid, '0f0f0000-0000-0000-0000-000000000001', '0f0f0000-0000-0000-0000-0000000000e2', '0f0f0000-0000-0000-0000-0000000000d2',
+          'Mallory', '+12125550113', 'mallory@evil.com', 'email', encode(extensions.digest(rid::text || ':123456', 'sha256'), 'hex'),
+          now() + interval '10 minutes');
+  v := public.exos_phone_rsvp_verify(rid, '123456', 'https://exos.example');
+  ASSERT v->>'error' = 'already' AND v->'tickets' IS NULL AND position(current_setting('test.tk1') in v::text) = 0,
+         'PW15b: no links or ticket ids ' || v::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'mallory@evil.com'), 'PW15b: no ticket mail';
+  -- Em confirms by email (the code is in the mail), taking the last seat.
+  r := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Em', '+12125550131', 'Em@X.com', 0, NULL, false);
+  first := public.exos_phone_rsvp_verify((r->>'rsvp_id')::uuid,
+             (SELECT substring(html FROM '<strong>([0-9]{6})</strong>') FROM public.exos_mail
+               WHERE template = 'rsvp-code' AND to_email = 'em@x.com' ORDER BY created_at DESC, id DESC LIMIT 1),
+             'https://exos.example');
+  ASSERT (first->>'ok')::boolean AND jsonb_array_length(first->'tickets') = 1, 'PW15b: Em confirmed by email ' || first::text;
+  ASSERT (public.exos_phone_rsvp_info('0f0f0000-0000-0000-0000-0000000000e2'))->>'reason' = 'sold_out', 'PW15b: now full';
+  -- Legit resend 1: exactly the same email, even though the event is full.
+  DELETE FROM public.exos_mail WHERE to_email = 'em@x.com';
+  r := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Em', '+12125550131', 'em@x.com', 0, NULL, false);
+  ASSERT (r->>'ok')::boolean AND r->>'channel' = 'email', 'PW15b: same email may ask again ' || r::text;
+  v := public.exos_phone_rsvp_verify((r->>'rsvp_id')::uuid,
+         (SELECT substring(html FROM '<strong>([0-9]{6})</strong>') FROM public.exos_mail WHERE template = 'rsvp-code' AND to_email = 'em@x.com' LIMIT 1),
+         'https://exos.example');
+  ASSERT (v->>'ok')::boolean AND v->'tickets'->0->>'id' = first->'tickets'->0->>'id', 'PW15b: same tickets resent by email ' || v::text;
+  -- Another email for Em's number: refused.
+  r := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Em', '+12125550131', 'other@x.com', 0, NULL, false);
+  ASSERT r->>'error' = 'already', 'PW15b: a different email is refused';
+  -- Legit resend 2: Bea's own phone by text, event full.
+  UPDATE public.exos_phone_rsvps SET created_at = now() - interval '1 hour' WHERE phone = '+12125550113';
+  r := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Bea', '+12125550113', NULL, 0, NULL, true);
+  ASSERT (r->>'ok')::boolean AND r->>'channel' = 'sms', 'PW15b: the phone itself may ask again ' || r::text;
+  v := public.exos_phone_rsvp_verify((r->>'rsvp_id')::uuid, r->>'code', 'https://exos.example');
+  ASSERT (v->>'ok')::boolean AND v->'tickets'->0->>'id' = current_setting('test.tk1'), 'PW15b: Bea''s tickets by text ' || v::text;
+  ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = '0f0f0000-0000-0000-0000-0000000000d2') = 6, 'PW15b: resends mint nothing';
+  RAISE NOTICE 'OK  PW15b no RSVP takeover by email; legitimate resends work';
+END $$;
+
 -- PW16. Claim into an account by the link key; the old link dies.
 SET LOCAL ROLE anon;
 DO $$
@@ -590,7 +674,7 @@ DO $$
 DECLARE ok boolean := false;
 BEGIN
   ASSERT (SELECT count(*) FROM public.exos_phone_rsvps WHERE event_id = '0f0f0000-0000-0000-0000-0000000000e2'
-           AND phone = '+12125550113') = 2, 'PW17: the manager sees the org''s RSVPs';
+           AND phone = '+12125550113' AND status IN ('confirmed', 'duplicate')) = 3, 'PW17: the manager sees the org''s RSVPs';
   BEGIN PERFORM code_hash FROM public.exos_phone_rsvps LIMIT 1;
   EXCEPTION WHEN insufficient_privilege THEN ok := true; END;
   ASSERT ok, 'PW17: code hashes are not readable';
@@ -669,7 +753,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public'
      AND p.proname IN ('_exos_pc_terms', '_exos_pc_reprice', 'exos_promoter_by_token', 'exos_record_promoter_stripe',
-                       'exos_promoter_transfer_claim', 'exos_promoter_funding_mark', 'exos_promoter_transfer_mark',
+                       'exos_promoter_transfer_claim', 'exos_promoter_transfer_reconcile', 'exos_promoter_funding_mark', 'exos_promoter_transfer_mark',
                        'exos_promoter_payout_cancel', 'exos_instant_payout_begin', 'exos_instant_payout_mark',
                        '_exos_phone_rsvp_offer', 'exos_phone_rsvp_info', 'exos_phone_rsvp_start', 'exos_phone_rsvp_verify')
      AND has_function_privilege('authenticated', p.oid, 'EXECUTE');
