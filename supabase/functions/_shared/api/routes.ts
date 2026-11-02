@@ -389,6 +389,21 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'public-get-order', method: 'GET', auth: P, path: '/public/orders/:id', scope: null, paged: false },
   { id: 'public-list-ticket-links', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs', scope: null, paged: false },
   { id: 'public-get-ticket-link', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs/:ticket', scope: null, paged: false },
+
+  // -- claude/exos-gap-memberships (mig 20261102100000): membership-product
+  // writes and lifecycle, staff-issued memberships, imported attendees. Writes
+  // go through exos_api_commerce_write (exos-api/memberships.ts).
+  { id: 'create-membership-product', method: 'POST', auth: K, path: '/membership-products', scope: 'commerce:write', paged: false },
+  { id: 'update-membership-product', method: 'PATCH', auth: K, path: '/membership-products/:id', scope: 'commerce:write', paged: false },
+  { id: 'publish-membership-product', method: 'POST', auth: K, path: '/membership-products/:id/publish', scope: 'commerce:write', paged: false },
+  { id: 'unpublish-membership-product', method: 'POST', auth: K, path: '/membership-products/:id/unpublish', scope: 'commerce:write', paged: false },
+  { id: 'archive-membership-product', method: 'POST', auth: K, path: '/membership-products/:id/archive', scope: 'commerce:write', paged: false },
+  { id: 'issue-membership', method: 'POST', auth: K, path: '/memberships', scope: 'commerce:write', paged: false },
+  { id: 'update-membership', method: 'PATCH', auth: K, path: '/memberships/:id', scope: 'commerce:write', paged: false },
+  { id: 'list-migrated-attendees', method: 'GET', auth: K, path: '/migrated-attendees', scope: 'tickets:read', paged: true, aliases: ['/migrated_attendees'] },
+  { id: 'get-migrated-attendee', method: 'GET', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:read', paged: false, aliases: ['/migrated_attendees/:id'] },
+  { id: 'update-migrated-attendee', method: 'PATCH', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:write', paged: false, aliases: ['/migrated_attendees/:id'] },
+  { id: 'delete-migrated-attendee', method: 'DELETE', auth: K, path: '/migrated-attendees/:id', scope: 'tickets:write', paged: false, aliases: ['/migrated_attendees/:id'] },
 ];
 
 /** Methods the API answers (anything else is 405). */

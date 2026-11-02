@@ -1003,41 +1003,41 @@
    "category": "membership_products",
    "method": "POST",
    "path": "/api/v2/membership_products",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard create; no partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/membership-products",
+   "reason": "Created as a draft; one price per product (Opendate monthly / annual amounts map to price_cents + billing)"
   },
   {
    "category": "membership_products",
    "method": "PATCH",
    "path": "/api/v2/membership_products/{id}",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard update; no partner write route yet"
+   "status": "route",
+   "exos": "PATCH /v1/membership-products/:id",
+   "reason": "Edits apply to new members; current members keep their benefits and price"
   },
   {
    "category": "membership_products",
    "method": "POST",
    "path": "/api/v2/membership_products/{id}/publish",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard publish (active on); no partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/publish",
+   "reason": "Same lifecycle; an archived product is never published again (Opendate restores it)"
   },
   {
    "category": "membership_products",
    "method": "POST",
    "path": "/api/v2/membership_products/{id}/unpublish",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard unpublish (active off); no partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/unpublish",
+   "reason": ""
   },
   {
    "category": "membership_products",
    "method": "POST",
    "path": "/api/v2/membership_products/{id}/archive",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard archive (archived_at); no partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/archive",
+   "reason": "Final: archive is the delete verb for a sold product"
   },
   {
    "category": "gift_card_sales",
@@ -2235,17 +2235,17 @@
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes/{id}/pkpass",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Wallet passes exist for tickets, not yet for season passes"
+   "status": "equivalent",
+   "exos": "exos-wallet POST /season-pass { pass_id, kind: \"apple\" }",
+   "reason": "Signed-in holder; 503 until the Apple Wallet certificates are configured"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes/{id}/google_wallet_url",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Wallet passes exist for tickets, not yet for season passes"
+   "status": "equivalent",
+   "exos": "exos-wallet POST /season-pass { pass_id, kind: \"google\" } → { save_url }",
+   "reason": "Signed-in holder; 503 until the Google Wallet issuer is configured"
   },
   {
    "category": "fan_app",
@@ -3107,41 +3107,41 @@
    "category": "admin_membership_products",
    "method": "POST",
    "path": "/api/v2/admin/membership_products",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard create; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/membership-products",
+   "reason": "Same write, per organization (the key's org; Exos has no cross-team back office)"
   },
   {
    "category": "admin_membership_products",
    "method": "PATCH",
    "path": "/api/v2/admin/membership_products/:id",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard update; no partner write route yet"
+   "status": "equivalent",
+   "exos": "PATCH /v1/membership-products/:id",
+   "reason": "Same write, per organization"
   },
   {
    "category": "admin_membership_products",
    "method": "POST",
    "path": "/api/v2/admin/membership_products/:id/publish",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard publish; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/membership-products/:id/publish",
+   "reason": "Same write, per organization"
   },
   {
    "category": "admin_membership_products",
    "method": "POST",
    "path": "/api/v2/admin/membership_products/:id/unpublish",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard unpublish; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/membership-products/:id/unpublish",
+   "reason": "Same write, per organization"
   },
   {
    "category": "admin_membership_products",
    "method": "POST",
    "path": "/api/v2/admin/membership_products/:id/archive",
-   "status": "planned",
-   "exos": "Org settings → Memberships",
-   "reason": "Dashboard archive; no partner write route yet"
+   "status": "equivalent",
+   "exos": "POST /v1/membership-products/:id/archive",
+   "reason": "Same write, per organization"
   },
   {
    "category": "admin_memberships",
@@ -3163,17 +3163,17 @@
    "category": "admin_memberships",
    "method": "POST",
    "path": "/api/v2/admin/memberships",
-   "status": "planned",
-   "exos": "exos_membership_gift (comp)",
-   "reason": "Importing members is not built; staff comp one with exos_membership_gift"
+   "status": "equivalent",
+   "exos": "POST /v1/memberships; dashboard Memberships → Members",
+   "reason": "Staff-issue a comp or a member who paid elsewhere (source import): active at once, one-time term, no Stripe subscription opened"
   },
   {
    "category": "admin_memberships",
    "method": "PATCH",
    "path": "/api/v2/admin/memberships/:id",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Member renames are the holder's; no staff route yet"
+   "status": "equivalent",
+   "exos": "PATCH /v1/memberships/:id; dashboard Memberships → Members",
+   "reason": "Rename and staff notes; status and end date too for memberships Stripe doesn't bill (a refunded one is never revived)"
   },
   {
    "category": "admin_memberships",
@@ -3228,16 +3228,16 @@
    "method": "GET",
    "path": "/api/v2/admin/migrated_attendees",
    "status": "equivalent",
-   "exos": "exos_door_imports (Tickets sold somewhere else)",
-   "reason": "Imported attendee lists are door imports (mig 20261013090000); dashboard"
+   "exos": "GET /v1/migrated-attendees; dashboard Memberships → Imported attendees",
+   "reason": "Imported attendee lists are door imports (mig 20261013090000), per organization"
   },
   {
    "category": "admin_migrated_attendees",
    "method": "GET",
    "path": "/api/v2/admin/migrated_attendees/:id",
    "status": "equivalent",
-   "exos": "exos_door_imports",
-   "reason": "Dashboard"
+   "exos": "GET /v1/migrated-attendees/:id",
+   "reason": "Per organization"
   },
   {
    "category": "admin_migrated_attendees",
@@ -3259,17 +3259,17 @@
    "category": "admin_migrated_attendees",
    "method": "PATCH",
    "path": "/api/v2/admin/migrated_attendees/:id",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Editing an imported row is not built (re-import)"
+   "status": "equivalent",
+   "exos": "PATCH /v1/migrated-attendees/:id; dashboard Memberships → Imported attendees",
+   "reason": "Imported attendees are door-import guest entries; contact, code (legacy barcode), ticket label and source. No price buckets or ledger: imports carry no money in Exos"
   },
   {
    "category": "admin_migrated_attendees",
    "method": "DELETE",
    "path": "/api/v2/admin/migrated_attendees/:id",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Deleting one imported row is not built (re-import)"
+   "status": "equivalent",
+   "exos": "DELETE /v1/migrated-attendees/:id; dashboard Memberships → Imported attendees",
+   "reason": "Guarded like Opendate: refused once checked in or when synced from Eventbrite"
   },
   {
    "category": "admin_migrated_attendees",

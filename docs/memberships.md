@@ -17,7 +17,8 @@ checkout, prices and orders are exactly as before.
 - **UI:** Org settings → Memberships & passes (`OrgMembershipsPanel`, incl. card lookup and comp gifts),
   `/shop/:orgSlug`, `/me/memberships` (`MyMemberships`: card QR, household, billing portal, passes, gift cards),
   `/membership/claim`, the event page (`MemberPassRedeem`: member price notice, "Use my pass", member free tickets).
-- **Tests:** `tests/exos/test_passes_memberships.sql` (run by `run_p0.sh`), `src/lib/commerce.test.ts`.
+- **Tests:** `tests/exos/test_passes_memberships.sql`, `tests/exos/test_membership_writes.sql` (run by `run_p0.sh`),
+  `src/lib/commerce.test.ts`, `src/lib/membershipAdmin.test.ts`, `src/lib/apiMemberships.test.ts`, `src/lib/wallet/seasonPass.test.ts`.
 
 ## Products
 
@@ -27,8 +28,23 @@ checkout, prices and orders are exactly as before.
 | `exos_pass_products` | `kind` (`season` / `flex`), price, `credits` (flex), `per_event_limit` (season default 1), `event_ids` or `date_from` / `date_to`, `tier_ids` (empty = all), `valid_until`, `sales_end`, `max_sold`, `sold` (server-kept) |
 
 Owners and managers write; finance reads; buyers read active products through `exos_public_membership_products` /
-`exos_public_pass_products`. A product that has sold can't be deleted (turn it off). Editing a product never changes
-existing members or passes: each keeps a snapshot (`benefits`, `eligibility`).
+`exos_public_pass_products`. A product that has sold can't be deleted (archive it). Editing a product never changes
+existing members or passes: each keeps a snapshot (`benefits`, `eligibility`), and a subscription keeps the price it
+started with in Stripe.
+
+**Lifecycle** (mig 20261102100000): `exos_membership_products.status` is `draft` → `published` ⇄ `unpublished` →
+`archived`. A new product (dashboard or API) starts as a draft; only `published` is on sale. Archiving is final: an
+archived product is never published or edited again, and its members keep their benefits until their period ends.
+A trigger keeps `active` (`= published`) and `archived_at` in step with the status, so checkout and the public view are
+unchanged, and an older client that flips `active` moves the status (a draft turned on is published; nothing revives an
+archived one). Writes: `exos_membership_product_save(org, id, fields)` (create as a draft / update; unknown fields,
+`billing` and `currency` after creation refused; names unique among the org's live products) and
+`exos_membership_product_transition(id, publish | unpublish | archive)` (the same state again is a no-op).
+
+**Dashboard:** `/orgs/:orgId/memberships` (linked from Org settings → Memberships): Products (search, status filter,
+sort, page; edit, publish, unpublish, archive), Members (`exos_org_memberships_page`: status / product filters,
+search, sort, server paging; issue, rename, notes, end date, cancel, reactivate) and Imported attendees (below).
+Owner / manager write; finance reads products and members; scanners see nothing. Pure rules: `src/lib/membershipAdmin.ts`.
 
 ## Memberships (`exos_fan_memberships`)
 
@@ -125,9 +141,41 @@ for good (`ended_reason = 'refunded'`), and for a subscription stripe-webhook ca
 renewal invoices aren't matched to the membership yet.
 Voiding a pass ticket doesn't give the credit back.
 
+### Staff-issued memberships (mig 20261102100000)
+
+`exos_membership_issue(org, { product_id, email, member_name?, source: comp | import, expires_at?, staff_notes? })`
+(owner / manager, 30 a minute): an `active` membership with the product's benefits, `billing = 'once'`, no Stripe
+subscription, ending at `expires_at` (default one period of the product). `source = 'import'` is a member who paid
+somewhere else (a roster move). The account is matched by confirmed email; with none yet it is held for the email and
+`exos_claim_my_memberships()` (called by `/me/memberships`) attaches it once that email is confirmed. Refused while the
+email holds a live (or pending) membership of the product, or when the product is archived.
+`exos_membership_update(id, { member_name?, staff_notes?, status?: active | cancelled | expired, expires_at? })`: the
+name and notes always; status and end date only when Stripe doesn't bill it, it isn't an unclaimed gift and it has no
+`ended_reason` (a refund is never revived). Cancel / expire end the benefits now. `staff_notes` and `issued_by` have no
+client column grant (staff read them through `exos_org_memberships_page`); `member_name` is readable by the holder.
+
+### Imported attendees (door imports)
+
+Attendees imported from another platform are guest entries with a `source`, an external code or an `external_ref`
+(`exos_import_guests`, the Posh / Eventbrite paths). `exos_org_imported_attendees(org, event?, source?, search?, sort,
+desc, limit, offset)` lists them (owner / manager). `exos_imported_attendee_update(id, fields)` edits name, email,
+phone, plus-ones and note through `exos_update_guest` (list caps, capacity) and the code (normalized, unique per event,
+fixed once the party checked in), ticket label and source; `exos_imported_attendee_delete(id)` removes one through
+`exos_remove_guest` (not once checked in). Rows synced from Eventbrite (`external_ref`) are the sync's: refused here.
+
 ## Partner API
 
-Read-only routes with `commerce:read` (`docs/api/commerce.json`, `/developers`). Mapping against Opendate's v2 API
+Writes (mig 20261102100000, `docs/api/membership-writes.json`): `POST /v1/membership-products`,
+`PATCH /v1/membership-products/:id`, `POST /v1/membership-products/:id/{publish,unpublish,archive}`,
+`POST /v1/memberships`, `PATCH /v1/memberships/:id` (`commerce:write`), and `GET /v1/migrated-attendees[/:id]`,
+`PATCH` / `DELETE /v1/migrated-attendees/:id` (`tickets:read` / `tickets:write`). Each runs
+`exos_api_commerce_write(key, action, target, args, idempotency key)`: the steps of `exos_api_write` (the key's org,
+scope re-checked, runs as the key's creator while an active member, Idempotency-Key replay, logged in
+`exos_api_writes`) and then the dashboard RPC above. Opendate's field names are accepted
+(`supabase/functions/_shared/api/memberships.ts`). `GET /v1/membership-products` takes `?status=` and Opendate's
+`?q[status_not_eq]=archived`.
+
+Read routes with `commerce:read` (`docs/api/commerce.json`, `/developers`). Mapping against Opendate's v2 API
 (memberships, membership_products, membership_reservations, membership_scans, gift_card_sales, giving_campaigns):
 
 | Opendate endpoint | Exos |
@@ -137,9 +185,12 @@ Read-only routes with `commerce:read` (`docs/api/commerce.json`, `/developers`).
 | `DELETE /memberships/:id/gift` | `exos_membership_cancel_gift` (giver or owner / manager). No partner write route yet |
 | `GET /users/current/memberships[/:token]` (fan app) | `exos_my_memberships()` (signed-in RPC; shared rows without billing details) |
 | `GET /membership_products`, `GET /membership_products/:id` | `GET /v1/membership-products`, `GET /v1/membership-products/:id` |
-| `POST /membership_products`, `PATCH /membership_products/:id` | Org settings (RLS-checked table writes). No partner write route yet |
-| `POST /membership_products/:id/publish` / `unpublish` | `active` on / off (Org settings) |
-| `POST /membership_products/:id/archive` | `archived_at` (hidden from the shop, members keep theirs) |
+| `POST /membership_products`, `PATCH /membership_products/:id` | `POST /v1/membership-products`, `PATCH /v1/membership-products/:id` (a draft; one price per product) |
+| `POST /membership_products/:id/publish` / `unpublish` | `POST /v1/membership-products/:id/publish` / `unpublish` |
+| `POST /membership_products/:id/archive` | `POST /v1/membership-products/:id/archive` (final; Opendate restores with publish, Exos doesn't) |
+| `POST /admin/memberships`, `PATCH /admin/memberships/:id` | `POST /v1/memberships`, `PATCH /v1/memberships/:id` (per organization) |
+| `PATCH` / `DELETE /admin/migrated_attendees/:id` | `PATCH` / `DELETE /v1/migrated-attendees/:id` |
+| `GET /users/current/season_passes/:id/pkpass`, `…/google_wallet_url` | exos-wallet `POST /season-pass` (`docs/wallet.md`) |
 | `POST /membership_products/:id/membership_reservations`, `DELETE …/:token`, `POST …/:token/complete` | Doesn't apply: memberships aren't capacity-limited, so there's nothing to reserve; Exos's flow is one Stripe Checkout session (`buy_membership`) completed by the webhook, and an abandoned one simply expires |
 | `POST /membership_scans` | `exos_membership_scan(org, membership id)` (door staff; Org settings lookup). No partner route: door scans are a signed-in staff action |
 | `GET /gift_card_products` | `GET /v1/gift-card-products` |
@@ -153,11 +204,13 @@ Read-only routes with `commerce:read` (`docs/api/commerce.json`, `/developers`).
 | `POST /giving_campaigns/:id/recurring_donations` | Not built yet (would reuse the membership subscription plumbing) |
 | — (no Opendate equivalent) | `GET /v1/donations`, `GET /v1/pass-products`, `GET /v1/passes`, `GET /v1/events/:id/member-presale` |
 
-The partner API is read-only by design (`docs/api-reference.md`); the write rows above are signed-in staff actions in
-the app. Adding POST routes with `commerce:write` is the open follow-up.
+Gifts, gift cards and offline donations are still signed-in staff actions in the app.
 
 ## Not covered yet
 
 - Prorating or switching between membership products (do it in the Stripe portal, or cancel and rebuy).
-- A wallet (Apple / Google) membership card; the QR on `/me/memberships` is the card for now.
-- Recurring donations; partner API write routes.
+- A wallet (Apple / Google) membership card; the QR on `/me/memberships` is the card for now. Season passes and flex
+  packs have wallet cards (exos-wallet `POST /season-pass`).
+- Recurring donations; partner write routes for gifts, gift cards and donations.
+- Imported memberships don't open a Stripe subscription that bills later (Opendate's trial-then-invoice import): an
+  imported member gets a one-time term, and renews by buying.
