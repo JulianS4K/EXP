@@ -1,0 +1,593 @@
+{
+  "file": "order-edits",
+  "name": "Order and ticket edits",
+  "order": 21,
+  "description": "Change an order's buyer details, resend its receipt, check a whole order out at the door, and correct a ticket's attendee name, the same as in the dashboard (Orders): each write runs as the member who created the key, needs that member's role (owner or manager), and is kept in the order's edit history. Prices, quantities, tickets and who holds them never change through these: refund or reissue for that, and a ticket changes hands only by transfer (its barcode rotates). Also a dry run of a guest-list import. Opendate's /v1/confirms/:event_id/orders/:id, …/send_receipt, …/check_out, /v1/confirms/:event_id/tickets/:barcode and /v1/confirms/:id/guest_list_preview answer too. Bodies may be JSON or form-encoded, flat or wrapped (`order[first_name]`, `ticket[attendee_name]`).",
+  "endpoints": [
+    {
+      "id": "update-order",
+      "method": "PUT",
+      "path": "/v1/orders/:id",
+      "summary": "Update an order's buyer details",
+      "description": "Sets the buyer's first and last name, contact email, phone number and notes. Only those: anything else (amounts, quantity, ticket type, status) answers 400. The email is where receipts and order mail go; the tickets, their holders and the invoice stay as they were. Sending the current values changes nothing and records nothing. Receipts keep going to the address the order was placed with unless the organization allows other addresses.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id (its checkout session id). One of another organization answers 404. Also answers under /v1/confirms/:event_id/orders/:id, where the order must be on that event.",
+          "example": "cs_live_a1b2c3d4e5"
+        },
+        {
+          "name": "first_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 60 characters; null or \"\" clears it.",
+          "example": "Jane"
+        },
+        {
+          "name": "last_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 60 characters; null or \"\" clears it.",
+          "example": "Doe"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The contact email (receipts, order mail). Can't be cleared.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "phone_number",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Digits, spaces and + ( ) . - (3-32 characters). `phone` works too.",
+          "example": "+1 555 0100"
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Staff notes, at most 1000 characters.",
+          "example": "Needs step-free access"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "order": {
+          "first_name": "Jane",
+          "phone_number": "+1 555 0100"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The order as it is now; changed_fields lists what this call changed.",
+          "example": {
+            "data": {
+              "id": "cs_live_a1b2c3d4e5",
+              "session_id": "cs_live_a1b2c3d4e5",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "fulfilled",
+              "quantity": 2,
+              "amount_cents": 6000,
+              "currency": "usd",
+              "email": "jane@example.com",
+              "first_name": "Jane",
+              "last_name": "Doe",
+              "phone_number": "+1 555 0100",
+              "notes": "Needs step-free access",
+              "created_at": "2026-10-30T18:01:02+00:00",
+              "fulfilled_at": "2026-10-30T18:01:09+00:00",
+              "details_updated_at": "2026-11-02T14:05:00+00:00",
+              "changed": true,
+              "changed_fields": [
+                "first_name",
+                "phone"
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field that can't be changed, or a bad value.",
+          "example": {
+            "error": "amount_cents can't be changed on an order: refund or reissue instead."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created the key isn't an owner or manager (or has left the organization).",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-order-receipt",
+      "method": "POST",
+      "path": "/v1/orders/:id/send-receipt",
+      "summary": "Resend an order's receipt",
+      "description": "Mails the order's receipt again (what was paid, the lines, the all-in price note) through the normal outbox. It never contains ticket claim links. To the address the order was placed with. Any other address, including a contact email changed with PUT /v1/orders/:id, is an override: allowed (and then the default) only when an owner has allowed other addresses for the organization (Orders, Settings); otherwise the receipt still goes to the original address, and asking for another one answers 403. At most 3 an hour per order by default (an owner can raise it to 10) and 10 a day. Also /v1/orders/:id/send_receipt.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id (its checkout session id). One of another organization answers 404. Also answers under /v1/confirms/:event_id/orders/:id, where the order must be on that event.",
+          "example": "cs_live_a1b2c3d4e5"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Another address to send it to. Refused (403) unless the organization allows it.",
+          "example": "accounts@example.com"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {},
+      "responses": [
+        {
+          "status": 200,
+          "description": "Queued.",
+          "example": {
+            "data": {
+              "order_id": "cs_live_a1b2c3d4e5",
+              "sent": true,
+              "to": "jane@example.com",
+              "override": false,
+              "mail_id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b",
+              "resends_left_this_hour": 2
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad email, or no valid email on the order.",
+          "example": {
+            "error": "email is not an email address."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write; or another address was asked for and the organization sends receipts only to the email on the order; or the key's creator isn't an owner or manager.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "order not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The order isn't completed (no receipt yet).",
+          "example": {
+            "error": "only a completed order has a receipt"
+          }
+        },
+        {
+          "status": 429,
+          "description": "This order's receipt was sent too often.",
+          "example": {
+            "error": "this order's receipt was sent too often; try again later"
+          }
+        }
+      ]
+    },
+    {
+      "id": "check-out-order",
+      "method": "POST",
+      "path": "/v1/orders/:id/check-out",
+      "summary": "Check a whole order out",
+      "description": "The opposite of checking the order in: records an exit for every ticket of the order that is inside on a re-entry check-in list (the last scan there was an entry), the same as at the door, so re-entry and the live headcount stay right. A ticket that is already out records nothing and answers not-inside, so calling it again is safe. Tickets the order no longer holds (transferred away) are skipped. A ticket checked in on the event's default list can't be checked out (exit-not-allowed): exits need a re-entry list. A typed exit is a door override, so the key's creator must be an owner or manager. Also /v1/orders/:id/check_out.",
+      "auth": "api_key",
+      "scope": "checkin:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order's id (its checkout session id). One of another organization answers 404. Also answers under /v1/confirms/:event_id/orders/:id, where the order must be on that event.",
+          "example": "cs_live_a1b2c3d4e5"
+        },
+        {
+          "name": "list_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this check-in list (gate). Default: every re-entry list the ticket is inside on.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Kept on each exit (default \"order check-out\").",
+          "example": "smoke break"
+        },
+        {
+          "name": "device",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A label for the app (shown in the check-in log).",
+          "example": "box-office-1"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "reason": "smoke break"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "Per ticket: changed true when an exit was recorded.",
+          "example": {
+            "data": {
+              "order_id": "cs_live_a1b2c3d4e5",
+              "checked_out": 1,
+              "results": [
+                {
+                  "ticket_id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+                  "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+                  "changed": true,
+                  "ok": true,
+                  "reason": "checked-out",
+                  "direction": "exit",
+                  "scanned_at": "2026-11-02T23:10:00+00:00",
+                  "verified": false
+                },
+                {
+                  "ticket_id": "3c0f5a2b-8d4e-4f6a-9b7c-1d2e3f4a5b6c",
+                  "changed": false,
+                  "ok": true,
+                  "reason": "not-inside"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks checkin:write, or the key's creator isn't an owner or manager.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "checkin:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-ticket",
+      "method": "PUT",
+      "path": "/v1/tickets/:id",
+      "summary": "Update a ticket's attendee",
+      "description": "Sets or clears the attendee name on a ticket (attendee_name, or first_name and last_name). Changing who holds the ticket is a transfer, not an edit: the barcode rotates and transfer rules apply, so an email other than the holder's answers 409 (the holder sends it from their ticket). The holder's own email is accepted and changes nothing. Not for a ticket in transfer or voided. Also /v1/confirms/:event_id/tickets/:barcode.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The ticket's id, or a door code (T-…) of it. One of another organization answers 404.",
+          "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "attendee_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 80 characters; null or \"\" clears it.",
+          "example": "Sam Ray"
+        },
+        {
+          "name": "first_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "With last_name, instead of attendee_name.",
+          "example": "Sam"
+        },
+        {
+          "name": "last_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "With first_name.",
+          "example": "Ray"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Only the holder's own email is accepted (it changes nothing): another one is a transfer.",
+          "example": "jane@example.com"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
+        }
+      ],
+      "request_example": {
+        "ticket": {
+          "attendee_name": "Sam Ray"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The ticket (never its barcode secret).",
+          "example": {
+            "data": {
+              "id": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "order_id": "cs_live_a1b2c3d4e5",
+              "tier_name": "GA",
+              "attendee_name": "Sam Ray",
+              "status": "active",
+              "check_in_at": null,
+              "changed": true
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field that can't be changed.",
+          "example": {
+            "error": "price_paid can't be changed on a ticket (attendee_name, or first_name + last_name)."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the key's creator isn't an owner or manager.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "ticket not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A different email (a transfer), or the ticket is in transfer or voided.",
+          "example": {
+            "error": "changing who holds a ticket is a transfer (the barcode changes); the holder sends it from their ticket, or refund and reissue"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-guest-list",
+      "method": "POST",
+      "path": "/v1/events/:id/guest-list-preview",
+      "summary": "Preview a guest-list import",
+      "description": "Checks an import without adding anyone. Send one of: text (pasted names, one per line; +2, (+2), plus 2 or x2 after a name adds plus-ones; bullets and numbering are dropped; lines ending in : ! or ?, lines with an @ and lines over six words are skipped), csv (an attendee export, read like the dashboard's Door import: Eventbrite, Posh, DICE, Shotgun, RA or any sheet with a name column) or rows. Each row comes back ready, duplicate (already on a list of the event, or earlier in this import), invalid (no name, code too long) or too_many_plus_ones, with warnings for malformed emails (the import drops them). capacity says what the import would do to the list's cap and, when the list counts toward capacity, to the event's. Writes nothing. Also /v1/events/:id/guest_list_preview and /v1/confirms/:id/guest_list_preview. Bodies up to 2.25 MB.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "list_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The guest list it would go into (its cap and plus-one limit apply). `guest_list_id` works too.",
+          "example": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b"
+        },
+        {
+          "name": "text",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Pasted names, one per line.",
+          "example": "Maya Chen +2\nTessa"
+        },
+        {
+          "name": "csv",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "An attendee export as CSV text (comma, semicolon or tab).",
+          "example": "Name,Email\nMaya Chen,maya@example.com"
+        },
+        {
+          "name": "rows",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Rows of { name, email?, phone?, code?, ticket?, note?, plus_ones? }, at most 5000.",
+          "example": [
+            {
+              "name": "Maya Chen",
+              "plus_ones": 2
+            }
+          ]
+        }
+      ],
+      "request_example": {
+        "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+        "text": "Hey team:\nMaya Chen +2\nTessa\nAnn Lee"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "What the import would do.",
+          "example": {
+            "data": {
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "list_id": "8e2f1a3b-4c5d-4e6f-9a7b-8c9d0e1f2a3b",
+              "source": "text",
+              "rows": [
+                {
+                  "row": 1,
+                  "status": "ready",
+                  "name": "Maya Chen",
+                  "plus_ones": 2,
+                  "tickets": 3
+                },
+                {
+                  "row": 2,
+                  "status": "ready",
+                  "name": "Tessa",
+                  "plus_ones": 0,
+                  "tickets": 1
+                },
+                {
+                  "row": 3,
+                  "status": "duplicate",
+                  "reason": "existing",
+                  "name": "Ann Lee",
+                  "plus_ones": 0,
+                  "tickets": 1,
+                  "existing_list_name": "Friends"
+                }
+              ],
+              "skipped_lines": [
+                {
+                  "line": 1,
+                  "text": "Hey team:",
+                  "reason": "not_a_name"
+                }
+              ],
+              "summary": {
+                "rows": 3,
+                "ready": 2,
+                "duplicates": 1,
+                "invalid": 0,
+                "invalid_emails": 0,
+                "heads": 4
+              },
+              "capacity": {
+                "list_cap": 20,
+                "list_heads": 12,
+                "list_cap_left_after": 4,
+                "over_list_cap": false,
+                "counts_toward_capacity": false,
+                "event_capacity": 300,
+                "tickets_sold": 212,
+                "counted_guest_heads": 0,
+                "event_left_after": 88
+              },
+              "writes": false
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "None or more than one of text, csv and rows; a CSV with no rows; over 5000 rows.",
+          "example": {
+            "error": "send one of text (pasted names), csv (an attendee export) or rows."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

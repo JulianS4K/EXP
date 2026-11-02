@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 153 | 33.6% |
+| route | 161 | 35.4% |
 | equivalent | 236 | 51.9% |
-| **covered (route + equivalent)** | **389** | **85.5%** |
+| **covered (route + equivalent)** | **397** | **87.3%** |
 | not_applicable | 58 | 12.7% |
-| planned | 8 | 1.8% |
+| planned | 0 | 0% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **91** of the 335 rows in the route table
+Exos routes beyond Opendate: **91** of the 343 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -39,7 +39,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | team_roles | 1 | 0 | 1 | 0 | 0 |
 | personal_access_tokens | 2 | 1 | 1 | 0 | 0 |
 | staffing_kiosk_devices | 2 | 0 | 0 | 2 | 0 |
-| events | 12 | 8 | 1 | 1 | 2 |
+| events | 12 | 10 | 1 | 1 | 0 |
 | events_database | 2 | 0 | 0 | 2 | 0 |
 | holds | 6 | 6 | 0 | 0 | 0 |
 | artists | 3 | 3 | 0 | 0 | 0 |
@@ -50,15 +50,15 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | add_ons | 2 | 2 | 0 | 0 | 0 |
 | custom_charge_types | 2 | 0 | 2 | 0 | 0 |
 | promo_codes | 6 | 5 | 1 | 0 | 0 |
-| tickets | 7 | 1 | 3 | 2 | 1 |
-| orders | 8 | 0 | 3 | 2 | 3 |
+| tickets | 7 | 2 | 3 | 2 | 0 |
+| orders | 8 | 3 | 3 | 2 | 0 |
 | organizer_ticket_reservations | 7 | 7 | 0 | 0 | 0 |
 | organizer_orders | 2 | 0 | 2 | 0 | 0 |
-| guest_lists | 5 | 0 | 4 | 0 | 1 |
+| guest_lists | 5 | 1 | 4 | 0 | 0 |
 | ticket_reservations | 2 | 2 | 0 | 0 | 0 |
 | ticket_transfers | 2 | 0 | 2 | 0 | 0 |
 | scan_lookups | 1 | 1 | 0 | 0 | 0 |
-| fans | 7 | 4 | 1 | 1 | 1 |
+| fans | 7 | 5 | 1 | 1 | 0 |
 | membership_scans | 1 | 0 | 1 | 0 | 0 |
 | memberships | 3 | 1 | 2 | 0 | 0 |
 | membership_reservations | 3 | 0 | 0 | 3 | 0 |
@@ -154,11 +154,3 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 
 | Category | Endpoint | Note |
 |---|---|---|
-| events | `GET /api/v2/confirms/{id}/similars` | No similar-events model yet |
-| events | `GET /api/v2/confirms/recommendations` | No recommendation model yet |
-| tickets | `PUT /api/v2/confirms/{confirm_id}/tickets/{barcode}` | Ticket edits (attendee name) are dashboard / holder actions; no API write yet |
-| orders | `PUT /api/v2/confirms/{confirm_id}/orders/{id}` | Order edits (buyer details) are dashboard actions; no API write yet |
-| orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/send_receipt` | Receipts are mailed at fulfilment; a resend is a dashboard action, not an API route yet |
-| orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/check_out` | Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet |
-| guest_lists | `POST /api/v2/confirms/{confirm_id}/guest_list_preview` | Pasted-names preview is client-side in the dashboard |
-| fans | `GET /api/v2/confirms/{confirm_id}/fans/recommendations` | No recommendation model yet (docs/fans.md) |
