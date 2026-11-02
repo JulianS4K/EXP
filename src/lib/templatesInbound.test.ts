@@ -1,49 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { compareValues, nextSort, pageLabel, queryRows, sortValue, statusCounts } from './dataTable';
 import { canWriteRentalTemplates, depositDueDate, lineTotal, rentalActions, rentalTotals } from './rentalInvoice';
 import { emptyInboundForm, inboundActions, inboundErrorMessage, inboundFormPath, inboundPayload, MAX_SUBMISSION_BYTES } from './inbound';
-
-describe('dataTable', () => {
-  const rows = [
-    { id: 'a', name: 'Zed', n: 3, s: 'active', at: '2026-11-02T10:00:00Z' },
-    { id: 'b', name: 'alpha', n: 10, s: 'archived', at: '2026-10-01T10:00:00Z' },
-    { id: 'c', name: 'Beta', n: null, s: 'active', at: null },
-    { id: 'd', name: 'beta', n: 3, s: 'active', at: '2026-11-03T10:00:00Z' },
-  ];
-  type R = (typeof rows)[number];
-  const get = (r: R, k: string) => (r as Record<string, string | number | null>)[k];
-
-  it('compares numbers, dates and text; empty cells last both ways', () => {
-    expect(sortValue('2026-11-02')).toBe(Date.parse('2026-11-02'));
-    expect(sortValue('Abc')).toBe('abc');
-    expect(compareValues(2, 10)).toBeLessThan(0);
-    expect(compareValues('item 2', 'item 10')).toBeLessThan(0);
-    expect(compareValues(null, 1, 'asc')).toBe(1);
-    expect(compareValues(null, 1, 'desc')).toBe(1);
-  });
-
-  it('sorts stably, filters by status and search, pages', () => {
-    const byN = queryRows(rows, { sort: { key: 'n', dir: 'asc' } }, { get });
-    expect(byN.rows.map((r) => r.id)).toEqual(['a', 'd', 'b', 'c']);
-    const byName = queryRows(rows, { sort: { key: 'name', dir: 'desc' } }, { get });
-    expect(byName.rows.map((r) => r.id)).toEqual(['a', 'c', 'd', 'b']);
-    const active = queryRows(rows, { status: 'active', search: 'BET' }, { get, status: (r) => r.s, searchFields: (r) => [r.name] });
-    expect(active.rows.map((r) => r.id)).toEqual(['c', 'd']);
-    expect(queryRows(rows, { status: 'all' }, { get, status: (r) => r.s }).total).toBe(4);
-    const p2 = queryRows(rows, { page: 2, perPage: 3 }, { get });
-    expect([p2.rows.map((r) => r.id), p2.page, p2.pages]).toEqual([['d'], 2, 2]);
-    expect(queryRows(rows, { page: 99, perPage: 3 }, { get }).page).toBe(2);
-    expect(pageLabel(p2)).toBe('4-4 of 4');
-    expect(pageLabel({ total: 0, page: 1, perPage: 25 })).toBe('0 of 0');
-  });
-
-  it('flips the sort on the same column and counts statuses', () => {
-    expect(nextSort(null, 'name')).toEqual({ key: 'name', dir: 'asc' });
-    expect(nextSort({ key: 'name', dir: 'asc' }, 'name')).toEqual({ key: 'name', dir: 'desc' });
-    expect(nextSort({ key: 'name', dir: 'desc' }, 'n')).toEqual({ key: 'n', dir: 'asc' });
-    expect(statusCounts(rows, (r) => r.s)).toEqual({ active: 3, archived: 1 });
-  });
-});
 
 describe('rentalInvoice', () => {
   // The same numbers the SQL harness checks (test_templates_inbound.sql TI4).

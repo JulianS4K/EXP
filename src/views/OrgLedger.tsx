@@ -16,11 +16,12 @@ import {
   type ImportedEntryRow, type ReportingRow, type RevenueCodeRow,
 } from '../lib/financeExtrasApi';
 import {
-  filterOptions, IMPORT_SOURCES, initialTable, label, PAYMENT_METHOD_LABEL, planLedgerImport, REVENUE_TYPE_LABEL, REVENUE_TYPES,
-  reportingRowsCsv, SOURCE_TYPE_LABEL, totalsByCurrency, type TableState,
+  IMPORT_SOURCES, label, PAYMENT_METHOD_LABEL, planLedgerImport, REVENUE_TYPE_LABEL, REVENUE_TYPES,
+  reportingRowsCsv, SOURCE_TYPE_LABEL, totalsByCurrency,
 } from '../lib/financeTables';
+import { filterOptions, initialTable, type TableState } from '../lib/dataTable';
 import { downloadCsv } from '../lib/csv';
-import DataTable, { type DataColumn } from '../components/finance/DataTable';
+import DataTable, { type DataColumn } from '../components/DataTable';
 import { BTN, BTN_PRIMARY, FLD, LABEL, Money, Section } from '../components/finance/ui';
 
 type Tab = 'rows' | 'imports' | 'codes';
@@ -154,7 +155,7 @@ export default function OrgLedger() {
             A show's order lines appear once it is backfilled (Event report → Settlement → Ledger codes); imported entries at once.
             Payout rows are money moved, not revenue.{truncated ? ' More rows exist: narrow the dates.' : ''}
           </p>
-          <DataTable<ReportingRow> caption="Reporting rows" rows={rows} rowKey={(r) => r.id} columns={rowColumns} state={rowTable} onState={setRowTable}
+          <DataTable<ReportingRow> dense label="Reporting rows" rows={rows} rowKey={(r) => r.id} columns={rowColumns} state={rowTable} onState={setRowTable}
             searchPlaceholder="Event, code, description"
             filters={[
               { key: 'source_type', label: 'Source', options: opts(filterOptions<ReportingRow>(rows, (r) => r.source_type), SOURCE_TYPE_LABEL) },
@@ -192,7 +193,7 @@ export default function OrgLedger() {
               <span className="text-xs text-slate-400 basis-full">Columns: source ({IMPORT_SOURCES.join(', ')}), amount (or amount_cents; negative for a cost), tax_amount, gl_code, tax_gl_code, posted_at, source_system, source_line_id, description, source_order_id, event_id. Up to 500 rows; a line already imported is skipped.</span>
             </div>
           )}
-          <DataTable<ImportedEntryRow> caption="Imported ledger entries" rows={entries} rowKey={(r) => r.id} columns={entryColumns} state={entryTable} onState={setEntryTable}
+          <DataTable<ImportedEntryRow> dense label="Imported ledger entries" rows={entries} rowKey={(r) => r.id} columns={entryColumns} state={entryTable} onState={setEntryTable}
             searchPlaceholder="System, line, description"
             filters={[
               { key: 'source', label: 'Source', options: opts(filterOptions<ImportedEntryRow>(entries, (r) => r.source), REVENUE_TYPE_LABEL) },

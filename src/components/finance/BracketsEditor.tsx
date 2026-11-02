@@ -6,8 +6,8 @@
 import { useState } from 'react';
 import { bracketErrors, describeBrackets, formatCents, type BracketBasis } from '../../lib/dealMath';
 import { deleteBracket, saveBracket, type BracketRow } from '../../lib/financeExtrasApi';
-import { initialTable, type TableState } from '../../lib/financeTables';
-import DataTable, { type DataColumn } from './DataTable';
+import { initialTable, type TableState } from '../../lib/dataTable';
+import DataTable, { type DataColumn } from '../DataTable';
 import { BTN, BTN_PRIMARY, centsFromInput, FLD, inputFromCents, LABEL } from './ui';
 
 interface Props {
@@ -88,7 +88,7 @@ export default function BracketsEditor({ offerId, brackets, percentage, dealType
         {!canEdit && ' Brackets change only on a draft offer, by an owner or manager.'}
       </p>
       {brackets.length > 0 && (
-        <DataTable<BracketRow> caption="Deal brackets" rows={brackets} rowKey={(b) => b.id} columns={columns} state={table} onState={setTable}
+        <DataTable<BracketRow> dense label="Deal brackets" rows={brackets} rowKey={(b) => b.id} columns={columns} state={table} onState={setTable}
           actions={canEdit ? (b) => (editing?.id === b.id
             ? <><button className={BTN} disabled={busy} onClick={saveEdit}>Save</button> <button className={BTN} onClick={() => setEditing(null)}>Cancel</button></>
             : <><button className={BTN} disabled={busy} onClick={() => setEditing({ id: b.id, threshold: b.basis === 'tickets' ? String(b.threshold) : inputFromCents(b.threshold), pct: String(b.percentage) })}>Edit</button>{' '}

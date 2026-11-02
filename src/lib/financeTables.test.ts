@@ -1,58 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyTable, centsFromMajor, filterOptions, initialTable, label, planLedgerImport, REVENUE_TYPE_LABEL, reportingRowsCsv,
-  setFilter, setQuery, toggleSort, totalsByCurrency, type TableColumn,
+  centsFromMajor, label, planLedgerImport, REVENUE_TYPE_LABEL, reportingRowsCsv, totalsByCurrency,
 } from './financeTables';
-
-interface R { id: string; name: string; amount: number | null; kind: string }
-const rows: R[] = [
-  { id: 'a', name: 'Row 10', amount: 300, kind: 'bar' },
-  { id: 'b', name: 'row 2', amount: null, kind: 'tickets' },
-  { id: 'c', name: 'Row 1', amount: -50, kind: 'bar' },
-  { id: 'd', name: 'Beer night', amount: 300, kind: 'bar' },
-];
-const cols: TableColumn<R>[] = [
-  { key: 'name', value: (r) => r.name, searchable: true },
-  { key: 'amount', value: (r) => r.amount },
-  { key: 'kind', value: (r) => r.kind, searchable: true },
-];
-const ids = (v: { rows: R[] }) => v.rows.map((r) => r.id);
-
-describe('applyTable', () => {
-  it('sorts text naturally and case-insensitively, either way', () => {
-    const s = initialTable('name');
-    expect(ids(applyTable(rows, s, cols))).toEqual(['d', 'c', 'b', 'a']);
-    expect(ids(applyTable(rows, toggleSort(s, 'name'), cols))).toEqual(['a', 'b', 'c', 'd']);
-  });
-  it('sorts numbers, keeps ties in input order and blanks last both ways', () => {
-    const s = toggleSort(initialTable('name'), 'amount');
-    expect(s.sortDir).toBe('asc');
-    expect(ids(applyTable(rows, s, cols))).toEqual(['c', 'a', 'd', 'b']);
-    expect(ids(applyTable(rows, toggleSort(s, 'amount'), cols))).toEqual(['a', 'd', 'c', 'b']);
-  });
-  it('searches every word across searchable columns, filters exactly', () => {
-    expect(ids(applyTable(rows, setQuery(initialTable('name'), 'ROW bar'), cols))).toEqual(['c', 'a']);
-    expect(ids(applyTable(rows, setFilter(initialTable('name'), 'kind', 'tickets'), cols))).toEqual(['b']);
-    expect(ids(applyTable(rows, setFilter(initialTable('name'), 'kind', ''), cols))).toHaveLength(4);
-  });
-  it('pages, and clamps a page past the end', () => {
-    const s = { ...initialTable('name'), perPage: 3 };
-    const p1 = applyTable(rows, s, cols);
-    expect([p1.total, p1.pageCount, p1.rows.length]).toEqual([4, 2, 3]);
-    const p9 = applyTable(rows, { ...s, page: 9 }, cols);
-    expect([p9.page, ids(p9)]).toEqual([2, ['a']]);
-    expect(applyTable([], s, cols)).toEqual({ rows: [], total: 0, page: 1, pageCount: 1 });
-  });
-  it('a new sort, search or filter goes back to page 1', () => {
-    const s = { ...initialTable('name'), page: 3 };
-    expect(toggleSort(s, 'amount').page).toBe(1);
-    expect(setQuery(s, 'x').page).toBe(1);
-    expect(setFilter(s, 'kind', 'bar').page).toBe(1);
-  });
-  it('filter options are distinct and sorted', () => {
-    expect(filterOptions(rows, (r) => r.kind)).toEqual(['bar', 'tickets']);
-  });
-});
 
 describe('centsFromMajor', () => {
   it('is exact', () => {

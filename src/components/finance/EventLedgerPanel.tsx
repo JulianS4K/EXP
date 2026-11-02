@@ -11,8 +11,9 @@ import {
   backfillGlCodes, deleteAssignment, getCashSummary, listAssignments, listRevenueCodes, saveAssignment,
   type AssignmentRow, type CashSummary, type RevenueCodeRow,
 } from '../../lib/financeExtrasApi';
-import { initialTable, label, PAYMENT_METHOD_LABEL, REVENUE_TYPE_LABEL, REVENUE_TYPES, type TableState } from '../../lib/financeTables';
-import DataTable, { type DataColumn } from './DataTable';
+import { label, PAYMENT_METHOD_LABEL, REVENUE_TYPE_LABEL, REVENUE_TYPES } from '../../lib/financeTables';
+import { initialTable, type TableState } from '../../lib/dataTable';
+import DataTable, { type DataColumn } from '../DataTable';
 import { BTN, BTN_PRIMARY, FLD, LABEL, Money, Row, Section } from './ui';
 
 interface Props {
@@ -88,7 +89,7 @@ export default function EventLedgerPanel({ eventId, orgId, canView }: Props) {
           </div>
         </div>
         <div className="mt-4">
-          <DataTable<MethodRow> caption="By payment method" rows={cash.by_payment_method} rowKey={(r) => r.method} columns={methodColumns}
+          <DataTable<MethodRow> dense label="By payment method" rows={cash.by_payment_method} rowKey={(r) => r.method} columns={methodColumns}
             state={methodTable} onState={setMethodTable} empty="No payments yet." />
         </div>
       </Section>

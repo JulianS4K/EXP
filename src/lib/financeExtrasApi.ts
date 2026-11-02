@@ -1,7 +1,7 @@
 // Deal brackets, ledger codes per revenue type, per-event overrides and
 // backfills, imported ledger entries, reporting rows and the cash summary:
 // the dashboard's data layer (mig 20261102120000). Table logic is
-// ./financeTables.ts; the bracket maths ./dealMath.ts.
+// ./dataTable.ts, labels and CSV ./financeTables.ts; the bracket maths ./dealMath.ts.
 //
 // Brackets (owner / manager), revenue codes and overrides (owner / manager /
 // finance) are rows the signed-in user writes; RLS and triggers decide.

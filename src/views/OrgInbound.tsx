@@ -91,13 +91,13 @@ export default function OrgInbound() {
         statuses={INBOUND_STATUSES} status={(x) => x.status} defaultStatus="new" defaultSort={{ key: 'received', dir: 'desc' }}
         onRowClick={(x) => setOpen(x)}
         columns={[
-          { key: 'artist', label: 'Act', sortValue: (x) => x.artist_name, render: (x) => <><p className="font-bold text-slate-900">{x.artist_name}</p>{x.genres.length > 0 && <p className="text-xs text-slate-400">{x.genres.join(', ')}</p>}</> },
-          { key: 'contact', label: 'Contact', sortValue: (x) => x.contact_name ?? x.email, render: (x) => <>{x.contact_name ?? '—'}{x.contact_role ? <span className="text-xs text-slate-400"> · {x.contact_role}</span> : null}<p className="text-xs text-slate-400">{x.email}</p></> },
-          { key: 'venue', label: 'Venue', sortValue: (x) => (x.venue_id ? venueName.get(x.venue_id) : null), render: (x) => (x.venue_id ? venueName.get(x.venue_id) ?? '—' : 'Any') },
-          { key: 'dates', label: 'Dates', sortValue: (x) => x.preferred_dates[0], render: (x) => x.preferred_dates.join(', ') || (x.dates_flexible ? 'Flexible' : '—') },
-          { key: 'draw', label: 'Draw', align: 'right', sortValue: (x) => x.expected_draw, render: (x) => x.expected_draw ?? '—' },
-          { key: 'received', label: 'Received', sortValue: (x) => x.created_at, render: (x) => new Date(x.created_at).toLocaleDateString() },
-          { key: 'status', label: 'Status', sortValue: (x) => x.status, render: (x) => <StatusBadge status={x.status} /> },
+          { key: 'artist', header: 'Act', value: (x) => x.artist_name, render: (x) => <><p className="font-bold text-slate-900">{x.artist_name}</p>{x.genres.length > 0 && <p className="text-xs text-slate-400">{x.genres.join(', ')}</p>}</> },
+          { key: 'contact', header: 'Contact', value: (x) => x.contact_name ?? x.email, render: (x) => <>{x.contact_name ?? '—'}{x.contact_role ? <span className="text-xs text-slate-400"> · {x.contact_role}</span> : null}<p className="text-xs text-slate-400">{x.email}</p></> },
+          { key: 'venue', header: 'Venue', value: (x) => (x.venue_id ? venueName.get(x.venue_id) : null), render: (x) => (x.venue_id ? venueName.get(x.venue_id) ?? '—' : 'Any') },
+          { key: 'dates', header: 'Dates', value: (x) => x.preferred_dates[0], render: (x) => x.preferred_dates.join(', ') || (x.dates_flexible ? 'Flexible' : '—') },
+          { key: 'draw', header: 'Draw', align: 'right', value: (x) => x.expected_draw, render: (x) => x.expected_draw ?? '—' },
+          { key: 'received', header: 'Received', value: (x) => x.created_at, render: (x) => new Date(x.created_at).toLocaleDateString() },
+          { key: 'status', header: 'Status', value: (x) => x.status, render: (x) => <StatusBadge status={x.status} /> },
         ]}
         actions={(x) => (<>
           {x.status === 'new' && <button className={BTN} onClick={() => act(() => setInboundStatus(x.id, 'reviewing'))}>Review</button>}

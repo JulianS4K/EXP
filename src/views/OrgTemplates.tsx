@@ -120,12 +120,12 @@ function EventTemplates({ orgId, canEdit, onErr }: { orgId: string; canEdit: boo
         searchFields={(t) => [t.name, t.event_name, t.description]} searchPlaceholder="Search templates"
         statuses={TEMPLATE_STATUSES} status={(t) => t.status} defaultStatus="active" defaultSort={{ key: 'name', dir: 'asc' }}
         columns={[
-          { key: 'name', label: 'Template', sortValue: (t) => t.name, render: (t) => <><p className="font-bold text-slate-900">{t.name}</p>{t.event_name && <p className="text-xs text-slate-400">{t.event_name}</p>}</> },
-          { key: 'tiers', label: 'Ticket types', sortValue: (t) => t.tiers.length, render: (t) => t.tiers.map((x) => `${x.name} ${formatCents(x.price_cents, String(t.event_fields.currency ?? 'USD'))}`).join(' · ') || '—' },
-          { key: 'capacity', label: 'Capacity', align: 'right', sortValue: (t) => t.capacity ?? t.tiers.reduce((s, x) => s + x.capacity, 0), render: (t) => t.capacity ?? t.tiers.reduce((s, x) => s + x.capacity, 0) },
-          { key: 'used', label: 'Used', align: 'right', sortValue: (t) => t.use_count, render: (t) => t.use_count },
-          { key: 'last', label: 'Last used', sortValue: (t) => t.last_used_at, render: (t) => when(t.last_used_at) },
-          { key: 'status', label: 'Status', sortValue: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
+          { key: 'name', header: 'Template', value: (t) => t.name, render: (t) => <><p className="font-bold text-slate-900">{t.name}</p>{t.event_name && <p className="text-xs text-slate-400">{t.event_name}</p>}</> },
+          { key: 'tiers', header: 'Ticket types', value: (t) => t.tiers.length, render: (t) => t.tiers.map((x) => `${x.name} ${formatCents(x.price_cents, String(t.event_fields.currency ?? 'USD'))}`).join(' · ') || '—' },
+          { key: 'capacity', header: 'Capacity', align: 'right', value: (t) => t.capacity ?? t.tiers.reduce((s, x) => s + x.capacity, 0), render: (t) => t.capacity ?? t.tiers.reduce((s, x) => s + x.capacity, 0) },
+          { key: 'used', header: 'Used', align: 'right', value: (t) => t.use_count, render: (t) => t.use_count },
+          { key: 'last', header: 'Last used', value: (t) => t.last_used_at, render: (t) => when(t.last_used_at) },
+          { key: 'status', header: 'Status', value: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
         ]}
         actions={canEdit ? (t) => (<>
           {t.status === 'active' && <button className={BTN} onClick={() => setMaking(t)}>Create event</button>}
@@ -285,10 +285,10 @@ function NoteTemplates({ orgId, canEdit, onErr }: { orgId: string; canEdit: bool
       <DataTable<NoteTemplateRow> label="Note templates" rows={rows} rowKey={(t) => t.id} searchFields={(t) => [t.title, t.body]} searchPlaceholder="Search notes"
         statuses={TEMPLATE_STATUSES} status={(t) => t.status} defaultStatus="active" defaultSort={{ key: 'title', dir: 'asc' }}
         columns={[
-          { key: 'title', label: 'Title', sortValue: (t) => t.title, render: (t) => <span className="font-bold text-slate-900">{t.title}</span> },
-          { key: 'body', label: 'Note', render: (t) => <span className="text-slate-600">{t.body.length > 120 ? `${t.body.slice(0, 120)}…` : t.body}</span> },
-          { key: 'updated', label: 'Updated', sortValue: (t) => t.updated_at, render: (t) => when(t.updated_at) },
-          { key: 'status', label: 'Status', sortValue: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
+          { key: 'title', header: 'Title', value: (t) => t.title, render: (t) => <span className="font-bold text-slate-900">{t.title}</span> },
+          { key: 'body', header: 'Note', render: (t) => <span className="text-slate-600">{t.body.length > 120 ? `${t.body.slice(0, 120)}…` : t.body}</span> },
+          { key: 'updated', header: 'Updated', value: (t) => t.updated_at, render: (t) => when(t.updated_at) },
+          { key: 'status', header: 'Status', value: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
         ]}
         actions={canEdit ? (t) => (<>
           {t.status === 'active' && <button className={BTN} onClick={() => setApplying(t)}>Add to show</button>}
@@ -409,12 +409,12 @@ function RentalTemplates({ orgId, canEdit, onErr }: { orgId: string; canEdit: bo
       <DataTable<RentalTemplateRow> label="Rental invoice templates" rows={rows} rowKey={(t) => t.id} searchFields={(t) => [t.title, t.payee_name]}
         statuses={TEMPLATE_STATUSES} status={(t) => t.status} defaultStatus="active" defaultSort={{ key: 'title', dir: 'asc' }}
         columns={[
-          { key: 'title', label: 'Template', sortValue: (t) => t.title, render: (t) => <span className="font-bold text-slate-900">{t.title}</span> },
-          { key: 'lines', label: 'Lines', align: 'right', sortValue: (t) => t.items.length, render: (t) => t.items.length },
-          { key: 'total', label: 'Total', align: 'right', sortValue: (t) => rentalTotals(t.items, t.attendance_count, t.discount_cents, t.tax_fees).total_cents,
+          { key: 'title', header: 'Template', value: (t) => t.title, render: (t) => <span className="font-bold text-slate-900">{t.title}</span> },
+          { key: 'lines', header: 'Lines', align: 'right', value: (t) => t.items.length, render: (t) => t.items.length },
+          { key: 'total', header: 'Total', align: 'right', value: (t) => rentalTotals(t.items, t.attendance_count, t.discount_cents, t.tax_fees).total_cents,
             render: (t) => formatCents(rentalTotals(t.items, t.attendance_count, t.discount_cents, t.tax_fees).total_cents, t.currency) },
-          { key: 'updated', label: 'Updated', sortValue: (t) => t.updated_at, render: (t) => when(t.updated_at) },
-          { key: 'status', label: 'Status', sortValue: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
+          { key: 'updated', header: 'Updated', value: (t) => t.updated_at, render: (t) => when(t.updated_at) },
+          { key: 'status', header: 'Status', value: (t) => t.status, render: (t) => <StatusBadge status={t.status} /> },
         ]}
         actions={canEdit ? (t) => (<>
           <button className={BTN} onClick={() => setEditing(t)}>Edit</button>
@@ -513,13 +513,13 @@ function RentalInvoices({ orgId, role, isAdmin, canPrefix, onErr }: { orgId: str
         searchFields={(i) => [i.number, i.title, i.bill_to_name, i.bill_to_email, i.hold_id ? holdName.get(i.hold_id) : null]} searchPlaceholder="Search number, title, bill to"
         statuses={['draft', 'issued', 'paid', 'void']} status={(i) => i.status} defaultSort={{ key: 'created', dir: 'desc' }}
         columns={[
-          { key: 'number', label: 'Number', sortValue: (i) => i.number_seq, render: (i) => i.number ?? <span className="text-slate-400">draft</span> },
-          { key: 'title', label: 'Invoice', sortValue: (i) => i.title, render: (i) => <><p className="font-bold text-slate-900">{i.title}</p>{i.hold_id && <p className="text-xs text-slate-400">{holdName.get(i.hold_id) ?? 'Hold'}</p>}</> },
-          { key: 'bill', label: 'Bill to', sortValue: (i) => i.bill_to_name, render: (i) => i.bill_to_name ?? '—' },
-          { key: 'date', label: 'Rental date', sortValue: (i) => i.rental_date, render: (i) => i.rental_date ?? '—' },
-          { key: 'total', label: 'Total', align: 'right', sortValue: (i) => i.total_cents, render: (i) => formatCents(i.total_cents, i.currency) },
-          { key: 'created', label: 'Created', sortValue: (i) => i.created_at, render: (i) => when(i.created_at) },
-          { key: 'status', label: 'Status', sortValue: (i) => i.status, render: (i) => <StatusBadge status={i.status} /> },
+          { key: 'number', header: 'Number', value: (i) => i.number_seq, render: (i) => i.number ?? <span className="text-slate-400">draft</span> },
+          { key: 'title', header: 'Invoice', value: (i) => i.title, render: (i) => <><p className="font-bold text-slate-900">{i.title}</p>{i.hold_id && <p className="text-xs text-slate-400">{holdName.get(i.hold_id) ?? 'Hold'}</p>}</> },
+          { key: 'bill', header: 'Bill to', value: (i) => i.bill_to_name, render: (i) => i.bill_to_name ?? '—' },
+          { key: 'date', header: 'Rental date', value: (i) => i.rental_date, render: (i) => i.rental_date ?? '—' },
+          { key: 'total', header: 'Total', align: 'right', value: (i) => i.total_cents, render: (i) => formatCents(i.total_cents, i.currency) },
+          { key: 'created', header: 'Created', value: (i) => i.created_at, render: (i) => when(i.created_at) },
+          { key: 'status', header: 'Status', value: (i) => i.status, render: (i) => <StatusBadge status={i.status} /> },
         ]}
         actions={(i) => {
           const a = rentalActions(i.status, role, isAdmin);
