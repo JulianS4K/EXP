@@ -151,7 +151,8 @@ for m in \
          20261102110000_exos_giving_writes \
          20261102120000_exos_finance_extras \
          20261102130000_exos_templates_inbound \
-         20261102140000_exos_order_edits_recs; do
+         20261102140000_exos_order_edits_recs \
+         20261102160000_exos_gaps_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -337,7 +338,8 @@ for m in \
          20261102110000_exos_giving_writes \
          20261102120000_exos_finance_extras \
          20261102130000_exos_templates_inbound \
-         20261102140000_exos_order_edits_recs; do
+         20261102140000_exos_order_edits_recs \
+         20261102160000_exos_gaps_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -406,3 +408,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_finance_e
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_templates_inbound.sql"
 # claude/exos-gap-orders
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_order_edits_recs.sql"
+# gaps integration (mig 20261102160000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gaps_integration.sql"
