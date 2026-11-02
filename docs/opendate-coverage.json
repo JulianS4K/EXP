@@ -275,9 +275,9 @@
    "category": "events",
    "method": "GET",
    "path": "/api/v2/confirms/{id}/similars",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "No similar-events model yet"
+   "status": "route",
+   "exos": "GET /v1/events/:id/similar",
+   "reason": "Also /v1/confirms/:id/similars. Public upcoming events scored on shared artists, venue, series, genres, tags, date and in-org co-buyers"
   },
   {
    "category": "events",
@@ -307,9 +307,9 @@
    "category": "events",
    "method": "GET",
    "path": "/api/v2/confirms/recommendations",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "No recommendation model yet"
+   "status": "route",
+   "exos": "GET /v1/event-recommendations",
+   "reason": "Also /v1/confirms/recommendations?fan_id=. From the fan's purchases with this org only; held events left out"
   },
   {
    "category": "events_database",
@@ -619,9 +619,9 @@
    "category": "tickets",
    "method": "PUT",
    "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Ticket edits (attendee name) are dashboard / holder actions; no API write yet"
+   "status": "route",
+   "exos": "PUT /v1/tickets/:id",
+   "reason": "Also /v1/confirms/:event_id/tickets/:barcode (ticket id or door code). Attendee name only; a holder change is a transfer and is refused"
   },
   {
    "category": "tickets",
@@ -675,9 +675,9 @@
    "category": "orders",
    "method": "PUT",
    "path": "/api/v2/confirms/{confirm_id}/orders/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Order edits (buyer details) are dashboard actions; no API write yet"
+   "status": "route",
+   "exos": "PUT /v1/orders/:id",
+   "reason": "Also /v1/confirms/:event_id/orders/:id. Buyer name, email, phone and notes only; audited"
   },
   {
    "category": "orders",
@@ -699,9 +699,9 @@
    "category": "orders",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/orders/{id}/send_receipt",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Receipts are mailed at fulfilment; a resend is a dashboard action, not an API route yet"
+   "status": "route",
+   "exos": "POST /v1/orders/:id/send-receipt",
+   "reason": "Also …/send_receipt. Rate-limited per order; another address only when the org allows it"
   },
   {
    "category": "orders",
@@ -715,9 +715,9 @@
    "category": "orders",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/orders/{id}/check_out",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet"
+   "status": "route",
+   "exos": "POST /v1/orders/:id/check-out",
+   "reason": "Also …/check_out. Exits on re-entry lists through the door's check-in function; idempotent"
   },
   {
    "category": "organizer_ticket_reservations",
@@ -803,9 +803,9 @@
    "category": "guest_lists",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/guest_list_preview",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Pasted-names preview is client-side in the dashboard"
+   "status": "route",
+   "exos": "POST /v1/events/:id/guest-list-preview",
+   "reason": "Also /v1/confirms/:id/guest_list_preview. Pasted names, CSV or rows; writes nothing"
   },
   {
    "category": "guest_lists",
@@ -915,9 +915,9 @@
    "category": "fans",
    "method": "GET",
    "path": "/api/v2/confirms/{confirm_id}/fans/recommendations",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "No recommendation model yet (docs/fans.md)"
+   "status": "route",
+   "exos": "GET /v1/events/:id/fan-recommendations",
+   "reason": "Also /v1/confirms/:id/fans/recommendations. Opted-in fans of the org, not holders, scored on past purchases"
   },
   {
    "category": "fans",

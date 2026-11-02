@@ -389,6 +389,36 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'public-get-order', method: 'GET', auth: P, path: '/public/orders/:id', scope: null, paged: false },
   { id: 'public-list-ticket-links', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs', scope: null, paged: false },
   { id: 'public-get-ticket-link', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs/:ticket', scope: null, paged: false },
+
+  // claude/exos-gap-orders: order and ticket edits, receipt resends, order
+  // check-out, the guest-list preview and recommendations (mig 20261102140000,
+  // exos-api/orders.ts). Opendate's /confirms/:id/… paths are aliases.
+  { id: 'update-order', method: 'PUT', auth: K, path: '/orders/:id', scope: 'tickets:write', paged: false, aliases: ['/confirms/:eid/orders/:id'] },
+  {
+    id: 'send-order-receipt', method: 'POST', auth: K, path: '/orders/:id/send-receipt', scope: 'tickets:write', paged: false,
+    aliases: ['/orders/:id/send_receipt', '/confirms/:eid/orders/:id/send_receipt'],
+  },
+  {
+    id: 'check-out-order', method: 'POST', auth: K, path: '/orders/:id/check-out', scope: 'checkin:write', paged: false,
+    aliases: ['/orders/:id/check_out', '/confirms/:eid/orders/:id/check_out'],
+  },
+  { id: 'update-ticket', method: 'PUT', auth: K, path: '/tickets/:id', scope: 'tickets:write', paged: false, aliases: ['/confirms/:eid/tickets/:id'] },
+  {
+    id: 'preview-guest-list', method: 'POST', auth: K, path: '/events/:id/guest-list-preview', scope: 'tickets:write', paged: false,
+    aliases: ['/events/:id/guest_list_preview', '/confirms/:id/guest_list_preview'],
+  },
+  {
+    id: 'list-similar-events', method: 'GET', auth: K, path: '/events/:id/similar', scope: 'events:read', paged: true,
+    aliases: ['/events/:id/similars', '/confirms/:id/similars'],
+  },
+  {
+    id: 'list-fan-event-recommendations', method: 'GET', auth: K, path: '/event-recommendations', scope: 'fans:read', paged: true,
+    aliases: ['/confirms/recommendations'],
+  },
+  {
+    id: 'list-event-fan-recommendations', method: 'GET', auth: K, path: '/events/:id/fan-recommendations', scope: 'fans:read', paged: true,
+    aliases: ['/confirms/:id/fans/recommendations'],
+  },
 ];
 
 /** Methods the API answers (anything else is 405). */

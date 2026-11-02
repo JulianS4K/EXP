@@ -1,0 +1,346 @@
+{
+  "file": "recommendations",
+  "name": "Recommendations",
+  "order": 36,
+  "description": "Simple, explainable recommendations: similar events, events for a fan, and fans for an event. A score adds up shared artists (the lineup, matched by artist or name: 50 each, up to 3), the same venue (40), the same series (30), shared genres (15 each, up to 4), shared tags (10 each, up to 5) and buyers of both events (5 each, up to 10), plus up to 20 for being close in date, which only counts when something else matched. Each row says why (signals, reasons). Only public events are ever recommended: published, listed (not noindex) and not started yet; drafts and cancelled events never appear. Buyers are only ever counted, never named, and only between events of the key's own organization. Opendate's /v1/confirms/:id/similars, /v1/confirms/recommendations and /v1/confirms/:id/fans/recommendations answer too.",
+  "endpoints": [
+    {
+      "id": "list-similar-events",
+      "method": "GET",
+      "path": "/v1/events/:id/similar",
+      "summary": "List similar events",
+      "description": "Public upcoming events like one of the organization's (the source may be a draft: only its matches come back). Highest score first, then the sooner event. Also /v1/events/:id/similars and /v1/confirms/:id/similars.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "scope",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "org",
+            "all"
+          ],
+          "default": "org",
+          "description": "org: the organization's own public events. all: other organizations' public events too (only their public fields; co-buyers are never counted across organizations).",
+          "example": "all"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+                "name": "Nova Lane: late show",
+                "slug": "nova-lane-late",
+                "starts_at": "2026-11-20T02:00:00+00:00",
+                "timezone": "America/New_York",
+                "venue_name": "The Room",
+                "image_url": null,
+                "org": {
+                  "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+                  "name": "The Room NYC",
+                  "slug": "the-room"
+                },
+                "score": 127,
+                "same_org": true,
+                "signals": {
+                  "shared_artists": 1,
+                  "same_venue": true,
+                  "same_series": false,
+                  "shared_genres": 1,
+                  "shared_tags": 0,
+                  "co_buyers": 1,
+                  "days_apart": 5
+                },
+                "reasons": [
+                  "1 shared artist",
+                  "same venue",
+                  "1 shared genre",
+                  "1 buyer of both",
+                  "5 days apart"
+                ]
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad scope, page or per_page.",
+          "example": {
+            "error": "scope must be org or all."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-fan-event-recommendations",
+      "method": "GET",
+      "path": "/v1/event-recommendations",
+      "summary": "List events for a fan",
+      "description": "Public upcoming events one of the organization's fans may like, from what they bought from this organization (never from other organizations), leaving out events they already hold a ticket for. Dates closer to today score higher. Also /v1/confirms/recommendations.",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [
+        {
+          "name": "fan_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The fan (GET /v1/fans). A fan of another organization answers 404.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "scope",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "enum": [
+            "org",
+            "all"
+          ],
+          "default": "org",
+          "description": "org: the organization's own public events. all: other organizations' public events too (only their public fields; co-buyers are never counted across organizations).",
+          "example": "all"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+                "name": "Nova Lane: late show",
+                "slug": "nova-lane-late",
+                "starts_at": "2026-11-20T02:00:00+00:00",
+                "timezone": "America/New_York",
+                "venue_name": "The Room",
+                "image_url": null,
+                "org": {
+                  "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+                  "name": "The Room NYC",
+                  "slug": "the-room"
+                },
+                "score": 94,
+                "same_org": true,
+                "signals": {
+                  "shared_artists": 1,
+                  "same_venue": true,
+                  "same_series": false,
+                  "shared_genres": 1,
+                  "shared_tags": 0,
+                  "co_buyers": 2,
+                  "days_apart": 18
+                },
+                "reasons": [
+                  "1 shared artist",
+                  "same venue",
+                  "1 shared genre",
+                  "2 buyers of both",
+                  "18 days apart"
+                ]
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "fan_id missing or not a UUID; a bad scope, page or per_page.",
+          "example": {
+            "error": "fan_id is required."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such fan in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "fan not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-fan-recommendations",
+      "method": "GET",
+      "path": "/v1/events/:id/fan-recommendations",
+      "summary": "List fans for an event",
+      "description": "The organization's fans most likely to want this event: on its email list (they opted in themselves), with no ticket for it yet, scored by how many of their past events with the organization share an artist (50), the venue (40), the series (30), a genre (15) or a tag (10), each counted up to 3 events. Highest score first, then the most recent buyer. Also /v1/confirms/:id/fans/recommendations.",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+                "email": "dana@example.com",
+                "first_name": "Dana",
+                "last_name": "Lee",
+                "orders_count": 3,
+                "last_order_at": "2026-10-04T14:01:02+00:00",
+                "score": 105,
+                "signals": {
+                  "artist_events": 1,
+                  "venue_events": 1,
+                  "series_events": 0,
+                  "genre_events": 1,
+                  "tag_events": 0
+                },
+                "reasons": [
+                  "saw the artist at 1 show",
+                  "1 show at this venue",
+                  "1 show in the genre"
+                ]
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or not on the event the path names).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

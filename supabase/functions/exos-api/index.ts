@@ -138,6 +138,7 @@ import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
+import { handleOrders, ORDER_ROUTES } from "./orders.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
@@ -322,8 +323,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Only lists read ?page / ?per_page; elsewhere they are ignored.
       page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
       body: method === "POST" || method === "PUT" || method === "PATCH"
-        ? await readBody(req, match.route.id === "import-sales-counts" ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES,
-          PLATFORM_ROUTES.has(match.route.id) ? "rails" : "flat")
+        ? await readBody(req, match.route.id === "import-sales-counts" || match.route.id === "preview-guest-list"
+            ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES,
+          PLATFORM_ROUTES.has(match.route.id) || ORDER_ROUTES.has(match.route.id) ? "rails" : "flat")
         : {},
       idempotencyKey: method === "GET" ? null : idempotencyKey(req),
     };
@@ -348,7 +350,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // more codes; the artist / lineup / key functions raise the codes in
     // RPC_STATUS.
     // Fan and tag routes answer with rpcError alone, as on #73.
-    const db = CORE_ROUTES.has(match.route.id) ? sqlError(e)
+    const db = CORE_ROUTES.has(match.route.id) || ORDER_ROUTES.has(match.route.id) ? sqlError(e)
       : FAN_ROUTES.has(match.route.id) ? rpcError(e)
       : (match.route.id.includes("sales-count") ? dbError(e) : null) ??
         bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
@@ -433,6 +435,12 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
+  // claude/exos-gap-orders (mig 20261102140000).
+  if (ORDER_ROUTES.has(route.id)) {
+    return await handleOrders(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
     });
   }
