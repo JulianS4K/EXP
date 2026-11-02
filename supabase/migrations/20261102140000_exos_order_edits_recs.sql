@@ -1400,15 +1400,43 @@ END $$;
 SELECT pg_temp.exos_patch_n('public.exos_delete_my_account()',
   'exos_order_details',
   $o$  UPDATE public.exos_checkout_sessions SET buyer_email = NULL WHERE buyer_uid = v_uid;$o$,
-  $n$  -- Order desk (mig 20261102140000): buyer details, the original address, and
-  -- the addresses in the edit history. Before the session email is nulled.
+  $n$  -- Order desk (mig 20261102140000). The caller's orders: their own sessions,
+  -- and orders bought with their email ONLY when that email is confirmed (an
+  -- unconfirmed sign-up with someone else's address must not erase that
+  -- person's guest orders). Those lose the buyer details and their whole
+  -- edit history; elsewhere, only history values exactly equal to the
+  -- confirmed address are redacted. Before the session email is nulled.
+  UPDATE public.exos_order_edits x SET changes = jsonb_build_object('erased', true)
+   WHERE x.session_id IN (
+           SELECT cs.session_id FROM public.exos_checkout_sessions cs WHERE cs.buyer_uid = v_uid
+           UNION
+           SELECT cs.session_id FROM public.exos_checkout_sessions cs
+             JOIN auth.users u ON u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+            WHERE lower(btrim(cs.buyer_email)) = lower(btrim(u.email))
+           UNION
+           SELECT d.session_id FROM public.exos_order_details d
+             JOIN auth.users u ON u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+            WHERE d.original_email = lower(btrim(u.email)));
+  UPDATE public.exos_order_edits x SET changes = jsonb_set(x.changes, '{email,from}', '"[erased]"')
+    FROM auth.users u
+   WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+     AND lower(x.changes #>> '{email,from}') = lower(btrim(u.email));
+  UPDATE public.exos_order_edits x SET changes = jsonb_set(x.changes, '{email,to}', '"[erased]"')
+    FROM auth.users u
+   WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+     AND lower(x.changes #>> '{email,to}') = lower(btrim(u.email));
+  UPDATE public.exos_order_edits x SET changes = jsonb_set(x.changes, '{to}', '"[erased]"')
+    FROM auth.users u
+   WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+     AND x.action = 'order.receipt' AND lower(x.changes ->> 'to') = lower(btrim(u.email));
   UPDATE public.exos_order_details d
      SET first_name = NULL, last_name = NULL, phone = NULL, notes = NULL, original_email = NULL
-   WHERE d.session_id IN (SELECT cs.session_id FROM public.exos_checkout_sessions cs
-                           WHERE cs.buyer_uid = v_uid
-                              OR (coalesce(v_email, '') <> '' AND lower(cs.buyer_email) = v_email))
-      OR (coalesce(v_email, '') <> '' AND lower(d.original_email) = v_email);
-  UPDATE public.exos_order_edits x SET changes = jsonb_build_object('erased', true)
-   WHERE x.session_id IN (SELECT cs.session_id FROM public.exos_checkout_sessions cs WHERE cs.buyer_uid = v_uid)
-      OR (coalesce(v_email, '') <> '' AND position(v_email IN lower(x.changes::text)) > 0);
+   WHERE d.session_id IN (
+           SELECT cs.session_id FROM public.exos_checkout_sessions cs WHERE cs.buyer_uid = v_uid
+           UNION
+           SELECT cs.session_id FROM public.exos_checkout_sessions cs
+             JOIN auth.users u ON u.id = v_uid AND u.email_confirmed_at IS NOT NULL
+            WHERE lower(btrim(cs.buyer_email)) = lower(btrim(u.email)))
+      OR d.original_email = (SELECT lower(btrim(u.email)) FROM auth.users u
+                              WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL);
   UPDATE public.exos_checkout_sessions SET buyer_email = NULL WHERE buyer_uid = v_uid;$n$, 1);

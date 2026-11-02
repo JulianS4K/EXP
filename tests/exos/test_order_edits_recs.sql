@@ -16,6 +16,9 @@
 --   O3b no address at the first edit: no original, any receipt is an
 --       override; account deletion erases order details and edit-history
 --       addresses, and an erased order gets no receipt
+--   O3c erasure matches the email only when confirmed, and whole values
+--       only: an unconfirmed look-alike erases nothing; jimbob@x.com
+--       survives bob@x.com's deletion
 --   O4  order check-out: every ticket inside a re-entry list goes out once;
 --       again = nothing recorded (idempotent); the implicit list can't exit;
 --       scanners can't (typed exit is an override)
@@ -388,6 +391,62 @@ BEGIN
     RAISE EXCEPTION 'O3b FAIL: receipt for an erased order';
   END IF;
   RAISE NOTICE 'OK O3b no original = every address is an override; erasure clears order details and stops receipts';
+END $$;
+
+-- O3c ----------------------------------------------------------------------------
+-- Erasure matches the email only when it is confirmed, and only whole values.
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
+  ('de000000-0000-0000-0000-0000000000b6','shared@x.com',NULL),
+  ('de000000-0000-0000-0000-0000000000b7','bob@x.com',now());
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,guest,quantity,amount_cents,status,payment_intent) VALUES
+  ('cs_deg1','de000000-0000-0000-0000-0000000000e6','de000000-0000-0000-0000-0000000000d6','de000000-0000-0000-0000-000000000001',NULL,'shared@x.com',true,1,2000,'fulfilled','pi_deg1'),
+  ('cs_deg2','de000000-0000-0000-0000-0000000000e6','de000000-0000-0000-0000-0000000000d6','de000000-0000-0000-0000-000000000001',NULL,'bob@x.com',true,1,2000,'fulfilled','pi_deg2'),
+  ('cs_dej','de000000-0000-0000-0000-0000000000e6','de000000-0000-0000-0000-0000000000d6','de000000-0000-0000-0000-000000000001',NULL,'jimbob@x.com',true,1,2000,'fulfilled','pi_dej');
+DO $$
+DECLARE d public.exos_order_details%ROWTYPE; h jsonb; n int;
+BEGIN
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_deg1', '{"fields":{"first_name":"Guest","phone":"+1 555 0199","notes":"shared"}}'::jsonb);
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_deg2', '{"fields":{"first_name":"Bob","notes":"bob guest"}}'::jsonb);
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_dej', '{"fields":{"first_name":"Jim","email":"jim.b@x.com"}}'::jsonb);
+  -- Overrides are on (O3b): a receipt of jimbob's order sent to bob@x.com.
+  PERFORM pg_temp.w('f1', 'order.send_receipt', 'cs_dej', '{"email":"bob@x.com"}'::jsonb);
+
+  -- An unconfirmed account with the guest's address erases nothing of theirs.
+  PERFORM set_config('app.uid', 'de000000-0000-0000-0000-0000000000b6', true);
+  PERFORM public.exos_delete_my_account();
+  PERFORM set_config('app.uid', '', true);
+  SELECT * INTO d FROM public.exos_order_details WHERE session_id = 'cs_deg1';
+  IF d.first_name IS DISTINCT FROM 'Guest' OR d.phone IS DISTINCT FROM '+1 555 0199' OR d.original_email IS DISTINCT FROM 'shared@x.com'
+     OR NOT EXISTS (SELECT 1 FROM public.exos_order_edits WHERE session_id = 'cs_deg1' AND changes ? 'first_name') THEN
+    RAISE EXCEPTION 'O3c FAIL: an unconfirmed account erased a guest''s order %', to_jsonb(d);
+  END IF;
+
+  -- bob@x.com (confirmed) deletes: his guest order goes; jimbob@x.com stays,
+  -- and only the receipt's exact bob@x.com value is redacted.
+  PERFORM set_config('app.uid', 'de000000-0000-0000-0000-0000000000b7', true);
+  PERFORM public.exos_delete_my_account();
+  PERFORM set_config('app.uid', '', true);
+  SELECT * INTO d FROM public.exos_order_details WHERE session_id = 'cs_deg2';
+  IF d.first_name IS NOT NULL OR d.notes IS NOT NULL OR d.original_email IS NOT NULL
+     OR EXISTS (SELECT 1 FROM public.exos_order_edits WHERE session_id = 'cs_deg2' AND NOT (changes = '{"erased": true}'::jsonb)) THEN
+    RAISE EXCEPTION 'O3c FAIL: a confirmed email did not erase the guest order %', to_jsonb(d);
+  END IF;
+  SELECT * INTO d FROM public.exos_order_details WHERE session_id = 'cs_dej';
+  IF d.first_name IS DISTINCT FROM 'Jim' OR d.original_email IS DISTINCT FROM 'jimbob@x.com' THEN
+    RAISE EXCEPTION 'O3c FAIL: jimbob''s details erased %', to_jsonb(d);
+  END IF;
+  SELECT changes INTO h FROM public.exos_order_edits WHERE session_id = 'cs_dej' AND action = 'order.update';
+  IF h #>> '{email,from}' <> 'jimbob@x.com' OR h #>> '{email,to}' <> 'jim.b@x.com' THEN
+    RAISE EXCEPTION 'O3c FAIL: jimbob''s history touched %', h;
+  END IF;
+  SELECT changes INTO h FROM public.exos_order_edits WHERE session_id = 'cs_dej' AND action = 'order.receipt';
+  IF h ->> 'to' <> '[erased]' OR NOT (h ->> 'override')::boolean THEN
+    RAISE EXCEPTION 'O3c FAIL: receipt address not redacted (or the row wiped) %', h;
+  END IF;
+  SELECT count(*) INTO n FROM public.exos_order_edits WHERE position('bob@x.com' IN changes::text) > 0
+     AND position('jimbob@x.com' IN changes::text) = 0;
+  IF n <> 0 THEN RAISE EXCEPTION 'O3c FAIL: bob@x.com left in % history rows', n; END IF;
+  RAISE NOTICE 'OK O3c erasure: confirmed email only, whole values only (jimbob@x.com survives bob@x.com)';
 END $$;
 
 -- O4 -----------------------------------------------------------------------------
