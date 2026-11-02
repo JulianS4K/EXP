@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 143 | 31.4% |
-| equivalent | 217 | 47.7% |
-| **covered (route + equivalent)** | **360** | **79.1%** |
+| route | 149 | 32.7% |
+| equivalent | 227 | 49.9% |
+| **covered (route + equivalent)** | **376** | **82.6%** |
 | not_applicable | 58 | 12.7% |
-| planned | 37 | 8.1% |
+| planned | 21 | 4.6% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **70** of the 285 rows in the route table
+Exos routes beyond Opendate: **72** of the 303 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -39,7 +39,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | team_roles | 1 | 0 | 1 | 0 | 0 |
 | personal_access_tokens | 2 | 1 | 1 | 0 | 0 |
 | staffing_kiosk_devices | 2 | 0 | 0 | 2 | 0 |
-| events | 12 | 7 | 1 | 1 | 3 |
+| events | 12 | 8 | 1 | 1 | 2 |
 | events_database | 2 | 0 | 0 | 2 | 0 |
 | holds | 6 | 6 | 0 | 0 | 0 |
 | artists | 3 | 3 | 0 | 0 | 0 |
@@ -72,7 +72,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | offers | 3 | 3 | 0 | 0 | 0 |
 | offer_imports | 5 | 4 | 0 | 1 | 0 |
 | v3_offers | 8 | 8 | 0 | 0 | 0 |
-| v3_budgets | 23 | 5 | 13 | 0 | 5 |
+| v3_budgets | 23 | 10 | 13 | 0 | 0 |
 | v3_offer_pools | 8 | 3 | 5 | 0 | 0 |
 | v3_offer_templates | 8 | 6 | 0 | 2 | 0 |
 | tags | 5 | 4 | 1 | 0 | 0 |
@@ -117,7 +117,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_teams | 3 | 0 | 1 | 2 | 0 |
 | admin_artists | 2 | 0 | 2 | 0 | 0 |
 | admin_announcements | 5 | 0 | 0 | 5 | 0 |
-| admin_reporting_rows | 2 | 0 | 0 | 0 | 2 |
+| admin_reporting_rows | 2 | 0 | 2 | 0 | 0 |
 | admin_order_financials | 2 | 0 | 2 | 0 | 0 |
 | admin_add_ons | 2 | 0 | 2 | 0 | 0 |
 | admin_custom_charge_types | 2 | 0 | 2 | 0 | 0 |
@@ -140,14 +140,14 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_membership_products | 7 | 0 | 7 | 0 | 0 |
 | admin_memberships | 5 | 0 | 5 | 0 | 0 |
 | admin_external_identities | 2 | 0 | 0 | 2 | 0 |
-| admin_imported_ledger_entries | 3 | 0 | 0 | 0 | 3 |
+| admin_imported_ledger_entries | 3 | 0 | 3 | 0 | 0 |
 | admin_migrated_attendees | 8 | 0 | 6 | 2 | 0 |
 | admin_seat_reconciliations | 2 | 0 | 2 | 0 | 0 |
 | admin_offers | 5 | 0 | 5 | 0 | 0 |
 | admin_v3_offers | 3 | 0 | 2 | 1 | 0 |
 | admin_offer_source_creation | 1 | 0 | 0 | 1 | 0 |
 | admin_prisms | 5 | 0 | 0 | 5 | 0 |
-| admin_general_ledger_codes | 15 | 0 | 9 | 1 | 5 |
+| admin_general_ledger_codes | 15 | 0 | 14 | 1 | 0 |
 | admin_template_inventory | 14 | 0 | 6 | 0 | 8 |
 
 ## Planned
@@ -155,7 +155,6 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | Category | Endpoint | Note |
 |---|---|---|
 | events | `GET /api/v2/confirms/{id}/similars` | No similar-events model yet |
-| events | `GET /api/v2/confirms/{id}/cash_summary` | Box-office cash totals per event are in the dashboard report, not the API yet |
 | events | `GET /api/v2/confirms/recommendations` | No recommendation model yet |
 | tickets | `PUT /api/v2/confirms/{confirm_id}/tickets/{barcode}` | Ticket edits (attendee name) are dashboard / holder actions; no API write yet |
 | orders | `PUT /api/v2/confirms/{confirm_id}/orders/{id}` | Order edits (buyer details) are dashboard actions; no API write yet |
@@ -163,26 +162,11 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/check_out` | Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet |
 | guest_lists | `POST /api/v2/confirms/{confirm_id}/guest_list_preview` | Pasted-names preview is client-side in the dashboard |
 | fans | `GET /api/v2/confirms/{confirm_id}/fans/recommendations` | No recommendation model yet (docs/fans.md) |
-| v3_budgets | `GET /api/v2/v3_deal_brackets` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
-| v3_budgets | `GET /api/v2/v3_deal_brackets/{id}` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
-| v3_budgets | `POST /api/v2/v3_deal_brackets` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
-| v3_budgets | `PATCH /api/v2/v3_deal_brackets/{id}` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
-| v3_budgets | `DELETE /api/v2/v3_deal_brackets/{id}` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
 | inbound_submissions | `POST /api/v2/inbound_submissions` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | inbound_submissions | `GET /api/v2/inbound_submissions` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | inbound_submissions | `GET /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | inbound_submissions | `DELETE /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | admin_events | `DELETE /api/v2/admin/confirms/{id}` | Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API |
-| admin_reporting_rows | `GET /api/v2/admin/reporting_rows` | Order reporting rows (a flat export) are the dashboard CSV exports; no API route yet |
-| admin_reporting_rows | `GET /api/v2/admin/reporting_rows/{id}` | See reporting_rows |
-| admin_imported_ledger_entries | `GET /api/v2/admin/imported_ledger_entries` | Importing accounting ledgers is not built |
-| admin_imported_ledger_entries | `POST /api/v2/admin/imported_ledger_entries/bulk` | Importing accounting ledgers is not built |
-| admin_imported_ledger_entries | `DELETE /api/v2/admin/imported_ledger_entries/{id}` | Importing accounting ledgers is not built |
-| admin_general_ledger_codes | `GET /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
-| admin_general_ledger_codes | `POST /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
-| admin_general_ledger_codes | `PATCH /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
-| admin_general_ledger_codes | `DELETE /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
-| admin_general_ledger_codes | `POST /api/v2/admin/confirms/{confirm_id}/general_ledger_code_backfills` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
 | admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/event_templates` | Event templates are not built (events are copied) |
 | admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/event_templates/{id}` | Event templates are not built |
 | admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/note_templates` | Note templates are not built |

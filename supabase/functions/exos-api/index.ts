@@ -137,6 +137,7 @@ import {
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
+import { handleFinanceExtras } from "./financeExtras.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
 import { GIVING_ROUTES, handleGiving } from "./giving.ts";
@@ -1777,6 +1778,9 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
   // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
   const fin = await handleFinance(route.id, c, FIN_DEPS);
   if (fin !== undefined) return fin;
+  // Brackets, ledger codes, imports, reporting rows, cash summary (./financeExtras.ts).
+  const extra = await handleFinanceExtras(route.id, c, FIN_DEPS);
+  if (extra !== undefined) return extra;
   throw new ApiError(404, "not found");
 }
 

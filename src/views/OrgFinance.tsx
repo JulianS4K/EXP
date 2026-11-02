@@ -67,7 +67,8 @@ export default function OrgFinance() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <Link to="/dashboard" className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 mb-4"><ArrowLeft size={14} /> Dashboard</Link>
       <h1 className="text-2xl font-black text-slate-900 mb-1">Finance</h1>
-      <p className="text-sm text-slate-500 mb-6">{orgName} · profit and loss across shows, finance categories and ledger codes.</p>
+      <p className="text-sm text-slate-500 mb-6">{orgName} · profit and loss across shows, finance categories and ledger codes.{' '}
+        <Link className="text-tm-blue" to={`/orgs/${orgId}/finance/ledger`}>Ledger: reporting rows, imported entries, revenue codes →</Link></p>
 
       <Section title="Profit and loss" action={pnl && <button className={BTN} onClick={() => downloadCsv(`profit-and-loss-${from}-${to}.csv`, orgPnlCsv(pnl))}>CSV</button>}>
         <div className="flex flex-wrap gap-2 items-end mb-4">

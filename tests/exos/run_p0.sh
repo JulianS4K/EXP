@@ -148,7 +148,8 @@ for m in \
          20261031230000_exos_group_chat \
          20261101000000_exos_integration \
          20261102100000_exos_membership_writes \
-         20261102110000_exos_giving_writes; do
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -331,7 +332,8 @@ for m in \
          20261031230000_exos_group_chat \
          20261101000000_exos_integration \
          20261102100000_exos_membership_writes \
-         20261102110000_exos_giving_writes; do
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -396,3 +398,4 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_cha
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_integration.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_membership_writes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_giving_writes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_finance_extras.sql"

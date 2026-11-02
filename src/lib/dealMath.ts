@@ -4,4 +4,5 @@
 
 export * from '../../supabase/functions/_shared/finance/dealMath.ts';
 export * from '../../supabase/functions/_shared/finance/settlementModel.ts';
+export * from '../../supabase/functions/_shared/finance/dealBrackets.ts';
 export { offerPdf, settlementPdf, type OfferDoc } from '../../supabase/functions/_shared/finance/documents.ts';
