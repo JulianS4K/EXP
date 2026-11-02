@@ -132,7 +132,7 @@
       "method": "GET",
       "path": "/v1/event-recommendations",
       "summary": "List events for a fan",
-      "description": "Public upcoming events one of the organization's fans may like, from what they bought from this organization (never from other organizations), leaving out events they already hold a ticket for. Dates closer to today score higher. Also /v1/confirms/recommendations.",
+      "description": "Public upcoming events one of the organization's fans may like, from what they bought from this organization (never from other organizations), leaving out events they already hold a ticket for from this organization (what they hold elsewhere never changes the answer). Dates closer to today score higher. Also /v1/confirms/recommendations.",
       "auth": "api_key",
       "scope": "fans:read",
       "parameters": [

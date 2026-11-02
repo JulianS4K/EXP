@@ -49,7 +49,10 @@
 --   * A receipt resend mails the order's receipt (exos_receipt_html: amount,
 --     lines, the all-in note) as a 'ticket-issued' mail through the normal
 --     outbox (exos_mail, exos-mail-drain). It never carries claim links, so
---     sending it elsewhere can't hand tickets over. Per order at most
+--     sending it elsewhere can't hand tickets over. Any address other than the
+--     one the order was bought with (exos_order_details.original_email, kept
+--     from the first edit) is an override, so editing the contact email
+--     can't redirect receipts. Per order at most
 --     exos_order_settings.receipt_resends_per_hour (default 3) an hour, and
 --     10 a day (54000). Another address than the one on file only when the
 --     org has switched receipt_override_email on (owner only); otherwise the
@@ -96,7 +99,9 @@
 --   outside it). Other orgs' events only when the caller asks (scope 'all'),
 --   and then only their public fields. Co-purchases are counted only between
 --   events of the caller's own org, and only as a number; no buyer is ever
---   named. A fan's history is their purchases from this org only. Fan
+--   named. A fan's history is their purchases from this org only, and only
+--   events they hold from this org are left out (holdings elsewhere never
+--   change an answer). Fan
 --   recommendations list only the org's own fans who are on its email list
 --   (they opted in themselves) and hold no ticket for the event.
 --
@@ -113,10 +118,15 @@ CREATE TABLE IF NOT EXISTS public.exos_order_details (
   last_name   text CHECK (last_name IS NULL OR char_length(last_name) BETWEEN 1 AND 60),
   phone       text CHECK (phone IS NULL OR phone ~ '^[0-9+() .-]{3,32}$'),
   notes       text CHECK (notes IS NULL OR char_length(notes) BETWEEN 1 AND 1000),
+  -- The address the order was bought with, kept from the first edit on: a
+  -- receipt anywhere else is an override (exos_order_send_receipt).
+  original_email text CHECK (original_email IS NULL OR char_length(original_email) <= 320),
   updated_by  uuid,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.exos_order_details ADD COLUMN IF NOT EXISTS original_email text
+  CHECK (original_email IS NULL OR char_length(original_email) <= 320);
 CREATE INDEX IF NOT EXISTS exos_order_details_org_idx ON public.exos_order_details (org_id);
 DROP TRIGGER IF EXISTS exos_order_details_touch ON public.exos_order_details;
 CREATE TRIGGER exos_order_details_touch BEFORE UPDATE ON public.exos_order_details
@@ -308,11 +318,13 @@ BEGIN
   IF v_email IS DISTINCT FROM s.buyer_email THEN v_chg := v_chg || jsonb_build_object('email', jsonb_build_object('from', s.buyer_email, 'to', v_email)); END IF;
 
   IF v_chg <> '{}'::jsonb THEN
-    INSERT INTO public.exos_order_details (session_id, org_id, first_name, last_name, phone, notes, updated_by)
-    VALUES (s.session_id, s.org_id, v_first, v_last, v_phone, v_notes, auth.uid())
+    -- original_email: set once (the buyer's address before any edit), never updated.
+    INSERT INTO public.exos_order_details (session_id, org_id, first_name, last_name, phone, notes, updated_by, original_email)
+    VALUES (s.session_id, s.org_id, v_first, v_last, v_phone, v_notes, auth.uid(), lower(btrim(s.buyer_email)))
     ON CONFLICT (session_id) DO UPDATE
       SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, phone = EXCLUDED.phone,
-          notes = EXCLUDED.notes, updated_by = EXCLUDED.updated_by;
+          notes = EXCLUDED.notes, updated_by = EXCLUDED.updated_by,
+          original_email = coalesce(public.exos_order_details.original_email, EXCLUDED.original_email);
     IF v_chg ? 'email' THEN
       -- The contact address only: tickets keep theirs (purchase limits), invoices stay as issued.
       UPDATE public.exos_checkout_sessions SET buyer_email = v_email WHERE session_id = s.session_id;
@@ -336,6 +348,7 @@ DECLARE
   v_set    jsonb;
   v_to     text;
   v_over   boolean := false;
+  v_orig   text;
   v_hour   int;
   v_day    int;
   v_name   text;
@@ -357,14 +370,21 @@ BEGIN
     RAISE EXCEPTION 'exos_order_send_receipt: only a completed order has a receipt' USING ERRCODE = '55000';
   END IF;
   v_set := public._exos_oe_settings(s.org_id);
-  v_to := lower(btrim(coalesce(s.buyer_email, '')));
-  IF nullif(btrim(coalesce(p_email, '')), '') IS NOT NULL AND lower(btrim(p_email)) <> v_to THEN
-    IF NOT (v_set ->> 'receipt_override_email')::boolean THEN
-      RAISE EXCEPTION 'exos_order_send_receipt: this organization sends receipts only to the email on the order'
+  -- The address the order was bought with (an edit can't move receipts:
+  -- anything else is an override, allowed only when the org permits it).
+  SELECT lower(btrim(coalesce(d.original_email, s.buyer_email, ''))) INTO v_orig
+    FROM (SELECT 1) one LEFT JOIN public.exos_order_details d ON d.session_id = s.session_id;
+  v_to := coalesce(nullif(lower(btrim(coalesce(p_email, ''))), ''), lower(btrim(coalesce(s.buyer_email, ''))));
+  IF v_to <> v_orig THEN
+    IF (v_set ->> 'receipt_override_email')::boolean THEN
+      v_over := true;
+    ELSIF nullif(btrim(coalesce(p_email, '')), '') IS NOT NULL THEN
+      RAISE EXCEPTION 'exos_order_send_receipt: this organization sends receipts only to the email the order was placed with'
         USING ERRCODE = '42501';
+    ELSE
+      -- The contact email was edited and overrides are off: the original address.
+      v_to := v_orig;
     END IF;
-    v_to := lower(btrim(p_email));
-    v_over := true;
   END IF;
   IF v_to !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' OR char_length(v_to) > 254 THEN
     RAISE EXCEPTION 'exos_order_send_receipt: no valid email to send to' USING ERRCODE = '22023';
@@ -1203,10 +1223,12 @@ BEGIN
     FROM public.exos_tickets t
    WHERE t.org_id = p_org AND t.status <> 'voided'
      AND ((f.user_id IS NOT NULL AND t.owner_id = f.user_id) OR lower(t.buyer_email) = f.email);
-  -- What they hold anywhere is excluded (only ids, never shown).
+  -- What they hold FROM THIS ORG is excluded. Never holdings at other orgs:
+  -- an event missing from a scope=all answer would tell this org about a
+  -- purchase elsewhere.
   SELECT coalesce(array_agg(DISTINCT t.event_id), '{}') INTO v_held
     FROM public.exos_tickets t
-   WHERE t.status <> 'voided'
+   WHERE t.org_id = p_org AND t.status <> 'voided'
      AND ((f.user_id IS NOT NULL AND t.owner_id = f.user_id) OR lower(t.buyer_email) = f.email);
   RETURN jsonb_build_object('fan_id', f.id) || public._exos_rec_rank(
     p_org, p_cross, v_bought, v_held, now(), 60, v_bought, coalesce(f.user_id::text, f.email), p_limit, p_offset);

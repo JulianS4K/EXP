@@ -330,7 +330,7 @@ function ResendReceipt({ o, settings, onSent }: { o: OrderRow; settings: OrderSe
         <div className="min-w-[260px]"><label className={label} htmlFor={`rr-${o.sessionId}`}>Send to (blank: {o.email ?? 'the buyer'})</label>
           <input id={`rr-${o.sessionId}`} className={field} type="email" maxLength={254} value={to} onChange={(e) => setTo(e.target.value)} /></div>
       ) : (
-        <p className="text-sm text-slate-600">The receipt goes to {o.email ?? 'the buyer'}. It has no ticket links.</p>
+        <p className="text-sm text-slate-600">The receipt goes to the address the order was placed with (this organization doesn't send receipts elsewhere). It has no ticket links.</p>
       )}
       <button type="button" className={btnDark} disabled={busy} onClick={() => void send()}><Mail size={12} /> Send receipt</button>
       <span className="text-xs text-slate-400">{o.receiptsSent} resent so far</span>

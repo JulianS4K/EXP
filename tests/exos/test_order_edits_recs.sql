@@ -9,9 +9,10 @@
 --       quantities refused; the tickets' buyer_email (purchase limits) kept;
 --       a no-op writes nothing; scanner key refused; other org / other
 --       event not found
---   O3  receipt resend: the email on file; no claim links; another address
---       only once the owner allows it (managers can't change that); rate
---       limited per order; an Idempotency-Key replays without a second mail
+--   O3  receipt resend: the address the order was bought with; editing the
+--       contact email doesn't move receipts unless overrides are on; no claim
+--       links; another address only once the owner allows it (managers can't
+--       change that); rate limited per order; Idempotency-Key replays
 --   O4  order check-out: every ticket inside a re-entry list goes out once;
 --       again = nothing recorded (idempotent); the implicit list can't exit;
 --       scanners can't (typed exit is an override)
@@ -28,7 +29,8 @@
 --   R3  other orgs' events only when asked, public only, no co-buyers, no
 --       buyer data in the answer
 --   R4  events for a fan: from their purchases with this org, minus what
---       they hold; another org's fan is not found
+--       they hold from this org (a ticket at another org changes nothing:
+--       no cross-tenant oracle); another org's fan is not found
 --   R5  fans for an event: on the list, not holders, scored; roles
 --   R6  wrappers: roles (content reads similars, not fans)
 -- ============================================================================
@@ -263,12 +265,21 @@ END $$;
 DO $$
 DECLARE r jsonb; n int; h text;
 BEGIN
+  -- O2 moved the contact email to dana.new@x.com; the order was bought with
+  -- de-b1@x.com. With overrides off an edit can't redirect receipts: the
+  -- default goes to the original address, the edited one asked for is refused.
+  IF (SELECT original_email FROM public.exos_order_details WHERE session_id = 'cs_de1') <> 'de-b1@x.com' THEN
+    RAISE EXCEPTION 'O3 FAIL: original email not kept';
+  END IF;
   r := pg_temp.w('f1', 'order.send_receipt', 'cs_de1', '{}');
-  IF NOT (r ->> 'sent')::boolean OR r ->> 'to' <> 'dana.new@x.com' OR (r ->> 'override')::boolean THEN
-    RAISE EXCEPTION 'O3 FAIL: resend %', r;
+  IF NOT (r ->> 'sent')::boolean OR r ->> 'to' <> 'de-b1@x.com' OR (r ->> 'override')::boolean THEN
+    RAISE EXCEPTION 'O3 FAIL: edit-then-resend bypass %', r;
+  END IF;
+  IF pg_temp.st('f1', 'order.send_receipt', 'cs_de1', '{"email":"dana.new@x.com"}') <> '42501' THEN
+    RAISE EXCEPTION 'O3 FAIL: the edited address treated as on file with overrides off';
   END IF;
   SELECT m.html INTO h FROM public.exos_mail m WHERE m.id = (r ->> 'mail_id')::uuid
-     AND m.template = 'ticket-issued' AND m.to_email = 'dana.new@x.com' AND m.status = 'pending';
+     AND m.template = 'ticket-issued' AND m.to_email = 'de-b1@x.com' AND m.status = 'pending';
   IF h IS NULL OR position('/claim/' IN h) > 0 OR position('cs_de1' IN h) = 0 THEN
     RAISE EXCEPTION 'O3 FAIL: receipt mail %', h;
   END IF;
@@ -290,8 +301,12 @@ BEGIN
   IF NOT (r ->> 'idempotent_replay')::boolean OR (SELECT count(*) FROM public.exos_mail WHERE to_email = 'friend@y.com') <> n THEN
     RAISE EXCEPTION 'O3 FAIL: replay sent again %', r;
   END IF;
-  -- Third this hour is fine, the fourth is rate limited.
-  IF pg_temp.st('f1', 'order.send_receipt', 'cs_de1', '{}') <> 'ok' THEN RAISE EXCEPTION 'O3 FAIL: third resend'; END IF;
+  -- Overrides on: the edited contact email is allowed, as an override, and
+  -- counts toward the same limit (third this hour); the fourth is refused.
+  r := pg_temp.w('f1', 'order.send_receipt', 'cs_de1', '{}');
+  IF r ->> 'to' <> 'dana.new@x.com' OR NOT (r ->> 'override')::boolean THEN
+    RAISE EXCEPTION 'O3 FAIL: edited address with overrides on %', r;
+  END IF;
   IF pg_temp.st('f1', 'order.send_receipt', 'cs_de1', '{}') <> '54000' THEN RAISE EXCEPTION 'O3 FAIL: no rate limit'; END IF;
   IF (SELECT count(*) FROM public.exos_order_edits WHERE session_id = 'cs_de1' AND action = 'order.receipt') <> 3 THEN
     RAISE EXCEPTION 'O3 FAIL: receipt audit rows';
@@ -300,7 +315,7 @@ BEGIN
   IF pg_temp.st('f1', 'order.send_receipt', 'cs_de2', '{}') <> 'ok' THEN RAISE EXCEPTION 'O3 FAIL: per order'; END IF;
   IF pg_temp.st('f2', 'order.send_receipt', 'cs_de2', '{}') <> '42501' THEN RAISE EXCEPTION 'O3 FAIL: scanner resent'; END IF;
   IF pg_temp.st('f6', 'order.send_receipt', 'cs_de2', '{}') <> 'P0002' THEN RAISE EXCEPTION 'O3 FAIL: cross-org resend'; END IF;
-  RAISE NOTICE 'OK O3 receipt resend: email on file, override only when allowed (owner), no claim links, rate limited, idempotent';
+  RAISE NOTICE 'OK O3 receipt resend: the original address unless overrides are on (an email edit can''t bypass it), no claim links, rate limited, idempotent';
 END $$;
 
 -- O4 -----------------------------------------------------------------------------
@@ -575,6 +590,17 @@ BEGIN
      OR (r -> 'rows' -> 0 ->> 'same_org')::boolean THEN
     RAISE EXCEPTION 'R4 FAIL: another org''s history used %', r;
   END IF;
+  -- No cross-tenant oracle: b1 (org 1's fan) holds org 2's e9; scope=all for
+  -- org 1 must still list e9, and the same answer comes back without that ticket.
+  r := public._exos_rec_fan_events('de000000-0000-0000-0000-000000000001', 'de000000-0000-0000-0000-0000000001f1', true, 50, 0);
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'rows') x WHERE x ->> 'id' = 'de000000-0000-0000-0000-0000000000e9') THEN
+    RAISE EXCEPTION 'R4 FAIL: another org''s ticket hid e9 %', r;
+  END IF;
+  UPDATE public.exos_tickets SET status = 'voided' WHERE id = 'de000000-0000-0000-0000-000000000901';
+  IF public._exos_rec_fan_events('de000000-0000-0000-0000-000000000001', 'de000000-0000-0000-0000-0000000001f1', true, 50, 0) <> r THEN
+    RAISE EXCEPTION 'R4 FAIL: a ticket at another org changed the answer';
+  END IF;
+  UPDATE public.exos_tickets SET status = 'active' WHERE id = 'de000000-0000-0000-0000-000000000901';
   BEGIN
     PERFORM public._exos_rec_fan_events('de000000-0000-0000-0000-000000000001', 'de000000-0000-0000-0000-0000000009f1', true, 50, 0);
     RAISE EXCEPTION 'R4 FAIL: another org''s fan';

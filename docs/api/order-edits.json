@@ -9,7 +9,7 @@
       "method": "PUT",
       "path": "/v1/orders/:id",
       "summary": "Update an order's buyer details",
-      "description": "Sets the buyer's first and last name, contact email, phone number and notes. Only those: anything else (amounts, quantity, ticket type, status) answers 400. The email is where receipts and order mail go; the tickets, their holders and the invoice stay as they were. Sending the current values changes nothing and records nothing.",
+      "description": "Sets the buyer's first and last name, contact email, phone number and notes. Only those: anything else (amounts, quantity, ticket type, status) answers 400. The email is where receipts and order mail go; the tickets, their holders and the invoice stay as they were. Sending the current values changes nothing and records nothing. Receipts keep going to the address the order was placed with unless the organization allows other addresses.",
       "auth": "api_key",
       "scope": "tickets:write",
       "parameters": [
@@ -137,7 +137,7 @@
       "method": "POST",
       "path": "/v1/orders/:id/send-receipt",
       "summary": "Resend an order's receipt",
-      "description": "Mails the order's receipt again (what was paid, the lines, the all-in price note) through the normal outbox. It never contains ticket claim links. To the email on the order, or to `email` when an owner has allowed other addresses for the organization (Orders, Settings). At most 3 an hour per order by default (an owner can raise it to 10) and 10 a day. Also /v1/orders/:id/send_receipt.",
+      "description": "Mails the order's receipt again (what was paid, the lines, the all-in price note) through the normal outbox. It never contains ticket claim links. To the address the order was placed with. Any other address, including a contact email changed with PUT /v1/orders/:id, is an override: allowed (and then the default) only when an owner has allowed other addresses for the organization (Orders, Settings); otherwise the receipt still goes to the original address, and asking for another one answers 403. At most 3 an hour per order by default (an owner can raise it to 10) and 10 a day. Also /v1/orders/:id/send_receipt.",
       "auth": "api_key",
       "scope": "tickets:write",
       "parameters": [
