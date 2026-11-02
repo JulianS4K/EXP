@@ -71,8 +71,11 @@ An artist or agent asks to play. Two ways in:
   (`docs/security.md`, H3 allowlist). Protections: 16 KB body cap; unknown
   fields refused; https links only; a hidden `homepage` honeypot (answered
   `{ok: true}`, nothing stored); limits counted under advisory locks: per
-  network 5 an hour per org and 20 a day overall (SHA-256 of the forwarded
-  IP, never the IP; no client column grant), per email 3 a day per org, 300
+  network 5 an hour per org and 20 a day overall (SHA-256 of the IP from
+  `_exos_request_ip()`: `cf-connecting-ip`, else the last X-Forwarded-For
+  entry, never the client-written first one; requests without a trusted IP
+  share one `unknown` bucket with the same caps; the IP itself is never
+  stored and the hash has no client column grant), per email 3 a day per org, 300
   a day per org.
 - The API: `POST /v1/inbound-submissions` (`booking:write`), which accepts
   Opendate's `inbound_submission[...]` fields.

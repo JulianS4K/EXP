@@ -17,7 +17,8 @@
 --              _delete and their exos_rental_invoice_* wrappers,
 --              exos_rental_invoice_prefix_set, _exos_tg_inbound_settings,
 --              _exos_inbound_create, _exos_inbound_set_status,
---              _exos_inbound_hold and wrappers, exos_inbound_form_public (anon),
+--              _exos_inbound_hold and wrappers, _exos_request_ip (internal),
+--              exos_inbound_form_public (anon),
 --              exos_inbound_submit (anon), _exos_event_delete / exos_event_delete
 --           R: exos_orgs, exos_org_memberships, exos_events, exos_ticket_tiers,
 --              exos_fee_rules, exos_event_fee_settings, exos_event_notes,
@@ -60,7 +61,8 @@
 --     turns it on. The anon RPC exos_inbound_submit caps the body at 16 KB,
 --     drops honeypot submissions silently (the hidden `homepage` field),
 --     and limits per network (5 an hour per org, 20 a day across orgs: the
---     SHA-256 of the forwarded IP, never the IP), per email (3 a day per org)
+--     SHA-256 of the platform-set IP, _exos_request_ip(), never the IP;
+--     requests without one share an "unknown" bucket), per email (3 a day per org)
 --     and per org (300 a day). Staff (owner, manager, content) list, read,
 --     review (new / reviewing / accepted / declined) and delete them; owners
 --     and managers can turn one into a hold (accepted, linked).
@@ -1267,6 +1269,36 @@ $$;
 REVOKE ALL ON FUNCTION public.exos_inbound_form_public(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_inbound_form_public(text) TO anon, authenticated, service_role;
 
+-- The caller's IP as the platform saw it, for rate limits. Only headers the
+-- platform sets are trusted: Cloudflare's cf-connecting-ip (Supabase's API is
+-- behind Cloudflare), else the LAST X-Forwarded-For entry (the one the
+-- trusted proxy appended). Never the first entry: the client writes that one.
+-- NULL when neither is a valid address (callers then use a shared bucket).
+-- Internal: no grants; definer RPCs call it.
+CREATE OR REPLACE FUNCTION public._exos_request_ip()
+RETURNS text LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE h jsonb; v text; parts text[];
+BEGIN
+  BEGIN
+    h := nullif(current_setting('request.headers', true), '')::jsonb;
+  EXCEPTION WHEN others THEN RETURN NULL;
+  END;
+  IF h IS NULL OR jsonb_typeof(h) <> 'object' THEN RETURN NULL; END IF;
+  v := nullif(btrim(coalesce(h ->> 'cf-connecting-ip', '')), '');
+  IF v IS NULL THEN
+    parts := string_to_array(coalesce(h ->> 'x-forwarded-for', ''), ',');
+    IF cardinality(parts) > 0 THEN v := nullif(btrim(parts[cardinality(parts)]), ''); END IF;
+  END IF;
+  IF v IS NULL OR char_length(v) > 45 THEN RETURN NULL; END IF;
+  BEGIN
+    RETURN host(v::inet);
+  EXCEPTION WHEN others THEN RETURN NULL;
+  END;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_request_ip() FROM PUBLIC, anon, authenticated;
+
 -- The public submission (anon). Always { ok: true } once accepted (also for
 -- a honeypot hit, which stores nothing). Limits: 16 KB body; per network 5 an
 -- hour per org and 20 a day across orgs; per email 3 a day per org; 300 a day
@@ -1299,21 +1331,20 @@ BEGIN
     v_headers := nullif(current_setting('request.headers', true), '')::jsonb;
   EXCEPTION WHEN others THEN v_headers := NULL;
   END;
-  v_ip := nullif(btrim(split_part(coalesce(v_headers ->> 'x-forwarded-for', v_headers ->> 'x-real-ip', ''), ',', 1)), '');
+  v_ip := public._exos_request_ip();
   v_ua := v_headers ->> 'user-agent';
-  v_hash := CASE WHEN v_ip IS NOT NULL THEN encode(sha256(convert_to('exos-inbound:' || v_ip, 'UTF8')), 'hex') END;
+  -- No trusted IP: one shared "unknown" bucket with the same caps (never no limit).
+  v_hash := encode(sha256(convert_to('exos-inbound:' || coalesce(v_ip, 'unknown'), 'UTF8')), 'hex');
   v_email := lower(btrim(coalesce(p_submission ->> 'email', '')));
 
   -- Count-then-insert under locks, so parallel requests can't slip past.
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_inbound:org:' || v_org::text, 0));
-  IF v_hash IS NOT NULL THEN
-    PERFORM pg_advisory_xact_lock(hashtextextended('exos_inbound:ip:' || v_hash, 0));
-    IF (SELECT count(*) FROM public.exos_inbound_submissions
-         WHERE ip_hash = v_hash AND org_id = v_org AND created_at > now() - interval '1 hour') >= 5
-       OR (SELECT count(*) FROM public.exos_inbound_submissions
-            WHERE ip_hash = v_hash AND created_at > now() - interval '1 day') >= 20 THEN
-      RAISE EXCEPTION 'too many requests from this network; try again later' USING ERRCODE = '54000';
-    END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_inbound:ip:' || v_hash, 0));
+  IF (SELECT count(*) FROM public.exos_inbound_submissions
+       WHERE ip_hash = v_hash AND org_id = v_org AND created_at > now() - interval '1 hour') >= 5
+     OR (SELECT count(*) FROM public.exos_inbound_submissions
+          WHERE ip_hash = v_hash AND created_at > now() - interval '1 day') >= 20 THEN
+    RAISE EXCEPTION 'too many requests from this network; try again later' USING ERRCODE = '54000';
   END IF;
   IF v_email <> '' AND (SELECT count(*) FROM public.exos_inbound_submissions
                          WHERE org_id = v_org AND email = v_email AND created_at > now() - interval '1 day') >= 3 THEN

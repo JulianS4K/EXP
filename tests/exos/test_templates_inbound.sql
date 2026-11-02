@@ -442,7 +442,8 @@ BEGIN
   ASSERT f ->> 'org_name' = 'D7 Org' AND f ->> 'intro' = 'Tell us about your act.'
      AND f -> 'venues' = '[{"id":"d7000000-0000-0000-0000-0000000000c1","name":"D7 Hall"}]'::jsonb
      AND NOT f ? 'org_id', 'TI5: public text and venues only';
-  PERFORM set_config('request.headers', '{"x-forwarded-for":"203.0.113.7, 10.0.0.1","user-agent":"t"}', true);
+  -- The client wrote the first X-Forwarded-For entry; the proxy appended the last.
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"1.2.3.4, 203.0.113.7","user-agent":"t"}', true);
   ASSERT public.exos_inbound_submit('d7-org', '{"artist_name":"The Ramblers","contact_name":"Jo","contact_role":"agent","email":"Jo@Agency.example","message":"Touring in March.","links":{"spotify":"https://open.spotify.com/artist/1"},"genres":["folk"],"venue_id":"d7000000-0000-0000-0000-0000000000c1","preferred_dates":["2027-03-05","2027-03-06"],"expected_draw":200}')
          = '{"ok":true}'::jsonb, 'TI5: accepted';
   -- Honeypot: answered the same, stored nothing.
@@ -477,25 +478,57 @@ BEGIN
     RAISE EXCEPTION 'TI5: a 4th request from one email today';
   EXCEPTION WHEN SQLSTATE '54000' THEN NULL;
   END;
-  -- Per network: 5 an hour per org (3 so far from this network).
+  -- Per network: 5 an hour per org (3 so far from this network). Rotating
+  -- the spoofable first X-Forwarded-For entry doesn't reset it.
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"9.9.9.1, 203.0.113.7"}', true);
   PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"A","email":"a1@x.example"}');
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"9.9.9.2, 203.0.113.7"}', true);
   PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"B","email":"a2@x.example"}');
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"9.9.9.3, 8.8.8.8, 203.0.113.7"}', true);
   BEGIN
     PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"C","email":"a3@x.example"}');
-    RAISE EXCEPTION 'TI5: a 6th request from one network this hour';
+    RAISE EXCEPTION 'TI5: a spoofed first X-Forwarded-For entry reset the network limit';
   EXCEPTION WHEN SQLSTATE '54000' THEN NULL;
   END;
-  -- Another network still gets through.
-  PERFORM set_config('request.headers', '{"x-forwarded-for":"198.51.100.9"}', true);
+  -- cf-connecting-ip wins over X-Forwarded-For: another network gets through.
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"198.51.100.9","x-forwarded-for":"203.0.113.7"}', true);
   ASSERT public.exos_inbound_submit('d7-org', '{"artist_name":"Other net","email":"o@x.example"}') = '{"ok":true}'::jsonb,
-    'TI5: limits are per network';
+    'TI5: limits are per network (cf-connecting-ip first)';
+  -- No trusted IP (no headers, or junk): one shared bucket with the same caps.
+  PERFORM set_config('request.headers', '{}', true);
+  PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U1","email":"u1@x.example"}');
+  PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U2","email":"u2@x.example"}');
+  PERFORM set_config('request.headers', '', true);
+  PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U3","email":"u3@x.example"}');
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"not-an-ip"}', true);
+  PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U4","email":"u4@x.example"}');
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"","x-forwarded-for":""}', true);
+  PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U5","email":"u5@x.example"}');
+  BEGIN
+    PERFORM set_config('request.headers', '{}', true);
+    PERFORM public.exos_inbound_submit('d7-org', '{"artist_name":"U6","email":"u6@x.example"}');
+    RAISE EXCEPTION 'TI5: requests without a trusted IP skipped the network limit';
+  EXCEPTION WHEN SQLSTATE '54000' THEN NULL;
+  END;
   RAISE NOTICE 'OK  TI5 public form: honeypot, cap, validation, limits';
 END $$;
 RESET ROLE;
 DO $$
 BEGIN
-  ASSERT (SELECT count(*) FROM public.exos_inbound_submissions WHERE org_id = 'd7000000-0000-0000-0000-000000000001') = 6,
-    'TI5: six stored (no honeypot, none over the limits)';
+  ASSERT (SELECT count(*) FROM public.exos_inbound_submissions WHERE org_id = 'd7000000-0000-0000-0000-000000000001') = 11,
+    'TI5: eleven stored (no honeypot, none over the limits)';
+  ASSERT (SELECT count(*) FROM public.exos_inbound_submissions
+           WHERE ip_hash = encode(sha256(convert_to('exos-inbound:unknown', 'UTF8')), 'hex')) = 5,
+    'TI5: header-less requests share the unknown bucket';
+  -- The helper: cf-connecting-ip, else the LAST X-Forwarded-For entry, valid addresses only.
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"1.2.3.4, 203.0.113.7 "}', true);
+  ASSERT public._exos_request_ip() = '203.0.113.7', 'TI5: last XFF entry';
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"2001:db8::1","x-forwarded-for":"203.0.113.7"}', true);
+  ASSERT public._exos_request_ip() = '2001:db8::1', 'TI5: cf-connecting-ip first';
+  PERFORM set_config('request.headers', '{"x-forwarded-for":"203.0.113.7, garbage"}', true);
+  ASSERT public._exos_request_ip() IS NULL, 'TI5: junk is no IP';
+  ASSERT NOT has_function_privilege('anon', 'public._exos_request_ip()', 'EXECUTE')
+     AND NOT has_function_privilege('authenticated', 'public._exos_request_ip()', 'EXECUTE'), 'TI5: helper has no grants';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_inbound_submissions WHERE artist_name = 'Spam'), 'TI5: honeypot stored nothing';
   ASSERT (SELECT ip_hash = encode(sha256(convert_to('exos-inbound:203.0.113.7', 'UTF8')), 'hex') AND email = 'jo@agency.example'
                  AND status = 'new' AND source = 'form' AND preferred_dates = ARRAY['2027-03-05', '2027-03-06']::date[]
@@ -510,7 +543,7 @@ DO $$
 DECLARE r jsonb;
 BEGIN
   PERFORM pg_temp.as_user('d7000000-0000-0000-0000-0000000000a4');  -- content reviews
-  ASSERT (SELECT count(*) FROM public.exos_inbound_submissions) = 6, 'TI5: content lists them';
+  ASSERT (SELECT count(*) FROM public.exos_inbound_submissions) = 11, 'TI5: content lists them';
   r := public.exos_inbound_set_status((SELECT d7.v FROM d7 WHERE k = 'sub'), 'reviewing', 'Check March avails');
   ASSERT r ->> 'status' = 'reviewing' AND r ->> 'reviewed_by' = 'd7000000-0000-0000-0000-0000000000a4' AND NOT r ? 'ip_hash',
     'TI5: content reviews';
