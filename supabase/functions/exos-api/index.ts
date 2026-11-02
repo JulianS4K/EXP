@@ -138,6 +138,7 @@ import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
+import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
@@ -199,11 +200,12 @@ const CAMPAIGN_COLS =
   "suggested_cents, created_at";
 const MEMBERSHIP_PRODUCT_COLS =
   "id, name, price_cents, currency, billing, duration_days, discount_percent, presale, free_tickets_per_period, " +
-  "guest_allowance, household_seats, giftable, active, created_at";
+  "guest_allowance, household_seats, giftable, active, status, archived_at, created_at";
 const MEMBERSHIP_COLS =
   "id, product_id, product_name, billing, holder_email, status, current_period_start, current_period_end, " +
   "cancel_at_period_end, source, benefits, created_at";
 const MEMBERSHIP_STATUSES = new Set(["pending", "active", "past_due", "cancelled", "expired"]);
+const PRODUCT_STATUSES = new Set(["draft", "published", "unpublished", "archived"]);
 const TAG_COLS = "id, name, scope, color, canonical_tag_id, created_at, updated_at";
 const TAGGED_COLS = "id, tag_id, taggable_type, taggable_id, created_at";
 const TAGGABLE = new Set(["event", "fan", "artist"]);
@@ -348,7 +350,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // more codes; the artist / lineup / key functions raise the codes in
     // RPC_STATUS.
     // Fan and tag routes answer with rpcError alone, as on #73.
-    const db = CORE_ROUTES.has(match.route.id) ? sqlError(e)
+    const db = CORE_ROUTES.has(match.route.id) || MEMBERSHIP_ROUTES.has(match.route.id) ? sqlError(e)
       : FAN_ROUTES.has(match.route.id) ? rpcError(e)
       : (match.route.id.includes("sales-count") ? dbError(e) : null) ??
         bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
@@ -433,6 +435,12 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
+  // Membership products, memberships, imported attendees (mig 20261102100000).
+  if (MEMBERSHIP_ROUTES.has(route.id)) {
+    return await handleMemberships(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
     });
   }
@@ -680,8 +688,18 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
-    case "list-membership-products":
-      return rows(await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId).order("created_at"));
+    case "list-membership-products": {
+      let q = sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId);
+      // ?status=published, or Opendate's q[status_not_eq]=archived (mig 20261102100000).
+      const st = c.q.get("status");
+      const not = c.q.get("q[status_not_eq]") ?? c.q.get("status_not");
+      for (const v of [st, not]) {
+        if (v !== null && !PRODUCT_STATUSES.has(v)) throw new ApiError(400, "status must be draft, published, unpublished or archived.");
+      }
+      if (st !== null) q = q.eq("status", st);
+      if (not !== null) q = q.neq("status", not);
+      return rows(await q.order("created_at"));
+    }
 
     case "get-membership-product": {
       const { data, error } = await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS)

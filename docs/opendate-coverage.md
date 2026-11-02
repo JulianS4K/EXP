@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 135 | 29.7% |
-| equivalent | 198 | 43.5% |
-| **covered (route + equivalent)** | **333** | **73.2%** |
+| route | 140 | 30.8% |
+| equivalent | 209 | 45.9% |
+| **covered (route + equivalent)** | **349** | **76.7%** |
 | not_applicable | 58 | 12.7% |
-| planned | 64 | 14.1% |
+| planned | 48 | 10.5% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **66** of the 259 rows in the route table
+Exos routes beyond Opendate: **66** of the 270 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -62,7 +62,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | membership_scans | 1 | 0 | 1 | 0 | 0 |
 | memberships | 3 | 1 | 2 | 0 | 0 |
 | membership_reservations | 3 | 0 | 0 | 3 | 0 |
-| membership_products | 7 | 2 | 0 | 0 | 5 |
+| membership_products | 7 | 7 | 0 | 0 | 0 |
 | gift_card_sales | 4 | 1 | 3 | 0 | 0 |
 | giving_campaigns | 5 | 2 | 2 | 0 | 1 |
 | refunds | 2 | 0 | 2 | 0 | 0 |
@@ -99,7 +99,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | public_tixel_waitlist_signups | 1 | 0 | 0 | 1 | 0 |
 | public_refund_requests | 2 | 0 | 2 | 0 | 0 |
 | public_confirm_fan_infos | 1 | 0 | 1 | 0 | 0 |
-| fan_app | 18 | 0 | 16 | 0 | 2 |
+| fan_app | 18 | 0 | 18 | 0 | 0 |
 
 ## Opendate's back office (admin)
 
@@ -137,11 +137,11 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_deals | 5 | 0 | 5 | 0 | 0 |
 | admin_event_series | 8 | 0 | 8 | 0 | 0 |
 | admin_gift_up_giftcards | 3 | 0 | 2 | 0 | 1 |
-| admin_membership_products | 7 | 0 | 2 | 0 | 5 |
-| admin_memberships | 5 | 0 | 3 | 0 | 2 |
+| admin_membership_products | 7 | 0 | 7 | 0 | 0 |
+| admin_memberships | 5 | 0 | 5 | 0 | 0 |
 | admin_external_identities | 2 | 0 | 0 | 2 | 0 |
 | admin_imported_ledger_entries | 3 | 0 | 0 | 0 | 3 |
-| admin_migrated_attendees | 8 | 0 | 4 | 2 | 2 |
+| admin_migrated_attendees | 8 | 0 | 6 | 2 | 0 |
 | admin_seat_reconciliations | 2 | 0 | 2 | 0 | 0 |
 | admin_offers | 5 | 0 | 5 | 0 | 0 |
 | admin_v3_offers | 3 | 0 | 2 | 1 | 0 |
@@ -165,11 +165,6 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | organizer_ticket_reservations | `DELETE /api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}/gift_card_redemptions/{id}` | See gift_card_redemptions above |
 | guest_lists | `POST /api/v2/confirms/{confirm_id}/guest_list_preview` | Pasted-names preview is client-side in the dashboard |
 | fans | `GET /api/v2/confirms/{confirm_id}/fans/recommendations` | No recommendation model yet (docs/fans.md) |
-| membership_products | `POST /api/v2/membership_products` | Dashboard create; no partner write route yet |
-| membership_products | `PATCH /api/v2/membership_products/{id}` | Dashboard update; no partner write route yet |
-| membership_products | `POST /api/v2/membership_products/{id}/publish` | Dashboard publish (active on); no partner write route yet |
-| membership_products | `POST /api/v2/membership_products/{id}/unpublish` | Dashboard unpublish (active off); no partner write route yet |
-| membership_products | `POST /api/v2/membership_products/{id}/archive` | Dashboard archive (archived_at); no partner write route yet |
 | giving_campaigns | `POST /api/v2/giving_campaigns/{giving_campaign_id}/recurring_donations` | Recurring giving would reuse the membership subscriptions |
 | v3_budgets | `GET /api/v2/v3_deal_brackets` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
 | v3_budgets | `GET /api/v2/v3_deal_brackets/{id}` | Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md) |
@@ -180,8 +175,6 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | inbound_submissions | `GET /api/v2/inbound_submissions` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | inbound_submissions | `GET /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
 | inbound_submissions | `DELETE /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
-| fan_app | `GET /api/v2/users/current/season_passes/{id}/pkpass` | Wallet passes exist for tickets, not yet for season passes |
-| fan_app | `GET /api/v2/users/current/season_passes/{id}/google_wallet_url` | Wallet passes exist for tickets, not yet for season passes |
 | admin_events | `DELETE /api/v2/admin/confirms/{id}` | Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API |
 | admin_reporting_rows | `GET /api/v2/admin/reporting_rows` | Order reporting rows (a flat export) are the dashboard CSV exports; no API route yet |
 | admin_reporting_rows | `GET /api/v2/admin/reporting_rows/{id}` | See reporting_rows |
@@ -193,18 +186,9 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_donations | `DELETE /api/v2/admin/donations/:id` | Offline donations are corrected, not deleted, in the dashboard |
 | admin_donations | `POST /api/v2/admin/donations/:donation_id/offline_refund` | Offline donation refunds are not recorded yet |
 | admin_gift_up_giftcards | `POST /api/v2/admin/gift_up_giftcards/bulk` | Importing legacy gift cards is not built |
-| admin_membership_products | `POST /api/v2/admin/membership_products` | Dashboard create; no partner write route yet |
-| admin_membership_products | `PATCH /api/v2/admin/membership_products/:id` | Dashboard update; no partner write route yet |
-| admin_membership_products | `POST /api/v2/admin/membership_products/:id/publish` | Dashboard publish; no partner write route yet |
-| admin_membership_products | `POST /api/v2/admin/membership_products/:id/unpublish` | Dashboard unpublish; no partner write route yet |
-| admin_membership_products | `POST /api/v2/admin/membership_products/:id/archive` | Dashboard archive; no partner write route yet |
-| admin_memberships | `POST /api/v2/admin/memberships` | Importing members is not built; staff comp one with exos_membership_gift |
-| admin_memberships | `PATCH /api/v2/admin/memberships/:id` | Member renames are the holder's; no staff route yet |
 | admin_imported_ledger_entries | `GET /api/v2/admin/imported_ledger_entries` | Importing accounting ledgers is not built |
 | admin_imported_ledger_entries | `POST /api/v2/admin/imported_ledger_entries/bulk` | Importing accounting ledgers is not built |
 | admin_imported_ledger_entries | `DELETE /api/v2/admin/imported_ledger_entries/{id}` | Importing accounting ledgers is not built |
-| admin_migrated_attendees | `PATCH /api/v2/admin/migrated_attendees/:id` | Editing an imported row is not built (re-import) |
-| admin_migrated_attendees | `DELETE /api/v2/admin/migrated_attendees/:id` | Deleting one imported row is not built (re-import) |
 | admin_general_ledger_codes | `GET /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
 | admin_general_ledger_codes | `POST /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |
 | admin_general_ledger_codes | `PATCH /api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}` | Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md) |

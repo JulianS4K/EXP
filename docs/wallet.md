@@ -174,6 +174,7 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 | `POST /exos-wallet/pass` `{ticket_id, kind:"apple"}` | Supabase JWT (holder) | `.pkpass` (`application/vnd.apple.pkpass`) |
 | `POST /exos-wallet/pass` `{ticket_id, kind:"google"}` | Supabase JWT (holder) | `{ save_url, serial }` |
 | `POST /exos-wallet/reissue` `{ticket_id}` | Supabase JWT (holder) | `{ ok, code_epoch }` |
+| `POST /exos-wallet/season-pass` `{pass_id, kind}` | Supabase JWT (holder) | `.pkpass` (apple) / `{ save_url, serial }` (google); 404 `record_not_found` / `wallet_pass_unavailable` (voided, used up, past) |
 | `POST /exos-wallet/push` | `x-cron-secret` | summary; a dry run until pushes are configured |
 | `POST /exos-wallet/apple/v1/devices/{d}/registrations/{pt}/{serial}` | `ApplePass <token>` | 201 new / 200 known / 401 |
 | `DELETE` same path | `ApplePass <token>` | 200 / 401 |
@@ -183,6 +184,12 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 
 Errors: 403 not your ticket; 409 `not-active` / `in-transfer` / `no-secret` / `no-pass`;
 503 wallet not configured.
+
+Season passes and flex packs (mig 20261102100000, `exos_wallet_season_pass`, `_shared/wallet/seasonPass.ts`) get a
+card, not a door code: a pass is used by redeeming it for tickets, which carry their own rotating codes. The Apple card
+is a static generic pass (no barcode, no web service: adding it again shows the current admissions left); the Google
+card is a generic object sent whole inside the save JWT (nothing secret in it, no REST call). Same certificates and
+secrets as tickets; without them the route answers 503.
 
 ## Operator setup
 
