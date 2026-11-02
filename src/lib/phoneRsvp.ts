@@ -5,7 +5,7 @@
 
 import { supabase } from './supabase';
 
-export { maskPhone, normalizeRsvpPhone, rsvpErrorMessage } from '../../supabase/functions/_shared/rsvp.ts';
+export { codeSentText, maskPhone, normalizeRsvpPhone, rsvpErrorMessage } from '../../supabase/functions/_shared/rsvp.ts';
 
 export interface RsvpInfo { ok: boolean; reason: string; tier_name: string | null; max_plus_ones: number; sms: boolean }
 export interface RsvpStart { ok: boolean; error?: string; rsvp_id?: string; channel?: 'sms' | 'email'; to?: string; max_plus_ones?: number }

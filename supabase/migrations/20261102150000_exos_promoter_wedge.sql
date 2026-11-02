@@ -415,7 +415,11 @@ ALTER TABLE public.exos_promoter_payouts
   -- Set each time a send is claimed; a payout with a send that may have
   -- reached Stripe can't be cancelled until reconciled_at is later.
   ADD COLUMN IF NOT EXISTS send_started_at     timestamptz,
-  ADD COLUMN IF NOT EXISTS reconciled_at       timestamptz;
+  ADD COLUMN IF NOT EXISTS reconciled_at       timestamptz,
+  -- The current lease holder (exos_promoter_transfer_claim): a send checks
+  -- its token before each Stripe call; any new claim replaces it.
+  ADD COLUMN IF NOT EXISTS lease_token         uuid,
+  ADD COLUMN IF NOT EXISTS lease_purpose       text;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_promoter_payouts_transfer_chk') THEN
@@ -429,6 +433,13 @@ BEGIN
       AND (transfer_error IS NULL OR length(transfer_error) <= 300)
       AND (transfer_status IS DISTINCT FROM 'sent' OR stripe_transfer_id IS NOT NULL)
       AND ((transfer_status = 'cancelled') = (cancelled_at IS NOT NULL)));
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_promoter_payouts_lease_chk') THEN
+    ALTER TABLE public.exos_promoter_payouts ADD CONSTRAINT exos_promoter_payouts_lease_chk
+      CHECK (lease_purpose IS NULL OR lease_purpose IN ('send', 'reconcile', 'cancel'));
   END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS exos_promoter_payouts_idem_uq
@@ -753,20 +764,34 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_record_promoter_stripe(uuid, text, boolean, boolean, boolean) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.exos_record_promoter_stripe(uuid, text, boolean, boolean, boolean) TO service_role;
 
--- Claim a Stripe payout for sending (or cancelling). p_user must be the
--- org's owner or manager (the function checked the JWT; this re-checks).
--- Returns the payout, its funding lines and the org's live switch, or
--- {ok:false, error}. Leases the row for 2 minutes; a crashed send is safe to
--- resend because every Stripe call carries a deterministic idempotency key.
+-- Claim a Stripe payout (service role: exos-promoter-payouts). p_user must
+-- be the org's owner or manager (the function checked the JWT; this
+-- re-checks). p_purpose:
+--   'send'       lease it to send. Refused ('needs_reconcile') when an earlier
+--                send attempt was never reconciled with Stripe, so a retry
+--                (even after Stripe's 24 h idempotency window) can't pay twice.
+--   'reconcile'  lease it to look Stripe up (exos_promoter_transfer_reconcile).
+--   'cancel'     lease it to cancel; answers needs_reconcile when a send was
+--                ever started and not reconciled since.
+-- Every claim mints a new lease token, which fences out any older holder:
+-- a send re-checks its token (exos_promoter_lease_ok) right before each
+-- Stripe call. 'reconcile' / 'cancel' are refused while a send attempt is
+-- still open (leased for send, no outcome recorded, under 10 minutes old).
+-- Returns the payout, its funding lines and the token, or {ok:false, error}.
 CREATE OR REPLACE FUNCTION public.exos_promoter_transfer_claim(p_payout_id uuid, p_user uuid, p_purpose text DEFAULT 'send')
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  po public.exos_promoter_payouts%ROWTYPE;
+  po      public.exos_promoter_payouts%ROWTYPE;
   v_lines bigint;
+  v_tok   uuid := gen_random_uuid();
+  v_unrec boolean;
 BEGIN
+  IF p_purpose NOT IN ('send', 'reconcile', 'cancel') THEN
+    RAISE EXCEPTION 'exos_promoter_transfer_claim: bad purpose' USING ERRCODE = '22023';
+  END IF;
   SELECT * INTO po FROM public.exos_promoter_payouts WHERE id = p_payout_id FOR UPDATE;
   IF po.id IS NULL OR NOT EXISTS (
        SELECT 1 FROM public.exos_org_memberships m
@@ -782,24 +807,38 @@ BEGIN
   IF po.transfer_status = 'sending' AND po.lease_until > now() THEN
     RETURN jsonb_build_object('ok', false, 'error', 'busy');
   END IF;
-  IF p_purpose = 'send' AND NOT coalesce((SELECT stripe_transfers FROM public.exos_org_promoter_payouts WHERE org_id = po.org_id), false) THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'switched_off');
+  IF p_purpose <> 'send' AND po.transfer_status = 'sending' AND po.lease_purpose = 'send'
+     AND po.send_started_at > now() - interval '10 minutes' THEN
+    -- A send may still be talking to Stripe: wait for it to finish or time out.
+    RETURN jsonb_build_object('ok', false, 'error', 'send_in_progress');
   END IF;
-  SELECT coalesce(sum(amount_cents), 0) INTO v_lines FROM public.exos_promoter_payout_funding
-   WHERE payout_id = po.id AND status IN ('planned', 'taken');
-  IF p_purpose = 'send' AND v_lines <> po.amount_cents THEN
-    -- Never send more (or other) than the funding the settle planned.
-    RETURN jsonb_build_object('ok', false, 'error', 'funding_mismatch');
+  v_unrec := po.send_started_at IS NOT NULL AND (po.reconciled_at IS NULL OR po.reconciled_at < po.send_started_at);
+  IF p_purpose = 'send' THEN
+    IF v_unrec THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'needs_reconcile');
+    END IF;
+    IF NOT coalesce((SELECT stripe_transfers FROM public.exos_org_promoter_payouts WHERE org_id = po.org_id), false) THEN
+      RETURN jsonb_build_object('ok', false, 'error', 'switched_off');
+    END IF;
+    SELECT coalesce(sum(amount_cents), 0) INTO v_lines FROM public.exos_promoter_payout_funding
+     WHERE payout_id = po.id AND status IN ('planned', 'taken');
+    IF v_lines <> po.amount_cents THEN
+      -- Never send more (or other) than the funding the settle planned.
+      RETURN jsonb_build_object('ok', false, 'error', 'funding_mismatch');
+    END IF;
   END IF;
   UPDATE public.exos_promoter_payouts
      SET transfer_status = 'sending', lease_until = now() + interval '2 minutes',
-         transfer_attempts = transfer_attempts + 1, transfer_updated_at = now(),
+         lease_token = v_tok, lease_purpose = p_purpose,
+         transfer_attempts = transfer_attempts + CASE WHEN p_purpose = 'send' THEN 1 ELSE 0 END,
+         transfer_updated_at = now(),
          send_started_at = CASE WHEN p_purpose = 'send' THEN clock_timestamp() ELSE send_started_at END
    WHERE id = po.id;
   RETURN jsonb_build_object(
-    'ok', true, 'payout_id', po.id,
-    'needs_reconcile', p_purpose <> 'send' AND po.send_started_at IS NOT NULL
-                       AND (po.reconciled_at IS NULL OR po.reconciled_at < po.send_started_at), 'org_id', po.org_id, 'promoter_id', po.promoter_id,
+    'ok', true, 'payout_id', po.id, 'lease_token', v_tok, 'purpose', p_purpose,
+    'attempt', po.transfer_attempts + CASE WHEN p_purpose = 'send' THEN 1 ELSE 0 END,
+    'needs_reconcile', p_purpose <> 'send' AND v_unrec,
+    'org_id', po.org_id, 'promoter_id', po.promoter_id,
     'amount_cents', po.amount_cents, 'currency', po.currency, 'destination', po.stripe_account_id,
     'stripe_transfer_id', po.stripe_transfer_id,
     'lines', coalesce((SELECT jsonb_agg(jsonb_build_object('session_id', f.session_id, 'org_transfer_id', f.org_transfer_id,
@@ -809,6 +848,28 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_promoter_transfer_claim(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.exos_promoter_transfer_claim(uuid, uuid, text) TO service_role;
+
+-- Does this send still hold the payout? Called right before every Stripe
+-- call: the payout is 'sending', leased for send with this token, not
+-- cancelled, and the lease hasn't run out. Extends the lease by 2 minutes,
+-- never past 8 minutes after the send started (cancel waits 10).
+CREATE OR REPLACE FUNCTION public.exos_promoter_lease_ok(p_payout_id uuid, p_lease_token uuid)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_n integer;
+BEGIN
+  UPDATE public.exos_promoter_payouts
+     SET lease_until = least(now() + interval '2 minutes', send_started_at + interval '8 minutes')
+   WHERE id = p_payout_id AND via = 'stripe' AND transfer_status = 'sending' AND lease_purpose = 'send'
+     AND lease_token = p_lease_token AND lease_until > now() AND cancelled_at IS NULL
+     AND send_started_at > now() - interval '8 minutes';
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n > 0;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_promoter_lease_ok(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_promoter_lease_ok(uuid, uuid) TO service_role;
 
 -- One funding line: 'taken' (the reversal went through) or 'returned' (sent
 -- back to the organizer on cancel).
@@ -833,8 +894,11 @@ REVOKE ALL ON FUNCTION public.exos_promoter_funding_mark(uuid, text, text, text)
 GRANT  EXECUTE ON FUNCTION public.exos_promoter_funding_mark(uuid, text, text, text) TO service_role;
 
 -- The outcome of a send: sent (with the transfer id), dry_run, or failed.
+-- 'sent' is recorded whoever holds the lease (the money moved); dry_run /
+-- failed only by the holder of p_lease_token, so a stale send can't flip a
+-- payout that a cancel or reconcile has since claimed.
 CREATE OR REPLACE FUNCTION public.exos_promoter_transfer_mark(
-  p_payout_id uuid, p_status text, p_transfer_id text DEFAULT NULL, p_error text DEFAULT NULL
+  p_payout_id uuid, p_status text, p_transfer_id text DEFAULT NULL, p_error text DEFAULT NULL, p_lease_token uuid DEFAULT NULL
 ) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -852,22 +916,25 @@ BEGIN
      SET transfer_status = p_status,
          stripe_transfer_id = CASE WHEN p_status = 'sent' THEN p_transfer_id ELSE stripe_transfer_id END,
          transfer_error = CASE WHEN p_status = 'failed' THEN left(coalesce(p_error, 'failed'), 300) ELSE NULL END,
-         lease_until = NULL, transfer_updated_at = now()
-   WHERE id = p_payout_id AND via = 'stripe' AND transfer_status = 'sending';
+         lease_until = NULL, lease_token = NULL, transfer_updated_at = now()
+   WHERE id = p_payout_id AND via = 'stripe' AND transfer_status = 'sending'
+     AND (p_status = 'sent' OR lease_token = p_lease_token);
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RETURN v_n > 0;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_promoter_transfer_mark(uuid, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.exos_promoter_transfer_mark(uuid, text, text, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_promoter_transfer_mark(uuid, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_promoter_transfer_mark(uuid, text, text, text, uuid) TO service_role;
 
--- Reconcile a claimed payout with what Stripe actually did (service role).
--- p_reversals: [{session_id, reversal_id}] found at Stripe for this payout;
--- those lines become 'taken'. p_transfer_id: the transfer to the promoter
--- found at Stripe (transfer_group / metadata), which marks the payout sent;
--- NULL means Stripe has none, so the payout is reconciled and may be
--- cancelled. Answers 'sent' or 'reconciled'.
-CREATE OR REPLACE FUNCTION public.exos_promoter_transfer_reconcile(p_payout_id uuid, p_transfer_id text, p_reversals jsonb DEFAULT '[]'::jsonb)
-RETURNS text
+-- Reconcile with what Stripe actually did, by the holder of a 'reconcile' or
+-- 'cancel' lease (service role). p_reversals: [{session_id, reversal_id}]
+-- found at Stripe for this payout; those lines become 'taken'.
+-- p_transfer_id: the transfer to the promoter found at Stripe, which marks
+-- the payout sent (nothing new is created). NULL: Stripe has none, so the
+-- payout is reconciled: a send may be claimed again, or the cancel go on.
+-- Answers 'sent' or 'reconciled'.
+CREATE OR REPLACE FUNCTION public.exos_promoter_transfer_reconcile(
+  p_payout_id uuid, p_lease_token uuid, p_transfer_id text, p_reversals jsonb DEFAULT '[]'::jsonb
+) RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
@@ -876,8 +943,9 @@ DECLARE
   x  jsonb;
 BEGIN
   SELECT * INTO po FROM public.exos_promoter_payouts WHERE id = p_payout_id FOR UPDATE;
-  IF po.id IS NULL OR po.via <> 'stripe' OR po.transfer_status <> 'sending' THEN
-    RAISE EXCEPTION 'exos_promoter_transfer_reconcile: claim the payout first' USING ERRCODE = '22023';
+  IF po.id IS NULL OR po.via <> 'stripe' OR po.transfer_status <> 'sending'
+     OR po.lease_purpose NOT IN ('reconcile', 'cancel') OR po.lease_token IS DISTINCT FROM p_lease_token THEN
+    RAISE EXCEPTION 'exos_promoter_transfer_reconcile: claim the payout to reconcile first' USING ERRCODE = '22023';
   END IF;
   IF p_transfer_id IS NOT NULL AND p_transfer_id !~ '^tr_[A-Za-z0-9]{1,64}$' THEN
     RAISE EXCEPTION 'exos_promoter_transfer_reconcile: bad transfer id' USING ERRCODE = '22023';
@@ -892,20 +960,29 @@ BEGIN
     -- The money went out: it is paid, whatever the ledger said.
     UPDATE public.exos_promoter_payouts
        SET transfer_status = 'sent', stripe_transfer_id = p_transfer_id, transfer_error = NULL,
-           lease_until = NULL, reconciled_at = clock_timestamp(), transfer_updated_at = now()
+           lease_until = NULL, lease_token = NULL, reconciled_at = clock_timestamp(), transfer_updated_at = now()
      WHERE id = po.id;
     RETURN 'sent';
   END IF;
-  UPDATE public.exos_promoter_payouts SET reconciled_at = clock_timestamp() WHERE id = po.id;
+  -- A reconcile lease ends here (a send may now be claimed); a cancel keeps
+  -- its token for exos_promoter_payout_cancel in the next step.
+  UPDATE public.exos_promoter_payouts
+     SET reconciled_at = clock_timestamp(),
+         lease_until = CASE WHEN po.lease_purpose = 'reconcile' THEN NULL ELSE lease_until END,
+         transfer_status = CASE WHEN po.lease_purpose = 'reconcile' THEN 'failed' ELSE transfer_status END,
+         transfer_error = CASE WHEN po.lease_purpose = 'reconcile' THEN coalesce(transfer_error, 'reconciled: nothing at Stripe') ELSE transfer_error END
+   WHERE id = po.id;
   RETURN 'reconciled';
 END $$;
-REVOKE ALL ON FUNCTION public.exos_promoter_transfer_reconcile(uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.exos_promoter_transfer_reconcile(uuid, text, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_promoter_transfer_reconcile(uuid, uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_promoter_transfer_reconcile(uuid, uuid, text, jsonb) TO service_role;
 
--- Cancel a Stripe payout that never reached 'sent' (it must be claimed for
--- 'cancel' first, and every taken line returned). Its sales go back to
--- unpaid; clawbacks it netted are outstanding again. Service role.
-CREATE OR REPLACE FUNCTION public.exos_promoter_payout_cancel(p_payout_id uuid, p_return_transfer_id text DEFAULT NULL)
+-- Cancel a Stripe payout that never reached 'sent', by the holder of the
+-- 'cancel' lease (claimed with exos_promoter_transfer_claim, which also
+-- fenced out any send). Refused until a started send was reconciled and
+-- every taken line returned. Its sales go back to unpaid; clawbacks it
+-- netted are outstanding again. Service role.
+CREATE OR REPLACE FUNCTION public.exos_promoter_payout_cancel(p_payout_id uuid, p_lease_token uuid, p_return_transfer_id text DEFAULT NULL)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -915,6 +992,9 @@ BEGIN
   SELECT * INTO po FROM public.exos_promoter_payouts WHERE id = p_payout_id FOR UPDATE;
   IF po.id IS NULL OR po.via <> 'stripe' OR po.transfer_status <> 'sending' OR po.stripe_transfer_id IS NOT NULL THEN
     RETURN false;
+  END IF;
+  IF po.lease_purpose IS DISTINCT FROM 'cancel' OR po.lease_token IS DISTINCT FROM p_lease_token THEN
+    RAISE EXCEPTION 'exos_promoter_payout_cancel: claim the payout for cancel first' USING ERRCODE = '22023';
   END IF;
   IF po.send_started_at IS NOT NULL AND (po.reconciled_at IS NULL OR po.reconciled_at < po.send_started_at) THEN
     -- A send may have reached Stripe: look it up first (exos_promoter_transfer_reconcile).
@@ -936,13 +1016,13 @@ BEGIN
   UPDATE public.exos_promoter_commissions SET recovered_payout_id = NULL, updated_at = now()
    WHERE recovered_payout_id = po.id;
   UPDATE public.exos_promoter_payouts
-     SET transfer_status = 'cancelled', cancelled_at = now(), lease_until = NULL,
+     SET transfer_status = 'cancelled', cancelled_at = now(), lease_until = NULL, lease_token = NULL,
          return_transfer_id = p_return_transfer_id, transfer_updated_at = now()
    WHERE id = po.id;
   RETURN true;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_promoter_payout_cancel(uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.exos_promoter_payout_cancel(uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_promoter_payout_cancel(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_promoter_payout_cancel(uuid, uuid, text) TO service_role;
 
 -- ===========================================================================
 -- A6. The promoter's page: earnings (replaced) and the leaderboard.
@@ -1262,6 +1342,9 @@ CREATE TABLE IF NOT EXISTS public.exos_phone_rsvps (
   attempts        integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 10),
   ip_hash         text CHECK (ip_hash IS NULL OR ip_hash ~ '^[0-9a-f]{16,128}$'),
   ticket_ids      uuid[],
+  -- A row anon gets an ordinary answer for but that can never verify: the
+  -- email fallback refused for an RSVP'd number, or a sold-out log row.
+  decoy           boolean NOT NULL DEFAULT false,
   verified_at     timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
@@ -1464,7 +1547,8 @@ CREATE OR REPLACE FUNCTION public.exos_phone_rsvp_start(
   p_plus_ones integer,
   p_ip_hash   text,
   p_sms_ok    boolean,
-  p_promoter  text DEFAULT NULL
+  p_promoter  text DEFAULT NULL,
+  p_app_base  text DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -1481,7 +1565,12 @@ DECLARE
   v_id    uuid := gen_random_uuid();
   v_promo text;
   v_safe  text;
-  v_prev  boolean;
+  v_prev  public.exos_phone_rsvps%ROWTYPE;
+  v_decoy boolean := false;
+  v_full  boolean;
+  v_links text := '';
+  v_urls  jsonb;
+  i       integer;
 BEGIN
   IF length(v_name) < 1 THEN RETURN jsonb_build_object('ok', false, 'error', 'bad_name'); END IF;
   IF v_phone IS NULL THEN RETURN jsonb_build_object('ok', false, 'error', 'bad_phone'); END IF;
@@ -1490,16 +1579,17 @@ BEGIN
   END IF;
   IF v_ip IS NOT NULL AND v_ip !~ '^[0-9a-f]{16,128}$' THEN v_ip := NULL; END IF;
 
+  -- Nothing anon sees may depend on whether this number already RSVP'd (no
+  -- enumeration oracle): the answers below are the same either way, and
+  -- what differs is only where messages go, always to a proven channel.
   SELECT * INTO o FROM public._exos_phone_rsvp_offer(p_event_id);
-  -- A number that already RSVP'd may ask for its tickets again even when the
-  -- event is full (verify resends them; it never mints a second set).
-  v_prev := EXISTS (SELECT 1 FROM public.exos_phone_rsvps x
-                     WHERE x.event_id = p_event_id AND x.phone = v_phone AND x.status = 'confirmed');
-  IF NOT o.ok AND NOT (o.reason = 'sold_out' AND v_prev) THEN RETURN jsonb_build_object('ok', false, 'error', o.reason); END IF;
+  IF NOT o.ok AND o.reason <> 'sold_out' THEN RETURN jsonb_build_object('ok', false, 'error', o.reason); END IF;
   IF v_plus NOT BETWEEN 0 AND o.max_plus_ones THEN
     RETURN jsonb_build_object('ok', false, 'error', 'too_many_guests', 'max_plus_ones', o.max_plus_ones);
   END IF;
-  IF NOT v_prev AND o.seats_left < 1 + v_plus THEN RETURN jsonb_build_object('ok', false, 'error', 'sold_out'); END IF;
+  v_full := NOT o.ok OR o.seats_left < 1 + v_plus;
+  SELECT * INTO v_prev FROM public.exos_phone_rsvps x
+   WHERE x.event_id = p_event_id AND x.phone = v_phone AND x.status = 'confirmed';
 
   -- Channel: a text when the org can send one and the number hasn't opted out
   -- of its texts; else the guest's email; else not available.
@@ -1509,13 +1599,11 @@ BEGIN
     v_chan := 'sms';
   ELSIF v_email IS NOT NULL THEN
     -- The email fallback proves an inbox, not the phone: it is only for a
-    -- number with no confirmed RSVP here, or to resend to the very email
-    -- that confirmed it. Anything else: a generic "already", no links.
-    IF EXISTS (SELECT 1 FROM public.exos_phone_rsvps x
-                WHERE x.event_id = p_event_id AND x.phone = v_phone AND x.status = 'confirmed'
-                  AND NOT (x.channel = 'email' AND x.email IS NOT NULL AND lower(x.email) = v_email)) THEN
-      RETURN jsonb_build_object('ok', false, 'error', 'already');
-    END IF;
+    -- number with no confirmed RSVP here, or the very email that confirmed
+    -- it. Anything else gets the same answer ("if this number and email can
+    -- RSVP, we've emailed a code") but a decoy row: no mail, never verifies.
+    v_decoy := v_prev.id IS NOT NULL
+               AND NOT (v_prev.channel = 'email' AND v_prev.email IS NOT NULL AND lower(v_prev.email) = v_email);
     v_chan := 'email';
   ELSE
     RETURN jsonb_build_object('ok', false, 'error', 'no_channel');
@@ -1532,6 +1620,41 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'rate_limited');
   END IF;
 
+  -- Full: the same "sold out" for everyone. A number that already RSVP'd
+  -- gets its tickets again, but only through a proven channel: by text to
+  -- this very number, or by email to exactly the email that confirmed it.
+  -- A log row (never verifiable) keeps the rate limits counting.
+  IF v_full THEN
+    INSERT INTO public.exos_phone_rsvps (org_id, event_id, tier_id, guest_name, phone, email, plus_ones, channel, status,
+                                         code_hash, code_expires_at, ip_hash, decoy)
+    VALUES (o.org_id, p_event_id, o.tier_id, v_name, v_phone, v_email, v_plus, v_chan, 'expired',
+            encode(extensions.gen_random_bytes(32), 'hex'), now(), v_ip, true);
+    IF v_prev.id IS NOT NULL THEN
+      SELECT coalesce(jsonb_agg(public._exos_ticket_link_url(x.id, coalesce(p_app_base, '')) ORDER BY x.ord), '[]'::jsonb)
+        INTO v_urls FROM unnest(v_prev.ticket_ids) WITH ORDINALITY AS x(id, ord);
+      IF v_chan = 'sms' THEN
+        -- '_resend' is for exos-rsvp only (it texts the links and strips it).
+        RETURN jsonb_build_object('ok', false, 'error', 'sold_out',
+                                  '_resend', jsonb_build_object('to', v_phone, 'org_id', o.org_id, 'event_name', o.event_name,
+                                                                'urls', v_urls));
+      ELSIF NOT v_decoy AND p_app_base ~ '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$' THEN
+        v_safe := replace(replace(replace(coalesce(o.event_name, 'your event'), '&', '&amp;'), '<', '&lt;'), '>', '&gt;');
+        FOR i IN 1..jsonb_array_length(v_urls) LOOP
+          IF v_urls ->> (i - 1) IS NOT NULL THEN
+            v_links := v_links || '<li><a href="' || (v_urls ->> (i - 1)) || '">Open ticket ' || i || '</a></li>';
+          END IF;
+        END LOOP;
+        IF v_links <> '' THEN
+          INSERT INTO public.exos_mail (template, to_email, subject, html, status)
+          VALUES ('ticket-issued', v_email, left('Your tickets: ' || coalesce(o.event_name, 'your RSVP'), 200),
+                  '<p>Here are your tickets for <strong>' || v_safe || '</strong> again.</p><ul>' || v_links ||
+                  '</ul><p>Anyone with a link can use that ticket.</p>', 'pending');
+        END IF;
+      END IF;
+    END IF;
+    RETURN jsonb_build_object('ok', false, 'error', 'sold_out');
+  END IF;
+
   -- A newer code replaces any older pending one for this phone and event.
   UPDATE public.exos_phone_rsvps SET status = 'expired'
    WHERE event_id = p_event_id AND phone = v_phone AND status = 'pending';
@@ -1541,10 +1664,14 @@ BEGIN
 
   v_code := lpad((('x00000000' || encode(extensions.gen_random_bytes(4), 'hex'))::bit(64)::bigint % 1000000)::text, 6, '0');
   INSERT INTO public.exos_phone_rsvps (id, org_id, event_id, tier_id, guest_name, phone, email, plus_ones, promoter_code,
-                                       channel, code_hash, code_expires_at, ip_hash)
+                                       channel, code_hash, code_expires_at, ip_hash, decoy)
   VALUES (v_id, o.org_id, p_event_id, o.tier_id, v_name, v_phone, v_email, v_plus, v_promo,
-          v_chan, encode(extensions.digest(v_id::text || ':' || v_code, 'sha256'), 'hex'), now() + interval '10 minutes', v_ip);
+          v_chan, encode(extensions.digest(v_id::text || ':' || v_code, 'sha256'), 'hex'), now() + interval '10 minutes', v_ip,
+          v_decoy);
 
+  IF v_decoy THEN
+    RETURN jsonb_build_object('ok', true, 'rsvp_id', v_id, 'channel', 'email', 'to', v_email);
+  END IF;
   IF v_chan = 'email' THEN
     v_safe := replace(replace(replace(coalesce(o.event_name, 'your event'), '&', '&amp;'), '<', '&lt;'), '>', '&gt;');
     INSERT INTO public.exos_mail (template, to_email, subject, html, status)
@@ -1557,8 +1684,8 @@ BEGIN
   RETURN jsonb_build_object('ok', true, 'rsvp_id', v_id, 'channel', 'sms', 'to', v_phone, 'code', v_code,
                             'org_id', o.org_id, 'event_name', o.event_name);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_phone_rsvp_start(uuid, text, text, text, integer, text, boolean, text) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.exos_phone_rsvp_start(uuid, text, text, text, integer, text, boolean, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_phone_rsvp_start(uuid, text, text, text, integer, text, boolean, text, text) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_phone_rsvp_start(uuid, text, text, text, integer, text, boolean, text, text) TO service_role;
 
 -- ===========================================================================
 -- C3. Verify: the code, then the ticket(s). Service role (exos-rsvp).
@@ -1595,7 +1722,7 @@ BEGIN
     UPDATE public.exos_phone_rsvps SET status = 'expired' WHERE id = r.id AND status = 'pending';
     RETURN jsonb_build_object('ok', false, 'error', 'expired');
   END IF;
-  IF p_code IS NULL OR btrim(p_code) !~ '^[0-9]{6}$'
+  IF p_code IS NULL OR btrim(p_code) !~ '^[0-9]{6}$' OR r.decoy
      OR encode(extensions.digest(r.id::text || ':' || btrim(p_code), 'sha256'), 'hex') <> r.code_hash THEN
     UPDATE public.exos_phone_rsvps
        SET attempts = attempts + 1, status = CASE WHEN attempts + 1 >= 5 THEN 'locked' ELSE status END
@@ -1617,7 +1744,8 @@ BEGIN
        OR (r.channel = 'email' AND v_prev.channel = 'email' AND v_prev.email IS NOT NULL AND r.email IS NOT NULL
            AND lower(r.email) = lower(v_prev.email))) THEN
     UPDATE public.exos_phone_rsvps SET status = 'expired' WHERE id = r.id;
-    RETURN jsonb_build_object('ok', false, 'error', 'already');
+    -- The same answer as an expired code: nothing says the number RSVP'd.
+    RETURN jsonb_build_object('ok', false, 'error', 'expired');
   END IF;
   IF v_prev.id IS NOT NULL THEN
     UPDATE public.exos_phone_rsvps SET status = 'duplicate', verified_at = now(), ticket_ids = v_prev.ticket_ids

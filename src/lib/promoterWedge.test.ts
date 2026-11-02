@@ -12,10 +12,10 @@ import {
 import { admitted, moneySoFarText, normalizeMoneySoFar, takeHomeCents } from './moneySoFar';
 import { rsvpHeads, ticketPathFromUrl } from './phoneRsvp';
 import {
-  codeText, honeypotAnswer, maskPhone, normalizeRsvpPhone, parseRsvpRequest, RsvpInputError, rsvpErrorMessage, smsAvailable, ticketsText,
+  codeSentText, codeText, honeypotAnswer, maskPhone, normalizeRsvpPhone, parseRsvpRequest, RsvpInputError, rsvpErrorMessage, smsAvailable, ticketsText,
 } from '../../supabase/functions/_shared/rsvp.ts';
 import {
-  amountToReturn, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
+  amountToReturn, claimAction, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode, type TransferClaim,
 } from '../../supabase/functions/_shared/payouts/promoterTransfers.ts';
 import {
   checkInstantRequest, instantAvailable, instantEnabled, instantFeeCents, instantFeeConfig, maxInstantPayout,
@@ -114,6 +114,24 @@ describe('promoter transfer plans', () => {
     expect(reconcileDecision(c, [{ id: 'tr_y', destination: 'acct_Z', metadata: meta }], {}).action).toBe('allow_cancel');
     // Another payout's reversal on the same order transfer isn't ours.
     expect(reconcileDecision(c, [], { cs_1: [{ id: 'trr_8', metadata: { exos_promoter_payout_id: 'po2', exos_session_id: 'cs_1' } }] }).reversals).toEqual([]);
+  });
+  it('decides what a claim allows: proceed, reconcile first, or stop', () => {
+    const tok = '0f0f0000-1111-4222-8333-444455556666';
+    const base = claim();
+    expect(claimAction({ ok: true, purpose: 'send', lease_token: tok, attempt: 1, ...base })).toBe('proceed');
+    // A retried send whose earlier attempt was never reconciled.
+    expect(claimAction({ ok: false, error: 'needs_reconcile' })).toBe('reconcile_first');
+    // A cancel (or reconcile) after a started send.
+    expect(claimAction({ ok: true, purpose: 'cancel', lease_token: tok, needs_reconcile: true, ...base })).toBe('reconcile_first');
+    expect(claimAction({ ok: true, purpose: 'cancel', lease_token: tok, needs_reconcile: false, ...base })).toBe('proceed');
+    // An open send, a sent or cancelled payout, a missing lease: stop.
+    expect(claimAction({ ok: false, error: 'send_in_progress' })).toEqual({ stop: 'send_in_progress' });
+    expect(claimAction({ ok: false, error: 'sent' })).toEqual({ stop: 'sent' });
+    expect(claimAction({ ok: true, purpose: 'send', lease_token: '', ...base })).toEqual({ stop: 'no lease' });
+    // After a reconcile finds the transfer, the send creates nothing: mark_sent.
+    const meta = { exos_promoter_payout_id: 'po1' };
+    expect(reconcileDecision(base, [{ id: 'tr_done', destination: 'acct_P', metadata: meta }], {}))
+      .toMatchObject({ action: 'mark_sent', transferId: 'tr_done' });
   });
   it('retries a ledger write and reports a write that never sticks', async () => {
     let n = 0;
@@ -221,6 +239,9 @@ describe('phone RSVP', () => {
     expect(ticketsText('X', ['https://a/t/1#k=k'])).toContain('https://a/t/1#k=k');
     expect(ticketsText('X', ['u1', 'u2'])).toContain('+1: u2');
     expect(codeText('x'.repeat(200), '000000').length).toBeLessThan(160);
+    // The email line never claims a code was sent (same answer either way).
+    expect(codeSentText('email', 'ma***@evil.com')).toMatch(/^If this number and email can RSVP/);
+    expect(codeSentText('sms', '•••• 0113')).toContain('texted');
   });
   it('texts only with a live, connected provider', () => {
     expect(smsAvailable(false, { status: 'connected', secret: 's' })).toBe(false);
@@ -231,7 +252,7 @@ describe('phone RSVP', () => {
   });
   it('has a message for every error the SQL answers', () => {
     for (const e of ['bad_phone', 'bad_name', 'bad_email', 'too_many_guests', 'sold_out', 'no_channel', 'rate_limited',
-                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over', 'already']) {
+                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over']) {
       expect(rsvpErrorMessage(e)).not.toBe(rsvpErrorMessage('???'));
     }
     expect(rsvpErrorMessage('wrong_code', { attempts_left: 1 })).toContain('1 try left');

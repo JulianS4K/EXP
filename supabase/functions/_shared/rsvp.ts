@@ -100,6 +100,17 @@ export function ticketsText(eventName: string | null | undefined, urls: string[]
   return `You're in for ${name}. Your ticket: ${links[0]}\nSend each guest their own link:\n${rest}`;
 }
 
+/**
+ * Where the code went. For email the line is deliberately conditional: the
+ * answer is the same whether or not the number already RSVP'd (no
+ * enumeration), and a refused fallback simply sends nothing.
+ */
+export function codeSentText(channel: 'sms' | 'email', to: string): string {
+  return channel === 'sms'
+    ? `We texted a 6-digit code to ${to}. It works for 10 minutes.`
+    : `If this number and email can RSVP, we've emailed a 6-digit code to ${to}. It works for 10 minutes.`;
+}
+
 /** What the page says for each error the SQL can answer. */
 export function rsvpErrorMessage(error: string | undefined, extra: { max_plus_ones?: number; attempts_left?: number } = {}): string {
   switch (error) {
@@ -116,7 +127,6 @@ export function rsvpErrorMessage(error: string | undefined, extra: { max_plus_on
     case 'locked': return 'Too many wrong codes. Start again to get a new one.';
     case 'expired': return 'That code expired. Start again to get a new one.';
     case 'used': return 'That code was already used. Check your texts for your ticket link.';
-    case 'already': return 'This number has already RSVP\'d. We can text the tickets to that phone: start again with texts, or use the email it RSVP\'d with.';
     case 'off': return 'RSVP by phone isn\'t open for this event.';
     case 'closed': return 'RSVPs for this event are closed.';
     case 'over': return 'This event is over.';

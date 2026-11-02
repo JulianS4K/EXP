@@ -34,8 +34,8 @@ import { readCapped } from "../_shared/api/body.ts";
 import { redactError } from "../_shared/log.ts";
 import { isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
-  amountToReturn, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey, transfersMode,
-  type StripeReversalLite, type StripeTransferLite, type TransferClaim,
+  amountToReturn, claimAction, durably, reconcileDecision, returnKey, reversalKey, sendPlan, stripeErrorText, transferKey,
+  transfersMode, type ClaimAnswer, type StripeReversalLite, type StripeTransferLite,
 } from "../_shared/payouts/promoterTransfers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -133,22 +133,82 @@ async function promoterRoute(route: string, body: Record<string, unknown>, strip
 }
 
 // --- Organizer: send / cancel ---------------------------------------------
-async function send(payoutId: string, user: string, stripe: Stripe, sb: SupabaseClient) {
-  const { data, error } = await sb.rpc("exos_promoter_transfer_claim", { p_payout_id: payoutId, p_user: user, p_purpose: "send" });
+// Every claim returns a lease token. A send re-checks it in SQL
+// (exos_promoter_lease_ok) right before each Stripe call, and a cancel or
+// reconcile claim replaces it, so a stale send can't move money after a
+// cancel. The idempotency keys are per payout (and per order for reversals),
+// not per attempt: within Stripe's 24 h window a repeat returns the first
+// result; after it Stripe would create a new object, which is why any retry
+// first reconciles (the SQL refuses a send until it has).
+
+type Claimed = Extract<ClaimAnswer, { ok: true }>;
+
+async function claim(sb: SupabaseClient, payoutId: string, user: string, purpose: "send" | "reconcile" | "cancel"): Promise<ClaimAnswer> {
+  const { data, error } = await sb.rpc("exos_promoter_transfer_claim", { p_payout_id: payoutId, p_user: user, p_purpose: purpose });
   if (error) throw error;
-  const claim = data as ({ ok: true } & TransferClaim) | { ok: false; error: string };
-  if ("error" in claim) return json({ error: claim.error }, claim.error === "not_found" ? 404 : 409);
-  const plan = sendPlan(claim);
+  return data as ClaimAnswer;
+}
+
+// Ask Stripe what this payout already did and record it under the claim's lease.
+async function reconcile(c: Claimed, stripe: Stripe, sb: SupabaseClient): Promise<"sent" | "reconciled"> {
+  const transfers = await stripe.transfers.list({ transfer_group: `exos-promoter-payout-${c.payout_id}`, limit: 100 });
+  const reversals: Record<string, StripeReversalLite[]> = {};
+  for (const l of c.lines.filter((x) => x.status === "planned")) {
+    const list = await stripe.transfers.listReversals(l.org_transfer_id, { limit: 100 });
+    reversals[l.session_id] = list.data.map((r) => ({ id: r.id, metadata: (r.metadata ?? {}) as Record<string, string> }));
+  }
+  const d = reconcileDecision(c, transfers.data.map((t): StripeTransferLite => ({
+    id: t.id, destination: typeof t.destination === "string" ? t.destination : t.destination?.id ?? null,
+    metadata: (t.metadata ?? {}) as Record<string, string>,
+  })), reversals);
+  const { data, error } = await sb.rpc("exos_promoter_transfer_reconcile", {
+    p_payout_id: c.payout_id, p_lease_token: c.lease_token, p_transfer_id: d.transferId, p_reversals: d.reversals,
+  });
+  if (error) throw error;
+  for (const r of d.reversals) {
+    const l = c.lines.find((x) => x.session_id === r.session_id);
+    if (l) { l.status = "taken"; l.reversal_id = r.reversal_id; }
+  }
+  return data as "sent" | "reconciled";
+}
+
+async function leaseOk(sb: SupabaseClient, c: Claimed): Promise<boolean> {
+  const { data, error } = await sb.rpc("exos_promoter_lease_ok", { p_payout_id: c.payout_id, p_lease_token: c.lease_token });
+  return !error && data === true;
+}
+
+async function send(payoutId: string, user: string, stripe: Stripe, sb: SupabaseClient) {
+  let a = await claim(sb, payoutId, user, "send");
+  let act = claimAction(a);
+  if (act === "reconcile_first") {
+    // An earlier attempt never finished: look Stripe up before sending again.
+    const r = await claim(sb, payoutId, user, "reconcile");
+    const ra = claimAction(r);
+    if (typeof ra === "object") return json({ error: ra.stop }, ra.stop === "not_found" ? 404 : 409);
+    try {
+      if ((await reconcile(r as Claimed, stripe, sb)) === "sent") return json({ status: "sent", reconciled: true });
+    } catch (e) {
+      return json({ status: "failed", error: `Couldn't check Stripe: ${stripeErrorText(e)}` }, 502);
+    }
+    a = await claim(sb, payoutId, user, "send");
+    act = claimAction(a);
+  }
+  if (typeof act === "object") return json({ error: act.stop }, act.stop === "not_found" ? 404 : 409);
+  if (act !== "proceed") return json({ error: "needs_reconcile" }, 409);
+  const c = a as Claimed;
+  const plan = sendPlan(c);
   if ("error" in plan) {
-    await mark(sb, payoutId, "failed", null, plan.error);
+    await mark(sb, payoutId, "failed", null, plan.error, c.lease_token);
     return json({ status: "failed", error: plan.error }, 409);
   }
   if (transfersMode((k) => Deno.env.get(k)) === "dry-run") {
-    await mark(sb, payoutId, "dry_run");
+    await mark(sb, payoutId, "dry_run", null, null, c.lease_token);
     return json({ status: "dry_run", would_send: plan.transfer, would_reverse: plan.reverse.map((l) => ({ order: l.session_id, amount_cents: l.amount_cents })) });
   }
+  const lost = () => json({ status: "stopped", error: "This payout was taken over (cancelled or timed out); nothing more was sent." }, 409);
   try {
     for (const line of plan.reverse) {
+      if (!(await leaseOk(sb, c))) return lost();
       const rev = await stripe.transfers.createReversal(
         line.org_transfer_id,
         { amount: line.amount_cents, metadata: { exos_promoter_payout_id: payoutId, exos_session_id: line.session_id } },
@@ -161,106 +221,102 @@ async function send(payoutId: string, user: string, stripe: Stripe, sb: Supabase
         return !mErr && ok === true;
       });
       if (!marked) {
-        // The reversal happened but isn't recorded: stop here and leave the
-        // payout 'sending'; a cancel reconciles it with Stripe first.
+        // The reversal happened but isn't recorded: stop and leave 'sending';
+        // the next send or a cancel reconciles with Stripe first.
         console.error("exos-promoter-payouts: reversal not recorded", payoutId, line.session_id, rev.id);
         return json({ status: "sending", error: "Stripe moved money but Exos couldn't record it yet. Try Send again." }, 500);
       }
     }
+    if (!(await leaseOk(sb, c))) return lost();
     const tr = await stripe.transfers.create(
       {
         amount: plan.transfer.amount, currency: plan.transfer.currency, destination: plan.transfer.destination,
         transfer_group: `exos-promoter-payout-${payoutId}`,
-        metadata: { exos_promoter_payout_id: payoutId, exos_org_id: claim.org_id, exos_promoter_id: claim.promoter_id },
+        metadata: { exos_promoter_payout_id: payoutId, exos_org_id: c.org_id, exos_promoter_id: c.promoter_id },
       },
       { idempotencyKey: transferKey(payoutId) },
     );
     // The transfer exists at Stripe: the 'sent' mark must stick. If it can't
-    // be written, answer an error and leave 'sending' (never 'failed', which
-    // would let the payout be cancelled and its sales paid again).
+    // be written, answer an error and leave 'sending' (never 'failed').
     if (!(await durably(() => mark(sb, payoutId, "sent", tr.id)))) {
       console.error("exos-promoter-payouts: sent not recorded", payoutId, tr.id);
       return json({ status: "sending", transfer_id: tr.id, error: "Sent at Stripe, but not recorded yet. Try Send again." }, 500);
     }
     return json({ status: "sent", transfer_id: tr.id });
   } catch (e) {
+    // The call may or may not have reached Stripe; the next send or cancel
+    // reconciles before doing anything (send_started_at stays unreconciled).
     const msg = stripeErrorText(e);
-    await mark(sb, payoutId, "failed", null, msg);
+    await mark(sb, payoutId, "failed", null, msg, c.lease_token);
     return json({ status: "failed", error: msg }, 502);
   }
 }
 
 async function cancel(payoutId: string, user: string, stripe: Stripe, sb: SupabaseClient) {
-  const { data, error } = await sb.rpc("exos_promoter_transfer_claim", { p_payout_id: payoutId, p_user: user, p_purpose: "cancel" });
-  if (error) throw error;
-  const claim = data as ({ ok: true; needs_reconcile?: boolean } & TransferClaim) | { ok: false; error: string };
-  if ("error" in claim) return json({ error: claim.error }, claim.error === "not_found" ? 404 : 409);
-  if (claim.needs_reconcile) {
-    // A send was started: ask Stripe what happened before anything is undone.
+  // The cancel claim replaces any send's lease in the same transaction, and
+  // is refused while a send attempt is still open (under 10 minutes).
+  const a = await claim(sb, payoutId, user, "cancel");
+  const act = claimAction(a);
+  if (typeof act === "object") return json({ error: act.stop }, act.stop === "not_found" ? 404 : 409);
+  const c = a as Claimed;
+  if (act === "reconcile_first") {
     try {
-      const transfers = await stripe.transfers.list({ transfer_group: `exos-promoter-payout-${payoutId}`, limit: 100 });
-      const reversals: Record<string, StripeReversalLite[]> = {};
-      for (const l of claim.lines.filter((x) => x.status === "planned")) {
-        const list = await stripe.transfers.listReversals(l.org_transfer_id, { limit: 100 });
-        reversals[l.session_id] = list.data.map((r) => ({ id: r.id, metadata: (r.metadata ?? {}) as Record<string, string> }));
-      }
-      const d = reconcileDecision(claim, transfers.data.map((t): StripeTransferLite => ({
-        id: t.id, destination: typeof t.destination === "string" ? t.destination : t.destination?.id ?? null,
-        metadata: (t.metadata ?? {}) as Record<string, string>,
-      })), reversals);
-      const { data: res, error: rErr } = await sb.rpc("exos_promoter_transfer_reconcile", {
-        p_payout_id: payoutId, p_transfer_id: d.transferId, p_reversals: d.reversals,
-      });
-      if (rErr) throw rErr;
-      if (res === "sent") return json({ status: "sent", transfer_id: d.transferId, error: "Stripe had already sent this payout; it stays paid." }, 409);
-      for (const r of d.reversals) {
-        const l = claim.lines.find((x) => x.session_id === r.session_id);
-        if (l) { l.status = "taken"; l.reversal_id = r.reversal_id; }
+      if ((await reconcile(c, stripe, sb)) === "sent") {
+        return json({ status: "sent", error: "Stripe had already sent this payout; it stays paid." }, 409);
       }
     } catch (e) {
       const msg = stripeErrorText(e);
-      await mark(sb, payoutId, "failed", null, `cancel: couldn't check Stripe: ${msg}`);
+      await mark(sb, payoutId, "failed", null, `cancel: couldn't check Stripe: ${msg}`, c.lease_token);
       return json({ error: `Couldn't check Stripe before cancelling: ${msg}` }, 502);
     }
   }
-  const back = amountToReturn(claim.lines);
+  const back = amountToReturn(c.lines);
   let returnId: string | null = null;
   if (back > 0) {
     // Money already taken from the organizer goes back to their account.
-    const { data: sec } = await sb.from("exos_org_secrets").select("payments").eq("org_id", claim.org_id).maybeSingle();
+    const { data: sec } = await sb.from("exos_org_secrets").select("payments").eq("org_id", c.org_id).maybeSingle();
     const dest = (sec?.payments as { connectedAccountId?: string } | null)?.connectedAccountId;
     if (!dest) {
-      await mark(sb, payoutId, "failed", null, "cancel: the organizer has no connected account to return the money to");
+      await mark(sb, payoutId, "failed", null, "cancel: the organizer has no connected account to return the money to", c.lease_token);
       return json({ error: "no connected account to return the money to" }, 409);
     }
     try {
       const tr = await stripe.transfers.create(
-        { amount: back, currency: (claim.currency || "usd").toLowerCase(), destination: dest,
+        { amount: back, currency: (c.currency || "usd").toLowerCase(), destination: dest,
           transfer_group: `exos-promoter-payout-${payoutId}`, metadata: { exos_promoter_payout_id: payoutId, exos_return: "1" } },
         { idempotencyKey: returnKey(payoutId) },
       );
       returnId = tr.id;
-      for (const l of claim.lines.filter((x) => x.status === "taken")) {
-        await sb.rpc("exos_promoter_funding_mark", { p_payout_id: payoutId, p_session_id: l.session_id, p_status: "returned" });
+      for (const l of c.lines.filter((x) => x.status === "taken")) {
+        await durably(async () => {
+          const { data: ok, error: e2 } = await sb.rpc("exos_promoter_funding_mark", { p_payout_id: payoutId, p_session_id: l.session_id, p_status: "returned" });
+          return !e2 && ok === true;
+        });
       }
     } catch (e) {
       const msg = stripeErrorText(e);
-      await mark(sb, payoutId, "failed", null, `cancel: ${msg}`);
+      await mark(sb, payoutId, "failed", null, `cancel: ${msg}`, c.lease_token);
       return json({ error: msg }, 502);
     }
   }
-  const { data: ok, error: cErr } = await sb.rpc("exos_promoter_payout_cancel", { p_payout_id: payoutId, p_return_transfer_id: returnId });
+  const { data: ok, error: cErr } = await sb.rpc("exos_promoter_payout_cancel", {
+    p_payout_id: payoutId, p_lease_token: c.lease_token, p_return_transfer_id: returnId,
+  });
   if (cErr || !ok) return json({ error: "could not cancel" }, 409);
   return json({ status: "cancelled", returned_cents: back });
 }
 
-async function mark(sb: SupabaseClient, id: string, status: "sent" | "dry_run" | "failed", transferId: string | null = null, err: string | null = null): Promise<boolean> {
-  const { data, error } = await sb.rpc("exos_promoter_transfer_mark", { p_payout_id: id, p_status: status, p_transfer_id: transferId, p_error: err });
+async function mark(
+  sb: SupabaseClient, id: string, status: "sent" | "dry_run" | "failed",
+  transferId: string | null = null, err: string | null = null, leaseToken: string | null = null,
+): Promise<boolean> {
+  const { data, error } = await sb.rpc("exos_promoter_transfer_mark", {
+    p_payout_id: id, p_status: status, p_transfer_id: transferId, p_error: err, p_lease_token: leaseToken,
+  });
   if (error) console.error("exos-promoter-payouts: mark failed", id, status, redactError(error));
   return !error && data === true;
 }
 
-// The SPA's own origins only (EXOS_REDIRECT_ORIGINS), as exos-integrations does.
 function corsHeaders(origin: string | null): Record<string, string> {
   const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
