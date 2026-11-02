@@ -13,6 +13,9 @@
 --       contact email doesn't move receipts unless overrides are on; no claim
 --       links; another address only once the owner allows it (managers can't
 --       change that); rate limited per order; Idempotency-Key replays
+--   O3b no address at the first edit: no original, any receipt is an
+--       override; account deletion erases order details and edit-history
+--       addresses, and an erased order gets no receipt
 --   O4  order check-out: every ticket inside a re-entry list goes out once;
 --       again = nothing recorded (idempotent); the implicit list can't exit;
 --       scanners can't (typed exit is an override)
@@ -316,6 +319,75 @@ BEGIN
   IF pg_temp.st('f2', 'order.send_receipt', 'cs_de2', '{}') <> '42501' THEN RAISE EXCEPTION 'O3 FAIL: scanner resent'; END IF;
   IF pg_temp.st('f6', 'order.send_receipt', 'cs_de2', '{}') <> 'P0002' THEN RAISE EXCEPTION 'O3 FAIL: cross-org resend'; END IF;
   RAISE NOTICE 'OK O3 receipt resend: the original address unless overrides are on (an email edit can''t bypass it), no claim links, rate limited, idempotent';
+END $$;
+
+-- O3b ----------------------------------------------------------------------------
+-- An order with no address at the first edit has no original: the edited
+-- address is never treated as the original. Erasure clears the order desk's
+-- PII and stops receipts (no fallback to the recorded original).
+-- The test chain lacks some of prod's tables exos_delete_my_account touches:
+-- minimal stand-ins (rolled back with everything else).
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone text, ADD COLUMN IF NOT EXISTS raw_user_meta_data jsonb,
+  ADD COLUMN IF NOT EXISTS banned_until timestamptz, ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+CREATE TABLE IF NOT EXISTS auth.identities (user_id uuid);
+CREATE TABLE IF NOT EXISTS auth.sessions (user_id uuid);
+CREATE TABLE IF NOT EXISTS auth.refresh_tokens (user_id text);
+CREATE TABLE IF NOT EXISTS public.exos_org_invites (email text, claimed_by uuid);
+CREATE TABLE IF NOT EXISTS public.exos_org_follows (follower_uid uuid);
+CREATE TABLE IF NOT EXISTS public.exos_event_saves (user_id uuid);
+CREATE TABLE IF NOT EXISTS public.exos_notification_reads (uid uuid);
+CREATE TABLE IF NOT EXISTS public.exos_profiles (id uuid);
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('de000000-0000-0000-0000-0000000000b5','de-b5@x.com',now());
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,status,payment_intent) VALUES
+  ('cs_de4','de000000-0000-0000-0000-0000000000e6','de000000-0000-0000-0000-0000000000d6','de000000-0000-0000-0000-000000000001','de000000-0000-0000-0000-0000000000b2',NULL,1,2000,'fulfilled','pi_de4'),
+  ('cs_de5','de000000-0000-0000-0000-0000000000e6','de000000-0000-0000-0000-0000000000d6','de000000-0000-0000-0000-000000000001','de000000-0000-0000-0000-0000000000b5','de-b5@x.com',1,2000,'fulfilled','pi_de5');
+DO $$
+DECLARE r jsonb; d public.exos_order_details%ROWTYPE;
+BEGIN
+  -- No address at the first edit.
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_de4', '{"fields":{"email":"new@y.com"}}'::jsonb);
+  SELECT * INTO d FROM public.exos_order_details WHERE session_id = 'cs_de4';
+  IF NOT d.original_captured OR d.original_email IS NOT NULL THEN RAISE EXCEPTION 'O3b FAIL: original not captured as none %', to_jsonb(d); END IF;
+  -- A second edit doesn't make its address the original.
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_de4', '{"fields":{"email":"newer@y.com"}}'::jsonb);
+  IF (SELECT original_email FROM public.exos_order_details WHERE session_id = 'cs_de4') IS NOT NULL THEN
+    RAISE EXCEPTION 'O3b FAIL: a later edit set the original';
+  END IF;
+  IF pg_temp.as_st('a1', $q$SELECT public.exos_order_settings_save('de000000-0000-0000-0000-000000000001', false, 3)$q$) <> 'ok' THEN
+    RAISE EXCEPTION 'O3b FAIL: overrides off';
+  END IF;
+  IF pg_temp.st('f1', 'order.send_receipt', 'cs_de4', '{}') <> '42501'
+     OR pg_temp.st('f1', 'order.send_receipt', 'cs_de4', '{"email":"newer@y.com"}') <> '42501' THEN
+    RAISE EXCEPTION 'O3b FAIL: no original, overrides off, but sent';
+  END IF;
+  IF pg_temp.as_st('a1', $q$SELECT public.exos_order_settings_save('de000000-0000-0000-0000-000000000001', true, 3)$q$) <> 'ok' THEN
+    RAISE EXCEPTION 'O3b FAIL: overrides on';
+  END IF;
+  r := pg_temp.w('f1', 'order.send_receipt', 'cs_de4', '{}');
+  IF r ->> 'to' <> 'newer@y.com' OR NOT (r ->> 'override')::boolean THEN RAISE EXCEPTION 'O3b FAIL: override with no original %', r; END IF;
+
+  -- Erasure: b5's order has details, an original and an edit history.
+  PERFORM pg_temp.w('f1', 'order.update', 'cs_de5',
+    '{"fields":{"first_name":"Bea","last_name":"Five","phone":"+1 555 0105","notes":"aisle","email":"bea.alt@y.com"}}'::jsonb);
+  PERFORM pg_temp.w('f1', 'order.send_receipt', 'cs_de5', '{}');
+  PERFORM set_config('app.uid', 'de000000-0000-0000-0000-0000000000b5', true);
+  PERFORM public.exos_delete_my_account();
+  PERFORM set_config('app.uid', '', true);
+  SELECT * INTO d FROM public.exos_order_details WHERE session_id = 'cs_de5';
+  IF d.first_name IS NOT NULL OR d.last_name IS NOT NULL OR d.phone IS NOT NULL OR d.notes IS NOT NULL OR d.original_email IS NOT NULL
+     OR (SELECT buyer_email FROM public.exos_checkout_sessions WHERE session_id = 'cs_de5') IS NOT NULL THEN
+    RAISE EXCEPTION 'O3b FAIL: erasure left PII %', to_jsonb(d);
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.exos_order_edits WHERE session_id = 'cs_de5'
+              AND (position('de-b5@x.com' IN changes::text) > 0 OR position('bea.alt@y.com' IN changes::text) > 0)) THEN
+    RAISE EXCEPTION 'O3b FAIL: addresses left in the edit history';
+  END IF;
+  -- Erased: refused, even with overrides on and an address given.
+  IF pg_temp.st('f1', 'order.send_receipt', 'cs_de5', '{}') <> '22023'
+     OR pg_temp.st('f1', 'order.send_receipt', 'cs_de5', '{"email":"de-b5@x.com"}') <> '22023' THEN
+    RAISE EXCEPTION 'O3b FAIL: receipt for an erased order';
+  END IF;
+  RAISE NOTICE 'OK O3b no original = every address is an override; erasure clears order details and stops receipts';
 END $$;
 
 -- O4 -----------------------------------------------------------------------------

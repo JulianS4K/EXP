@@ -29,6 +29,8 @@
 --              exos_checkin_lists, exos_guest_lists, exos_guest_list_entries,
 --              exos_event_lineup, exos_artists, exos_tagged_items, exos_tags,
 --              exos_fans, exos_orgs, exos_mail (insert: the receipt)
+--           W: FUNCTION exos_delete_my_account (marker-patched: erases
+--              exos_order_details PII and edit-history addresses)
 --           Calls (unchanged): exos_check_in_ticket, exos_receipt_html,
 --              exos_mail_escape, exos_has_org_role, exos_is_admin,
 --              exos_venue_key, _exos_door_code, _exos_fan_email_list
@@ -121,12 +123,18 @@ CREATE TABLE IF NOT EXISTS public.exos_order_details (
   -- The address the order was bought with, kept from the first edit on: a
   -- receipt anywhere else is an override (exos_order_send_receipt).
   original_email text CHECK (original_email IS NULL OR char_length(original_email) <= 320),
+  -- true once the first edit has recorded original_email (which may be NULL:
+  -- the order had no address then). Neither is ever changed by a later edit.
+  original_captured boolean NOT NULL DEFAULT false,
   updated_by  uuid,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+-- No legacy rows: this migration was never applied, so every row is written
+-- by exos_order_update below and captures its original at the first edit.
 ALTER TABLE public.exos_order_details ADD COLUMN IF NOT EXISTS original_email text
   CHECK (original_email IS NULL OR char_length(original_email) <= 320);
+ALTER TABLE public.exos_order_details ADD COLUMN IF NOT EXISTS original_captured boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS exos_order_details_org_idx ON public.exos_order_details (org_id);
 DROP TRIGGER IF EXISTS exos_order_details_touch ON public.exos_order_details;
 CREATE TRIGGER exos_order_details_touch BEFORE UPDATE ON public.exos_order_details
@@ -319,12 +327,19 @@ BEGIN
 
   IF v_chg <> '{}'::jsonb THEN
     -- original_email: set once (the buyer's address before any edit), never updated.
-    INSERT INTO public.exos_order_details (session_id, org_id, first_name, last_name, phone, notes, updated_by, original_email)
-    VALUES (s.session_id, s.org_id, v_first, v_last, v_phone, v_notes, auth.uid(), lower(btrim(s.buyer_email)))
+    -- The original address is captured once, here, from the session as it is
+    -- BEFORE this edit (NULL when it had none) and never updated afterwards:
+    -- a later edit can't make its own address the original.
+    INSERT INTO public.exos_order_details (session_id, org_id, first_name, last_name, phone, notes, updated_by,
+                                           original_email, original_captured)
+    VALUES (s.session_id, s.org_id, v_first, v_last, v_phone, v_notes, auth.uid(),
+            nullif(lower(btrim(coalesce(s.buyer_email, ''))), ''), true)
     ON CONFLICT (session_id) DO UPDATE
       SET first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, phone = EXCLUDED.phone,
           notes = EXCLUDED.notes, updated_by = EXCLUDED.updated_by,
-          original_email = coalesce(public.exos_order_details.original_email, EXCLUDED.original_email);
+          original_email = CASE WHEN public.exos_order_details.original_captured
+                                THEN public.exos_order_details.original_email ELSE EXCLUDED.original_email END,
+          original_captured = true;
     IF v_chg ? 'email' THEN
       -- The contact address only: tickets keep theirs (purchase limits), invoices stay as issued.
       UPDATE public.exos_checkout_sessions SET buyer_email = v_email WHERE session_id = s.session_id;
@@ -349,6 +364,8 @@ DECLARE
   v_to     text;
   v_over   boolean := false;
   v_orig   text;
+  v_capt   boolean;
+  v_dorig  text;
   v_hour   int;
   v_day    int;
   v_name   text;
@@ -370,15 +387,23 @@ BEGIN
     RAISE EXCEPTION 'exos_order_send_receipt: only a completed order has a receipt' USING ERRCODE = '55000';
   END IF;
   v_set := public._exos_oe_settings(s.org_id);
-  -- The address the order was bought with (an edit can't move receipts:
-  -- anything else is an override, allowed only when the org permits it).
-  SELECT lower(btrim(coalesce(d.original_email, s.buyer_email, ''))) INTO v_orig
-    FROM (SELECT 1) one LEFT JOIN public.exos_order_details d ON d.session_id = s.session_id;
-  v_to := coalesce(nullif(lower(btrim(coalesce(p_email, ''))), ''), lower(btrim(coalesce(s.buyer_email, ''))));
-  IF v_to <> v_orig THEN
+  -- An erased order (account deletion nulls buyer_email): never sent, and
+  -- never to the recorded original either.
+  IF nullif(btrim(coalesce(s.buyer_email, '')), '') IS NULL THEN
+    RAISE EXCEPTION 'exos_order_send_receipt: this order has no email (never given, or erased)' USING ERRCODE = '22023';
+  END IF;
+  -- The address the order was bought with. Never edited: the session's.
+  -- Edited: the one captured at the first edit, which may be none, and then
+  -- every destination is an override.
+  SELECT d.original_captured, d.original_email INTO v_capt, v_dorig
+    FROM public.exos_order_details d WHERE d.session_id = s.session_id;
+  v_orig := CASE WHEN coalesce(v_capt, false) THEN lower(btrim(v_dorig))
+                 ELSE lower(btrim(s.buyer_email)) END;
+  v_to := coalesce(nullif(lower(btrim(coalesce(p_email, ''))), ''), lower(btrim(s.buyer_email)));
+  IF v_orig IS NULL OR v_to <> v_orig THEN
     IF (v_set ->> 'receipt_override_email')::boolean THEN
       v_over := true;
-    ELSIF nullif(btrim(coalesce(p_email, '')), '') IS NOT NULL THEN
+    ELSIF v_orig IS NULL OR nullif(btrim(coalesce(p_email, '')), '') IS NOT NULL THEN
       RAISE EXCEPTION 'exos_order_send_receipt: this organization sends receipts only to the email the order was placed with'
         USING ERRCODE = '42501';
     ELSE
@@ -1347,3 +1372,43 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_event_fan_recommendations(uuid, int, int) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_fan_recommendations(uuid, int, int) TO authenticated, service_role;
+
+-- 8. Account deletion: erase the order desk's personal data too -------------------
+-- exos_delete_my_account (mig 20260926010000) nulls the session's buyer_email;
+-- the buyer's name, phone, notes and the recorded original address here, and
+-- the addresses in the edit history, go with it. Marker-patched so a replay
+-- is a no-op.
+CREATE OR REPLACE FUNCTION pg_temp.exos_patch_n(p_sig text, p_marker text, p_old text, p_new text, p_hits int)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE p_fn regprocedure := to_regprocedure(p_sig); v_def text; v_hits int;
+BEGIN
+  IF p_fn IS NULL THEN
+    RAISE EXCEPTION '%: not present', p_sig;
+  END IF;
+  v_def := replace(pg_get_functiondef(p_fn), chr(13), '');
+  IF position(p_marker in v_def) > 0 THEN
+    RAISE NOTICE '%: already patched (%)', p_fn, p_marker;
+    RETURN;
+  END IF;
+  v_hits := (length(v_def) - length(replace(v_def, p_old, ''))) / length(p_old);
+  IF v_hits <> p_hits THEN
+    RAISE EXCEPTION '%: expected % match(es) for patch "%", found %', p_fn, p_hits, p_marker, v_hits;
+  END IF;
+  EXECUTE replace(v_def, p_old, p_new);
+END $$;
+
+SELECT pg_temp.exos_patch_n('public.exos_delete_my_account()',
+  'exos_order_details',
+  $o$  UPDATE public.exos_checkout_sessions SET buyer_email = NULL WHERE buyer_uid = v_uid;$o$,
+  $n$  -- Order desk (mig 20261102140000): buyer details, the original address, and
+  -- the addresses in the edit history. Before the session email is nulled.
+  UPDATE public.exos_order_details d
+     SET first_name = NULL, last_name = NULL, phone = NULL, notes = NULL, original_email = NULL
+   WHERE d.session_id IN (SELECT cs.session_id FROM public.exos_checkout_sessions cs
+                           WHERE cs.buyer_uid = v_uid
+                              OR (coalesce(v_email, '') <> '' AND lower(cs.buyer_email) = v_email))
+      OR (coalesce(v_email, '') <> '' AND lower(d.original_email) = v_email);
+  UPDATE public.exos_order_edits x SET changes = jsonb_build_object('erased', true)
+   WHERE x.session_id IN (SELECT cs.session_id FROM public.exos_checkout_sessions cs WHERE cs.buyer_uid = v_uid)
+      OR (coalesce(v_email, '') <> '' AND position(v_email IN lower(x.changes::text)) > 0);
+  UPDATE public.exos_checkout_sessions SET buyer_email = NULL WHERE buyer_uid = v_uid;$n$, 1);
