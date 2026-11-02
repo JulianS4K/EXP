@@ -299,9 +299,9 @@
    "category": "events",
    "method": "GET",
    "path": "/api/v2/confirms/{id}/cash_summary",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Box-office cash totals per event are in the dashboard report, not the API yet"
+   "status": "route",
+   "exos": "GET /v1/events/:id/cash-summary",
+   "reason": "Gross, fees, tax, refunds and net by payment method, with payouts; /confirms/:id/cash_summary and q[created_at_gt|lt] answer too"
   },
   {
    "category": "events",
@@ -1483,41 +1483,41 @@
    "category": "v3_budgets",
    "method": "GET",
    "path": "/api/v2/v3_deal_brackets",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+   "status": "route",
+   "exos": "GET /v1/deal-brackets",
+   "reason": "Brackets on an offer (Opendate: on its budget; ?budget_id filters the same way); /v3_deal_brackets answers too"
   },
   {
    "category": "v3_budgets",
    "method": "GET",
    "path": "/api/v2/v3_deal_brackets/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+   "status": "route",
+   "exos": "GET /v1/deal-brackets/:id",
+   "reason": "Same record; /v3_deal_brackets/:id answers too"
   },
   {
    "category": "v3_budgets",
    "method": "POST",
    "path": "/api/v2/v3_deal_brackets",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+   "status": "route",
+   "exos": "POST /v1/deal-brackets",
+   "reason": "A threshold (cents or paid tickets) and a percentage on a draft offer; Opendate widths, dollar_amount and cap_overflow_target are not modelled"
   },
   {
    "category": "v3_budgets",
    "method": "PATCH",
    "path": "/api/v2/v3_deal_brackets/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+   "status": "route",
+   "exos": "PATCH /v1/deal-brackets/:id",
+   "reason": "Draft offers only; a bracket never moves"
   },
   {
    "category": "v3_budgets",
    "method": "DELETE",
    "path": "/api/v2/v3_deal_brackets/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Tiered deal brackets are not built: a deal is one of four types (docs/offers-settlements.md)"
+   "status": "route",
+   "exos": "DELETE /v1/deal-brackets/:id",
+   "reason": "Answers the deleted bracket, as Opendate"
   },
   {
    "category": "v3_offer_pools",
@@ -2587,17 +2587,17 @@
    "category": "admin_reporting_rows",
    "method": "GET",
    "path": "/api/v2/admin/reporting_rows",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Order reporting rows (a flat export) are the dashboard CSV exports; no API route yet"
+   "status": "equivalent",
+   "exos": "GET /v1/reporting-rows",
+   "reason": "A flat feed of money lines (orders, refunds, POS, payouts, imported entries) with their ledger codes, for the key's org"
   },
   {
    "category": "admin_reporting_rows",
    "method": "GET",
    "path": "/api/v2/admin/reporting_rows/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "See reporting_rows"
+   "status": "equivalent",
+   "exos": "GET /v1/reporting-rows/:id",
+   "reason": "One line of that feed (Opendate: one order)"
   },
   {
    "category": "admin_order_financials",
@@ -3203,25 +3203,25 @@
    "category": "admin_imported_ledger_entries",
    "method": "GET",
    "path": "/api/v2/admin/imported_ledger_entries",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Importing accounting ledgers is not built"
+   "status": "equivalent",
+   "exos": "GET /v1/imported-ledger-entries",
+   "reason": "The key's org's entries, oldest posted first, with Opendate's q[...] filters"
   },
   {
    "category": "admin_imported_ledger_entries",
    "method": "POST",
    "path": "/api/v2/admin/imported_ledger_entries/bulk",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Importing accounting ledgers is not built"
+   "status": "equivalent",
+   "exos": "POST /v1/imported-ledger-entries/bulk",
+   "reason": "Up to 500 per call, deduped on source_system + source_line_id, per-row status; amounts in integer cents"
   },
   {
    "category": "admin_imported_ledger_entries",
    "method": "DELETE",
    "path": "/api/v2/admin/imported_ledger_entries/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Importing accounting ledgers is not built"
+   "status": "equivalent",
+   "exos": "DELETE /v1/imported-ledger-entries/:id",
+   "reason": "Its reporting rows go with it"
   },
   {
    "category": "admin_migrated_attendees",
@@ -3459,41 +3459,41 @@
    "category": "admin_general_ledger_codes",
    "method": "GET",
    "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+   "status": "equivalent",
+   "exos": "GET /v1/events/:id/gl-code-assignments",
+   "reason": "Per-event overrides by revenue type (not per tax / fee record), for the key's org"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "POST",
    "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/gl-code-assignments",
+   "reason": "Override a revenue type's code for one event, for the key's org"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "PATCH",
    "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+   "status": "equivalent",
+   "exos": "PATCH /v1/gl-code-assignments/:id",
+   "reason": "Repoint an override, for the key's org"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "DELETE",
    "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_assignments/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+   "status": "equivalent",
+   "exos": "DELETE /v1/gl-code-assignments/:id",
+   "reason": "Falls back to the org's code for the revenue type"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "POST",
    "path": "/api/v2/admin/confirms/{confirm_id}/general_ledger_code_backfills",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Per-event ledger-code overrides and backfills are not built: one code per category (docs/offers-settlements.md)"
+   "status": "equivalent",
+   "exos": "POST /v1/events/:id/gl-backfill",
+   "reason": "Rebuilds and re-tags the event's reporting rows; idempotent, returns counts"
   },
   {
    "category": "admin_general_ledger_codes",

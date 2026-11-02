@@ -17,6 +17,7 @@ import {
 import { PNL_COLUMNS, settle, settlementPdf, showPnl, showPnlCsv } from '../../lib/dealMath';
 import { downloadCsv } from '../../lib/csv';
 import { BTN, BTN_PRIMARY, centsFromInput, FLD, inputFromCents, LABEL, Money, Row, Section, StatusBadge } from './ui';
+import EventLedgerPanel from './EventLedgerPanel';
 
 interface Props {
   eventId: string;
@@ -165,7 +166,9 @@ export default function ShowFinancePanel({ eventId, orgId, orgName, canView, can
             <tbody>
               {pnl.rows.map((row) => (
                 <tr key={row.key} className={`border-t border-slate-100 ${row.section === 'result' ? 'font-bold' : ''}`}>
-                  <td className="py-1.5">{row.label}</td>
+                  <td className="py-1.5">{row.label}{row.imported && (
+                    <span className="ml-1 text-[10px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-50 text-amber-700"
+                      title="From imported ledger entries (another box office or POS), not Exos sales">imported</span>)}</td>
                   {PNL_COLUMNS.map((c) => <td key={c} className="py-1.5 text-right"><Money cents={row[c]} currency={cur} /></td>)}
                 </tr>
               ))}
@@ -175,6 +178,8 @@ export default function ShowFinancePanel({ eventId, orgId, orgName, canView, can
         </div>
         <p className="text-xs text-slate-400 mt-2">Forecast: the offer budget. Estimate: sales so far plus the current pace until the show. Actual: the settlement.</p>
       </Section>
+
+      <EventLedgerPanel eventId={eventId} orgId={orgId} canView={canView} />
 
       <TicketCounts eventId={eventId} canManage={canManage} />
     </>

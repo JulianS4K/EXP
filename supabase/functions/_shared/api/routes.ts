@@ -389,6 +389,56 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'public-get-order', method: 'GET', auth: P, path: '/public/orders/:id', scope: null, paged: false },
   { id: 'public-list-ticket-links', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs', scope: null, paged: false },
   { id: 'public-get-ticket-link', method: 'GET', auth: P, path: '/public/orders/:id/ticket_pdfs/:ticket', scope: null, paged: false },
+
+  // claude/exos-gap-finance: tiered deal brackets, ledger codes per revenue
+  // type with per-event overrides and backfills, imported ledger entries,
+  // reporting rows, the cash summary (mig 20261102120000,
+  // docs/api/finance-extras.json). Brackets are deal terms (booking:*).
+  { id: 'list-deal-brackets', method: 'GET', auth: K, path: '/deal-brackets', scope: 'booking:read', paged: true, aliases: ['/v3_deal_brackets'] },
+  { id: 'get-deal-bracket', method: 'GET', auth: K, path: '/deal-brackets/:id', scope: 'booking:read', paged: false, aliases: ['/v3_deal_brackets/:id'] },
+  { id: 'create-deal-bracket', method: 'POST', auth: K, path: '/deal-brackets', scope: 'booking:write', paged: false, aliases: ['/v3_deal_brackets'] },
+  { id: 'update-deal-bracket', method: 'PATCH', auth: K, path: '/deal-brackets/:id', scope: 'booking:write', paged: false, aliases: ['/v3_deal_brackets/:id'] },
+  { id: 'delete-deal-bracket', method: 'DELETE', auth: K, path: '/deal-brackets/:id', scope: 'booking:write', paged: false, aliases: ['/v3_deal_brackets/:id'] },
+  { id: 'list-gl-revenue-codes', method: 'GET', auth: K, path: '/gl-revenue-codes', scope: 'finance:read', paged: false },
+  { id: 'set-gl-revenue-code', method: 'PUT', auth: K, path: '/gl-revenue-codes/:type', scope: 'finance:write', paged: false },
+  {
+    id: 'list-gl-code-assignments', method: 'GET', auth: K, path: '/events/:id/gl-code-assignments', scope: 'finance:read', paged: false,
+    aliases: ['/confirms/:id/general_ledger_code_assignments'],
+  },
+  {
+    id: 'create-gl-code-assignment', method: 'POST', auth: K, path: '/events/:id/gl-code-assignments', scope: 'finance:write', paged: false,
+    aliases: ['/confirms/:id/general_ledger_code_assignments'],
+  },
+  {
+    id: 'update-gl-code-assignment', method: 'PATCH', auth: K, path: '/gl-code-assignments/:id', scope: 'finance:write', paged: false,
+    aliases: ['/confirms/:eid/general_ledger_code_assignments/:id'],
+  },
+  {
+    id: 'delete-gl-code-assignment', method: 'DELETE', auth: K, path: '/gl-code-assignments/:id', scope: 'finance:write', paged: false,
+    aliases: ['/confirms/:eid/general_ledger_code_assignments/:id'],
+  },
+  {
+    id: 'backfill-gl-codes', method: 'POST', auth: K, path: '/events/:id/gl-backfill', scope: 'finance:write', paged: false,
+    aliases: ['/confirms/:id/general_ledger_code_backfills'],
+  },
+  {
+    id: 'list-imported-ledger-entries', method: 'GET', auth: K, path: '/imported-ledger-entries', scope: 'finance:read', paged: true,
+    aliases: ['/imported_ledger_entries'],
+  },
+  {
+    id: 'import-ledger-entries', method: 'POST', auth: K, path: '/imported-ledger-entries/bulk', scope: 'finance:write', paged: false,
+    aliases: ['/imported_ledger_entries/bulk'],
+  },
+  {
+    id: 'delete-imported-ledger-entry', method: 'DELETE', auth: K, path: '/imported-ledger-entries/:id', scope: 'finance:write', paged: false,
+    aliases: ['/imported_ledger_entries/:id'],
+  },
+  { id: 'list-reporting-rows', method: 'GET', auth: K, path: '/reporting-rows', scope: 'finance:read', paged: true, aliases: ['/reporting_rows'] },
+  { id: 'get-reporting-row', method: 'GET', auth: K, path: '/reporting-rows/:id', scope: 'finance:read', paged: false, aliases: ['/reporting_rows/:id'] },
+  {
+    id: 'get-cash-summary', method: 'GET', auth: K, path: '/events/:id/cash-summary', scope: 'finance:read', paged: false,
+    aliases: ['/confirms/:id/cash_summary'],
+  },
 ];
 
 /** Methods the API answers (anything else is 405). */

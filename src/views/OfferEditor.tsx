@@ -19,6 +19,8 @@ import {
   formatCents, offerPdf, poolTermsFromJson, projectBudget, termsFromJson, type TermsJson,
 } from '../lib/dealMath';
 import TermsEditor from '../components/finance/TermsEditor';
+import BracketsEditor from '../components/finance/BracketsEditor';
+import { listBrackets, type BracketRow } from '../lib/financeExtrasApi';
 import { BTN, BTN_PRIMARY, centsFromInput, FLD, inputFromCents, LABEL, Money, Row, Section, StatusBadge } from '../components/finance/ui';
 
 export default function OfferEditor() {
@@ -35,6 +37,7 @@ export default function OfferEditor() {
   const [lineup, setLineup] = useState<OfferRow[]>([]);
   const [pool, setPool] = useState<PoolRow | null>(null);
   const [cats, setCats] = useState<CategoryRow[]>([]);
+  const [brackets, setBrackets] = useState<BracketRow[]>([]);
   const [link, setLink] = useState<string | null>(null);
   const [sendTo, setSendTo] = useState('');
   const [busy, setBusy] = useState(false);
@@ -59,6 +62,7 @@ export default function OfferEditor() {
         getBudget(o.budget_id), listBudgetLines(o.budget_id), listOffersForBudget(o.budget_id), getPool(o.budget_id), listCategories(orgId),
       ]);
       setBudget(b); setLines(ls); setLineup(lu); setPool(p); setCats(c);
+      setBrackets(await listBrackets(o.id));
       setLoadKey((k) => k + 1);
     } catch (e) {
       toast({ kind: 'error', message: (e as Error).message });
@@ -80,10 +84,14 @@ export default function OfferEditor() {
       capacity: budget.capacity, averagePrice: budget.average_price_cents, sellThroughPercent: budget.sell_through_percent,
       expenses: lines.filter((l) => l.kind === 'expense').map((l) => ({ amount: l.amount_cents, talent: catKey.get(l.category_id ?? '') === 'talent' })),
       income: lines.filter((l) => l.kind === 'income').map((l) => ({ amount: l.amount_cents, merch: catKey.get(l.category_id ?? '') === 'merch-income' })),
-      slots: acts.map((o) => ({ slotId: o.id, name: o.artist_name, terms: termsFromJson(o.terms), poolId: poolOn ? budget.id : null, poolShare: o.pool_share_percent })),
+      // This offer's brackets count in its projection (the other acts' are on their own pages).
+      slots: acts.map((o) => ({
+        slotId: o.id, name: o.artist_name, poolId: poolOn ? budget.id : null, poolShare: o.pool_share_percent,
+        terms: termsFromJson(o.terms, false, o.id === merged.id && brackets.length ? { basis: brackets[0].basis, tiers: brackets } : null),
+      })),
       pools: poolOn && pool ? [{ poolId: budget.id, terms: poolTermsFromJson(pool.terms) }] : [],
     });
-  }, [budget, lines, lineup, merged, pool, catKey]);
+  }, [budget, lines, lineup, merged, pool, catKey, brackets]);
 
   if (!offer || !merged) return <div className="p-8 text-sm text-slate-500">{offer === null ? 'Offer not found.' : 'Loading…'}</div>;
   const cur = offer.currency;
@@ -155,6 +163,9 @@ export default function OfferEditor() {
 
       <Section title="Terms">
         <TermsEditor key={`t${loadKey}`} terms={terms} disabled={!editable} onChange={(t: TermsJson) => setD({ terms: t })} />
+        <BracketsEditor key={`br${loadKey}`} offerId={offer.id} brackets={brackets} percentage={Number(terms.percentage ?? 0)}
+          dealType={String(terms.deal_type ?? 'flat')} currency={cur} canEdit={canEdit && status === 'draft'}
+          onChange={async () => setBrackets(await listBrackets(offer.id))} onError={(e) => toast({ kind: 'error', message: (e as Error).message })} />
         {pool?.mode === 'pool' && (
           <label className="block mt-3 max-w-xs"><span className={LABEL}>Share of the pool % (blank = equal part of the rest)</span>
             <input className={FLD} disabled={!editable} key={`p${loadKey}`} defaultValue={merged.pool_share_percent ?? ''}

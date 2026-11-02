@@ -1,0 +1,1511 @@
+{
+  "file": "finance-extras",
+  "name": "Deal brackets, ledger codes and reporting",
+  "order": 66,
+  "description": "Tiered deal brackets on offers (`booking:*`); ledger codes per revenue type with per-event overrides and backfills, imported ledger entries, the reporting-row feed and each event's cash summary (`finance:*`). Money is in integer cents.",
+  "endpoints": [
+    {
+      "id": "list-deal-brackets",
+      "method": "GET",
+      "path": "/v1/deal-brackets",
+      "summary": "List deal brackets",
+      "description": "Tiered deal terms on your offers, by offer and threshold. Opendate's /v3_deal_brackets answers here too (q[v3_budget_id_eq] filters by budget).",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "offer_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this offer's brackets.",
+          "example": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "budget_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only brackets of offers on this budget.",
+          "example": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+                "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+                "basis": "amount",
+                "threshold": 2000000,
+                "percentage": 90,
+                "created_at": "2026-11-02T15:04:05.120+00:00",
+                "updated_at": "2026-11-02T15:04:05.120+00:00",
+                "budget_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+                "offer_status": "draft"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "offer_id must be an id."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-deal-bracket",
+      "method": "GET",
+      "path": "/v1/deal-brackets/:id",
+      "summary": "Get a deal bracket",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The bracket.",
+          "example": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+              "basis": "amount",
+              "threshold": 2000000,
+              "percentage": 90,
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "budget_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+              "offer_status": "draft"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such deal bracket in your organization.",
+          "example": {
+            "error": "deal bracket not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-deal-bracket",
+      "method": "POST",
+      "path": "/v1/deal-brackets",
+      "summary": "Add a deal bracket to an offer",
+      "description": "Example: an offer at 85% with a bracket { threshold: 2000000, percentage: 90 } pays 85% of the first $20,000 and 90% of the rest. Brackets apply to versus, plus and door deals and change only while the offer is a draft (409 otherwise); the settlement computes the tiered amount. At most 20 per offer. A wrapped body ({ v3_deal_bracket: {...} }) is fine.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "offer_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "One of your offers (Opendate: v3_offer_id).",
+          "example": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "basis",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "What the thresholds count: amount (the cents the deal's percentage applies to: net after expenses for versus, net box office for door, the overage for plus) or tickets (paid tickets sold). Every bracket of an offer has the same basis. Opendate's gross_ticket_sales and ticket_count are accepted. Default amount.",
+          "example": "amount",
+          "enum": [
+            "amount",
+            "tickets"
+          ]
+        },
+        {
+          "name": "threshold",
+          "location": "body",
+          "type": "integer",
+          "required": true,
+          "description": "Where the bracket starts: cents (amount) or paid tickets (tickets). Below the lowest threshold the offer's own percentage applies; thresholds are unique per offer, so brackets never overlap.",
+          "example": 2000000
+        },
+        {
+          "name": "percentage",
+          "location": "body",
+          "type": "number",
+          "required": true,
+          "description": "The percentage from the threshold up, 0-100 with at most 3 decimals (Opendate: upside_percentage).",
+          "example": 90
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+              "basis": "amount",
+              "threshold": 2000000,
+              "percentage": 90,
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "budget_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+              "offer_status": "draft"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "threshold is required: the cents (amount) or paid tickets (tickets) from which the percentage applies."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such offer in your organization.",
+          "example": {
+            "error": "offer not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The offer is not a draft, or the offer already has 20 brackets.",
+          "example": {
+            "error": "brackets change only on a draft offer (edit its terms to take a sent offer back to draft)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+        "basis": "amount",
+        "threshold": 2000000,
+        "percentage": 90
+      }
+    },
+    {
+      "id": "update-deal-bracket",
+      "method": "PATCH",
+      "path": "/v1/deal-brackets/:id",
+      "summary": "Change a deal bracket",
+      "description": "basis, threshold and percentage; a bracket never moves to another offer. Draft offers only.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The bracket.",
+          "example": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e"
+        },
+        {
+          "name": "basis",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "What the thresholds count: amount (the cents the deal's percentage applies to: net after expenses for versus, net box office for door, the overage for plus) or tickets (paid tickets sold). Every bracket of an offer has the same basis. Opendate's gross_ticket_sales and ticket_count are accepted. Default amount.",
+          "example": "amount",
+          "enum": [
+            "amount",
+            "tickets"
+          ]
+        },
+        {
+          "name": "threshold",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Where the bracket starts: cents (amount) or paid tickets (tickets). Below the lowest threshold the offer's own percentage applies; thresholds are unique per offer, so brackets never overlap.",
+          "example": 2000000
+        },
+        {
+          "name": "percentage",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "The percentage from the threshold up, 0-100 with at most 3 decimals (Opendate: upside_percentage).",
+          "example": 90
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+              "basis": "amount",
+              "threshold": 2000000,
+              "percentage": 92.5,
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "budget_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+              "offer_status": "draft"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "two brackets start at 2000000: thresholds must be strictly increasing"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such deal bracket in your organization.",
+          "example": {
+            "error": "deal bracket not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "percentage": 92.5
+      }
+    },
+    {
+      "id": "delete-deal-bracket",
+      "method": "DELETE",
+      "path": "/v1/deal-brackets/:id",
+      "summary": "Delete a deal bracket",
+      "description": "Answers the deleted bracket. Draft offers only.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The bracket.",
+          "example": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "offer_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+              "basis": "amount",
+              "threshold": 2000000,
+              "percentage": 90,
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "budget_id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+              "offer_status": "draft",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such deal bracket in your organization.",
+          "example": {
+            "error": "deal bracket not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-gl-revenue-codes",
+      "method": "GET",
+      "path": "/v1/gl-revenue-codes",
+      "summary": "List ledger codes per revenue type",
+      "description": "Every revenue type with the ledger code it posts to across your organization (null when uncoded). A show's override wins over these.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "revenue_type": "tickets",
+                "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "gl_code": "4000",
+                "gl_code_name": "Ticket sales"
+              },
+              {
+                "revenue_type": "fees",
+                "gl_code_id": null,
+                "gl_code": null,
+                "gl_code_name": null
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-gl-revenue-code",
+      "method": "PUT",
+      "path": "/v1/gl-revenue-codes/:type",
+      "summary": "Set the ledger code of a revenue type",
+      "description": "Run a backfill on a show to re-tag its existing reporting rows.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "type",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The revenue type.",
+          "example": "tickets",
+          "enum": [
+            "tickets",
+            "fees",
+            "tax",
+            "donations",
+            "refunds",
+            "platform_fees",
+            "pos",
+            "payouts",
+            "box_office",
+            "bar",
+            "merchandise",
+            "membership",
+            "delivery",
+            "ticket_insurance",
+            "gift_cards",
+            "other"
+          ]
+        },
+        {
+          "name": "gl_code_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": true,
+          "description": "One of your ledger codes, or null to clear it.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "revenue_type": "tickets",
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "gl_code_id must be one of your ledger codes, or null to clear it."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ledger code in your organization.",
+          "example": {
+            "error": "ledger code not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    {
+      "id": "list-gl-code-assignments",
+      "method": "GET",
+      "path": "/v1/events/:id/gl-code-assignments",
+      "summary": "List an event's ledger-code overrides",
+      "description": "Per-event overrides of the revenue-type codes. Opendate's /confirms/:id/general_ledger_code_assignments answers here too.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "revenue_type": "tickets",
+                "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "created_at": "2026-11-02T15:04:05.120+00:00",
+                "updated_at": "2026-11-02T15:04:05.120+00:00",
+                "gl_code": "4010",
+                "gl_code_name": "Ticket sales - festival"
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-gl-code-assignment",
+      "method": "POST",
+      "path": "/v1/events/:id/gl-code-assignments",
+      "summary": "Override a ledger code for one event",
+      "description": "One override per revenue type and event. Then run a backfill to re-tag the event's rows.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "revenue_type",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The revenue type to override.",
+          "example": "tickets",
+          "enum": [
+            "tickets",
+            "fees",
+            "tax",
+            "donations",
+            "refunds",
+            "platform_fees",
+            "pos",
+            "payouts",
+            "box_office",
+            "bar",
+            "merchandise",
+            "membership",
+            "delivery",
+            "ticket_insurance",
+            "gift_cards",
+            "other"
+          ]
+        },
+        {
+          "name": "gl_code_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "One of your ledger codes (Opendate: general_ledger_code_id).",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "revenue_type": "tickets",
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "gl_code": "4010",
+              "gl_code_name": "Ticket sales - festival"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "revenue_type must be one of tickets, fees, tax, ..."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The event already overrides this revenue type.",
+          "example": {
+            "error": "duplicate key value violates unique constraint"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "revenue_type": "tickets",
+        "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    {
+      "id": "update-gl-code-assignment",
+      "method": "PATCH",
+      "path": "/v1/gl-code-assignments/:id",
+      "summary": "Repoint an event's ledger-code override",
+      "description": "Only the code changes; delete the override to change its revenue type.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The override.",
+          "example": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f"
+        },
+        {
+          "name": "gl_code_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "One of your ledger codes.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "revenue_type": "tickets",
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "created_at": "2026-11-02T15:04:05.120+00:00",
+              "updated_at": "2026-11-02T15:04:05.120+00:00",
+              "gl_code": "4010",
+              "gl_code_name": "Ticket sales - festival"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such override in your organization.",
+          "example": {
+            "error": "override not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    {
+      "id": "delete-gl-code-assignment",
+      "method": "DELETE",
+      "path": "/v1/gl-code-assignments/:id",
+      "summary": "Remove an event's ledger-code override",
+      "description": "The revenue type falls back to your organization's code for it.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The override.",
+          "example": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such override in your organization.",
+          "example": {
+            "error": "override not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "backfill-gl-codes",
+      "method": "POST",
+      "path": "/v1/events/:id/gl-backfill",
+      "summary": "Rebuild and re-tag an event's reporting rows",
+      "description": "Builds the event's reporting rows from its orders, refunds, POS sales and payouts and stamps every row (imported ones included) with the code in force: the event's override, else your code for the revenue type. It never changes money; it decides which account each amount posts to. Safe to re-run: a second run reports 0 created, 0 retagged, 0 removed. Opendate's /confirms/:id/general_ledger_code_backfills answers here too.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "created": 8,
+              "retagged": 0,
+              "removed": 0,
+              "rows": 11,
+              "backfilled_at": "2026-11-02T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-imported-ledger-entries",
+      "method": "GET",
+      "path": "/v1/imported-ledger-entries",
+      "summary": "List imported ledger entries",
+      "description": "Accounting lines imported from outside Exos, oldest posted first.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's entries.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "source",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this source (q[source_eq]).",
+          "example": "bar",
+          "enum": [
+            "box_office",
+            "bar",
+            "merchandise",
+            "donations",
+            "membership",
+            "delivery",
+            "ticket_insurance",
+            "gift_cards",
+            "other"
+          ]
+        },
+        {
+          "name": "source_system",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this system (q[source_system_eq]).",
+          "example": "square"
+        },
+        {
+          "name": "import_run_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this run (q[import_run_id_eq]).",
+          "example": "square-2026-11"
+        },
+        {
+          "name": "source_line_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "One line (q[source_line_id_eq]).",
+          "example": "sq:1"
+        },
+        {
+          "name": "gl_code",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this code (q[general_ledger_code_eq]).",
+          "example": "4100"
+        },
+        {
+          "name": "posted_from",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Posted at or after (q[posted_at_gteq]).",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "posted_to",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Posted before (q[posted_at_lt]).",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "source": "bar",
+                "description": "Bar night",
+                "amount_cents": 50000,
+                "tax_amount_cents": 4000,
+                "currency": "USD",
+                "gl_code": "4100",
+                "tax_gl_code": "2200",
+                "tax_name": "Sales tax",
+                "posted_at": "2026-11-01T22:00:00+00:00",
+                "source_system": "square",
+                "source_line_id": "sq:1",
+                "source_order_id": "SQ-1001",
+                "import_run_id": "square-2026-11",
+                "created_via": "api",
+                "created_at": "2026-11-02T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "import-ledger-entries",
+      "method": "POST",
+      "path": "/v1/imported-ledger-entries/bulk",
+      "summary": "Import ledger entries",
+      "description": "1 to 500 entries; each is applied on its own and reported as created, exists or error. A line is identified by source_system + source_line_id: sending it again with the same values is `exists` and writes nothing, so a batch can be re-sent; the same line with other values is an error naming the stored entry (delete it first). Amounts are signed integer cents (a cost or a gift-card spend is negative). Entries on an event count in its settlement and profit and loss under Imported lines, and become reporting rows at once (imported: true).",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "entries",
+          "location": "body",
+          "type": "array",
+          "required": true,
+          "description": "1-500 of { event_id?, source, description?, amount_cents, tax_amount_cents?, currency?, gl_code?, tax_gl_code?, tax_name?, posted_at, source_system, source_line_id, source_order_id?, import_run_id? }. Opendate's imported_ledger_entries key is accepted.",
+          "example": [
+            {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "source": "bar",
+              "description": "Bar night",
+              "amount_cents": 50000,
+              "tax_amount_cents": 4000,
+              "gl_code": "4100",
+              "posted_at": "2026-11-01T22:00:00Z",
+              "source_system": "square",
+              "source_line_id": "sq:1"
+            }
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Imported (see each row's status).",
+          "example": {
+            "data": {
+              "created": 1,
+              "exists": 1,
+              "errors": 1,
+              "results": [
+                {
+                  "index": 1,
+                  "status": "created",
+                  "id": "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+                },
+                {
+                  "index": 2,
+                  "status": "exists",
+                  "id": "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
+                },
+                {
+                  "index": 3,
+                  "status": "error",
+                  "error": "amount_cents must be a whole number of cents"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "At most 500 entries per import."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "entries": [
+          {
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "source": "bar",
+            "description": "Bar night",
+            "amount_cents": 50000,
+            "tax_amount_cents": 4000,
+            "gl_code": "4100",
+            "posted_at": "2026-11-01T22:00:00Z",
+            "source_system": "square",
+            "source_line_id": "sq:1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "delete-imported-ledger-entry",
+      "method": "DELETE",
+      "path": "/v1/imported-ledger-entries/:id",
+      "summary": "Delete an imported ledger entry",
+      "description": "Its reporting rows go with it, and the settlement and P&L stop counting it (a finalized settlement keeps its snapshot).",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The entry.",
+          "example": "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ledger entry in your organization.",
+          "example": {
+            "error": "ledger entry not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-reporting-rows",
+      "method": "GET",
+      "path": "/v1/reporting-rows",
+      "summary": "List reporting rows",
+      "description": "A flat feed of money lines (order lines, refunds, POS sales, payouts and imported entries) with the ledger code each posts to, oldest first, for an accounting export. Exos lines appear once an event is backfilled; imported lines at once. Amounts are signed cents; payout rows are money moved, not revenue.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event (q[confirm_id_eq]).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "source_type",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this kind of source.",
+          "example": "order",
+          "enum": [
+            "order",
+            "refund",
+            "pos",
+            "payout",
+            "imported"
+          ]
+        },
+        {
+          "name": "revenue_type",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this revenue type.",
+          "example": "tickets",
+          "enum": [
+            "tickets",
+            "fees",
+            "tax",
+            "donations",
+            "refunds",
+            "platform_fees",
+            "pos",
+            "payouts",
+            "box_office",
+            "bar",
+            "merchandise",
+            "membership",
+            "delivery",
+            "ticket_insurance",
+            "gift_cards",
+            "other"
+          ]
+        },
+        {
+          "name": "imported",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "true: only imported lines; false: only Exos lines.",
+          "example": "false",
+          "enum": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "gl_code",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only lines posting to this code.",
+          "example": "4010"
+        },
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "At or after.",
+          "example": "2026-10-01"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Before.",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "source_type": "order",
+                "source_id": "cs_test_a1B2c3",
+                "revenue_type": "tickets",
+                "occurred_at": "2026-10-20T18:00:00+00:00",
+                "currency": "USD",
+                "amount_cents": 8900,
+                "payment_method": "card",
+                "description": "Order cs_test_a1B2c3",
+                "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "gl_code": "4010",
+                "imported": false,
+                "tagged_at": "2026-11-02T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "revenue_type must be one of tickets, fees, ..."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-reporting-row",
+      "method": "GET",
+      "path": "/v1/reporting-rows/:id",
+      "summary": "Get a reporting row",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The row.",
+          "example": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "source_type": "order",
+              "source_id": "cs_test_a1B2c3",
+              "revenue_type": "tickets",
+              "occurred_at": "2026-10-20T18:00:00+00:00",
+              "currency": "USD",
+              "amount_cents": 8900,
+              "payment_method": "card",
+              "description": "Order cs_test_a1B2c3",
+              "gl_code_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "gl_code": "4010",
+              "imported": false,
+              "tagged_at": "2026-11-02T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such reporting row in your organization.",
+          "example": {
+            "error": "reporting row not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-cash-summary",
+      "method": "GET",
+      "path": "/v1/events/:id/cash-summary",
+      "summary": "Get an event's cash summary",
+      "description": "Gross, fees, tax, refunds and net for one event, split by payment method (card, cashapp, paypal, venmo, gift_card, cash, pos_card, comp), with comps and payouts. Online orders and POS sales at the show both count. net = gross - tax - refunds - platform fees. Read-only. Opendate's /confirms/:id/cash_summary answers here too.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Only orders and payments at or after (q[created_at_gt]).",
+          "example": "2026-10-01T00:00:00Z"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Only before (q[created_at_lt]).",
+          "example": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "currency": "USD",
+              "from": null,
+              "to": null,
+              "orders": 2,
+              "gross_cents": 14000,
+              "fees": {
+                "buyer_fees_cents": 300,
+                "absorbed_fees_cents": 0,
+                "platform_fees_cents": 700,
+                "processor_fees_cents": 0
+              },
+              "fees_cents": 700,
+              "tax_cents": 800,
+              "refunds_cents": 2000,
+              "net_cents": 10500,
+              "online": {
+                "gross_cents": 14000,
+                "tax_cents": 800,
+                "refunds_cents": 2000
+              },
+              "pos": {
+                "gross_cents": 0,
+                "tax_cents": 0,
+                "refunds_cents": 0,
+                "tips_cents": 0
+              },
+              "by_payment_method": [
+                {
+                  "method": "card",
+                  "orders": 1,
+                  "gross_cents": 10000,
+                  "refunds_cents": 2000,
+                  "net_cents": 8000
+                },
+                {
+                  "method": "venmo",
+                  "orders": 1,
+                  "gross_cents": 4000,
+                  "refunds_cents": 0,
+                  "net_cents": 4000
+                }
+              ],
+              "comps": {
+                "tickets": 1,
+                "pos_cents": 0
+              },
+              "payouts": {
+                "stripe_transferred_cents": 9500,
+                "stripe_pending_cents": 0,
+                "paypal_owed_cents": 3800,
+                "paypal_held_cents": 0
+              },
+              "computed_at": "2026-11-02T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "The body or a parameter is not valid.",
+          "example": {
+            "error": "from must be before to."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    }
+  ]
+}
