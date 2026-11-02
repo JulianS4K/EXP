@@ -28,7 +28,7 @@ import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
   checkInstantRequest, instantAvailable, instantEnabled, instantFeeCents, instantFeeConfig, maxInstantPayout,
 } from "../_shared/payouts/instant.ts";
-import { stripeErrorText } from "../_shared/payouts/promoterTransfers.ts";
+import { STRIPE_MAX_RETRIES, STRIPE_TIMEOUT_MS, stripeErrorText, timedFetch } from "../_shared/payouts/promoterTransfers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -58,14 +58,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const orgId = String(body.org_id ?? "");
   if (!UUID.test(orgId)) return json({ error: "org_id is required" }, 400);
 
-  const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!);
+  const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!, { global: { fetch: timedFetch() } });
   const { data: mem } = await sb.from("exos_org_memberships").select("role, disabled").eq("org_id", orgId).eq("user_id", user.id).maybeSingle();
   if (!mem || mem.disabled || mem.role !== "owner") return json({ error: "forbidden: org owner only" }, 403);
   const { data: sec } = await sb.from("exos_org_secrets").select("payments").eq("org_id", orgId).maybeSingle();
   const acct = (sec?.payments as { connectedAccountId?: string } | null)?.connectedAccountId;
   if (!acct) return json({ enabled: true, eligible: false, reason: "Connect Stripe first (Settings, Payments)." });
 
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  // Bounded calls (same constants as exos-promoter-payouts).
+  const stripe = new Stripe(stripeKey, {
+    httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20",
+    timeout: STRIPE_TIMEOUT_MS, maxNetworkRetries: STRIPE_MAX_RETRIES,
+  });
   try {
     const balance = await stripe.balance.retrieve({ stripeAccount: acct });
     const available = instantAvailable(balance as unknown as { instant_available?: Array<{ amount?: number; currency?: string }> });
