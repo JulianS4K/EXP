@@ -92,6 +92,9 @@ const OrgMemberships = lazy(() => import('./views/OrgMemberships'));
 const OrgGiving = lazy(() => import('./views/OrgGiving'));
 const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
+const OrgTemplates = lazy(() => import('./views/OrgTemplates'));
+const OrgInbound = lazy(() => import('./views/OrgInbound'));
+const BookingRequest = lazy(() => import('./views/BookingRequest'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const MyGroups = lazy(() => import('./views/MyGroups'));
 const GroupChat = lazy(() => import('./views/GroupChat'));
@@ -187,6 +190,7 @@ export default function App() {
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />
                     <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />
                     <Route path="/signup/confirm" element={<SignupConfirm mode="confirm" />} />
+                    <Route path="/book/:orgSlug" element={<BookingRequest />} />
                     <Route path="/signup/unsubscribe" element={<SignupConfirm mode="unsubscribe" />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
@@ -240,6 +244,8 @@ export default function App() {
                     <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
                     <Route path="/orgs/:orgId/memberships" element={<OrgMemberships />} />
                     <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />
+                    <Route path="/orgs/:orgId/templates" element={<OrgTemplates />} />
+                    <Route path="/orgs/:orgId/booking-requests" element={<OrgInbound />} />
                     <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
                     <Route path="/groups" element={<MyGroups />} />
                     <Route path="/groups/:groupId" element={<GroupChat />} />

@@ -159,7 +159,10 @@ BEGIN
        'exos_promoter_remove_guest', 'exos_promoter_set_guest_access_needs', 'exos_promoter_set_socials',
        -- signup forms (mig 20261031120000): an active form's public text, and
        -- the 64-hex confirm / unsubscribe tokens; none returns fan data
-       'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe');
+       'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',
+       -- inbound booking requests (mig 20261102130000): an org's form text
+       -- when it is on, and the rate-limited, honeypotted, 16 KB-capped submit
+       'exos_inbound_form_public', 'exos_inbound_submit');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

@@ -1923,33 +1923,33 @@
    "category": "inbound_submissions",
    "method": "POST",
    "path": "/api/v2/inbound_submissions",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+   "status": "route",
+   "exos": "POST /v1/inbound-submissions",
+   "reason": "Same resource, Exos spelling (/v1/inbound_submissions answers too). Opendate's AppId-only public create is the org's public form (exos_inbound_submit, rate limited); over the API it takes a booking:write key"
   },
   {
    "category": "inbound_submissions",
    "method": "GET",
    "path": "/api/v2/inbound_submissions",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+   "status": "route",
+   "exos": "GET /v1/inbound-submissions",
+   "reason": "Same resource, Exos spelling (/v1/inbound_submissions answers too)"
   },
   {
    "category": "inbound_submissions",
    "method": "GET",
    "path": "/api/v2/inbound_submissions/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+   "status": "route",
+   "exos": "GET /v1/inbound-submissions/:id",
+   "reason": "Same resource, Exos spelling (/v1/inbound_submissions answers too)"
   },
   {
    "category": "inbound_submissions",
    "method": "DELETE",
    "path": "/api/v2/inbound_submissions/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Inbound booking submissions (an artist's request form) aren't built; holds are created by staff"
+   "status": "route",
+   "exos": "DELETE /v1/inbound-submissions/:id",
+   "reason": "Same resource, Exos spelling (/v1/inbound_submissions answers too)"
   },
   {
    "category": "eventbrite_events",
@@ -2299,9 +2299,9 @@
    "category": "admin_events",
    "method": "DELETE",
    "path": "/api/v2/admin/confirms/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API"
+   "status": "equivalent",
+   "exos": "DELETE /v1/events/:id",
+   "reason": "Per organization, with the key's org. Only drafts that never sold; anything with orders or tickets answers 409 and is cancelled instead"
   },
   {
    "category": "admin_events",
@@ -3539,17 +3539,17 @@
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/event_templates",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Event templates are not built (events are copied)"
+   "status": "equivalent",
+   "exos": "GET /v1/event-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/event_templates/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Event templates are not built"
+   "status": "equivalent",
+   "exos": "GET /v1/event-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
@@ -3603,49 +3603,49 @@
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/note_templates",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Note templates are not built"
+   "status": "equivalent",
+   "exos": "GET /v1/note-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/note_templates/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Note templates are not built"
+   "status": "equivalent",
+   "exos": "GET /v1/note-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Rental invoices are not built"
+   "status": "equivalent",
+   "exos": "GET /v1/rental-invoice-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Rental invoices are not built"
+   "status": "equivalent",
+   "exos": "GET /v1/rental-invoice-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "POST",
    "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Rental invoices are not built"
+   "status": "equivalent",
+   "exos": "POST /v1/rental-invoice-templates",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   },
   {
    "category": "admin_template_inventory",
    "method": "PATCH",
    "path": "/api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}",
-   "status": "planned",
-   "exos": "n/a",
-   "reason": "Rental invoices are not built"
+   "status": "equivalent",
+   "exos": "PATCH /v1/rental-invoice-templates/:id",
+   "reason": "Opendate's back office reads across teams; Exos answers per organization, with the key's org"
   }
  ]
 }

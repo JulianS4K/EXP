@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 149 | 32.7% |
-| equivalent | 227 | 49.9% |
-| **covered (route + equivalent)** | **376** | **82.6%** |
+| route | 153 | 33.6% |
+| equivalent | 236 | 51.9% |
+| **covered (route + equivalent)** | **389** | **85.5%** |
 | not_applicable | 58 | 12.7% |
-| planned | 21 | 4.6% |
+| planned | 8 | 1.8% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **72** of the 303 rows in the route table
+Exos routes beyond Opendate: **91** of the 335 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -86,7 +86,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | calendar_event_contacts | 2 | 2 | 0 | 0 | 0 |
 | food_and_beverage_items | 4 | 3 | 1 | 0 | 0 |
 | manual_ticket_counts | 5 | 5 | 0 | 0 | 0 |
-| inbound_submissions | 4 | 0 | 0 | 0 | 4 |
+| inbound_submissions | 4 | 4 | 0 | 0 | 0 |
 | eventbrite_events | 1 | 1 | 0 | 0 | 0 |
 | public_events | 2 | 2 | 0 | 0 | 0 |
 | public_website_event_series | 2 | 0 | 2 | 0 | 0 |
@@ -105,7 +105,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 
 | Category | Endpoints | route | equivalent | not_applicable | planned |
 |---|---:|---:|---:|---:|---:|
-| admin_events | 6 | 0 | 5 | 0 | 1 |
+| admin_events | 6 | 0 | 6 | 0 | 0 |
 | admin_orders | 2 | 0 | 2 | 0 | 0 |
 | admin_tickets | 2 | 0 | 2 | 0 | 0 |
 | admin_ticket_types | 5 | 0 | 5 | 0 | 0 |
@@ -148,7 +148,7 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | admin_offer_source_creation | 1 | 0 | 0 | 1 | 0 |
 | admin_prisms | 5 | 0 | 0 | 5 | 0 |
 | admin_general_ledger_codes | 15 | 0 | 14 | 1 | 0 |
-| admin_template_inventory | 14 | 0 | 6 | 0 | 8 |
+| admin_template_inventory | 14 | 0 | 14 | 0 | 0 |
 
 ## Planned
 
@@ -162,16 +162,3 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | orders | `POST /api/v2/confirms/{confirm_id}/orders/{id}/check_out` | Check out per ticket (POST /v1/tickets/:id/check-out); no whole-order check-out route yet |
 | guest_lists | `POST /api/v2/confirms/{confirm_id}/guest_list_preview` | Pasted-names preview is client-side in the dashboard |
 | fans | `GET /api/v2/confirms/{confirm_id}/fans/recommendations` | No recommendation model yet (docs/fans.md) |
-| inbound_submissions | `POST /api/v2/inbound_submissions` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
-| inbound_submissions | `GET /api/v2/inbound_submissions` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
-| inbound_submissions | `GET /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
-| inbound_submissions | `DELETE /api/v2/inbound_submissions/{id}` | Inbound booking submissions (an artist's request form) aren't built; holds are created by staff |
-| admin_events | `DELETE /api/v2/admin/confirms/{id}` | Events are cancelled or unpublished (POST /v1/events/:id/unpublish), not deleted over the API |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/event_templates` | Event templates are not built (events are copied) |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/event_templates/{id}` | Event templates are not built |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/note_templates` | Note templates are not built |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/note_templates/{id}` | Note templates are not built |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/rental_invoice_templates` | Rental invoices are not built |
-| admin_template_inventory | `GET /api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}` | Rental invoices are not built |
-| admin_template_inventory | `POST /api/v2/admin/teams/{team_id}/rental_invoice_templates` | Rental invoices are not built |
-| admin_template_inventory | `PATCH /api/v2/admin/teams/{team_id}/rental_invoice_templates/{id}` | Rental invoices are not built |

@@ -138,6 +138,7 @@ import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
 import { handleFinanceExtras } from "./financeExtras.ts";
+import { handleTemplates, type TemplateDeps } from "./templates.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
 import { GIVING_ROUTES, handleGiving } from "./giving.ts";
@@ -1781,8 +1782,20 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
   // Brackets, ledger codes, imports, reporting rows, cash summary (./financeExtras.ts).
   const extra = await handleFinanceExtras(route.id, c, FIN_DEPS);
   if (extra !== undefined) return extra;
+  // Templates, rental invoices, inbound submissions, event delete (./templates.ts).
+  const tpl = await handleTemplates(route.id, c, TEMPLATE_DEPS);
+  if (tpl !== undefined) return tpl;
   throw new ApiError(404, "not found");
 }
+
+const TEMPLATE_DEPS: TemplateDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  forbidden: (msg) => new ApiError(403, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
 
 const FIN_DEPS: FinDeps = {
   notFound: (what) => new ApiError(404, `${what} not found`),
