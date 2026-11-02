@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart, FileText, Inbox } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
@@ -146,6 +146,16 @@ export default function OrganizerDashboard() {
                 {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
                   <Link to={`/orgs/${activeOrg.id}/calendar`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Calendar className="w-4 h-4" /><span>Booking calendar</span>
+                  </Link>
+                )}
+                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/templates`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <FileText className="w-4 h-4" /><span>Templates</span>
+                  </Link>
+                )}
+                {(isAdmin || ['owner', 'manager', 'content'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/booking-requests`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Inbox className="w-4 h-4" /><span>Booking requests</span>
                   </Link>
                 )}
                 {canSeeMoney(activeRole, isAdmin) && (

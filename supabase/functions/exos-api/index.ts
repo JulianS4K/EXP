@@ -137,6 +137,7 @@ import {
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
+import { handleTemplates, type TemplateDeps } from "./templates.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
@@ -1747,8 +1748,20 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
   // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
   const fin = await handleFinance(route.id, c, FIN_DEPS);
   if (fin !== undefined) return fin;
+  // Templates, rental invoices, inbound submissions, event delete (./templates.ts).
+  const tpl = await handleTemplates(route.id, c, TEMPLATE_DEPS);
+  if (tpl !== undefined) return tpl;
   throw new ApiError(404, "not found");
 }
+
+const TEMPLATE_DEPS: TemplateDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  forbidden: (msg) => new ApiError(403, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
 
 const FIN_DEPS: FinDeps = {
   notFound: (what) => new ApiError(404, `${what} not found`),

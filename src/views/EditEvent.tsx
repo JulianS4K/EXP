@@ -28,6 +28,7 @@ import TierDistributionPanel from '../components/TierDistributionPanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
+import EventTemplateActions from '../components/EventTemplateActions';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import CurrencySelect from '../components/CurrencySelect';
@@ -1970,6 +1971,10 @@ export default function EditEvent() {
               Cancel this event
             </button>
           </section>
+        )}
+        {/* Save as template / delete a draft that never sold (mig 20261102130000). */}
+        {eventId && (isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')) && (
+          <EventTemplateActions eventId={eventId} status={String(eventData.status ?? '')} ticketsSold={Number(eventData.ticketsSold || 0)} />
         )}
       </form>
 
