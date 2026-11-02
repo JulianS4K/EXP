@@ -43,6 +43,7 @@ import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
+import PhoneRsvpLink from '../components/PhoneRsvpLink';
 import SaveEventButton from '../components/SaveEventButton';
 import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
@@ -1456,6 +1457,11 @@ export default function EventDetails() {
                       </a>
                     )}
                   </div>
+                )}
+
+                {/* Phone-number RSVP, when the organizer turned it on (mig 20261102150000). */}
+                {!elsewhere && (
+                  <PhoneRsvpLink eventId={event.id} hasFreeTier={(event.ticketTiers ?? []).some((t) => Number(t.price) === 0)} />
                 )}
 
                 {soldOut && !canBypass && !elsewhere && (

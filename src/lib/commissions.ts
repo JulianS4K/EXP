@@ -148,3 +148,71 @@ export function formatDateOnly(iso: string): string {
   if (!m) return iso || '';
   return `${MONTHS[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}, ${m[1]}`;
 }
+
+// --- Step terms + settling (mig 20261102150000) ------------------------------
+
+/** One step on top of the base terms: after `after` tickets at an event, `rateBps` / `flatCents`. */
+export interface StepTerms { after: number; rateBps: number; flatCents: number }
+
+export interface TieredTerms extends CommissionTerms { step?: StepTerms | null }
+
+/**
+ * The terms for the n-th (1-based) non-reversed ticket of a promoter at an
+ * event. Mirrors public._exos_pc_terms: the step applies once n > after.
+ */
+export function termsForOrdinal(t: TieredTerms, ordinal: number): CommissionTerms & { stepped: boolean } {
+  const n = Math.max(int(ordinal), 1);
+  if (t.step && int(t.step.after) >= 1 && n > int(t.step.after)) {
+    return { rateBps: t.step.rateBps, flatCents: t.step.flatCents, stepped: true };
+  }
+  return { rateBps: t.rateBps, flatCents: t.flatCents, stepped: false };
+}
+
+/** What `count` tickets at one event earn in total at a flat base each (pricing preview). */
+export function tieredTotalCents(t: TieredTerms, baseCents: number, count: number, alreadySold = 0): number {
+  let sum = 0;
+  for (let i = 1; i <= Math.max(int(count), 0); i++) {
+    const x = termsForOrdinal(t, int(alreadySold) + i);
+    sum += commissionCents(baseCents, x.rateBps, x.flatCents);
+  }
+  return sum;
+}
+
+/** The step from the RPC's columns, or null. */
+export function stepFrom(after: number | null | undefined, rateBps: number | null | undefined, flatCents: number | null | undefined): StepTerms | null {
+  if (after === null || after === undefined || int(after) < 1) return null;
+  return { after: int(after), rateBps: int(rateBps ?? 0), flatCents: int(flatCents ?? 0) };
+}
+
+/** "10%, then 15% after 20 tickets" (per event). */
+export function tieredLabel(t: TieredTerms, fmt?: (cents: number) => string): string {
+  const base = termsLabel(t, fmt);
+  if (!t.step) return base;
+  return `${base}, then ${termsLabel(t.step, fmt)} after ${t.step.after} ticket${t.step.after === 1 ? '' : 's'}`;
+}
+
+/** A fresh idempotency key for one settle (kept across retries of the same click). */
+export function newSettleKey(rand: () => string = () => globalThis.crypto.randomUUID()): string {
+  return `settle-${rand().replace(/[^A-Za-z0-9_-]/g, '')}`.slice(0, 80);
+}
+
+export type TransferStatus = 'pending' | 'sending' | 'sent' | 'dry_run' | 'failed' | 'cancelled';
+
+/** How a payout reads to the organizer. */
+export function payoutStatusLabel(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): string {
+  if (via === 'manual') return 'Recorded';
+  switch (status) {
+    case 'sent': return 'Sent by Stripe';
+    case 'pending': return 'Ready to send';
+    case 'sending': return 'Sending…';
+    case 'dry_run': return 'Dry run (nothing sent)';
+    case 'failed': return 'Failed';
+    case 'cancelled': return 'Cancelled';
+    default: return 'Unknown';
+  }
+}
+
+/** A Stripe payout the organizer can still send or cancel. */
+export function canSendOrCancel(via: 'manual' | 'stripe', status: TransferStatus | null | undefined): boolean {
+  return via === 'stripe' && (status === 'pending' || status === 'dry_run' || status === 'failed');
+}

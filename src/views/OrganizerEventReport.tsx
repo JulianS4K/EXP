@@ -21,6 +21,8 @@ import { useToast } from '../context/ToastContext';
 import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
 import DoorSummaryPanel from '../components/DoorSummaryPanel';
+import MoneySoFarPanel from '../components/MoneySoFarPanel';
+import PhoneRsvpPanel from '../components/PhoneRsvpPanel';
 import DoorImport from '../components/DoorImport';
 import EventbriteSync from '../components/EventbriteSync';
 import WaitlistPanel from '../components/WaitlistPanel';
@@ -327,7 +329,14 @@ export default function OrganizerEventReport() {
         {tab === 'overview' && (<>
         {/* Money: settlement summary + per-order CSV (owner / manager / finance;
             hidden before the money views exist). Read-only. */}
+        {/* End-of-night money (online, door, fees, promoters owed); mig 20261102150000. */}
+        <MoneySoFarPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Phone-number RSVP for free ticket types (mig 20261102150000). */}
+        {canAct && (
+          <PhoneRsvpPanel eventId={event.id} canManage={canAct}
+            freeTiers={(event.ticketTiers ?? []).filter((t) => Number(t.price) === 0).map((t) => ({ id: t.id, name: t.name }))} />
+        )}
         {/* Sold elsewhere: manual counts + platform CSV imports (owner / manager /
             finance; hidden before mig 20261030120000). Beside our numbers, never in them. */}
         <SalesCountsPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)}
