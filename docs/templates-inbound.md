@@ -73,7 +73,8 @@ An artist or agent asks to play. Two ways in:
   `{ok: true}`, nothing stored); limits counted under advisory locks: per
   network 5 an hour per org and 20 a day overall (SHA-256 of the IP from
   `_exos_request_ip()`: `cf-connecting-ip`, else the last X-Forwarded-For
-  entry, never the client-written first one; requests without a trusted IP
+  entry, never the client-written first one (`request_ip_source`,
+  docs/self-hosting.md); IPv6 by /64; requests without a trusted IP
   share one `unknown` bucket with the same caps; the IP itself is never
   stored and the hash has no client column grant), per email 3 a day per org, 300
   a day per org.

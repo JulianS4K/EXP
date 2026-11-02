@@ -120,6 +120,28 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 | `exos-event-import-check-15min` | 15 min (:07) | `exos-event-import/cron` (re-reads imported Eventbrite events: sold out, moved, cancelled). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-event-import-check-15min';` |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
 
+## Client IPs for rate limits
+
+Public forms (the booking-request form, `exos_inbound_submit`) rate limit
+per network, so the database needs the caller's real IP. It only trusts
+headers your proxy sets, chosen by one setting in `exos_platform_settings`
+(service role; `_exos_request_ip()`, docs/templates-inbound.md):
+
+| `request_ip_source` | Uses | Pick it when |
+|---|---|---|
+| `cloudflare` (default) | `cf-connecting-ip`, else the last `X-Forwarded-For` entry | Hosted Supabase, or your own stack behind Cloudflare (Cloudflare overwrites `cf-connecting-ip`) |
+| `xff_last` | only the last `X-Forwarded-For` entry | **Not behind Cloudflare.** Otherwise a client can send its own `cf-connecting-ip` and pick its bucket. Your reverse proxy (nginx, Kong, ...) must append the client address to `X-Forwarded-For` |
+
+```sql
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('request_ip_source', '"xff_last"')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+The first `X-Forwarded-For` entry is never used (the client writes it).
+IPv6 callers are limited per /64. Requests with no usable IP share one
+`unknown` bucket with the same caps, so a misconfigured proxy shows up as
+legitimate requests being limited together, never as no limit.
+
 ## Upstream rules (kept in code, not configuration)
 
 Ticketing platforms and marketplaces are **read**. pretix, hi.events, Luma and the marketplaces are only read;

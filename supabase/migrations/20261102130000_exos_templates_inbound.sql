@@ -17,10 +17,11 @@
 --              _delete and their exos_rental_invoice_* wrappers,
 --              exos_rental_invoice_prefix_set, _exos_tg_inbound_settings,
 --              _exos_inbound_create, _exos_inbound_set_status,
---              _exos_inbound_hold and wrappers, _exos_request_ip (internal),
+--              _exos_inbound_hold and wrappers, _exos_request_ip,
+--              _exos_request_ip_source, _exos_request_ip_bucket (internal),
 --              exos_inbound_form_public (anon),
 --              exos_inbound_submit (anon), _exos_event_delete / exos_event_delete
---           R: exos_orgs, exos_org_memberships, exos_events, exos_ticket_tiers,
+--           R: exos_platform_settings ('request_ip_source'), exos_orgs, exos_org_memberships, exos_events, exos_ticket_tiers,
 --              exos_fee_rules, exos_event_fee_settings, exos_event_notes,
 --              exos_venues, exos_venue_rooms, exos_holds, exos_hold_positions,
 --              exos_tickets, exos_checkout_sessions and the other order tables
@@ -28,7 +29,7 @@
 --              _exos_api_event_json, _exos_hold_create, _exos_fin_staff,
 --              _exos_fin_cents / _pct / _text / _date / _email,
 --              exos_occurs_at_local
--- Pre-reqs: 20261030100000 (booking), 20261031100000 (offers: _exos_fin_*),
+-- Pre-reqs: 20261014140000 (exos_platform_settings), 20261030100000 (booking), 20261031100000 (offers: _exos_fin_*),
 --           20261031110000 (core API: _exos_api_insert), 20261027100000 (fee
 --           rules)
 --
@@ -1270,11 +1271,26 @@ REVOKE ALL ON FUNCTION public.exos_inbound_form_public(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_inbound_form_public(text) TO anon, authenticated, service_role;
 
 -- The caller's IP as the platform saw it, for rate limits. Only headers the
--- platform sets are trusted: Cloudflare's cf-connecting-ip (Supabase's API is
--- behind Cloudflare), else the LAST X-Forwarded-For entry (the one the
--- trusted proxy appended). Never the first entry: the client writes that one.
--- NULL when neither is a valid address (callers then use a shared bucket).
+-- platform sets are trusted; which ones is a deployment setting
+-- (exos_platform_settings 'request_ip_source', docs/self-hosting.md):
+--   cloudflare (default; hosted Supabase is behind Cloudflare, which
+--              overwrites cf-connecting-ip): cf-connecting-ip, else the LAST
+--              X-Forwarded-For entry;
+--   xff_last   (self-hosted without Cloudflare, where a client could send
+--              cf-connecting-ip itself): only the LAST X-Forwarded-For entry.
+-- Never the first X-Forwarded-For entry: the client writes that one. NULL
+-- when there is no valid address (callers then use a shared bucket).
 -- Internal: no grants; definer RPCs call it.
+CREATE OR REPLACE FUNCTION public._exos_request_ip_source()
+RETURNS text LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce((SELECT value #>> '{}' FROM public.exos_platform_settings
+                    WHERE key = 'request_ip_source' AND jsonb_typeof(value) = 'string'
+                      AND value #>> '{}' IN ('cloudflare', 'xff_last')), 'cloudflare')
+$$;
+REVOKE ALL ON FUNCTION public._exos_request_ip_source() FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public._exos_request_ip()
 RETURNS text LANGUAGE plpgsql STABLE
 SET search_path = public, pg_temp
@@ -1286,7 +1302,9 @@ BEGIN
   EXCEPTION WHEN others THEN RETURN NULL;
   END;
   IF h IS NULL OR jsonb_typeof(h) <> 'object' THEN RETURN NULL; END IF;
-  v := nullif(btrim(coalesce(h ->> 'cf-connecting-ip', '')), '');
+  IF public._exos_request_ip_source() = 'cloudflare' THEN
+    v := nullif(btrim(coalesce(h ->> 'cf-connecting-ip', '')), '');
+  END IF;
   IF v IS NULL THEN
     parts := string_to_array(coalesce(h ->> 'x-forwarded-for', ''), ',');
     IF cardinality(parts) > 0 THEN v := nullif(btrim(parts[cardinality(parts)]), ''); END IF;
@@ -1298,6 +1316,22 @@ BEGIN
   END;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_request_ip() FROM PUBLIC, anon, authenticated;
+
+-- The rate-limit bucket of the caller's network: an IPv4 address as is, an
+-- IPv6 address as its /64 (one client can rotate addresses inside it);
+-- 'unknown' without a trusted IP. Internal: no grants.
+CREATE OR REPLACE FUNCTION public._exos_request_ip_bucket()
+RETURNS text LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE v text := public._exos_request_ip(); i inet;
+BEGIN
+  IF v IS NULL THEN RETURN 'unknown'; END IF;
+  i := v::inet;
+  IF family(i) = 6 THEN RETURN network(set_masklen(i, 64))::text; END IF;
+  RETURN host(i);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_request_ip_bucket() FROM PUBLIC, anon, authenticated;
 
 -- The public submission (anon). Always { ok: true } once accepted (also for
 -- a honeypot hit, which stores nothing). Limits: 16 KB body; per network 5 an
@@ -1331,10 +1365,11 @@ BEGIN
     v_headers := nullif(current_setting('request.headers', true), '')::jsonb;
   EXCEPTION WHEN others THEN v_headers := NULL;
   END;
-  v_ip := public._exos_request_ip();
+  -- IPv4 as is, IPv6 by /64; no trusted IP: one shared "unknown" bucket with
+  -- the same caps (never no limit).
+  v_ip := public._exos_request_ip_bucket();
   v_ua := v_headers ->> 'user-agent';
-  -- No trusted IP: one shared "unknown" bucket with the same caps (never no limit).
-  v_hash := encode(sha256(convert_to('exos-inbound:' || coalesce(v_ip, 'unknown'), 'UTF8')), 'hex');
+  v_hash := encode(sha256(convert_to('exos-inbound:' || v_ip, 'UTF8')), 'hex');
   v_email := lower(btrim(coalesce(p_submission ->> 'email', '')));
 
   -- Count-then-insert under locks, so parallel requests can't slip past.

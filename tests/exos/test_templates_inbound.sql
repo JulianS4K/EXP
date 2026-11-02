@@ -527,6 +527,31 @@ BEGIN
   ASSERT public._exos_request_ip() = '2001:db8::1', 'TI5: cf-connecting-ip first';
   PERFORM set_config('request.headers', '{"x-forwarded-for":"203.0.113.7, garbage"}', true);
   ASSERT public._exos_request_ip() IS NULL, 'TI5: junk is no IP';
+  -- IPv6: one /64 is one bucket (a client can rotate inside it); IPv4 stays whole.
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"2001:db8:1:2::1"}', true);
+  ASSERT public._exos_request_ip_bucket() = '2001:db8:1:2::/64', 'TI5: IPv6 bucket is the /64';
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"2001:db8:1:2:ffff:ee:dd:cc"}', true);
+  ASSERT public._exos_request_ip_bucket() = '2001:db8:1:2::/64', 'TI5: two addresses in one /64 share a bucket';
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"2001:db8:1:3::1"}', true);
+  ASSERT public._exos_request_ip_bucket() = '2001:db8:1:3::/64', 'TI5: another /64 is another bucket';
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"203.0.113.7"}', true);
+  ASSERT public._exos_request_ip_bucket() = '203.0.113.7', 'TI5: IPv4 stays whole';
+  PERFORM set_config('request.headers', '{}', true);
+  ASSERT public._exos_request_ip_bucket() = 'unknown', 'TI5: no IP, the shared bucket';
+  ASSERT public._exos_request_ip_source() = 'cloudflare', 'TI5: cloudflare by default';
+  -- Self-hosted without Cloudflare: xff_last ignores a client-sent cf-connecting-ip.
+  INSERT INTO public.exos_platform_settings (key, value) VALUES ('request_ip_source', '"xff_last"')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"198.51.100.200","x-forwarded-for":"1.2.3.4, 203.0.113.7"}', true);
+  ASSERT public._exos_request_ip() = '203.0.113.7', 'TI5: xff_last ignores cf-connecting-ip';
+  PERFORM set_config('request.headers', '{"cf-connecting-ip":"198.51.100.200"}', true);
+  ASSERT public._exos_request_ip() IS NULL AND public._exos_request_ip_bucket() = 'unknown',
+    'TI5: xff_last with only cf-connecting-ip is the shared bucket';
+  UPDATE public.exos_platform_settings SET value = '"bogus"' WHERE key = 'request_ip_source';
+  ASSERT public._exos_request_ip_source() = 'cloudflare', 'TI5: an unknown value falls back to cloudflare';
+  DELETE FROM public.exos_platform_settings WHERE key = 'request_ip_source';
+  ASSERT NOT has_function_privilege('anon', 'public._exos_request_ip_bucket()', 'EXECUTE')
+     AND NOT has_function_privilege('anon', 'public._exos_request_ip_source()', 'EXECUTE'), 'TI5: helpers have no grants';
   ASSERT NOT has_function_privilege('anon', 'public._exos_request_ip()', 'EXECUTE')
      AND NOT has_function_privilege('authenticated', 'public._exos_request_ip()', 'EXECUTE'), 'TI5: helper has no grants';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_inbound_submissions WHERE artist_name = 'Spam'), 'TI5: honeypot stored nothing';
