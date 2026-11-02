@@ -77,10 +77,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data, error } = await sb.rpc("exos_phone_rsvp_start", {
         p_event_id: parsed.eventId, p_name: parsed.name, p_phone: parsed.phone, p_email: parsed.email,
         p_plus_ones: parsed.plusOnes ?? 0, p_ip_hash: ipHash, p_sms_ok: canText, p_promoter: parsed.promoter,
+        p_app_base: normalizeAppUrl(Deno.env.get("EXOS_APP_URL")),
       });
       if (error) throw error;
       const r = data as { ok: boolean; error?: string; rsvp_id?: string; channel?: string; to?: string; code?: string;
-                          event_name?: string; max_plus_ones?: number };
+                          event_name?: string; max_plus_ones?: number;
+                          _resend?: { to: string; event_name?: string; urls: (string | null)[] } };
+      if (r._resend && cfg) {
+        // Sold out and this number already RSVP'd: its tickets go back by text
+        // to the number itself. The answer is the same generic "sold out".
+        const urls = r._resend.urls.filter((u): u is string => !!u);
+        if (urls.length) {
+          const sent = await sendSms(fetch, cfg, r._resend.to, ticketsText(r._resend.event_name, urls));
+          if (!("id" in sent)) console.error("exos-rsvp: resend text failed", sent.error);
+        }
+      }
       if (!r.ok) return json({ ok: false, error: r.error, max_plus_ones: r.max_plus_ones });
       if (r.channel === "sms") {
         const sent = cfg ? await sendSms(fetch, cfg, r.to!, codeText(r.event_name, r.code!)) : null;

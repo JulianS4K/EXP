@@ -11,7 +11,7 @@ import { getPublicEvent } from '../lib/events';
 import { applyMeta } from '../lib/meta';
 import type { Event } from '../types';
 import {
-  normalizeRsvpPhone, rsvpErrorMessage, rsvpInfo, rsvpStart, rsvpVerify, ticketPathFromUrl, type RsvpInfo,
+  codeSentText, normalizeRsvpPhone, rsvpErrorMessage, rsvpInfo, rsvpStart, rsvpVerify, ticketPathFromUrl, type RsvpInfo,
 } from '../lib/phoneRsvp';
 import WaitlistCTA from '../components/WaitlistCTA';
 
@@ -137,7 +137,7 @@ export default function PhoneRsvp() {
 
       {step === 'code' && (
         <form onSubmit={verify} className="grid gap-3">
-          <p className="text-sm text-white/70">We sent a 6-digit code {channel === 'sms' ? 'by text to' : 'to'} {sentTo}. It works for 10 minutes.</p>
+          <p className="text-sm text-white/70">{codeSentText(channel, sentTo)}</p>
           <input className={`${field} tracking-[0.5em] text-center text-2xl`} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
             aria-label="Code" value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ''))} />
           <button disabled={busy} className="bg-brand-primary text-black px-4 py-3 text-sm font-black uppercase disabled:opacity-50">Get my ticket</button>

@@ -112,3 +112,19 @@ export async function durably(write: () => Promise<boolean>, tries = 3, waitMs =
   }
   return false;
 }
+
+export type ClaimAnswer =
+  | ({ ok: true; purpose: 'send' | 'reconcile' | 'cancel'; lease_token: string; attempt?: number; needs_reconcile?: boolean } & TransferClaim)
+  | { ok: false; error: string };
+
+/**
+ * What to do with an exos_promoter_transfer_claim answer. A send whose earlier
+ * attempt was never reconciled, or a cancel after a started send, must look
+ * Stripe up first (reconcileDecision); anything else refused stops.
+ */
+export function claimAction(a: ClaimAnswer): 'proceed' | 'reconcile_first' | { stop: string } {
+  if ('error' in a) return a.error === 'needs_reconcile' ? 'reconcile_first' : { stop: a.error };
+  if (!/^[0-9a-f-]{36}$/i.test(String(a.lease_token ?? ''))) return { stop: 'no lease' };
+  if (a.purpose !== 'send' && a.needs_reconcile) return 'reconcile_first';
+  return 'proceed';
+}

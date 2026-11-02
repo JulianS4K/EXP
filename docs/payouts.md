@@ -157,6 +157,21 @@ clawback netting).
   whose metadata names this payout (and, for the transfer, the promoter's account; the organizer-return
   transfer doesn't count). A transfer found marks the payout `sent` and the cancel is refused; found
   reversals become `taken` lines that the cancel returns to the organizer; nothing found allows the cancel.
+- **Leases fence sends.** Every claim (`send`, `reconcile`, `cancel`) mints a new `lease_token` and
+  replaces the previous holder's. `send` calls `exos_promoter_lease_ok(payout, token)` right before each
+  reversal and before the transfer: it must still hold a send lease that hasn't run out (2 minutes,
+  extended per call, never past 8 minutes after the attempt began) on a payout that isn't cancelled.
+  A `cancel` or `reconcile` claim is refused while a send attempt is open (leased for send, no outcome,
+  under 10 minutes old), and the cancel's reconcile check and the cancel itself run under the cancel's
+  token. `dry_run` / `failed` marks need the current token, so a stale send can't change a payout
+  someone else has claimed; `sent` is always recorded.
+- **Retries reconcile first.** A send claim on a payout whose earlier attempt was never reconciled
+  answers `needs_reconcile`; the function then takes a `reconcile` lease, lists Stripe as above and, if
+  the transfer exists, marks the payout sent and creates nothing. Only then can a new send be claimed.
+- **Idempotency keys are per payout, not per attempt** (`exos-pct:<payout>`, `exos-pcf:<payout>:<order>`,
+  `exos-pcr:<payout>`). Within Stripe's 24-hour window a repeated call returns the first result. After
+  it Stripe forgets the key and would create a new object, which is why the reconcile before every retry
+  (and every cancel) is what actually prevents a second transfer.
 - **Cancel** (`/cancel`): a Stripe payout not yet `sent` can be cancelled. Money already taken from the
   organizer goes back to their connected account first (one transfer, key `exos-pcr:<payout>`); then
   `exos_promoter_payout_cancel` releases the lines, returns the sales to unpaid and re-opens the
