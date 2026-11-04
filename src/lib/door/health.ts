@@ -51,6 +51,7 @@ const CONFLICT_TEXT: Record<string, string> = {
   'wrong-event': 'another event',
   'needs-manager': 'typed entry needs a manager',
   'exit-not-allowed': 'exit on a list without re-entry',
+  'not-inside': 'scanned out without being checked in',
 };
 
 export function conflictText(c: Pick<ReplayConflict, 'reason' | 'forced'>): string {

@@ -214,6 +214,20 @@ export async function guestCheckIn(
   return (data ?? { ok: false, reason: 'unknown' }) as GuestCheckInResult;
 }
 
+/** Undo a guest-list arrival (owner / manager, with a reason; logged in
+ *  exos_guest_checkin_undos, mig 20261104120000). `count` defaults to every
+ *  arrival on the entry. Reasons: 'undone' | 'needs-manager' |
+ *  'reason-required' | 'not-checked-in' | 'bad-count' | 'wrong-event' | 'not-found'. */
+export async function guestUndoArrival(
+  eventId: string, entryId: string, reason: string, count?: number,
+): Promise<GuestCheckInResult> {
+  const { data, error } = await supabase.rpc('exos_guest_undo_arrival', {
+    p_entry_id: entryId, p_event_id: eventId, p_count: count ?? null, p_reason: reason,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'unknown' }) as GuestCheckInResult;
+}
+
 // Offline cache, same 7-day TTL as the ticket registry.
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const extrasKey = (eventId: string) => `doorextras_${eventId}`;

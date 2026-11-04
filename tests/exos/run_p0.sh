@@ -156,6 +156,7 @@ for m in \
          20261102160000_exos_gaps_integration \
          20261104100000_exos_sim_buyer_fixes \
          20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
          20261104130000_exos_sim_partner_fixes; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -221,6 +222,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_harde
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_buyer.sql"
 # Organizer mistake simulations (mig 20261104110000).
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_organizer.sql"
+# Mistake simulations (door staff and scanner phones; mig 20261104120000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_door.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in \
          20260924215000_exos_fulfill_all_or_nothing \
@@ -351,6 +354,7 @@ for m in \
          20261102160000_exos_gaps_integration \
          20261104100000_exos_sim_buyer_fixes \
          20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
          20261104130000_exos_sim_partner_fixes; do
   $PSQL -f "$MIG/$m.sql"
 done
