@@ -116,7 +116,10 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import {
   allowedMethods, API_METHODS, apiPath, isSharedKeyPath, matchRoute, publicAuthAt, type ApiMethod, type ApiRoute,
 } from "../_shared/api/routes.ts";
-import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import {
+  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, RPC_STATUS, userTokenMayCall,
+} from "../_shared/api/request.ts";
 import { effectiveScopes, hasScope, type Scope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
 import { parseCsv } from "../_shared/csvParse.ts";
@@ -145,7 +148,7 @@ import { GIVING_ROUTES, handleGiving } from "./giving.ts";
 import { handleOrders, ORDER_ROUTES } from "./orders.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
-  opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
+  opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
   reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
 } from "../_shared/partners/sales.ts";
 
@@ -315,7 +318,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Personal and OAuth tokens (#74) may call every GET and the platform routes.
   // Every other write records or checks an org API key id (exos_api_write,
   // booking, offers, listing keys), so it needs one.
-  if (cred.kind !== "api_key" && method !== "GET" && !PLATFORM_ROUTES.has(match.route.id)) {
+  if (!userTokenMayCall(cred.kind, method, match.route.id)) {
     return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
   }
 
@@ -341,6 +344,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(out, CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
     if (e instanceof PagingError || e instanceof BodyError || e instanceof ParamError) return json({ error: e.message }, 400);
+    if (e instanceof RequestError) return json({ error: e.message }, e.status);
     if (e instanceof ScopeError) {
       return json({ error: "insufficient scope", required_scope: e.scope }, 403, {
         "www-authenticate": `Bearer error="insufficient_scope", scope="${e.scope}"`,
@@ -423,19 +427,7 @@ async function resolveCredential(
   };
 }
 
-// Routes of the developer platform and partner sales (#74, migs 20261031130000 /
-// 130500). A personal or OAuth token may call these and every GET; any other
-// write needs an org API key, since those writes record or check an API key id
-// (exos_api_write, booking, offers, listing keys).
-const PLATFORM_ROUTES = new Set([
-  "list-distribution-partners", "create-distribution-partner", "update-distribution-partner",
-  "revoke-distribution-partner", "get-event-distribution", "set-event-distribution", "list-ticket-reservations",
-  "get-ticket-reservation", "build-organizer-reservation", "create-organizer-reservation",
-  "update-organizer-reservation", "cancel-organizer-reservation", "complete-organizer-reservation", "get-team",
-  "update-team", "list-team-members", "update-team-member", "remove-team-member", "list-team-invitations",
-  "create-team-invitation", "cancel-team-invitation", "list-team-roles", "list-my-memberships",
-  "revoke-current-token",
-]);
+// PLATFORM_ROUTES (what a personal or OAuth token may write): _shared/api/request.ts.
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
@@ -1176,7 +1168,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return new Created({
         data: await rpc(sb, "_exos_partner_reserve", {
           p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
-          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items), p_attrs: reservationAttrs(p),
+          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items),
+          // An Idempotency-Key makes a resend the same reservation (mig 20261104130000).
+          p_attrs: c.idempotencyKey ? { ...reservationAttrs(p), idempotency_key: c.idempotencyKey } : reservationAttrs(p),
           p_comp: false, p_dry_run: false,
         }),
       });
@@ -2032,9 +2026,7 @@ function unwrap(body: Record<string, unknown>, wrapper: string): Record<string, 
 }
 
 /** The SQLSTATEs the artist, lineup and key functions raise, as HTTP answers. */
-const RPC_STATUS: Record<string, number> = {
-  "22023": 400, "42501": 403, "P0002": 404, "23505": 409, "55000": 409, "54000": 409,
-};
+// RPC_STATUS (and the partner codes EX409 / EX422 / EXSLD): _shared/api/request.ts.
 
 function rpcError(e: unknown): { status: number; message: string } | null {
   const err = e as { code?: unknown; message?: unknown } | null;
@@ -2132,7 +2124,10 @@ async function partnerApi(req: Request, url: URL, path: string): Promise<Respons
 
   try {
     const body = method === "POST" || method === "PUT" ? await readBody(req, MAX_BODY_BYTES, "rails") : {};
-    const out = await partnerHandle(match.route.id, sb, p, match.params, url.searchParams, body);
+    // Reserve and comp take an Idempotency-Key: a resend answers the first
+    // reservation instead of holding the seats again (mig 20261104130000).
+    const idem = method === "GET" ? null : idempotencyKeyOf(req.headers.get("idempotency-key"));
+    const out = await partnerHandle(match.route.id, sb, p, match.params, url.searchParams, body, idem);
     return out instanceof Created ? json(out.body, 201, noStore) : json(out, 200, noStore);
   } catch (e) {
     return errorResponse(e, "exos-api partner", noStore);
@@ -2141,9 +2136,10 @@ async function partnerApi(req: Request, url: URL, path: string): Promise<Respons
 
 async function partnerHandle(
   id: string, sb: SupabaseClient, p: { id: string; org_id: string }, params: Record<string, string>,
-  q: URLSearchParams, body: Record<string, unknown>,
+  q: URLSearchParams, body: Record<string, unknown>, idem: string | null = null,
 ): Promise<unknown> {
   const org = p.org_id;
+  const keyed = (attrs: Record<string, unknown>) => idem ? { ...attrs, idempotency_key: idem } : attrs;
   const eventId = () => uuidOf(params.id, "Event not found.");
   switch (id) {
     case "public-list-ticket-types":
@@ -2156,7 +2152,7 @@ async function partnerHandle(
       }
       return new Created(await rpc(sb, "_exos_partner_reserve", {
         p_org_id: org, p_event_id: eventId(), p_partner_id: p.id, p_api_key_id: null,
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
         p_comp: false, p_dry_run: false,
       }));
     }
@@ -2197,7 +2193,7 @@ async function partnerHandle(
       const r = unwrapParams(body, "comp");
       return new Created((await rpc(sb, "_exos_partner_comp", {
         p_org_id: org, p_partner_id: p.id, p_event_id: eventId(),
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
         p_app_base: appBase(),
       }) as Record<string, unknown>).order);
     }
@@ -2273,14 +2269,13 @@ function rateLimited(): Response {
 function errorResponse(e: unknown, where: string, extra: Record<string, string> = {}): Response {
   if (e instanceof PagingError || e instanceof ParamError) return json({ error: e.message }, 400, extra);
   if (e instanceof ApiError) return json({ error: e.message, ...e.extra }, e.status, extra);
-  const err = e as { code?: unknown; message?: unknown } | null;
-  const code = typeof err?.code === "string" ? err.code : "";
-  if (code in RPC_STATUS) {
-    const body: Record<string, unknown> = { error: String(err?.message ?? "invalid request").slice(0, 300) };
-    if (code === "EXSLD") body.reason = "sold_out";
-    if (code === "EX422") body.reason = "not_available";
-    return json(body, RPC_STATUS[code], extra);
-  }
+  // A malformed body or Idempotency-Key (these were 500s on the platform routes).
+  if (e instanceof RequestError) return json({ error: e.message }, e.status, extra);
+  if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status, extra);
+  // EX409 / EX422 / EXSLD answer 409 / 422 / 409 (they had fallen out of
+  // RPC_STATUS in a merge and answered 500; tests/exos/sim_partner.sql).
+  const mapped = rpcAnswer(e);
+  if (mapped) return json(mapped.body, mapped.status, extra);
   console.error(`${where} error:`, e);
   return json({ error: "internal error" }, 500, extra);
 }
@@ -2441,26 +2436,13 @@ function importMapping(raw: unknown, header: string[]): SalesMapping {
  * a cap). Any other declared Content-Type is a 415.
  */
 async function readBody(req: Request, max: number, form: "flat" | "rails" = "flat"): Promise<Record<string, unknown>> {
-  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
-  const isForm = ct.includes("application/x-www-form-urlencoded");
   // The partner contract and the platform routes (#74) take any declared type
-  // and Rails-style nested forms, as on their branch.
-  if (form === "flat" && ct && !isForm && !ct.includes("json")) {
-    throw new ApiError(415, "send a JSON body (Content-Type: application/json) or a form-encoded one.");
-  }
+  // and Rails-style nested forms, as on their branch (_shared/api/request.ts).
+  const ct = req.headers.get("content-type");
+  parseBodyText(ct, "", form); // a wrong Content-Type is 415 before anything is read
   const text = await readCapped(req, max);
   if (text === null) throw new ApiError(413, "request body too large.");
-  if (!text.trim()) return {};
-  if (isForm) return form === "rails" ? railsFormBody(text) : formBody(text);
-  let v: unknown;
-  try {
-    v = JSON.parse(text);
-  } catch {
-    throw new ApiError(400, form === "rails" ? "the body must be JSON or form-encoded" : "the body is not valid JSON.");
-  }
-  // An array passes too: PUT /events/:id/lineup takes a bare list of slots.
-  if (!v || typeof v !== "object") throw new ApiError(400, "the body must be a JSON object.");
-  return v as Record<string, unknown>;
+  return parseBodyText(ct, text, form);
 }
 
 /** A Postgres error raised by a sales-count RPC as an HTTP answer with its own message. */

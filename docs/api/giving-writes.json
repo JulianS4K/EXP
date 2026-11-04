@@ -1269,7 +1269,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Makes a resend of the same batch answer the first result."
+          "description": "Makes a resend of the same batch answer the first result; the same key with other cards answers 400."
         }
       ],
       "request_example": {

@@ -316,6 +316,14 @@
           "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
         },
         {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional, and worth sending on every reservation: 8-100 letters, digits, _ . : or -. A resend after a timeout with the same key and body answers the first reservation (same token, \"idempotent_replay\": true) instead of holding the seats again; the same key with other lines answers 400.",
+          "example": "sh-txn-88231-attempt"
+        },
+        {
           "name": "ticket_reservation[order_items_attributes]",
           "location": "body",
           "type": "array of object",
@@ -441,6 +449,13 @@
           },
           "headers": {
             "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "The Idempotency-Key was already used for another reservation (other lines or event).",
+          "example": {
+            "error": "this Idempotency-Key was already used for another reservation"
           }
         }
       ],

@@ -73,8 +73,10 @@ Every write route calls one SQL function, `exos_api_write(key, action, target, a
 Bodies are JSON (fields, or wrapped `{ "event": { … } }` as Opendate sends them) or form-encoded, at most 64 KB,
 read capped while streaming (`body.ts`). An `Idempotency-Key` header (8-100 of `A-Za-z0-9_.:-`) makes a write safe
 to resend: the key is unique per API key, the first request claims it before doing the work (a concurrent twin
-waits, then replays), and a later resend replays the stored answer; the same key on another action or target is
-400. **Refunds require one**: it becomes the refund request's nonce, so a resend returns the same request and the
+waits, then replays), and a later resend replays the stored answer; the same key on another action or target, or
+with a different body, is 400 (mig 20261104130000: the body is hashed with the key, so a key is never replayed for a
+request it wasn't). Reservations and comps (partner and organizer) take one too: a resend answers the first
+reservation instead of holding the seats again. **Refunds require one**: it becomes the refund request's nonce, so a resend returns the same request and the
 Stripe call reuses its idempotency key. Publishing (`POST /v1/events/:id/publish`) goes through
 `exos_publish_event`, which refuses while `_exos_event_publish_blockers` lists anything (409 with the list); the
 dashboard's publish toggle (EditEvent) calls the same function after saving.
@@ -90,7 +92,7 @@ dashboard's publish toggle (EditEvent) calls the same function after saving.
   whose user left the org, or that tried a write that needs an org API key), `404` unknown path or
   another org's id, `405` a method the path doesn't answer (`Allow` lists the ones it does), `409` a write
   conflict (sold out, a completed or cancelled reservation, publish blockers, sold items, duplicates such as a tag or fan email, a taken permalink, a merged artist, the shared-key cap),
-  `410` an expired reservation, `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body that is neither JSON nor
+  `410` an expired reservation (the partner contract's `EXSLD` / `EX422` / `EX409` map in `_shared/api/request.ts`), `413` a body over 64 KB (2 MB of CSV for a sales-count import), `415` a body that is neither JSON nor
   form-encoded, `422` a CSV import with errors or a ticket type that isn't offered, `500`, `502` a refund Stripe didn't answer (resend with the same
   key), `503`. Core-API SQLSTATEs are mapped in `sqlError()` (`core.ts`).
 - Bodies are read through `_shared/api/body.ts` (`readCapped`: counted while streaming, never read in full past
