@@ -210,6 +210,16 @@
           }
         },
         {
+          "status": 409,
+          "description": "Over the cap the organizer set for your key (per ticket type or per event, docs/partner-sales.md \"Caps\"): nothing was held. `left` is how many you may still reserve.",
+          "example": {
+            "error": "partner_cap_reached: this partner may hold or sell 2 more of General admission",
+            "reason": "partner_cap_reached",
+            "left": 2,
+            "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+          }
+        },
+        {
           "status": 422,
           "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
           "example": {

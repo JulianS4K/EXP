@@ -74,6 +74,8 @@ function mapMembership(row: any): OrgMembership {
     addedAt: toTs(row.created_at),
     addedBy: row.added_by,
     disabled: row.disabled ?? undefined,
+    // A claimed invite waiting for approval (mig 20261104200000).
+    status: row.status === 'pending_approval' ? 'pending_approval' : undefined,
   };
 }
 

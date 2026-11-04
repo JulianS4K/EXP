@@ -564,6 +564,10 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'update-partner-presale', method: 'PUT', auth: K, path: '/partner-presale', scope: 'org:admin', paged: false },
   { id: 'get-event-partner-presale', method: 'GET', auth: K, path: '/events/:id/partner-presale', scope: 'events:read', paged: false },
   { id: 'update-event-partner-presale', method: 'PUT', auth: K, path: '/events/:id/partner-presale', scope: 'events:write', paged: false },
+  // claude/exos-small-ops (mig 20261104200000): optional per-partner caps
+  // (docs/partner-sales.md "Caps").
+  { id: 'get-event-partner-caps', method: 'GET', auth: K, path: '/events/:id/partner-caps', scope: 'events:read', paged: false },
+  { id: 'set-event-partner-caps', method: 'PUT', auth: K, path: '/events/:id/partner-caps', scope: 'events:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

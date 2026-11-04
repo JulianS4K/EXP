@@ -160,7 +160,8 @@ for m in \
          20261104130000_exos_sim_partner_fixes \
          20261104150000_exos_posh_link_channel \
          20261104180000_exos_org_access \
-         20261104190000_exos_commission_methods; do
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -361,7 +362,8 @@ for m in \
          20261104130000_exos_sim_partner_fixes \
          20261104150000_exos_posh_link_channel \
          20261104180000_exos_org_access \
-         20261104190000_exos_commission_methods; do
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -441,3 +443,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_link
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_access.sql"
 # claude/exos-commission-methods: four ways to fund promoter commissions (mig 20261104190000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
+# Partner caps, invite approval, drawer recount (mig 20261104200000; race: race_sim_partner.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"

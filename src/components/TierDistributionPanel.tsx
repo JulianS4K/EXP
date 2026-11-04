@@ -11,6 +11,7 @@ import {
   fetchTierDistribution, listDistributionPartners, setTierDistribution, sqlMessage,
   type DistributionPartner, type TierDistribution,
 } from '../lib/developerPlatform';
+import PartnerCapsPanel from './PartnerCapsPanel';
 
 const BTN = 'text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary disabled:opacity-40';
 
@@ -101,6 +102,8 @@ export default function TierDistributionPanel({ eventId, orgId }: { eventId: str
           </li>
         ))}
       </ul>
+      {/* Optional per-partner caps (mig 20261104200000). */}
+      <PartnerCapsPanel eventId={eventId} tiers={tiers} partners={partners} />
     </section>
   );
 }

@@ -569,8 +569,18 @@ BEGIN
   s := pg_temp.st(format($q$SELECT public._exos_partner_reserve('e9000000-0000-0000-0000-000000000001',
          'e9000000-0000-0000-0000-0000000000e1', %L, NULL, pg_temp.line('d1', %s), '{}')$q$, pg_temp.p('pB'), a1 + 1));
   IF s <> 'EXSLD' THEN RAISE EXCEPTION 'SIM-PARTNER-23 FAIL: reserved into another channel''s allocation: %', s; END IF;
-  -- KNOWN: one partner can take the whole primary pool (no per-partner quota).
-  RAISE NOTICE 'KNOWN SIM-PARTNER-23 partners can''t reserve another channel''s allocation, but there is no per-partner cap (% left, any one partner may take all)', a1;
+  -- FIXED (mig 20261104200000): an optional per-partner cap. With one set,
+  -- the partner gets 409 partner_cap_reached (EXCAP) past it, told what's left.
+  PERFORM public._exos_partner_caps_set('e9000000-0000-0000-0000-000000000001', 'e9000000-0000-0000-0000-0000000000e1',
+    jsonb_build_array(jsonb_build_object('partner_id', pg_temp.p('pB'), 'tier_id', 'e9000000-0000-0000-0000-0000000000d1',
+                                         'max_tickets', 2)), NULL);
+  s := pg_temp.st(format($q$SELECT public._exos_partner_reserve('e9000000-0000-0000-0000-000000000001',
+         'e9000000-0000-0000-0000-0000000000e1', %L, NULL, pg_temp.line('d1', 3), '{}')$q$, pg_temp.p('pB')));
+  IF s <> 'EXCAP' THEN RAISE EXCEPTION 'SIM-PARTNER-23 FAIL: reserved past the partner''s cap: %', s; END IF;
+  PERFORM public._exos_partner_caps_set('e9000000-0000-0000-0000-000000000001', 'e9000000-0000-0000-0000-0000000000e1',
+    jsonb_build_array(jsonb_build_object('partner_id', pg_temp.p('pB'), 'tier_id', 'e9000000-0000-0000-0000-0000000000d1',
+                                         'max_tickets', NULL)), NULL);
+  RAISE NOTICE 'OK SIM-PARTNER-23 FIXED partners can''t reserve another channel''s allocation, and an optional per-partner cap stops one partner taking the pool (% left)', a1;
 END $$;
 
 -- SIM-PARTNER-19: gift-card import: a replay, a reused key with another file,

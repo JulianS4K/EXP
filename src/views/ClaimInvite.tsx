@@ -23,6 +23,8 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { claimOrgInvite, getOrgInvite, getPublicOrg } from '../lib/orgs';
+import { claimOutcome } from '../lib/inviteApproval';
+import { myMembership } from '../lib/inviteApprovalApi';
 import { Organization, OrgRole } from '../types';
 import { Timestamp } from '../lib/timestamp';
 
@@ -47,7 +49,7 @@ export default function ClaimInvite() {
     | { kind: 'invalid'; reason: string }
     | { kind: 'ready'; invite: InviteDoc; org: Organization | null }
     | { kind: 'claiming' }
-    | { kind: 'done'; orgName: string }
+    | { kind: 'done'; orgName: string; waiting?: boolean }
   >({ kind: 'loading' });
 
   useEffect(() => {
@@ -121,9 +123,17 @@ export default function ClaimInvite() {
         role: state.invite.role,
         uid: user.uid,
       });
-      await refresh();
-      setActiveOrg(state.invite.orgId);
       const orgName = (state.kind as any) === 'ready' ? state.org?.name ?? 'the org' : 'the org';
+      // With the org's "approve new members" on (mig 20261104200000) the
+      // claim only asks: the membership waits until an owner approves it.
+      const waiting = claimOutcome(await myMembership(state.invite.orgId, user.uid)) === 'waiting';
+      await refresh();
+      if (waiting) {
+        setState({ kind: 'done', orgName, waiting: true });
+        toast({ kind: 'success', message: `Sent to ${orgName} for approval.` });
+        return;
+      }
+      setActiveOrg(state.invite.orgId);
       setState({ kind: 'done', orgName });
       toast({ kind: 'success', message: `Joined ${orgName} as ${state.invite.role}.` });
     } catch (err) {
@@ -185,9 +195,13 @@ export default function ClaimInvite() {
             <Check size={20} />
           </div>
           <h2 className="disp text-4xl tracking-tight leading-none text-white mb-3" style={{ transform: 'skewX(-4deg)' }}>
-            YOU'RE IN
+            {state.waiting ? 'WAITING FOR APPROVAL' : "YOU'RE IN"}
           </h2>
-          <p className="type text-white/60 text-sm mb-8">You've joined {state.orgName}.</p>
+          <p className="type text-white/60 text-sm mb-8">
+            {state.waiting
+              ? `An owner of ${state.orgName} has to approve your account before you get access. You'll see the organization in your dashboard once they do.`
+              : `You've joined ${state.orgName}.`}
+          </p>
           <button
             onClick={() => navigate('/dashboard')}
             className="disp px-6 py-3 bg-brand-primary text-black text-lg tracking-wide hover:bg-white transition-all"
@@ -251,7 +265,7 @@ export default function ClaimInvite() {
             </button>
 
             <p className="type text-[11px] text-white/30 text-center mt-4">
-              By accepting you'll be added to the org with the {invite.role} role. Whoever invited you gets an email saying which account joined.
+              By accepting you'll be added to the org with the {invite.role} role (some organizations approve new members first). Whoever invited you gets an email saying which account accepted.
             </p>
           </div>
         </div>
