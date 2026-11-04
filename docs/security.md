@@ -293,7 +293,10 @@ org; writes need a key whose creator holds the role now,
   `owned` is self-declared, so nothing links a promoter's record to an owned
   venue but the promoter itself (`exos_venue_link`); name matches are only
   suggestions, ambiguous ones shown as such, with `verified` (staff-only,
-  trigger-enforced) as a hint. A squatter's "owned" venue gates no one else.
+  trigger-enforced, cleared when the org edits the venue's name, address,
+  relationship or org) as a hint. Suggestions and links see only venues the
+  directory shows (`accepts_requests`); a refused link says nothing about
+  the target. A squatter's "owned" venue gates no one else.
 - **Grants**: a co-host reads or writes another org's event only through the
   `_exos_cohost_*` functions, which require a live grant with the scope
   (revoked: `P0002`, as for an event that doesn't exist, so ids can't be

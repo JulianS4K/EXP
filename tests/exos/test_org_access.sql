@@ -439,6 +439,51 @@ BEGIN
      AND NOT (sg->'suggestions'->1->>'verified')::boolean, 'OA6 verified first ' || sg::text;
 END $$;
 RESET ROLE;
+-- The venue org's own edits: other fields keep the badge; a new name drops it.
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE s text;
+BEGIN
+  PERFORM pg_temp.act(pg_temp.u('a1'));
+  UPDATE public.exos_venues SET capacity = 450 WHERE id = pg_temp.u('e1')::uuid;
+  ASSERT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.u('e1')::uuid), 'OA6 capacity keeps verified';
+  UPDATE public.exos_venues SET name = 'AC Hall Annex' WHERE id = pg_temp.u('e1')::uuid;
+  ASSERT NOT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.u('e1')::uuid), 'OA6 a rename drops verified';
+  UPDATE public.exos_venues SET name = 'AC Hall' WHERE id = pg_temp.u('e1')::uuid;
+  ASSERT NOT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.u('e1')::uuid), 'OA6 renaming back doesn''t restore it';
+  PERFORM pg_temp.act(NULL);
+END $$;
+RESET ROLE;
+UPDATE public.exos_venues SET verified = true WHERE id IN ('ac000000-0000-0000-0000-0000000000e1', pg_temp.v('squat')::uuid);
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE s text; sg jsonb; v0 uuid;
+BEGIN
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  UPDATE public.exos_venues SET address = '{"city":"Queens"}' WHERE id = pg_temp.v('squat')::uuid;
+  ASSERT NOT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.v('squat')::uuid), 'OA6 a new address drops verified';
+  UPDATE public.exos_venues SET address = '{"city":"Brooklyn"}' WHERE id = pg_temp.v('squat')::uuid;
+  -- A venue that takes no requests is never suggested, and can't be linked
+  -- (the same refusal as an unknown id: nothing about it is revealed).
+  UPDATE public.exos_venues SET accepts_requests = false WHERE id = pg_temp.v('squat')::uuid;
+  PERFORM pg_temp.act(pg_temp.u('b1'));
+  sg := public.exos_venue_link_suggestions(pg_temp.v('copy')::uuid);
+  ASSERT jsonb_array_length(sg->'suggestions') = 1 AND sg->'suggestions'->0->>'id' = pg_temp.u('e1'),
+    'OA6 closed venue not suggested ' || sg::text;
+  SELECT id INTO v0 FROM public.exos_venues
+   WHERE org_id = pg_temp.o(2) AND relationship = 'partner' AND listed_venue_id IS NULL LIMIT 1;
+  s := pg_temp.st(format($q$SELECT public.exos_venue_link(%L, %L)$q$, v0, pg_temp.v('squat')));
+  ASSERT s LIKE '22023 listed_venue_id must be a venue another organization runs on Exos that takes booking requests%',
+    'OA6 closed venue can''t be linked: ' || s;
+  ASSERT s = pg_temp.st(format($q$SELECT public.exos_venue_link(%L, %L)$q$, v0, gen_random_uuid())), 'OA6 same answer as an unknown id';
+  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v0) IS NULL, 'OA6 nothing linked';
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  UPDATE public.exos_venues SET accepts_requests = true WHERE id = pg_temp.v('squat')::uuid;
+  PERFORM pg_temp.act(NULL);
+END $$;
+RESET ROLE;
+-- Staff verify the real hall again (the directory check in OA7 expects it).
+UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1';
 -- The API path (a template-made event) answers the same.
 SET LOCAL ROLE service_role;
 DO $$

@@ -361,7 +361,7 @@
       "method": "GET",
       "path": "/v1/venues/:id/listing-suggestions",
       "summary": "Suggest the venue your record stands for",
-      "description": "For one of your rented or partner venues: owned venues of other organizations with the same name and city, every match listed (two are never decided for you), each with `verified` (Exos staff checked that organization runs it). Nothing is linked until you choose one (PUT /v1/venues/:id/listed-venue): anyone can call a venue owned, so a name match is only a suggestion.",
+      "description": "For one of your rented or partner venues: owned venues of other organizations with the same name and city, every match listed (two are never decided for you), each with `verified` (Exos staff checked that organization runs it; it clears when that organization edits the venue's name, address or relationship). Only venues that take booking requests, as in the directory. Nothing is linked until you choose one (PUT /v1/venues/:id/listed-venue): anyone can call a venue owned, so a name match is only a suggestion.",
       "auth": "api_key",
       "scope": "booking:read",
       "parameters": [
@@ -497,9 +497,9 @@
         },
         {
           "status": 400,
-          "description": "Not a venue another organization runs, or your venue isn't rented / partner.",
+          "description": "Not a venue another organization runs on Exos that takes booking requests (the same answer whatever the id is), or your venue isn't rented / partner.",
           "example": {
-            "error": "listed_venue_id must be a venue another organization runs (owned)"
+            "error": "listed_venue_id must be a venue another organization runs on Exos that takes booking requests"
           }
         }
       ],

@@ -57,7 +57,8 @@ really the org's.
 A promoter's own `rented` / `partner` record of the venue counts too once **the promoter** links it
 (`listed_venue_id`). Exos never links a record for anyone: since any org can call a venue `owned`, a name match is
 only a suggestion (Venue requests → Sent, or `GET /v1/venues/:id/listing-suggestions`), listing every candidate with
-its `verified` flag (set by Exos staff only; shown, never required). The promoter picks one (`PUT
+its `verified` flag (set by Exos staff only; shown, never required; the org's own change of the venue's name, address,
+relationship or org clears it). Only venues that take requests are suggested or can be linked, as in the directory. The promoter picks one (`PUT
 /v1/venues/:id/listed-venue`, `exos_venue_link`); a link it made can only be removed by a platform admin, so it can't
 be dropped to get around the gate. A squatter declaring a same-named "owned" venue gates nobody's records. A venue
 org can stop taking requests per venue (`accepts_requests`).

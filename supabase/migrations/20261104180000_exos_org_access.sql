@@ -592,6 +592,14 @@ BEGIN
       RAISE EXCEPTION 'only Exos staff verify a venue' USING ERRCODE = '42501';
     END IF;
   END IF;
+  -- Verification is of this name, place, relationship and org: an org's own
+  -- edit of any of them drops it (staff verify again).
+  IF TG_OP = 'UPDATE' AND NEW.verified
+     AND (NEW.name IS DISTINCT FROM OLD.name OR NEW.address IS DISTINCT FROM OLD.address
+          OR NEW.relationship IS DISTINCT FROM OLD.relationship OR NEW.org_id IS DISTINCT FROM OLD.org_id)
+     AND NOT (public.exos_is_admin() OR public._exos_caller_is_service()) THEN
+    NEW.verified := false;
+  END IF;
   -- (The owned venue being deleted clears it: ON DELETE SET NULL.)
   IF TG_OP = 'UPDATE' AND OLD.listed_venue_id IS NOT NULL AND NEW.listed_venue_id IS DISTINCT FROM OLD.listed_venue_id
      AND EXISTS (SELECT 1 FROM public.exos_venues v WHERE v.id = OLD.listed_venue_id)
@@ -604,9 +612,13 @@ BEGIN
       RAISE EXCEPTION 'only a rented or partner venue can be linked to a venue another organization runs'
         USING ERRCODE = '22023';
     END IF;
+    -- Only a venue the directory shows (owned elsewhere, taking requests);
+    -- anything else is the same refusal, so nothing is revealed about it.
     IF NOT EXISTS (SELECT 1 FROM public.exos_venues v
-                    WHERE v.id = NEW.listed_venue_id AND v.org_id <> NEW.org_id AND v.relationship = 'owned') THEN
-      RAISE EXCEPTION 'listed_venue_id must be a venue another organization runs (owned)' USING ERRCODE = '22023';
+                    WHERE v.id = NEW.listed_venue_id AND v.org_id <> NEW.org_id AND v.relationship = 'owned'
+                      AND v.accepts_requests) THEN
+      RAISE EXCEPTION 'listed_venue_id must be a venue another organization runs on Exos that takes booking requests'
+        USING ERRCODE = '22023';
     END IF;
   END IF;
   RETURN NEW;
@@ -618,8 +630,8 @@ CREATE TRIGGER exos_venues_listing BEFORE INSERT OR UPDATE ON public.exos_venues
 
 -- Owned venues of other orgs that may be the same place as this org's
 -- rented / partner record (same name and city, case and spaces aside), each
--- with `verified`. Every candidate is listed: two matches are never decided
--- for the promoter.
+-- with `verified`. Only venues the directory shows (taking requests). Every
+-- candidate is listed: two matches are never decided for the promoter.
 CREATE OR REPLACE FUNCTION public._exos_venue_link_suggestions(p_org uuid, p_venue uuid)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE r public.exos_venues%ROWTYPE;
@@ -631,7 +643,8 @@ BEGIN
              'region', v.address ->> 'region', 'verified', v.verified, 'accepts_requests', v.accepts_requests,
              'org', jsonb_build_object('id', o.id, 'name', o.name)) ORDER BY v.verified DESC, o.name, v.id)
       FROM public.exos_venues v JOIN public.exos_orgs o ON o.id = v.org_id
-     WHERE r.relationship IN ('rented', 'partner') AND v.relationship = 'owned' AND v.org_id <> p_org
+     WHERE r.relationship IN ('rented', 'partner') AND v.relationship = 'owned' AND v.accepts_requests
+       AND v.org_id <> p_org
        AND lower(btrim(v.name)) = lower(btrim(r.name))
        AND lower(btrim(coalesce(v.address ->> 'city', ''))) = lower(btrim(coalesce(r.address ->> 'city', '')))
        AND btrim(coalesce(r.address ->> 'city', '')) <> ''), '[]'::jsonb));
