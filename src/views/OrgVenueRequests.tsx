@@ -14,12 +14,14 @@ import { ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getUserRoleInOrg } from '../lib/orgs';
+import { listVenues } from '../lib/bookingApi';
 import DataTable from '../components/DataTable';
 import { BTN, BTN_PRIMARY, FLD, LABEL, Section, StatusBadge } from '../components/finance/ui';
 import {
-  createVenueRequest, decideVenueRequest, DEFAULT_GRANT_SCOPES, GRANT_SCOPE_INFO, GRANT_SCOPES, listCohostedEvents,
-  listPartnerGrants, listVenueRequests, revokePartnerGrant, searchVenueDirectory, setPartnerGrant,
-  type CohostedEvent, type DirectoryVenue, type GrantScope, type PartnerGrant, type VenueRequest,
+  createVenueRequest, decideVenueRequest, DEFAULT_GRANT_SCOPES, GRANT_SCOPE_INFO, GRANT_SCOPES, linkListedVenue,
+  listCohostedEvents, listPartnerGrants, listVenueRequests, revokePartnerGrant, searchVenueDirectory, setPartnerGrant,
+  venueLinkSuggestions, type CohostedEvent, type DirectoryVenue, type GrantScope, type LinkSuggestions, type PartnerGrant,
+  type VenueRequest,
 } from '../lib/orgAccess';
 
 const STATUSES = ['pending', 'approved', 'declined', 'withdrawn'] as const;
@@ -100,6 +102,7 @@ export default function OrgVenueRequests() {
 
       {tab === 'sent' && (<>
         {canDecide && <NewRequest orgId={orgId} onErr={onErr} onDone={() => { load(); toast({ kind: 'success', message: 'Request sent.' }); }} />}
+        <LinkRecords orgId={orgId} canEdit={canDecide} onErr={onErr} />
         <DataTable<VenueRequest> label="Requests sent" rows={sent} rowKey={(x) => x.id}
           searchFields={(x) => [x.title, x.venue_org.name, x.venue.name]} searchPlaceholder="Search show, venue"
           statuses={STATUSES} status={(x) => x.status} defaultSort={{ key: 'date', dir: 'asc' }}
@@ -195,6 +198,49 @@ function Decide({ req, canDecide, onClose, onDone, onErr }: {
           </div>
         ) : <p className="text-slate-500">{req.status === 'pending' ? 'Owners and managers decide.' : `This request is ${req.status}.`}</p>}
       </div>
+    </Section>
+  );
+}
+
+// Your rented / partner venues and the owned venues they may stand for.
+// Exos never links them for you (anyone can call a venue "owned"); pick the
+// right one. Once linked, events there go through that org, for good.
+function LinkRecords({ orgId, canEdit, onErr }: { orgId: string; canEdit: boolean; onErr: (e: unknown) => void }) {
+  const [rows, setRows] = useState<{ id: string; name: string; s: LinkSuggestions | null }[]>([]);
+  const load = useCallback(() => {
+    listVenues(orgId).then(async (vs) => {
+      const mine = vs.filter((v) => v.relationship === 'rented' || v.relationship === 'partner');
+      setRows(await Promise.all(mine.map(async (v) => ({ id: v.id, name: v.name, s: await venueLinkSuggestions(v.id).catch(() => null) }))));
+    }).catch(onErr);
+  }, [orgId, onErr]);
+  useEffect(() => { load(); }, [load]);
+  const open = rows.filter((r) => r.s && (r.s.listed_venue_id || r.s.suggestions.length));
+  if (!open.length) return null;
+  return (
+    <Section title="Your venue records that may be another org's venue">
+      <ul className="text-sm space-y-2">
+        {open.map((r) => (
+          <li key={r.id}>
+            <span className="font-bold">{r.name}</span>
+            {r.s!.listed_venue_id
+              ? <span className="text-xs text-slate-500"> · linked: events here go through {r.s!.suggestions.find((x) => x.id === r.s!.listed_venue_id)?.org.name ?? 'that venue'}</span>
+              : (
+                <span className="text-xs text-slate-500"> · may be:{' '}
+                  {r.s!.suggestions.map((x) => (
+                    <span key={x.id} className="mr-2">
+                      {x.name}, {x.org.name}{x.verified ? ' (verified)' : ' (not verified)'}
+                      {canEdit && <button className={`${BTN} ml-1`} onClick={() => {
+                        if (window.confirm(`Link ${r.name} to ${x.org.name}'s ${x.name}? Events and holds there will need their approval, and the link can't be undone.`)) {
+                          linkListedVenue(r.id, x.id).then(load).catch(onErr);
+                        }
+                      }}>This one</button>}
+                    </span>
+                  ))}
+                </span>
+              )}
+          </li>
+        ))}
+      </ul>
     </Section>
   );
 }

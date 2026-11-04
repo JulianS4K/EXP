@@ -7,10 +7,13 @@
 --   OA4  existing keys and tokens lose a scope at once; raising gives it back
 --   OA5  new keys are held to the maker's set
 --   OA6  a promoter is blocked at a venue another org runs (events, holds,
---        templates, its own linked record of the venue)
---   OA7  request -> approve as an event -> the event-scoped grant works
---   OA8  grant changes; a revoked grant stops it; decline, withdraw, approve
---        as a hold then convert later
+--        templates, its own record once it links it); a squatter's "owned"
+--        venue captures nothing; links are explicit, suggestions ambiguous
+--   OA7  request -> approve as an event -> the event-scoped grant works;
+--        co-host edits need the promoter key's owner / manager and are logged
+--   OA8  grant changes (money: gross only with finance:read in the grant AND
+--        the key); a revoked grant stops it; decline, withdraw, approve as a
+--        hold then convert later
 --   OA9  cross-org isolation
 --   OA10 partner presale: block (default) vs allow, org setting and event
 --        override, who may set it
@@ -117,12 +120,13 @@ BEGIN
       'public._exos_org_role_scopes(uuid,text,boolean)', 'public._exos_scopes_for_role(text[],text,uuid,boolean)',
       'public._exos_org_role_scopes_set(uuid,uuid,text,text[])', 'public._exos_venue_gate(uuid,uuid)',
       'public._exos_venue_directory(uuid,text,integer)', 'public._exos_venue_request_create(uuid,uuid,text,uuid,jsonb)',
-      'public._exos_venue_request_decide(uuid,uuid,text,uuid,uuid,text,jsonb)', 'public._exos_venue_request_withdraw(uuid,uuid)',
+      'public._exos_venue_request_decide(uuid,uuid,text,uuid,uuid,text,jsonb)', 'public._exos_venue_request_withdraw(uuid,uuid,uuid)',
+      'public._exos_venue_link_suggestions(uuid,uuid)', 'public._exos_venue_link(uuid,uuid,uuid)',
       'public._exos_venue_request_get(uuid,uuid)', 'public._exos_venue_requests_page(uuid,text,text,integer,integer)',
       'public._exos_partner_grants_list(uuid,uuid,boolean)', 'public._exos_partner_grant_set(uuid,uuid,uuid,jsonb)',
       'public._exos_partner_grant_revoke(uuid,uuid,uuid)', 'public._exos_cohost_events(uuid)',
-      'public._exos_cohost_event(uuid,uuid)', 'public._exos_cohost_event_update(uuid,uuid,jsonb)',
-      'public._exos_cohost_event_sales(uuid,uuid)', 'public._exos_partner_presale_mode(uuid)',
+      'public._exos_cohost_event(uuid,uuid)', 'public._exos_cohost_event_update(uuid,uuid,jsonb,uuid)',
+      'public._exos_cohost_event_sales(uuid,uuid,text[])', 'public._exos_partner_presale_mode(uuid)',
       'public._exos_partner_presale_get(uuid,uuid)', 'public._exos_partner_presale_set(uuid,uuid,uuid,text)',
       'public._exos_api_key_actor(uuid,uuid,text[])'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE')
@@ -134,7 +138,8 @@ BEGIN
       'public.exos_venue_requests(uuid,text,text)', 'public.exos_partner_grants(uuid)',
       'public.exos_partner_grant_set(uuid,text[])', 'public.exos_partner_grant_revoke(uuid)', 'public.exos_cohost_events(uuid)',
       'public.exos_partner_presale_get(uuid,uuid)', 'public.exos_partner_presale_set(uuid,text)',
-      'public.exos_event_partner_presale_set(uuid,text)'] LOOP
+      'public.exos_event_partner_presale_set(uuid,text)', 'public.exos_venue_link_suggestions(uuid)',
+      'public.exos_venue_link(uuid,uuid)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND has_function_privilege('authenticated', f, 'EXECUTE'),
       'OA1 authenticated: ' || f;
   END LOOP;
@@ -145,7 +150,7 @@ BEGIN
       'OA1 internal: ' || f;
   END LOOP;
   FOREACH f IN ARRAY ARRAY['public.exos_org_role_scopes', 'public.exos_venue_requests', 'public.exos_event_partner_grants',
-      'public.exos_org_partner_presale', 'public.exos_event_partner_presale'] LOOP
+      'public.exos_org_partner_presale', 'public.exos_event_partner_presale', 'public.exos_cohost_event_edits'] LOOP
     ASSERT NOT has_table_privilege('anon', f, 'SELECT') AND has_table_privilege('authenticated', f, 'SELECT')
        AND NOT has_table_privilege('authenticated', f, 'INSERT') AND NOT has_table_privilege('authenticated', f, 'UPDATE')
        AND NOT has_table_privilege('authenticated', f, 'DELETE'), 'OA1 table: ' || f;
@@ -351,7 +356,7 @@ RESET ROLE;
 -- OA6 -------------------------------------------------------------------------
 SET LOCAL ROLE authenticated;
 DO $$
-DECLARE s text; v uuid; v2 uuid; ev uuid;
+DECLARE s text; v uuid; v0 uuid; v2 uuid; sq uuid; ev uuid; sg jsonb;
 BEGIN
   PERFORM pg_temp.act(pg_temp.u('b1'));
   -- An event at the venue org's hall.
@@ -371,27 +376,67 @@ BEGIN
   s := pg_temp.st($q$INSERT INTO public.exos_event_templates (org_id, name, event_fields)
                     VALUES ('ac000000-0000-0000-0000-000000000002', 'T', '{"exos_venue_id":"ac000000-0000-0000-0000-0000000000e1"}')$q$);
   ASSERT s LIKE '22023 venue_approval_required%', 'OA6 template: ' || s;
-  -- The promoter's own record of the hall (same name and city): linked, and gated too.
+  -- The promoter's record of the hall, made before anyone else claims it.
+  INSERT INTO public.exos_venues (org_id, name, relationship, address) VALUES (pg_temp.o(2), 'AC Hall', 'partner', '{"city":"Brooklyn"}')
+  RETURNING id INTO v0;
+  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v0) IS NULL, 'OA6 no auto-link on create';
+  -- A squatter (another org) declares a same-named "owned" hall in the same city.
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  INSERT INTO public.exos_venues (org_id, name, relationship, address) VALUES (pg_temp.o(3), 'AC Hall', 'owned', '{"city":"Brooklyn"}')
+  RETURNING id INTO sq;
+  s := pg_temp.st(format($q$UPDATE public.exos_venues SET verified = true WHERE id = %L$q$, sq));
+  ASSERT s LIKE '42501%', 'OA6 an org can''t verify itself: ' || s;
+  PERFORM pg_temp.act(pg_temp.u('b1'));
+  -- It captures nothing: the existing record, renamed, stays unlinked and usable.
+  UPDATE public.exos_venues SET name = ' ac hall ', address = '{"city":"brooklyn"}' WHERE id = v0;
+  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v0) IS NULL, 'OA6 a squatter doesn''t capture an existing record';
+  PERFORM public.exos_hold_create(pg_temp.o(2), jsonb_build_object('title', 'Still mine',
+    'positions', jsonb_build_array(jsonb_build_object('date', pg_temp.day(29), 'venue_id', v0))));
+  -- A new same-named record isn't linked either.
   INSERT INTO public.exos_venues (org_id, name, relationship, address) VALUES (pg_temp.o(2), ' ac hall ', 'partner', '{"city":"brooklyn"}')
   RETURNING id INTO v;
-  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v) = pg_temp.u('e1')::uuid, 'OA6 copy linked';
+  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v) IS NULL, 'OA6 a same-named record doesn''t auto-link';
+  -- Suggestions: both candidates, nothing decided.
+  sg := public.exos_venue_link_suggestions(v);
+  ASSERT jsonb_array_length(sg->'suggestions') = 2 AND sg->'listed_venue_id' = 'null'::jsonb
+     AND (SELECT bool_and(NOT (x->>'verified')::boolean) FROM jsonb_array_elements(sg->'suggestions') x), 'OA6 ambiguous suggestions ' || sg::text;
+  s := pg_temp.st(format($q$SELECT public.exos_venue_link_suggestions(%L)$q$, pg_temp.u('e1')));
+  ASSERT s LIKE '42501%', 'OA6 suggestions for another org''s venue: ' || s;
+  s := pg_temp.st(format($q$UPDATE public.exos_venues SET verified = true WHERE id = %L$q$, v));
+  ASSERT s LIKE '42501%', 'OA6 a promoter can''t verify: ' || s;
+  -- The promoter links explicitly: now it is gated, and the link stays.
+  s := pg_temp.st(format($q$SELECT public.exos_venue_link(%L, %L)$q$, v, v0));
+  ASSERT s LIKE '22023%', 'OA6 link to own venue: ' || s;
+  sg := public.exos_venue_link(v, pg_temp.u('e1')::uuid);
+  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v) = pg_temp.u('e1')::uuid
+     AND sg->>'listed_venue_id' = pg_temp.u('e1'), 'OA6 explicit link';
   s := pg_temp.st(format($q$SELECT public.exos_hold_create('ac000000-0000-0000-0000-000000000002', jsonb_build_object('title', 'Mine',
          'positions', jsonb_build_array(jsonb_build_object('date', %L, 'venue_id', %L))))$q$, pg_temp.day(30), v));
-  ASSERT s LIKE '22023 venue_approval_required%ac000000-0000-0000-0000-0000000000e1%', 'OA6 hold at the copy: ' || s;
+  ASSERT s LIKE '22023 venue_approval_required%ac000000-0000-0000-0000-0000000000e1%', 'OA6 hold at the linked copy: ' || s;
   s := pg_temp.st(format($q$UPDATE public.exos_events SET exos_venue_id = %L WHERE id = %L$q$, v, ev));
-  ASSERT s LIKE '22023 venue_approval_required%', 'OA6 event at the copy: ' || s;
+  ASSERT s LIKE '22023 venue_approval_required%', 'OA6 event at the linked copy: ' || s;
   s := pg_temp.st(format($q$UPDATE public.exos_venues SET listed_venue_id = NULL WHERE id = %L$q$, v));
   ASSERT s LIKE '42501%', 'OA6 the link stays: ' || s;
-  s := pg_temp.st(format($q$UPDATE public.exos_venues SET listed_venue_id = %L WHERE id = %L$q$, v, v));
-  ASSERT s LIKE '42501%' OR s LIKE '22023%', 'OA6 relink: ' || s;
-  -- Another name, or no city: no link; its own venue works as before.
+  s := pg_temp.st(format($q$SELECT public.exos_venue_link(%L, %L)$q$, v, sq));
+  ASSERT s LIKE '42501%', 'OA6 relink: ' || s;
+  -- Its own other room works as before.
   INSERT INTO public.exos_venues (org_id, name, relationship) VALUES (pg_temp.o(2), 'AC Hall', 'rented') RETURNING id INTO v2;
-  ASSERT (SELECT listed_venue_id FROM public.exos_venues WHERE id = v2) IS NULL, 'OA6 no city, no link';
   PERFORM public.exos_hold_create(pg_temp.o(2), jsonb_build_object('title', 'Own room',
     'positions', jsonb_build_array(jsonb_build_object('date', pg_temp.day(30), 'venue_id', v2))));
   UPDATE public.exos_events SET exos_venue_id = v2 WHERE id = ev;
-  INSERT INTO ac VALUES ('copy', v::text);
+  INSERT INTO ac VALUES ('copy', v::text), ('squat', sq::text);
   PERFORM pg_temp.act(NULL);
+END $$;
+RESET ROLE;
+-- Exos staff (here the service role) verify the real hall: it leads the suggestions.
+UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1';
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE sg jsonb;
+BEGIN
+  sg := public._exos_venue_link_suggestions(pg_temp.o(2), pg_temp.v('copy')::uuid);
+  ASSERT sg->'suggestions'->0->>'id' = pg_temp.u('e1') AND (sg->'suggestions'->0->>'verified')::boolean
+     AND NOT (sg->'suggestions'->1->>'verified')::boolean, 'OA6 verified first ' || sg::text;
 END $$;
 RESET ROLE;
 -- The API path (a template-made event) answers the same.
@@ -414,7 +459,11 @@ DECLARE v jsonb; s text; n int;
 BEGIN
   PERFORM pg_temp.act(pg_temp.u('b1'));
   v := public.exos_venue_directory(pg_temp.o(2), 'brook');
-  ASSERT jsonb_array_length(v) = 1 AND v->0->>'id' = pg_temp.u('e1') AND v->0->'rooms'->0->>'name' = 'Main Room'
+  -- Both "owned" halls are listed; only the real one is verified, and nothing private shows.
+  ASSERT jsonb_array_length(v) = 2
+     AND (SELECT count(*) FROM jsonb_array_elements(v) x WHERE x->>'id' = pg_temp.u('e1') AND (x->>'verified')::boolean
+            AND x->'rooms'->0->>'name' = 'Main Room') = 1
+     AND (SELECT count(*) FROM jsonb_array_elements(v) x WHERE x->>'id' = pg_temp.v('squat') AND NOT (x->>'verified')::boolean) = 1
      AND NOT (v->0 ? 'contact_email'), 'OA7 directory ' || v::text;
   s := pg_temp.st($q$SELECT public.exos_venue_directory('ac000000-0000-0000-0000-000000000001', 'brook')$q$);
   ASSERT s LIKE '42501%', 'OA7 directory as another org: ' || s;
@@ -468,11 +517,20 @@ BEGIN
   ASSERT jsonb_array_length(v) = 1 AND v->0->>'id' = ev::text AND v->0->'host_org'->>'name' = 'AC Venue Co', 'OA7 list ' || v::text;
   v := public._exos_cohost_event(pg_temp.o(2), ev);
   ASSERT v->>'name' = 'Promoter Night' AND jsonb_array_length(v->'ticket_types') = 1, 'OA7 read ' || v::text;
-  v := public._exos_cohost_event_update(pg_temp.o(2), ev, '{"name":"Promoter Night Live","description":"Two DJs, all night."}');
+  -- Edits act as the promoter key's creator (an owner / manager of the promoter now) and are logged.
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"name":"x"}', NULL)$q$, ev));
+  ASSERT s LIKE '42501%', 'OA7 no key, no edit: ' || s;
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"name":"x"}', 'ac000000-0000-0000-0000-0000000000f5')$q$, ev));
+  ASSERT s LIKE '42501%', 'OA7 another org''s key: ' || s;
+  v := public._exos_cohost_event_update(pg_temp.o(2), ev, '{"name":"Promoter Night Live","description":"Two DJs, all night."}',
+         pg_temp.u('f4')::uuid);
+  ASSERT (SELECT actor_uid = pg_temp.u('b1')::uuid AND api_key_id = pg_temp.u('f4')::uuid AND org_id = pg_temp.o(1)
+                 AND fields = ARRAY['description','name']
+            FROM public.exos_cohost_event_edits WHERE event_id = ev), 'OA7 edit logged with its actor';
   ASSERT v->>'name' = 'Promoter Night Live' AND v->>'description' = 'Two DJs, all night.', 'OA7 update ' || v::text;
-  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"total_tickets":9999}')$q$, ev));
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"total_tickets":9999}', 'ac000000-0000-0000-0000-0000000000f4')$q$, ev));
   ASSERT s LIKE '22023%', 'OA7 capacity is the venue''s: ' || s;
-  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"image_url":"http://x"}')$q$, ev));
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"image_url":"http://x"}', 'ac000000-0000-0000-0000-0000000000f4')$q$, ev));
   ASSERT s LIKE '22023%', 'OA7 https only: ' || s;
 END $$;
 RESET ROLE;
@@ -487,7 +545,8 @@ SET LOCAL ROLE service_role;
 DO $$
 DECLARE v jsonb; ev uuid := pg_temp.v('ev')::uuid;
 BEGIN
-  v := public._exos_cohost_event_sales(pg_temp.o(2), ev);
+  -- The key has finance:read, the grant doesn't: no money.
+  v := public._exos_cohost_event_sales(pg_temp.o(2), ev, ARRAY['tickets:read', 'finance:read']);
   ASSERT v->'ticket_types'->0->>'sold' = '2' AND v->'ticket_types'->0->>'checked_in' = '1'
      AND NOT (v->'ticket_types'->0 ? 'gross_cents'), 'OA7 sales without money ' || v::text;
   RAISE NOTICE 'OK  OA7 request -> approve -> the event-scoped grant works';
@@ -516,8 +575,15 @@ DECLARE v jsonb; s text; ev uuid := pg_temp.v('ev')::uuid;
 BEGIN
   s := pg_temp.st(format($q$SELECT public._exos_cohost_event('ac000000-0000-0000-0000-000000000002', %L)$q$, ev));
   ASSERT s LIKE '42501 grant_scope_required%', 'OA8 events:read taken away: ' || s;
-  v := public._exos_cohost_event_sales(pg_temp.o(2), ev);
-  ASSERT (v->'ticket_types'->0->>'gross_cents')::int = 4000, 'OA8 finance:read shows gross ' || v::text;
+  -- The grant has finance:read now; money needs it in the key too.
+  v := public._exos_cohost_event_sales(pg_temp.o(2), ev, ARRAY['tickets:read']);
+  ASSERT NOT (v->'ticket_types'->0 ? 'gross_cents'), 'OA8 grant only: no money ' || v::text;
+  v := public._exos_cohost_event_sales(pg_temp.o(2), ev, NULL);
+  ASSERT NOT (v->'ticket_types'->0 ? 'gross_cents'), 'OA8 no credential scopes: no money ' || v::text;
+  v := public._exos_cohost_event_sales(pg_temp.o(2), ev, ARRAY['tickets:read', 'finance:read']);
+  ASSERT (v->'ticket_types'->0->>'gross_cents')::int = 4000, 'OA8 both: gross ' || v::text;
+  v := public._exos_cohost_event_sales(pg_temp.o(2), ev, ARRAY['tickets:read', 'finance:write']);
+  ASSERT (v->'ticket_types'->0->>'gross_cents')::int = 4000, 'OA8 finance:write covers finance:read ' || v::text;
 END $$;
 RESET ROLE;
 SET LOCAL ROLE authenticated;
@@ -529,9 +595,9 @@ SET LOCAL ROLE service_role;
 DO $$
 DECLARE s text; ev uuid := pg_temp.v('ev')::uuid;
 BEGIN
-  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_sales('ac000000-0000-0000-0000-000000000002', %L)$q$, ev));
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_sales('ac000000-0000-0000-0000-000000000002', %L, ARRAY['tickets:read'])$q$, ev));
   ASSERT s LIKE 'P0002%', 'OA8 a revoked grant stops it: ' || s;
-  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"name":"x"}')$q$, ev));
+  s := pg_temp.st(format($q$SELECT public._exos_cohost_event_update('ac000000-0000-0000-0000-000000000002', %L, '{"name":"x"}', 'ac000000-0000-0000-0000-0000000000f4')$q$, ev));
   ASSERT s LIKE 'P0002%', 'OA8 revoked: no writes: ' || s;
   ASSERT jsonb_array_length(public._exos_cohost_events(pg_temp.o(2))) = 0, 'OA8 gone from the list';
   s := pg_temp.st(format($q$SELECT public._exos_partner_grant_revoke('ac000000-0000-0000-0000-000000000001', NULL, %L)$q$, pg_temp.v('grant')));
@@ -568,9 +634,10 @@ BEGIN
   v := public._exos_venue_request_create(pg_temp.o(2), NULL, 'api', NULL,
          jsonb_build_object('venue_id', pg_temp.u('e1'), 'date', pg_temp.day(52), 'title', 'Maybe'));
   r4 := (v->>'id')::uuid;
-  s := pg_temp.st(format($q$SELECT public._exos_venue_request_withdraw('ac000000-0000-0000-0000-000000000001', %L)$q$, r4));
+  s := pg_temp.st(format($q$SELECT public._exos_venue_request_withdraw('ac000000-0000-0000-0000-000000000001', %L, NULL)$q$, r4));
   ASSERT s LIKE 'P0002%', 'OA8 the venue can''t withdraw it: ' || s;
-  ASSERT public._exos_venue_request_withdraw(pg_temp.o(2), r4)->>'status' = 'withdrawn', 'OA8 withdrawn';
+  ASSERT public._exos_venue_request_withdraw(pg_temp.o(2), r4, pg_temp.u('b1')::uuid)->>'status' = 'withdrawn', 'OA8 withdrawn';
+  ASSERT (SELECT decided_by FROM public.exos_venue_requests WHERE id = r4) = pg_temp.u('b1')::uuid, 'OA8 who withdrew';
   s := pg_temp.st(format($q$SELECT public._exos_venue_request_decide('ac000000-0000-0000-0000-000000000001', NULL, 'api', NULL, %L, 'approve', '{}')$q$, r4));
   ASSERT s LIKE '55000%', 'OA8 a withdrawn request can''t be approved: ' || s;
   -- A venue that takes no requests; the venue's own hall.

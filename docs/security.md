@@ -290,11 +290,19 @@ org; writes need a key whose creator holds the role now,
 - **The venue gate** (`_exos_venue_gate`) runs inside the event, hold-night
   and event-template write paths, so the dashboard, the API and templates
   answer alike. Its refusal names only the venue id the caller already sent.
+  `owned` is self-declared, so nothing links a promoter's record to an owned
+  venue but the promoter itself (`exos_venue_link`); name matches are only
+  suggestions, ambiguous ones shown as such, with `verified` (staff-only,
+  trigger-enforced) as a hint. A squatter's "owned" venue gates no one else.
 - **Grants**: a co-host reads or writes another org's event only through the
   `_exos_cohost_*` functions, which require a live grant with the scope
   (revoked: `P0002`, as for an event that doesn't exist, so ids can't be
   probed) and touch whitelisted copy fields only. A grant can never carry
-  refunds; the venue directory never shows contacts or notes.
+  refunds; the venue directory never shows contacts or notes. Money
+  (`gross_cents`) needs `finance:read` in the grant and in the caller's
+  credential (`p_cred_scopes`, the effective scopes). Co-host edits run as
+  the grantee key's creator (owner / manager now, `_exos_api_key_actor` in
+  the SQL) and are logged in `exos_cohost_event_edits`.
 
 ### Search path
 

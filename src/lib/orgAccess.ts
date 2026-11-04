@@ -97,6 +97,27 @@ export async function searchVenueDirectory(orgId: string, q: string): Promise<Di
   return (data ?? []) as DirectoryVenue[];
 }
 
+export interface LinkSuggestions {
+  venue_id: string;
+  listed_venue_id: string | null;
+  suggestions: { id: string; name: string; city: string | null; region: string | null; verified: boolean;
+    accepts_requests: boolean; org: { id: string; name: string } }[];
+}
+
+/** Owned venues elsewhere that may be the place your rented / partner record stands for. Never linked for you. */
+export async function venueLinkSuggestions(venueId: string): Promise<LinkSuggestions> {
+  const { data, error } = await supabase.rpc('exos_venue_link_suggestions', { p_venue_id: venueId });
+  if (error) throw error;
+  return data as LinkSuggestions;
+}
+
+/** Link your record to that venue (it then needs that org's approval; the link stays). */
+export async function linkListedVenue(venueId: string, listedVenueId: string): Promise<LinkSuggestions> {
+  const { data, error } = await supabase.rpc('exos_venue_link', { p_venue_id: venueId, p_listed_venue_id: listedVenueId });
+  if (error) throw error;
+  return data as LinkSuggestions;
+}
+
 export async function listVenueRequests(orgId: string, direction: 'received' | 'sent', status?: string): Promise<VenueRequest[]> {
   const { data, error } = await supabase.rpc('exos_venue_requests', {
     p_org_id: orgId, p_direction: direction, p_status: status ?? null,

@@ -320,6 +320,7 @@
                 "region": "NY",
                 "timezone": "America/New_York",
                 "capacity": 500,
+                "verified": true,
                 "org": {
                   "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
                   "name": "Lincoln Hall Inc."
@@ -354,6 +355,157 @@
           }
         }
       ]
+    },
+    {
+      "id": "get-venue-listing-suggestions",
+      "method": "GET",
+      "path": "/v1/venues/:id/listing-suggestions",
+      "summary": "Suggest the venue your record stands for",
+      "description": "For one of your rented or partner venues: owned venues of other organizations with the same name and city, every match listed (two are never decided for you), each with `verified` (Exos staff checked that organization runs it). Nothing is linked until you choose one (PUT /v1/venues/:id/listed-venue): anyone can call a venue owned, so a name match is only a suggestion.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Your venue's id. Another organization's answers 404.",
+          "example": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "venue_id": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "listed_venue_id": null,
+              "suggestions": [
+                {
+                  "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": true,
+                  "accepts_requests": true,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Lincoln Hall Inc."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your venues.",
+          "example": {
+            "error": "venue not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "link-listed-venue",
+      "method": "PUT",
+      "path": "/v1/venues/:id/listed-venue",
+      "summary": "Link your record to the venue it stands for",
+      "description": "Say that your rented or partner venue is another organization's owned venue. From then on events and holds at your record need that organization's approval (venue_approval_required), and booking requests through it go to them. The link stays: only Exos staff can remove it. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Your venue's id.",
+          "example": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "listed_venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The owned venue (from the suggestions or the directory).",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "venue_id": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "listed_venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "suggestions": [
+                {
+                  "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": true,
+                  "accepts_requests": true,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Lincoln Hall Inc."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your venues.",
+          "example": {
+            "error": "venue not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "Not a venue another organization runs, or your venue isn't rented / partner.",
+          "example": {
+            "error": "listed_venue_id must be a venue another organization runs (owned)"
+          }
+        }
+      ],
+      "request_example": {
+        "listed_venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+      }
     },
     {
       "id": "list-venue-requests",
@@ -1501,7 +1653,7 @@
       "method": "PATCH",
       "path": "/v1/cohosted-events/:id",
       "summary": "Edit a shared event's copy",
-      "description": "Name, description, summary, description_md, image_url and video_url (https). Prices, capacity, dates, status and money settings stay with the venue. Needs events:write in the venue's grant.",
+      "description": "Name, description, summary, description_md, image_url and video_url (https). Prices, capacity, dates, status and money settings stay with the venue. Needs events:write in the venue's grant and a key created by an owner or manager of your organization; each edit is logged for both organizations with who made it.",
       "auth": "api_key",
       "scope": "events:write",
       "parameters": [
@@ -1624,6 +1776,13 @@
           }
         },
         {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
           "status": 404,
           "description": "No live grant for your organization on this event (never shared, revoked, or another org's id).",
           "example": {
@@ -1648,7 +1807,7 @@
       "method": "GET",
       "path": "/v1/cohosted-events/:id/sales",
       "summary": "A shared event's sales",
-      "description": "Tickets sold and checked in per ticket type (no attendees). With finance:read in the grant, gross_cents too (what buyers paid for tickets still held). Needs tickets:read in the venue's grant.",
+      "description": "Tickets sold and checked in per ticket type (no attendees). gross_cents (what buyers paid for tickets still held) only when BOTH the venue's grant and your key have finance:read. Needs tickets:read in the venue's grant.",
       "auth": "api_key",
       "scope": "tickets:read",
       "parameters": [

@@ -21,7 +21,7 @@ import {
 /** The route ids this module answers. */
 export const ORG_ACCESS_ROUTES = new Set([
   "get-role-api-scopes", "update-role-api-scopes",
-  "list-venue-directory", "list-venue-requests", "create-venue-request", "get-venue-request",
+  "list-venue-directory", "get-venue-listing-suggestions", "link-listed-venue", "list-venue-requests", "create-venue-request", "get-venue-request",
   "approve-venue-request", "decline-venue-request", "withdraw-venue-request",
   "list-partner-grants", "update-partner-grant", "revoke-partner-grant",
   "list-cohosted-events", "get-cohosted-event", "update-cohosted-event", "get-cohosted-event-sales",
@@ -34,7 +34,8 @@ export const ORG_ACCESS_CREATED = new Set(["create-venue-request"]);
 export interface OrgAccessCtx {
   sb: SupabaseClient;
   orgId: string;
-  cred: { kind: "api_key" | "pat" | "oauth"; id: string; userId: string | null; role: string | null };
+  /** `scopes`: the credential's effective scopes now (resolveCredential). */
+  cred: { kind: "api_key" | "pat" | "oauth"; id: string; scopes: string[]; userId: string | null; role: string | null };
   params: Record<string, string>;
   q: URLSearchParams;
   page: Page;
@@ -111,6 +112,19 @@ export async function handleOrgAccess(route: ApiRoute, c: OrgAccessCtx): Promise
     case "list-venue-directory":
       return { data: await rpc(c, "_exos_venue_directory", { p_org: orgId, p_q: c.q.get("q") ?? "", p_limit: 25 }) };
 
+    // Your rented / partner record of a venue another org runs: candidates
+    // (same name and city, every match, with `verified`), and an explicit link.
+    case "get-venue-listing-suggestions":
+      return { data: await rpc(c, "_exos_venue_link_suggestions", { p_org: orgId, p_venue: idParam(c, "venue") }) };
+
+    case "link-listed-venue": {
+      const id = idParam(c, "venue");
+      const listed = c.body.listed_venue_id;
+      if (typeof listed !== "string" || !UUID_RE.test(listed)) throw new OrgAccessError(400, "listed_venue_id must be a venue id.");
+      await actor(c, ["owner", "manager"]);
+      return { data: await rpc(c, "_exos_venue_link", { p_org: orgId, p_venue: id, p_listed: listed }) };
+    }
+
     case "list-venue-requests": {
       const dir = c.q.get("direction") ?? "received";
       if (dir !== "received" && dir !== "sent") throw new OrgAccessError(400, "direction must be received or sent.");
@@ -174,8 +188,8 @@ export async function handleOrgAccess(route: ApiRoute, c: OrgAccessCtx): Promise
 
     case "withdraw-venue-request": {
       const id = idParam(c, "request");
-      await actor(c, ["owner", "manager"]);
-      return { data: await rpc(c, "_exos_venue_request_withdraw", { p_org: orgId, p_id: id }) };
+      const uid = await actor(c, ["owner", "manager"]);
+      return { data: await rpc(c, "_exos_venue_request_withdraw", { p_org: orgId, p_id: id, p_actor: uid }) };
     }
 
     // ---- Grants (the venue's side) ------------------------------------------------------
@@ -213,11 +227,19 @@ export async function handleOrgAccess(route: ApiRoute, c: OrgAccessCtx): Promise
       const extra = Object.keys(b).find((k) => !(COHOST_EVENT_FIELDS as readonly string[]).includes(k));
       if (extra) throw new OrgAccessError(400, `a co-host can change ${COHOST_EVENT_FIELDS.join(", ")}, not ${extra}.`);
       if (!Object.keys(b).length) throw new OrgAccessError(400, "Nothing to update.");
-      return { data: await rpc(c, "_exos_cohost_event_update", { p_org: orgId, p_event: id, p: b }) };
+      // As every write: the key's creator, an owner or manager of your org now
+      // (the SQL checks it again and logs the edit with them).
+      await actor(c, ["owner", "manager"]);
+      return { data: await rpc(c, "_exos_cohost_event_update", { p_org: orgId, p_event: id, p: b, p_api_key: c.cred.id }) };
     }
 
     case "get-cohosted-event-sales":
-      return { data: await rpc(c, "_exos_cohost_event_sales", { p_org: orgId, p_event: idParam(c, "event") }) };
+      // Money only when the venue's grant AND this credential have finance:read.
+      return {
+        data: await rpc(c, "_exos_cohost_event_sales", {
+          p_org: orgId, p_event: idParam(c, "event"), p_cred_scopes: c.cred.scopes,
+        }),
+      };
 
     // ---- Partner presale ----------------------------------------------------------------
     case "get-partner-presale":

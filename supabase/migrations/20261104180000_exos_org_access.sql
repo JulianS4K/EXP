@@ -33,7 +33,8 @@
 --           W: FUNCTION exos_api_write, exos_api_commerce_write,
 --              exos_api_order_write (patched: the scope check reads the key's
 --              effective scopes, so a lowered role takes effect at once)
---           W: TABLE exos_venues (+ accepts_requests, listed_venue_id)
+--           W: TABLE exos_venues (+ accepts_requests, listed_venue_id, verified)
+--           C: TABLE exos_cohost_event_edits (RLS: both orgs' staff read)
 --           C: TABLE exos_venue_requests, exos_event_partner_grants (RLS: staff
 --              of either org read; writes through the functions only)
 --           C: FUNCTION _exos_venue_gate, _exos_api_key_actor,
@@ -44,10 +45,12 @@
 --              _exos_partner_grant_revoke, _exos_partner_grants_list,
 --              _exos_partner_grant_scopes, _exos_cohost_events,
 --              _exos_cohost_event, _exos_cohost_event_update,
---              _exos_cohost_event_sales (service role: exos-api), their
+--              _exos_cohost_event_sales, _exos_venue_link_suggestions,
+--              _exos_venue_link (service role: exos-api), their
 --              signed-in wrappers exos_venue_directory,
 --              exos_venue_request_create, exos_venue_request_decide,
 --              exos_venue_request_withdraw, exos_venue_requests,
+--              exos_venue_link_suggestions, exos_venue_link,
 --              exos_partner_grant_set, exos_partner_grant_revoke,
 --              exos_cohost_events (authenticated), trigger
 --              _exos_tg_event_partner_grant, exos_event_partner_grant_vocab
@@ -105,11 +108,11 @@
 --         "venue_approval_required: ..." (SQLSTATE 22023, as the "venue not
 --         found in this organization" it replaces; exos-api answers 403 with
 --         the request endpoint, by the message prefix). So is one at B's own rented / partner record of that
---         venue once it is linked (listed_venue_id). A new or renamed
---         rented / partner record whose name and city match exactly one owned
---         venue of another org that takes requests is linked automatically;
---         a link can't be removed except by a platform admin. Existing
---         records are not re-linked.
+--         venue once B has linked it (listed_venue_id). Links are only ever
+--         made by B, explicitly (exos_venue_link): `owned` is self-declared,
+--         so a name match is a suggestion (_exos_venue_link_suggestions, all
+--         candidates, with the staff-set `verified` flag), never a link. A
+--         link B made can't be removed except by a platform admin.
 --       * The request: B sends A a booking request for a date and room
 --         (exos_venue_requests, like an inbound submission between two
 --         orgs). A's owners / managers approve (a hold on A's calendar, or a
@@ -121,7 +124,11 @@
 --         tickets:read). It is created when the event is (now, or when A
 --         converts the hold later). A changes or revokes it at any time; a
 --         revoked grant stops B's next request. B's API calls on the event
---         need the scope in its own credential AND in the grant.
+--         need the scope in its own credential AND in the grant; money
+--         (gross) needs finance:read in both, checked in SQL from the
+--         credential's effective scopes. B's edits need a key whose creator
+--         is an owner / manager of B now, and are logged
+--         (exos_cohost_event_edits).
 --       * Money: the event is A's, so it sells, refunds and settles exactly
 --         as A's other events (#71's settlement rules; nothing here changes
 --         payouts). A grant never carries refunds.
@@ -478,12 +485,15 @@ SELECT pg_temp.exos_patch_n('public.exos_api_order_write(uuid, text, text, jsonb
 -- ===========================================================================
 ALTER TABLE public.exos_venues ADD COLUMN IF NOT EXISTS accepts_requests boolean NOT NULL DEFAULT true;
 ALTER TABLE public.exos_venues ADD COLUMN IF NOT EXISTS listed_venue_id uuid REFERENCES public.exos_venues (id) ON DELETE SET NULL;
+ALTER TABLE public.exos_venues ADD COLUMN IF NOT EXISTS verified boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS exos_venues_listed_idx ON public.exos_venues (listed_venue_id) WHERE listed_venue_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS exos_venues_owned_name_idx ON public.exos_venues (lower(btrim(name))) WHERE relationship = 'owned';
 COMMENT ON COLUMN public.exos_venues.accepts_requests IS
   'mig 20261104180000: an owned venue other orgs may send booking requests to (exos_venue_requests).';
 COMMENT ON COLUMN public.exos_venues.listed_venue_id IS
-  'mig 20261104180000: this rented / partner record is another org''s owned venue; events and holds here need that org''s approval.';
+  'mig 20261104180000: this rented / partner record is another org''s owned venue (linked by its own org, never automatically); events and holds here need that org''s approval.';
+COMMENT ON COLUMN public.exos_venues.verified IS
+  'mig 20261104180000: Exos staff checked the org runs this venue. Shown in suggestions and the directory; the venue gate does not require it.';
 
 -- The venue gate: may org p_org put an event / hold night / template at
 -- p_venue on its own? Another org's owned venue, or this org's record linked
@@ -565,14 +575,23 @@ SELECT pg_temp.exos_patch_n('public._exos_tg_event_template()',
   IF NEW.event_fields ? 'exos_venue_id' AND jsonb_typeof(NEW.event_fields -> 'exos_venue_id') = 'string'
      AND NOT EXISTS$n$, 1);
 
--- A rented / partner record of another org's owned venue: the link is
--- checked, kept once set (a platform admin may clear it), and made
--- automatically for a new or renamed record whose name and city match
--- exactly one owned venue elsewhere that takes requests.
+-- Links are never made for an org: anyone can call a venue `owned`, so a
+-- name match proves nothing (a squatter's "Elsewhere, Brooklyn" must not
+-- capture other promoters' records). A promoter org links its own rented /
+-- partner record to another org's owned venue explicitly (exos_venue_link,
+-- or the column through RLS); _exos_venue_link_suggestions lists candidates,
+-- ambiguous ones included, with `verified`. Once a promoter has linked, the
+-- link stays (a platform admin may clear it), so it can't be dropped to get
+-- around the gate. `verified` is set by platform admins (or the service
+-- role) only and is shown, never required.
 CREATE OR REPLACE FUNCTION public._exos_tg_venue_listing()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_match uuid[]; v_city text;
 BEGIN
+  IF (TG_OP = 'INSERT' AND NEW.verified) OR (TG_OP = 'UPDATE' AND NEW.verified IS DISTINCT FROM OLD.verified) THEN
+    IF NOT (public.exos_is_admin() OR public._exos_caller_is_service()) THEN
+      RAISE EXCEPTION 'only Exos staff verify a venue' USING ERRCODE = '42501';
+    END IF;
+  END IF;
   -- (The owned venue being deleted clears it: ON DELETE SET NULL.)
   IF TG_OP = 'UPDATE' AND OLD.listed_venue_id IS NOT NULL AND NEW.listed_venue_id IS DISTINCT FROM OLD.listed_venue_id
      AND EXISTS (SELECT 1 FROM public.exos_venues v WHERE v.id = OLD.listed_venue_id)
@@ -580,22 +599,14 @@ BEGIN
     RAISE EXCEPTION 'this venue is linked to a venue another organization runs on Exos; the link stays'
       USING ERRCODE = '42501';
   END IF;
-  IF NEW.listed_venue_id IS NOT NULL AND (TG_OP = 'INSERT' OR NEW.listed_venue_id IS DISTINCT FROM OLD.listed_venue_id)
-     AND NOT EXISTS (SELECT 1 FROM public.exos_venues v
-                      WHERE v.id = NEW.listed_venue_id AND v.org_id <> NEW.org_id AND v.relationship = 'owned') THEN
-    RAISE EXCEPTION 'listed_venue_id must be a venue another organization runs (owned)' USING ERRCODE = '22023';
-  END IF;
-  IF NEW.listed_venue_id IS NULL AND NEW.relationship IN ('rented', 'partner')
-     AND (TG_OP = 'INSERT' OR NEW.name IS DISTINCT FROM OLD.name OR NEW.address IS DISTINCT FROM OLD.address
-          OR NEW.relationship IS DISTINCT FROM OLD.relationship) THEN
-    v_city := lower(btrim(coalesce(NEW.address ->> 'city', '')));
-    IF v_city <> '' THEN
-      v_match := ARRAY(SELECT v.id FROM public.exos_venues v
-                        WHERE v.relationship = 'owned' AND v.accepts_requests AND v.org_id <> NEW.org_id
-                          AND lower(btrim(v.name)) = lower(btrim(NEW.name))
-                          AND lower(btrim(coalesce(v.address ->> 'city', ''))) = v_city
-                        LIMIT 2);
-      IF cardinality(v_match) = 1 THEN NEW.listed_venue_id := v_match[1]; END IF;
+  IF NEW.listed_venue_id IS NOT NULL AND (TG_OP = 'INSERT' OR NEW.listed_venue_id IS DISTINCT FROM OLD.listed_venue_id) THEN
+    IF NEW.relationship NOT IN ('rented', 'partner') THEN
+      RAISE EXCEPTION 'only a rented or partner venue can be linked to a venue another organization runs'
+        USING ERRCODE = '22023';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.exos_venues v
+                    WHERE v.id = NEW.listed_venue_id AND v.org_id <> NEW.org_id AND v.relationship = 'owned') THEN
+      RAISE EXCEPTION 'listed_venue_id must be a venue another organization runs (owned)' USING ERRCODE = '22023';
     END IF;
   END IF;
   RETURN NEW;
@@ -604,6 +615,66 @@ REVOKE ALL ON FUNCTION public._exos_tg_venue_listing() FROM PUBLIC, anon, authen
 DROP TRIGGER IF EXISTS exos_venues_listing ON public.exos_venues;
 CREATE TRIGGER exos_venues_listing BEFORE INSERT OR UPDATE ON public.exos_venues
   FOR EACH ROW EXECUTE FUNCTION public._exos_tg_venue_listing();
+
+-- Owned venues of other orgs that may be the same place as this org's
+-- rented / partner record (same name and city, case and spaces aside), each
+-- with `verified`. Every candidate is listed: two matches are never decided
+-- for the promoter.
+CREATE OR REPLACE FUNCTION public._exos_venue_link_suggestions(p_org uuid, p_venue uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE r public.exos_venues%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM public.exos_venues WHERE id = p_venue AND org_id = p_org;
+  IF NOT FOUND THEN RAISE EXCEPTION 'venue not found' USING ERRCODE = 'P0002'; END IF;
+  RETURN jsonb_build_object('venue_id', r.id, 'listed_venue_id', r.listed_venue_id, 'suggestions', coalesce((
+    SELECT jsonb_agg(jsonb_build_object('id', v.id, 'name', v.name, 'city', v.address ->> 'city',
+             'region', v.address ->> 'region', 'verified', v.verified, 'accepts_requests', v.accepts_requests,
+             'org', jsonb_build_object('id', o.id, 'name', o.name)) ORDER BY v.verified DESC, o.name, v.id)
+      FROM public.exos_venues v JOIN public.exos_orgs o ON o.id = v.org_id
+     WHERE r.relationship IN ('rented', 'partner') AND v.relationship = 'owned' AND v.org_id <> p_org
+       AND lower(btrim(v.name)) = lower(btrim(r.name))
+       AND lower(btrim(coalesce(v.address ->> 'city', ''))) = lower(btrim(coalesce(r.address ->> 'city', '')))
+       AND btrim(coalesce(r.address ->> 'city', '')) <> ''), '[]'::jsonb));
+END $$;
+REVOKE ALL ON FUNCTION public._exos_venue_link_suggestions(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_venue_link_suggestions(uuid, uuid) TO service_role;
+
+-- The promoter org links its record (the trigger checks the target and keeps
+-- the link). Returns the suggestions view.
+CREATE OR REPLACE FUNCTION public._exos_venue_link(p_org uuid, p_venue uuid, p_listed uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF p_listed IS NULL THEN RAISE EXCEPTION 'listed_venue_id is required' USING ERRCODE = '22023'; END IF;
+  UPDATE public.exos_venues SET listed_venue_id = p_listed WHERE id = p_venue AND org_id = p_org;
+  IF NOT FOUND THEN RAISE EXCEPTION 'venue not found' USING ERRCODE = 'P0002'; END IF;
+  RETURN public._exos_venue_link_suggestions(p_org, p_venue);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_venue_link(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_venue_link(uuid, uuid, uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.exos_venue_link_suggestions(p_venue_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v_org uuid := (SELECT org_id FROM public.exos_venues WHERE id = p_venue_id);
+BEGIN
+  IF v_org IS NULL OR auth.uid() IS NULL OR NOT public.exos_has_org_role(v_org, ARRAY['owner', 'manager', 'content']) THEN
+    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
+  END IF;
+  RETURN public._exos_venue_link_suggestions(v_org, p_venue_id);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_venue_link_suggestions(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_venue_link_suggestions(uuid) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.exos_venue_link(p_venue_id uuid, p_listed_venue_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v_org uuid := (SELECT org_id FROM public.exos_venues WHERE id = p_venue_id);
+BEGIN
+  IF v_org IS NULL OR auth.uid() IS NULL OR NOT public.exos_has_org_role(v_org, ARRAY['owner', 'manager']) THEN
+    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
+  END IF;
+  RETURN public._exos_venue_link(v_org, p_venue_id, p_listed_venue_id);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_venue_link(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_venue_link(uuid, uuid) TO authenticated;
 
 -- An org API key's creator, when they hold one of p_roles in the key's org
 -- now (as staffActor in exos-api/templates.ts); else 42501.
@@ -715,6 +786,7 @@ CREATE TABLE IF NOT EXISTS public.exos_event_partner_grants (
   granted_by     uuid REFERENCES auth.users (id) ON DELETE SET NULL,
   revoked_at     timestamptz,
   revoked_by     uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  updated_by     uuid REFERENCES auth.users (id) ON DELETE SET NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
   CHECK (grantee_org_id <> org_id),
@@ -795,7 +867,8 @@ BEGIN
   v_q := replace(replace(replace(v_q, '\', '\\'), '%', '\%'), '_', '\_');
   RETURN coalesce((SELECT jsonb_agg(x ORDER BY x->>'name', x->>'id') FROM (
     SELECT jsonb_build_object('id', v.id, 'name', v.name, 'city', v.address ->> 'city', 'region', v.address ->> 'region',
-             'timezone', v.timezone, 'capacity', v.capacity, 'org', jsonb_build_object('id', o.id, 'name', o.name),
+             'timezone', v.timezone, 'capacity', v.capacity, 'verified', v.verified,
+             'org', jsonb_build_object('id', o.id, 'name', o.name),
              'rooms', coalesce((SELECT jsonb_agg(jsonb_build_object('id', rm.id, 'name', rm.name, 'capacity', rm.capacity)
                                                  ORDER BY rm.sort_order, rm.name)
                                   FROM public.exos_venue_rooms rm WHERE rm.venue_id = v.id), '[]'::jsonb)) AS x
@@ -957,18 +1030,18 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_venue_request_decide(uuid, uuid, text, uuid, uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_venue_request_decide(uuid, uuid, text, uuid, uuid, text, jsonb) TO service_role;
 
-CREATE OR REPLACE FUNCTION public._exos_venue_request_withdraw(p_org uuid, p_id uuid)
+CREATE OR REPLACE FUNCTION public._exos_venue_request_withdraw(p_org uuid, p_id uuid, p_actor uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE r public.exos_venue_requests%ROWTYPE;
 BEGIN
   SELECT * INTO r FROM public.exos_venue_requests WHERE id = p_id AND requester_org_id = p_org FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'request not found' USING ERRCODE = 'P0002'; END IF;
   IF r.status <> 'pending' THEN RAISE EXCEPTION 'this request is already %', r.status USING ERRCODE = '55000'; END IF;
-  UPDATE public.exos_venue_requests SET status = 'withdrawn' WHERE id = p_id;
+  UPDATE public.exos_venue_requests SET status = 'withdrawn', decided_by = p_actor, decided_at = now() WHERE id = p_id;
   RETURN public._exos_venue_request_json(p_id);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_venue_request_withdraw(uuid, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_venue_request_withdraw(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_venue_request_withdraw(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_venue_request_withdraw(uuid, uuid, uuid) TO service_role;
 
 -- One request the org sent or received; another's is not found.
 CREATE OR REPLACE FUNCTION public._exos_venue_request_get(p_org uuid, p_id uuid)
@@ -1040,7 +1113,7 @@ DECLARE v_scopes text[];
 BEGIN
   IF p_scopes IS NULL OR p_scopes = 'null'::jsonb THEN RAISE EXCEPTION 'scopes is required' USING ERRCODE = '22023'; END IF;
   v_scopes := public._exos_grant_clean_scopes(p_scopes);
-  UPDATE public.exos_event_partner_grants SET scopes = v_scopes
+  UPDATE public.exos_event_partner_grants SET scopes = v_scopes, updated_by = p_actor
    WHERE id = p_id AND org_id = p_org AND revoked_at IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'grant not found' USING ERRCODE = 'P0002'; END IF;
   RETURN public._exos_partner_grant_json(p_id);
@@ -1118,12 +1191,38 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_cohost_event(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_cohost_event(uuid, uuid) TO service_role;
 
+-- Every co-host edit: who (the grantee's member behind the key), which
+-- fields. The venue org's staff and the grantee's owners / managers read it.
+CREATE TABLE IF NOT EXISTS public.exos_cohost_event_edits (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id         uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,   -- the event's org
+  event_id       uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
+  grantee_org_id uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  grant_id       uuid REFERENCES public.exos_event_partner_grants (id) ON DELETE SET NULL,
+  actor_uid      uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  api_key_id     uuid,
+  fields         text[] NOT NULL,
+  at             timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_cohost_event_edits_event_idx ON public.exos_cohost_event_edits (event_id, at DESC);
+ALTER TABLE public.exos_cohost_event_edits ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS exos_cohost_event_edits_sel ON public.exos_cohost_event_edits;
+CREATE POLICY exos_cohost_event_edits_sel ON public.exos_cohost_event_edits FOR SELECT TO authenticated
+  USING (public.exos_has_org_role(org_id, ARRAY['owner', 'manager', 'content'])
+         OR public.exos_has_org_role(grantee_org_id, ARRAY['owner', 'manager']));
+REVOKE ALL ON public.exos_cohost_event_edits FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.exos_cohost_event_edits TO authenticated;
+GRANT ALL ON public.exos_cohost_event_edits TO service_role;
+
 -- events:write on the grant: the show's copy only (never price, capacity,
--- dates, status or money settings, which stay with the venue org).
-CREATE OR REPLACE FUNCTION public._exos_cohost_event_update(p_org uuid, p_event uuid, p jsonb)
+-- dates, status or money settings, which stay with the venue org). Acts as
+-- the grantee key's creator, who must be an owner or manager of the grantee
+-- org now (as every other API write); logged in exos_cohost_event_edits.
+CREATE OR REPLACE FUNCTION public._exos_cohost_event_update(p_org uuid, p_event uuid, p jsonb, p_api_key uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_bad text; k text; v_status text;
+DECLARE v_bad text; k text; v_status text; v_actor uuid; v_ev_org uuid;
 BEGIN
+  v_actor := public._exos_api_key_actor(p_org, p_api_key, ARRAY['owner', 'manager']);
   PERFORM public._exos_cohost_need(p_org, p_event, 'events:write');
   IF p IS NULL OR jsonb_typeof(p) <> 'object' OR p = '{}'::jsonb THEN
     RAISE EXCEPTION 'Nothing to update' USING ERRCODE = '22023';
@@ -1134,7 +1233,7 @@ BEGIN
     RAISE EXCEPTION 'a co-host can change name, description, summary, description_md, image_url and video_url, not %',
       left(v_bad, 40) USING ERRCODE = '22023';
   END IF;
-  SELECT status INTO v_status FROM public.exos_events WHERE id = p_event FOR UPDATE;
+  SELECT status, org_id INTO v_status, v_ev_org FROM public.exos_events WHERE id = p_event FOR UPDATE;
   IF v_status = 'cancelled' THEN RAISE EXCEPTION 'the event is cancelled' USING ERRCODE = '55000'; END IF;
   FOR k IN SELECT jsonb_object_keys(p) LOOP
     IF p -> k <> 'null'::jsonb AND jsonb_typeof(p -> k) <> 'string' THEN
@@ -1163,18 +1262,26 @@ BEGIN
       EXECUTE format('UPDATE public.exos_events SET %I = $1 WHERE id = $2', k) USING p ->> k, p_event;
     END IF;
   END LOOP;
+  INSERT INTO public.exos_cohost_event_edits (org_id, event_id, grantee_org_id, grant_id, actor_uid, api_key_id, fields)
+  VALUES (v_ev_org, p_event, p_org,
+          (SELECT g.id FROM public.exos_event_partner_grants g
+            WHERE g.event_id = p_event AND g.grantee_org_id = p_org AND g.revoked_at IS NULL),
+          v_actor, p_api_key, ARRAY(SELECT jsonb_object_keys(p) ORDER BY 1));
   RETURN public._exos_cohost_event(p_org, p_event);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_cohost_event_update(uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_cohost_event_update(uuid, uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_cohost_event_update(uuid, uuid, jsonb, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_cohost_event_update(uuid, uuid, jsonb, uuid) TO service_role;
 
--- tickets:read on the grant: counts per ticket type (never attendees);
--- finance:read adds gross in cents (what buyers paid for tickets still held).
-CREATE OR REPLACE FUNCTION public._exos_cohost_event_sales(p_org uuid, p_event uuid)
+-- tickets:read on the grant: counts per ticket type (never attendees).
+-- Gross in cents (what buyers paid for tickets still held) only when BOTH
+-- the grant and the caller's credential (p_cred_scopes: its effective
+-- scopes, from exos-api) have finance:read (finance:write covers it).
+CREATE OR REPLACE FUNCTION public._exos_cohost_event_sales(p_org uuid, p_event uuid, p_cred_scopes text[])
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v_scopes text[] := public._exos_cohost_need(p_org, p_event, 'tickets:read'); v_money boolean;
 BEGIN
-  v_money := 'finance:read' = ANY (v_scopes);
+  v_money := 'finance:read' = ANY (v_scopes)
+         AND public._exos_api_has_scope(coalesce(p_cred_scopes, '{}'), 'finance:read');
   RETURN jsonb_build_object('event_id', p_event, 'ticket_types', coalesce((
     SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
              'id', t.id, 'name', t.name, 'capacity', t.capacity, 'sold', s.sold, 'checked_in', s.checked_in,
@@ -1188,8 +1295,8 @@ BEGIN
      WHERE t.event_id = p_event), '[]'::jsonb),
     'scopes', to_jsonb(v_scopes));
 END $$;
-REVOKE ALL ON FUNCTION public._exos_cohost_event_sales(uuid, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_cohost_event_sales(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_cohost_event_sales(uuid, uuid, text[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_cohost_event_sales(uuid, uuid, text[]) TO service_role;
 
 -- ---- Signed-in wrappers -----------------------------------------------------
 CREATE OR REPLACE FUNCTION public.exos_venue_directory(p_org_id uuid, p_q text)
@@ -1222,7 +1329,7 @@ BEGIN
     IF r.id IS NULL OR auth.uid() IS NULL OR NOT public.exos_has_org_role(r.requester_org_id, ARRAY['owner', 'manager']) THEN
       RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
     END IF;
-    RETURN public._exos_venue_request_withdraw(r.requester_org_id, p_id);
+    RETURN public._exos_venue_request_withdraw(r.requester_org_id, p_id, auth.uid());
   END IF;
   IF r.id IS NULL OR auth.uid() IS NULL OR NOT public.exos_has_org_role(r.org_id, ARRAY['owner', 'manager']) THEN
     RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';

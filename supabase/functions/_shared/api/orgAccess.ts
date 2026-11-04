@@ -112,6 +112,12 @@ export function cohostAllowed(credScopes: readonly string[], grantScopes: readon
   return cred && grantScopes.includes(needed);
 }
 
+/** Money on a co-hosted event (gross): finance:read in the grant AND the credential. Same as the SQL. */
+export function cohostMoneyAllowed(credScopes: readonly string[], grantScopes: readonly string[]): boolean {
+  return cohostAllowed(credScopes, grantScopes, 'finance:read')
+    || (grantScopes.includes('finance:read') && credScopes.includes('finance:write'));
+}
+
 export const VENUE_REQUEST_STATUSES = ['pending', 'approved', 'declined', 'withdrawn'] as const;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

@@ -545,6 +545,8 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-role-api-scopes', method: 'GET', auth: K, path: '/role-api-scopes', scope: 'org:admin', paged: false },
   { id: 'update-role-api-scopes', method: 'PUT', auth: K, path: '/role-api-scopes/:role', scope: 'org:admin', paged: false },
   { id: 'list-venue-directory', method: 'GET', auth: K, path: '/venue-directory', scope: 'booking:read', paged: false },
+  { id: 'get-venue-listing-suggestions', method: 'GET', auth: K, path: '/venues/:id/listing-suggestions', scope: 'booking:read', paged: false },
+  { id: 'link-listed-venue', method: 'PUT', auth: K, path: '/venues/:id/listed-venue', scope: 'booking:write', paged: false },
   { id: 'list-venue-requests', method: 'GET', auth: K, path: '/venue-requests', scope: 'booking:read', paged: true },
   { id: 'create-venue-request', method: 'POST', auth: K, path: '/venue-requests', scope: 'booking:write', paged: false },
   { id: 'get-venue-request', method: 'GET', auth: K, path: '/venue-requests/:id', scope: 'booking:read', paged: false },

@@ -54,10 +54,13 @@ really the org's.
 - a hold night there (dashboard and `POST /v1/holds`);
 - an event template naming it.
 
-A promoter's own `rented` / `partner` record of the venue counts too once it is linked (`listed_venue_id`). A new
-or renamed record whose name and city match exactly one owned venue elsewhere that takes requests is linked
-automatically; a link can only be removed by a platform admin. Records created before this migration aren't
-re-linked. A venue org can stop taking requests per venue (`accepts_requests`).
+A promoter's own `rented` / `partner` record of the venue counts too once **the promoter** links it
+(`listed_venue_id`). Exos never links a record for anyone: since any org can call a venue `owned`, a name match is
+only a suggestion (Venue requests → Sent, or `GET /v1/venues/:id/listing-suggestions`), listing every candidate with
+its `verified` flag (set by Exos staff only; shown, never required). The promoter picks one (`PUT
+/v1/venues/:id/listed-venue`, `exos_venue_link`); a link it made can only be removed by a platform admin, so it can't
+be dropped to get around the gate. A squatter declaring a same-named "owned" venue gates nobody's records. A venue
+org can stop taking requests per venue (`accepts_requests`).
 
 **The request.** The promoter finds the venue (Venue requests → Sent → search, or `GET /v1/venue-directory?q=`)
 and asks for a date, optionally a room and start time (`POST /v1/venue-requests`). One pending request per
@@ -71,10 +74,13 @@ requests → Received (content staff see the table) and:
 **The grant.** Approving names what the promoter may do on that one event (`exos_event_partner_grants`):
 `events:read`, `events:write` (name, description, summary, image, video), `tickets:read` (sold and checked in per
 ticket type, no attendees) and `finance:read` (gross per ticket type). Default: `events:read`, `events:write`,
-`tickets:read`. With `create: hold`, the grant starts when the venue converts the hold. The venue changes or
+`tickets:read`. Money (`gross_cents`) needs `finance:read` in the grant **and** in the promoter's key (exos-api
+passes the key's effective scopes to the SQL). With `create: hold`, the grant starts when the venue converts the hold. The venue changes or
 revokes it at any time (Venue requests → Shared events, `PATCH` / `DELETE /v1/partner-grants/:id`); a revoked grant
 stops the promoter's next request (404). The promoter works on it through `/v1/cohosted-events`; each route needs
-its scope both in the promoter's key and in the grant (`grant_scope_required` otherwise).
+its scope both in the promoter's key and in the grant (`grant_scope_required` otherwise). Edits need a key whose
+creator is an owner or manager of the promoter org now, and each is logged with that member
+(`exos_cohost_event_edits`, readable by both orgs).
 
 **Money.** The event is the venue org's: it sells, refunds and pays out exactly like its other events, and
 settles with the promoter through offers and settlements (#71). A grant never carries refunds.

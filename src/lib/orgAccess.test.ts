@@ -8,7 +8,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ORG_ROLES, ROLE_SCOPES } from '../../supabase/functions/_shared/api/credentials.ts';
 import {
-  cleanGrantScopes, cohostAllowed, CONFIGURABLE_ROLES, DEFAULT_GRANT_SCOPES, effectivePartnerPresale, GRANT_SCOPES,
+  cleanGrantScopes, cohostAllowed, cohostMoneyAllowed, CONFIGURABLE_ROLES, DEFAULT_GRANT_SCOPES, effectivePartnerPresale, GRANT_SCOPES,
   ORG_SCOPES, orgRoleScopes, ROLE_SCOPE_CEILING, roleScopesProblem, toggleScope, venueApprovalVenue, venueRequestBody,
 } from '../../supabase/functions/_shared/api/orgAccess.ts';
 import { matchRoute } from '../../supabase/functions/_shared/api/routes.ts';
@@ -118,6 +118,13 @@ describe('venue requests and grants', () => {
     expect(cohostAllowed(['tickets:read'], ['tickets:read', 'finance:read'], 'tickets:read')).toBe(true);
   });
 
+  it('money on a co-hosted event needs finance:read in the grant AND the credential', () => {
+    expect(cohostMoneyAllowed(['tickets:read'], ['tickets:read', 'finance:read'])).toBe(false);
+    expect(cohostMoneyAllowed(['finance:read'], ['tickets:read'])).toBe(false);
+    expect(cohostMoneyAllowed(['finance:read'], ['finance:read'])).toBe(true);
+    expect(cohostMoneyAllowed(['finance:write'], ['finance:read'])).toBe(true);
+  });
+
   it('checks a request body\'s shape', () => {
     const ok = { venue_id: '7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b', date: '2026-12-12', title: 'Night' };
     expect(venueRequestBody(ok).ok).toBe(true);
@@ -146,6 +153,8 @@ describe('venue requests and grants', () => {
     expect(matchRoute('PUT', '/role-api-scopes/finance')?.route.scope).toBe('org:admin');
     expect(matchRoute('PUT', '/events/e1/partner-presale')?.route.id).toBe('update-event-partner-presale');
     expect(matchRoute('PUT', '/partner-presale')?.route.scope).toBe('org:admin');
+    expect(matchRoute('PUT', '/venues/v1/listed-venue')?.route.id).toBe('link-listed-venue');
+    expect(matchRoute('GET', '/venues/v1/listing-suggestions')?.route.scope).toBe('booking:read');
   });
 });
 
