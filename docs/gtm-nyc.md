@@ -53,13 +53,43 @@ One win is years of events, but the bids have pass/fail lines that indie promote
   an item only when a target bid makes it pass/fail.
 - **Reference:** the NYC indie events count as references in a bid, so the indie wedge comes first.
 
+### Venue economics (NIVA, State of Live 2025, 2024 data)
+
+What independent stages report about their own books
+([report PDF](https://static1.squarespace.com/static/5e91157c96fe495a4baf48f2/t/68e58e39bce25b729b47932e/1759874617679/2025-NIVA-State-of-Live-Report.pdf)):
+
+- **64% were unprofitable** in 2024 (22% struggling to stay open); New York's state figure is 81%.
+- **Revenue:** tickets and cover 46%, alcohol and other drinks 25%, donations and grants 10%, other 8%, food 6%,
+  sponsorships 4%, merch 2%. Ticketing is "the backbone of the business model".
+- **Costs:** artist and booking fees 31%, staff 26%, rent and facility 9%, drinks 7%, insurance 4%.
+- **Top challenges, by how often named:** 1. marketing and bringing in an audience; 2. artist fees; 3. staffing;
+  4. inflation; 5. monopolies; 6. insurance; 7. scalpers and predatory resale; 8. rent; 9. PRO fees;
+  10. falling alcohol sales.
+- **Volume:** 94% sell tickets or charge a cover, 91% run year-round, the average venue has shows 143 days a year,
+  and 41% have shows 4 or more nights a week.
+- NIVA names forced transferability, unchecked resale and unfair platform practices as threats to ticketing, and
+  asks for control over how tickets are priced, delivered and sold.
+
+What follows for us:
+
+- **Lead with the audience, not fees.** Getting people in the room is problem #1; one listing that reaches every
+  place fans look (storefront, Instagram, Google, AI assistants, listings, and resale channels where the
+  organizer opts in) is the answer. All-in pricing and the door back it up.
+- **Resale is #7 on their list.** Marketplace channels are pitched only as the organizer's own primary inventory,
+  opt-in, at their price, never as resale. Transfer rules and rotating barcodes are the control they ask for.
+- **A venue is worth several promoters.** Illustration, not data: 143 nights × 200 tickets × $20 is about $570K
+  a year in tickets; at 3% that is about $17K a year to Exos per venue, after the first 6 months.
+- **Bar revenue is squeezed, not gone** (25% of revenue, #10 of 10). Bar, merch and per-head spend (Phase 3 POS)
+  are a follow-on, not the opening pitch.
+
 ## The pitch
 
-> Your buyers see one price, the one they pay. You keep your fans' data. Doors keep scanning when
-> the signal drops, and screenshots don't get in.
+> Fill the room: list once and your show is everywhere fans look, at one price, the one they pay. You keep your
+> fans' data. Doors keep scanning when the signal drops, and screenshots don't get in.
 
 | Pain today | What Exos does |
 |---|---|
+| Getting people in the room (venues' #1 challenge) | One listing to the storefront, Instagram checkout, Google, AI assistants, the discovery listings queue, and opt-in channels over 150 capacity |
 | Fans balk at buyer fees at checkout | All-in price; the platform fee comes out of the payout |
 | Checkout breaks inside Instagram | Checkout built for the Instagram and Facebook in-app browsers (item 7a) |
 | Screenshot and forwarded-ticket fraud | Barcodes that rotate every 30 s and are signed per ticket |
@@ -68,12 +98,21 @@ One win is years of events, but the bids have pass/fail lines that indie promote
 | Promoter team payouts on spreadsheets | Promoter tracking links and attribution (Phase 1) |
 | Slow payouts | Stripe Connect Express, paid straight to the organizer's account |
 
-**Commercial offer, to validate with design partners:**
+**Commercial offer** (as built: `supabase/functions/_shared/platformFee.ts`, `docs/organizer-guide.md`):
 
-- Platform fee of 5% (the current default), paid by the organizer, with no buyer fees.
-- The first 3 events, or first 90 days, fee-free for design partners.
+- **No buyer fees.** The Exos fee is **3%**, net to Exos, paid by the organizer out of the payout. Card processing
+  (Stripe's 2.9% + 30¢) passes through to the organizer, as with any card sale. A $40 ticket pays out $37.34.
+- **First 6 months free** for every new org: no Exos fee, only card processing.
+- **Free tier:** events with a max capacity of 150 or less never pay an Exos fee (and are never listed on resale
+  channels). This is the DIY and small-room wedge.
+- **Marketplace sales** (events over 150 that opt in): 3% of what the marketplace pays; a $40 ticket pays out
+  $38.80.
 - Exos staff at the door for the first event.
-- A fee floor for free and RSVP events: free events stay free.
+
+**What venues get beyond ticketing** (built in the open build-phase PRs #65–#80, not merged or applied yet):
+holds with levels and a booking calendar, offers and deal math, settlements and P&L, season passes, flex packs and
+memberships, timed entry and reserved seating, promoter payouts, phone-number RSVP, and Venmo / PayPal / Cash App
+checkout. Pitch these to venues only once they're live.
 
 ## Motion
 
