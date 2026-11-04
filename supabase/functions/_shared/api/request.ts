@@ -62,6 +62,8 @@ export function idempotencyKeyOf(v: string | null): string | null {
 export const RPC_STATUS: Record<string, number> = {
   '22023': 400, '42501': 403, P0002: 404, '23505': 409, '55000': 409, '54000': 409,
   EX409: 409, EX422: 422, EXSLD: 409,
+  // A partner over its cap (mig 20261104200000): 409 partner_cap_reached.
+  EXCAP: 409,
 };
 
 /** A raised SQL error as an HTTP answer, or null for anything unmapped (a 500). */
@@ -72,7 +74,29 @@ export function rpcAnswer(e: unknown): { status: number; body: Record<string, un
   const body: Record<string, unknown> = { error: String(err?.message ?? 'invalid request').slice(0, 300) };
   if (code === 'EXSLD') body.reason = 'sold_out';
   if (code === 'EX422') body.reason = 'not_available';
+  if (code === 'EXCAP') Object.assign(body, partnerCapBody(err));
   return { status: RPC_STATUS[code], body };
+}
+
+/**
+ * The 409 body of a reservation over a partner's cap: the SQL puts
+ * {"left", "max_tickets", "tier_id"} in the error's DETAIL (PostgREST's
+ * `details`). `left` is what the partner may still reserve.
+ */
+export function partnerCapBody(e: unknown): { reason: 'partner_cap_reached'; left: number | null; ticket_type_id: string | null } {
+  const raw = (e as { details?: unknown } | null)?.details;
+  let left: number | null = null;
+  let tier: string | null = null;
+  if (typeof raw === 'string') {
+    try {
+      const d = JSON.parse(raw) as { left?: unknown; tier_id?: unknown };
+      if (typeof d.left === 'number' && Number.isInteger(d.left) && d.left >= 0) left = d.left;
+      if (typeof d.tier_id === 'string') tier = d.tier_id;
+    } catch {
+      // Not ours: keep the nulls.
+    }
+  }
+  return { reason: 'partner_cap_reached', left, ticket_type_id: tier };
 }
 
 // Routes of the developer platform and partner sales (#74, migs 20261031130000 /
@@ -87,6 +111,7 @@ export const PLATFORM_ROUTES: ReadonlySet<string> = new Set([
   'update-team', 'list-team-members', 'update-team-member', 'remove-team-member', 'list-team-invitations',
   'create-team-invitation', 'cancel-team-invitation', 'list-team-roles', 'list-my-memberships',
   'revoke-current-token',
+  'get-event-partner-caps', 'set-event-partner-caps',
 ]);
 
 /**

@@ -133,6 +133,7 @@ import {
   venueView,
 } from "../_shared/api/booking.ts";
 import { parseSpotifyArtist, PARTNER_TYPES, spotifyLinks } from "../_shared/artists.ts";
+import { normalizePartnerCaps } from "../_shared/partners/caps.ts";
 import {
   buildFeedPage, etagMatches, FEED_MAX_AGE, feedEntry, FeedParamError, parseFeedQuery, SHARED_KEY_RE,
   type FeedSource, type SourceEvent,
@@ -1126,6 +1127,25 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       };
     }
 
+    // -- Per-partner caps (mig 20261104200000) ---------------------------------
+    case "get-event-partner-caps": {
+      const id = await ownEvent(c);
+      return { data: await rpc(sb, "_exos_partner_caps_json", { p_event_id: id }) };
+    }
+
+    case "set-event-partner-caps": {
+      const id = await ownEvent(c);
+      // Like the partner switch: owners and managers only.
+      requireRole(c, ["owner", "manager"]);
+      const caps = Array.isArray(c.body) ? c.body : c.body.caps;
+      if (!Array.isArray(caps)) throw new ApiError(400, "caps must be a list of { partner_id, ticket_type_id?, max_tickets }.");
+      return {
+        data: await rpc(sb, "_exos_partner_caps_set", {
+          p_org_id: orgId, p_event_id: id, p_caps: normalizePartnerCaps(caps), p_actor: c.cred.userId,
+        }),
+      };
+    }
+
     // -- Reservations of an event; organizer reservations --------------------
     case "list-ticket-reservations": {
       const id = await ownEvent(c);
@@ -1222,15 +1242,18 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
 
     case "list-team-members": {
       await requireOwner(c);
-      const { data, error } = await sb.from("exos_org_memberships").select("user_id, role, disabled")
+      const { data, error } = await sb.from("exos_org_memberships").select("user_id, role, disabled, status, pending_role")
         .eq("org_id", orgId).order("role").limit(500);
       if (error) throw error;
-      const members = (data ?? []) as { user_id: string; role: string; disabled: boolean }[];
+      const members = (data ?? []) as { user_id: string; role: string; disabled: boolean; status?: string; pending_role?: string | null }[];
       const emails = await Promise.all(members.slice(0, 200).map(async (m) => {
         const { data: u } = await sb.auth.admin.getUserById(m.user_id);
         return u?.user?.email ?? null;
       }));
-      return { data: members.map((m, i) => ({ id: m.user_id, user_id: m.user_id, email: emails[i] ?? null, role: m.role, disabled: m.disabled })) };
+      // status pending_approval / pending_role: a claimed invite waiting for
+      // approval in the dashboard (mig 20261104200000).
+      return { data: members.map((m, i) => ({ id: m.user_id, user_id: m.user_id, email: emails[i] ?? null, role: m.role, disabled: m.disabled,
+        status: m.status ?? "active", pending_role: m.pending_role ?? null })) };
     }
 
     case "update-team-member": {

@@ -745,10 +745,13 @@ BEGIN
   ASSERT (r ->> 'variance_cents')::int = -1000, 'SIM-DOOR-20: the shortfall is recorded, got ' || r::text;
   ASSERT pg_temp.raises($q$SELECT public.exos_pos_close_drawer('d7d00000-0000-0000-0000-000000000dd3', 9000, '{"2000": 4}'::jsonb)$q$, '22023'),
          'SIM-DOOR-20: denomination counts must add up';
-  PERFORM pg_temp.known('20', false,
-    'a closed drawer can''t be recounted or corrected: a miscount (the $10 was under the tray) stays the '
-    'night''s variance. Proposal: exos_pos_recount_drawer(session, counted, reason) for owner / manager, '
-    'keeping the first count in an audit row.');
+  -- FIXED (mig 20261104200000): the $10 was under the tray. An owner / manager
+  -- recounts with a reason; the first count stays in the audit row.
+  r := public.exos_pos_recount_drawer('d7d00000-0000-0000-0000-000000000dd3', 10000, 'found $10 under the tray');
+  PERFORM pg_temp.known('20', (r ->> 'variance_cents')::int = 0 AND EXISTS (
+      SELECT 1 FROM public.exos_pos_drawer_recounts WHERE session_id = 'd7d00000-0000-0000-0000-000000000dd3'
+         AND previous_counted_cents = 9000 AND previous_variance_cents = -1000),
+    'a closed drawer is recounted by a manager (exos_pos_recount_drawer): variance recomputed, first count kept');
   RAISE NOTICE 'OK SIM-DOOR-20 drawer: cash gift cards counted (fixed), shortfall recorded, double close refused';
 END $$;
 

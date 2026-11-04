@@ -15,7 +15,12 @@ A five-step wizard:
 
 Needs a signed-in account. Buying or holding tickets also needs a **confirmed email**.
 
-**Team** (`/orgs/:orgId/members`): invite by email with a role.
+**Team** (`/orgs/:orgId/members`): invite by email with a role. Whoever opens the invite link first can accept
+it with any account, so a mistyped address reaches a stranger. With **Approve new members** on (the default for
+organizations made from 2026-11-04; owners switch it on Members), an accepted invite gives no access until an
+owner approves it, or a manager for finance, content and scanner. The request shows the account email next to
+the address you typed, and the inviter is emailed. Reject removes them; an existing member who accepts an
+invite keeps their current role until it's approved (mig `20261104200000`).
 
 | Role | Can |
 |---|---|

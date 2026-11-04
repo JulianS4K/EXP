@@ -21,7 +21,10 @@ Partner sales" (`docs/api/partner-sales.json`); this page is how it works.
 2. **Open ticket types.** Edit event → Sell through partners (owners and managers). Per ticket type: switch it
    on, optionally tick which partners (none ticked means all of them), pause it. Off by default. Table ticket
    types are never offered. The API does the same: `GET/PUT /v1/events/:id/distribution`.
-3. **Watch it.** Partner reservations and orders are in `exos_partner_reservations` (owners, managers and
+3. **Cap a partner (optional).** Same panel → Caps per partner: the most tickets one partner may hold or sell,
+   for the whole event or one ticket type (`exos_partner_caps`, mig `20261104200000`). Blank means no cap, which
+   is the default: partners share what is left. See "Caps" below. The API: `GET/PUT /v1/events/:id/partner-caps`.
+4. **Watch it.** Partner reservations and orders are in `exos_partner_reservations` (owners, managers and
    finance can read them), and through `GET /v1/events/:id/ticket-reservations`. Tickets carry
    `channel_source = 'partner:<type>'` and `order_ref = 'po:<order id>'`.
 
@@ -43,6 +46,27 @@ Partner sales" (`docs/api/partner-sales.json`); this page is how it works.
 - **All-in prices.** The price per ticket is what Exos checkout charges: the scheduled price, the organizer's
   passed-on fees and exclusive tax (`exos_all_in_unit_cents`). Partners see `price`, `calculated_fees`,
   `taxes_total` and `final_cost` per ticket type; they charge their buyer `final_cost`.
+
+## Caps
+
+Without a cap, every partner sells from the same pool (what is left after other channels' allocations), so one
+partner can take all of it. A cap limits one partner, per ticket type (`tier_id`) or across the event
+(`tier_id` null); with both, the tighter one applies.
+
+- **What counts.** The partner's live holds (active reservations, not past `expires_at`) plus the tickets it sold
+  that are still valid (`active` or `used`). Cancelled and expired reservations and voided or refunded tickets
+  give their place back. Comps through the partner count too. Organizer reservations (an org API key's box
+  office) are never capped.
+- **Race-safe.** `_exos_partner_reserve` checks the caps after every line and the house cap passed, under a
+  per-partner, per-event advisory lock, so two reservations of the same partner, even on different ticket
+  types, can't both pass on the same count (`tests/exos/race_sim_partner.sh`).
+- **Over the cap.** `409` with `reason: "partner_cap_reached"`, `left` (what the partner may still reserve) and
+  `ticket_type_id` (null for an event cap). Nothing is held. A dry run (`…/build`) is refused the same way.
+- **What partners see.** `GET …/ticket_types` answers `available` as at most what the partner's cap leaves.
+- **Lowering a cap** below what a partner already holds is allowed: it only stops new reservations.
+- `PUT /v1/events/:id/partner-caps` takes `{ "caps": [{ partner_id, ticket_type_id?, max_tickets }] }`;
+  `max_tickets` is 0-100000 (0 stops the partner), or null to remove that cap. Caps not listed are kept. Owners
+  and managers (a user token of another role is refused). The dashboard calls `exos_set_partner_caps`.
 
 ## How a sale works
 

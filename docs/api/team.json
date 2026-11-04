@@ -89,7 +89,7 @@
       "method": "GET",
       "path": "/v1/team/members",
       "summary": "List members",
-      "description": "Members with their role and whether they are disabled. `id` is the user id.",
+      "description": "Members with their role and whether they are disabled. `id` is the user id. `status` is `pending_approval` for someone who accepted an invite and is waiting for an owner or manager to approve them in the dashboard (no access meanwhile); `pending_role` is the role an accepted invite asks for, also for an existing member (mig 20261104200000). Removing a pending member rejects them.",
       "auth": "api_key",
       "scope": "org:admin",
       "parameters": [],
@@ -104,7 +104,9 @@
                 "user_id": "5e4d3c2b-1a09-4f8e-9d7c-6b5a49382716",
                 "email": "sam@example.com",
                 "role": "manager",
-                "disabled": false
+                "disabled": false,
+                "status": "active",
+                "pending_role": null
               }
             ]
           }
@@ -203,7 +205,8 @@
       ],
       "request_example": {
         "role": "finance"
-      }
+      },
+      "description": "A member waiting for approval can't be enabled here (400): approve them in the dashboard."
     },
     {
       "id": "remove-team-member",

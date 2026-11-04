@@ -126,6 +126,9 @@ export interface OrgMembership {
   // Soft-disable without revoking the doc. A disabled membership is
   // ignored by the rule helper but kept for audit history.
   disabled?: boolean;
+  // 'pending_approval': joined through an invite, waiting for an owner or
+  // manager to approve (disabled meanwhile; mig 20261104200000).
+  status?: 'pending_approval';
 }
 
 /**

@@ -57,6 +57,7 @@ import RefundAsksPanel from '../components/RefundAsksPanel';
 import LastCallBadge from '../components/LastCallBadge';
 import FixedBlockSummary from '../components/FixedBlockSummary';
 import ShowFinancePanel from '../components/finance/ShowFinancePanel';
+import PosDrawersPanel from '../components/PosDrawersPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
@@ -332,6 +333,8 @@ export default function OrganizerEventReport() {
         {/* End-of-night money (online, door, fees, promoters owed); mig 20261102150000. */}
         <MoneySoFarPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* POS cash drawers and their recounts (mig 20261104200000). */}
+        <PosDrawersPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)} canAct={canAct} />
         {/* Phone-number RSVP for free ticket types (mig 20261102150000). */}
         {canAct && (
           <PhoneRsvpPanel eventId={event.id} canManage={canAct}

@@ -38,11 +38,16 @@ supabase functions deploy <name> --project-ref <ref>               # most functi
 supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the table
 ```
 
-`--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
-`stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
-`exos-channel-sync`, `exos-event-import`, `exos-eventbrite-oauth`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
-`exos-marketplace-sales`, `exos-mcp`, `exos-oauth`, `exos-posh-webhook`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
-`exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
+`--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
+public feeds): `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
+`exos-commerce`, `exos-conversions-drain`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
+`exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
+`exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,
+`exos-payouts`, `exos-paypal`, `exos-posh-webhook`, `exos-promoter-payouts`, `exos-reconcile-checkouts`,
+`exos-reconcile-stripe`, `exos-rsvp`, `exos-s4k-feed`, `exos-signup`, `exos-sms-drain`, `exos-sms-relay`,
+`exos-wallet`, `exos-webhook-drain`. Only `exos-checkout`, `exos-refund`, `exos-connect-onboard`, `exos-pos` and
+`exos-geocode` keep JWT verification: the `VERIFY_JWT` list in `scripts/rollout-prod.sh`, which deploys
+everything else with `--no-verify-jwt`.
 
 ## 3. Secrets (Project settings → Edge functions → Secrets)
 
