@@ -8,7 +8,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, Globe } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { discoveryRows, type DiscoveryRow } from '../lib/discovery/channels';
+import { discoveryRows, type DiscoveryEvent, type DiscoveryRow } from '../lib/discovery/channels';
+import { POSH_LINK_CHANNEL, poshLinkEligibility, type PoshLinkEligibility } from '../lib/discovery/poshLink';
+import PoshLinkPanel from './PoshLinkPanel';
 import { eventChannels, queueListing, setListingStatus, withdrawListing } from '../lib/discovery/api';
 import { STATUS_LABEL, canQueue, hasManualSlot, takesSlot, type ChannelStatus } from '../../supabase/functions/_shared/discovery/channels.ts';
 
@@ -33,11 +35,15 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
   const [cap, setCap] = useState<{ cap: number | null; used: number; minutes: number }>({ cap: null, used: 0, minutes: 0 });
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [event, setEvent] = useState<DiscoveryEvent | null>(null);
+  const [posh, setPosh] = useState<PoshLinkEligibility>(poshLinkEligibility(null));
 
   const load = useCallback(() => {
     eventChannels(eventId)
       .then((r) => {
         setRows(discoveryRows(r));
+        setEvent(r.event ?? null);
+        setPosh(poshLinkEligibility(r.posh_link));
         setCanEdit(!!r.can_edit);
         setCap({ cap: r.manual_cap ?? null, used: r.manual_used ?? 0, minutes: r.minutes_spent ?? 0 });
         setFailed(false);
@@ -135,6 +141,7 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill status={r.status} />
                     {canEdit && canQueue(r.publication?.status)
+                      && !(r.id === POSH_LINK_CHANNEL && !posh.offered)
                       && (!takesSlot(r.publication?.status) || hasManualSlot(cap.cap, cap.used)) && (
                       <button type="button" disabled={busy === r.id} onClick={() => act(r.id, () => queueListing(eventId, r.id))}
                         className="px-3 py-1.5 rounded bg-brand-primary text-black text-xs font-bold disabled:opacity-50">
@@ -161,6 +168,9 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                     )}
                   </div>
                 </div>
+                {r.id === POSH_LINK_CHANNEL && (
+                  <PoshLinkPanel eventId={eventId} event={event} row={r} eligibility={posh} canEdit={canEdit} />
+                )}
               </li>
             ))}
           </ul>

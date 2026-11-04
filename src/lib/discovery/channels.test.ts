@@ -18,12 +18,15 @@ import { discoveryRows } from './channels';
 
 const MIGRATION = readFileSync(
   new URL('../../../supabase/migrations/20261029130000_exos_discovery_publishing.sql', import.meta.url), 'utf8');
+// Later migrations that seed more channels (posh_link: 20261104150000).
+const SEEDS = [MIGRATION, readFileSync(
+  new URL('../../../supabase/migrations/20261104150000_exos_posh_link_channel.sql', import.meta.url), 'utf8')];
 
 // The seed rows: ('id', 'name', 'kind', 'region', url|NULL, verified, sort)
 function seeded(): Map<string, { kind: string; region: string; url: string | null; verified: boolean }> {
   const out = new Map();
   const re = /\('([a-z0-9_]+)',\s*'[^']*',\s*'(feed|api|manual)',\s*'([^']+)',\s*(NULL|'[^']*'),\s*(true|false),\s*\d+\)/g;
-  for (const m of MIGRATION.matchAll(re)) {
+  for (const m of SEEDS.flatMap((sql) => [...sql.matchAll(re)])) {
     out.set(m[1], { kind: m[2], region: m[3], url: m[4] === 'NULL' ? null : m[4].slice(1, -1), verified: m[5] === 'true' });
   }
   return out;

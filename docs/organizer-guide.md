@@ -277,7 +277,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   `exos_calendar_public_feed` whether the event is in the org's `.ics`. Live means *in the feed*: Google reads it only
   once Exos is in its events ticketing program, and ad platforms only once the organizer adds the catalog URL.
 - **Calendars and listings sites (manual):** DoNYC, Time Out New York, CitySpark local calendars, Resident Advisor,
-  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown. **Queue for submission** puts the event in the operator's
+  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, Posh (third-party link). **Queue for submission** puts the event in the operator's
   queue; a person submits it on the channel's form and records **Submitted**, **Live** (with the listing's URL) or
   **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
   again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
@@ -290,8 +290,10 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   that step took (0-600, optional). They add up per record; `exos_discovery_minutes(org, since, until)` totals them per
   event (with the minutes per channel) and per org, with minutes per event. The operator screen shows the totals; the
   Promote page shows the event's total.
-- Some channels only take the organizer's own account (RA, Meetup, Songkick, Bandsintown): the organizer submits and
-  records **I submitted it** / **It's live** on the same screen.
+- Some channels only take the organizer's own account (RA, Meetup, Songkick, Bandsintown, Posh): the organizer submits
+  and records **I submitted it** / **It's live** on the same screen.
+- **Posh (third-party link)** (`posh_link`, mig `20261104150000_exos_posh_link_channel.sql`): a free Posh event page
+  whose **Get Tickets** button opens your Exos ticket link. See *Listing on Posh with a third-party link* below.
 - Each channel's "How to submit" link was looked up on 2026-10-29; links marked *not verified* point at the site, not
   a submission page.
 - **Tracking:** the ticket link given to each channel is the event page with `utm_source=<channel id>`,
@@ -313,6 +315,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
 | Meetup | manual | global | the organizer's own group (no) |
 | Songkick | manual | global | Songkick help: "Add an event" footer link (yes) |
 | Bandsintown | manual | global | Bandsintown for Artists "Add an event", per artist (yes) |
+| Posh (third-party link) | manual | global | posh.vip web: Create Event → External tickets, your own Posh account (no: no help page found) |
 
 **Why Edmtrain and Meetup aren't automatic:** Edmtrain's public API is read-only (event and location listings with a
 client key) and takes no submissions. Meetup's GraphQL API has `createEvent`, but only for an organizer of the group
@@ -520,6 +523,34 @@ Posh tells Exos about every sale.
   wrong quantity, unmatched when it shouldn't be), tell support; the delivery is kept for 30 days so it can be
   replayed once the parser is fixed. Posh documents no signature, so the secret URL is the only check: keep it
   private. Details: `docs/marketplace/posh.md`.
+- **Selling on Exos and only want a Posh page?** That's Posh's third-party link mode, not this: see *Listing on Posh
+  with a third-party link*.
+
+### Listing on Posh with a third-party link (tickets stay on Exos)
+
+Posh's **Third-Party Links** (launched 2026-10-05) give your event a Posh page while tickets stay on Exos: **Get
+Tickets** on Posh opens your Exos ticket link. It's free to list on Posh, and any organizer with a Posh account can use
+it. Posh has no API for it, so you make the page by hand; Exos never writes to Posh.
+
+- **Promote page → Discovery listings → Posh (third-party link) → Queue for submission.** It counts as one of the free
+  tier's 5 listing sites, like any other.
+- **On Posh (web only for now; not in the Posh app yet):** Create Event → **External tickets** (next to Sell tickets
+  and RSVP). Open **Posh kit** on the Posh row and copy each field across: title, start / end date and time in the
+  event's time zone, venue and address, the description (trimmed to fit), the image URL and the **external ticket URL**
+  (your Exos event page tagged `utm_source=posh_link`, `utm_medium=listing`, `utm_campaign=discovery`). Publish it.
+- Back on Exos: **I submitted it**, then **It's live** with the Posh event link.
+- **Posh numbers:** Posh counts page views and ticket-link clicks on its side. Once the row is live, enter them under
+  **Posh numbers** with an "as of" date, as often as you like (one reading per day; saving a day again replaces it,
+  and a wrong one can be deleted). Exos shows **Posh views → ticket clicks → Exos orders** (checkouts that came in
+  with `utm_source=posh_link`, with tickets and money net of refunds) and the rates between them, using your latest
+  reading. Free RSVPs that don't go through checkout carry no tag and aren't counted.
+- **Not for events sold on Posh.** An event you list from Posh, Eventbrite or Luma (*List an event you sell
+  elsewhere*) can't use it: a Posh-sold event already has a Posh page, and Exos refuses it with that message. If Posh
+  webhooks are connected for the event (*Selling on Posh too*), the row warns that third-party link mode is for events
+  sold on Exos, not Posh.
+- Access as for the other listings: owners and managers queue and enter numbers; finance sees them. RPCs:
+  `exos_posh_link_record_stats`, `exos_posh_link_delete_stats`, `exos_posh_link_funnel` (table
+  `exos_discovery_posh_stats`). Tests: `tests/exos/test_posh_link_channel.sql`, `src/lib/discovery/poshLink.test.ts`.
 
 ### Selling a block for DICE, Shotgun, RA or your box office (fixed block)
 
