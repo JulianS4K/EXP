@@ -8,18 +8,23 @@
 // Stripe keeps idempotency keys for 24h. Past that, callers must not rely on
 // the key alone — the sweep lists the PaymentIntent's refunds first.
 
+import { type ChargeModel, refundFlags } from "./payouts/commissionMethods.ts";
+
 export function autoRefundIdempotencyKey(sessionId: string): string {
   return `exos_autorefund_${sessionId}`;
 }
 
-export function autoRefundParams(paymentIntent: string, sessionId: string) {
+// chargeModel (mig 20261104190000): how the order was charged, from its
+// Checkout metadata (chargeModelFromMetadata), so both callers derive the
+// same value. Destination (every order before split at sale): pull the funds
+// back from the connected account and return our fee, otherwise the platform
+// balance pays the refund. Split at sale: the charge is the platform's and
+// nothing was transferred yet, so neither flag applies.
+export function autoRefundParams(paymentIntent: string, sessionId: string, chargeModel: ChargeModel = "destination") {
   return {
     payment_intent: paymentIntent,
     reason: "requested_by_customer" as const,
-    // Destination charge: pull the funds back from the connected account and
-    // return our fee, otherwise the platform balance pays the refund.
-    reverse_transfer: true,
-    refund_application_fee: true,
+    ...refundFlags(chargeModel, { commissionInFee: true }),
     metadata: { exos_session_id: sessionId, exos_auto: "fulfillment_failed" },
   };
 }

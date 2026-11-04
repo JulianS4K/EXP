@@ -6,6 +6,7 @@
 // 20260926020000): per-promoter terms, owed / paid, and recording payouts, in
 // PromoterCommissionPanel. Mig 20261102150000: step terms, idempotent
 // settling, and Stripe payouts to promoters behind the owner's switch here.
+// Mig 20261104190000: how commissions are funded (CommissionMethodsPanel).
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -15,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { getOrganization, getUserRoleInOrg } from '../lib/orgs';
 import { listOrgEvents } from '../lib/events';
 import PromoterCommissionPanel from '../components/PromoterCommissionPanel';
+import CommissionMethodsPanel from '../components/CommissionMethodsPanel';
 import { typedCode } from '../lib/shareLinks';
 import { cleanHandle, type SocialHandles } from '../lib/socialTags';
 import { publicUrl, formatCurrency } from '../lib/utils';
@@ -184,6 +186,8 @@ export default function OrgPromoters() {
           </button>
         )}
       </div>
+
+      {orgId && <CommissionMethodsPanel orgId={orgId} canWrite={canWrite} isOwner={isOwner} />}
 
       <h2 className="disp text-lg uppercase tracking-wide text-white mb-3 flex items-center gap-2"><Trophy className="w-4 h-4 text-brand-primary" /> Leaderboard</h2>
       {loading ? (

@@ -16,6 +16,7 @@ import {
 } from "./organizer-refund.ts";
 import { PayPalError, type PayPalClient } from "./paypal/client.ts";
 import { refundPayPal } from "./paypal/flows.ts";
+import type { ChargeModel } from "./payouts/commissionMethods.ts";
 import { isPayPalRef } from "./paypal/model.ts";
 
 /** The processors a refund may need, each only when its keys are set. */
@@ -61,6 +62,12 @@ export async function refundClaim(
   }
   if (!p.stripe) return { ...base, status: "claimed", error: "Stripe is switched off; try again once it's back" };
   const stripe = p.stripe;
+  // How the order was charged (mig 20261104190000). The plan row never
+  // changes, so every retry sends the same parameters. Before that migration
+  // (no table) every order is a destination charge; any other read error
+  // leaves the request claimed for a retry rather than guess.
+  const charge = await orderCharge(sb, c.session_id);
+  if (!charge) return { ...base, status: "claimed", error: "Couldn't read how this order was charged; try again" };
 
   let refund: Stripe.Refund | null = null;
   try {
@@ -72,7 +79,7 @@ export async function refundClaim(
       }
     }
     refund ??= await stripe.refunds.create(
-      organizerRefundParams(c, keepFee),
+      organizerRefundParams(c, keepFee, charge),
       { idempotencyKey: organizerRefundIdempotencyKey(c.request_id) },
     );
   } catch (e) {
@@ -102,6 +109,22 @@ export async function refundClaim(
   }
   const f = data as { voided?: number } | null;
   return { ...base, status, voided: f?.voided ?? 0, stripe_refund_id: refund.id };
+}
+
+/** The order's charge model and whether its fee carries a commission; null on a read error. */
+async function orderCharge(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>,
+  sessionId: string,
+): Promise<{ model: ChargeModel; commissionInFee: boolean } | null> {
+  const { data, error } = await sb.from("exos_checkout_commission_plans")
+    .select("charge_model, commission_fee_cents").eq("session_id", sessionId).maybeSingle();
+  if (error) {
+    const missing = error.code === "42P01" || error.code === "PGRST205" || error.code === "PGRST200";
+    return missing ? { model: "destination", commissionInFee: false } : null;
+  }
+  const row = data as { charge_model?: string; commission_fee_cents?: number } | null;
+  return { model: row?.charge_model === "split" ? "split" : "destination", commissionInFee: (row?.commission_fee_cents ?? 0) > 0 };
 }
 
 // The PayPal leg of refundClaim: same states as Stripe's. A definitive "no"

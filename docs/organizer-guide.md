@@ -137,6 +137,27 @@ tiers and discount codes, into a series of dates.
     never for more than you received for them; door, PayPal and staff-issued sales are paid by hand.
     Each payout is saved once even if you click twice. A Stripe payout that didn't go out can be sent
     again or cancelled (its sales become unpaid again). Details: `docs/payouts.md`.
+- **How promoter commissions are paid** (on the Promoters page). Pick where the money comes from:
+  - **Manual** (the default): you pay promoters yourself (Venmo, cash) and record it. Exos keeps the ledger.
+  - **From your payouts**: when you pay a promoter here, Exos takes the commission back from what Stripe paid
+    you for those orders and sends it to them.
+  - **Inside the Exos fee**: the commission is added to the Exos fee on each order, so your Stripe dashboard
+    shows a bigger application fee on those orders. That extra part is the promoter's commission: Exos holds it
+    and sends it to them after the event. Refunds give that part back in proportion.
+  - **Split at sale**: each order is paid to Exos, and after the event Exos sends you your share and each
+    promoter their commission from that order. You're paid after the event instead of at once, and Exos handles
+    disputes on those orders. The org **owner** turns it on; your Stripe account must be an Express account.
+  - Set a default for the org, and change it for one event or one promoter (the promoter's choice wins, then the
+    event's). Buyers pay the same price whichever you pick. Once an event has sold, its method is locked: a
+    change applies only to future sales, and every sale keeps the method it was sold with.
+  - **Holdback**: a commission is payable a few days after the event ends (3 by default, 0 to 30), so refunds
+    can land first.
+  - **Refunds after a promoter was paid** are taken off their next commission, never pulled back from their
+    account. If no new commission comes in for a while (30 days by default), the balance shows as overdue so you
+    can sort it out with them. Each promoter's balance (held, payable by you, paid by Exos, on its way, paid,
+    owed back) is on the same page.
+  - Methods that need Exos to move money (inside the fee, split at sale) are switched on by Exos too; until
+    then those sales are recorded as manual. Details: `docs/payouts.md` "Commission methods".
 - **Per-event campaigns.** Name a campaign and that becomes a promoter code.
   - Send each promoter their **kit link** (`/promoter/:eventId/:code`, no login needed). It gives
     them a buy-now link with the cart pre-filled, a story poster, and tracked links for Instagram,

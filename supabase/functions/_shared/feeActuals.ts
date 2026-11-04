@@ -49,6 +49,9 @@ function cents(v: unknown): number | null {
 export function feeActualsFromCharge(
   charge: ChargeLike | null | undefined,
   fallbackApplicationFeeCents: number | null = null,
+  // Commissions inside the Exos fee (mig 20261104190000): the part of the
+  // application fee that is a promoter's, held for them, not Exos's net.
+  commissionInFeeCents = 0,
 ): FeeActuals {
   const bt = charge?.balance_transaction;
   const btObj = bt && typeof bt === "object" ? bt : null;
@@ -61,7 +64,7 @@ export function feeActualsFromCharge(
     application_fee_id: idOf(charge?.application_fee),
     application_fee_cents: appFee,
     transfer_id: idOf(charge?.transfer),
-    net_cents: appFee != null && stripeFee != null ? appFee - stripeFee : null,
+    net_cents: appFee != null && stripeFee != null ? appFee - stripeFee - Math.max(Math.trunc(commissionInFeeCents) || 0, 0) : null,
   };
 }
 
@@ -133,7 +136,14 @@ export async function recordFeeActuals(
     const { data: sess } = await sb.from("exos_checkout_sessions")
       .select("application_fee_cents").eq("session_id", sessionId).maybeSingle();
     const recorded = (sess as { application_fee_cents?: number | null } | null)?.application_fee_cents ?? null;
-    const a = feeActualsFromCharge(charge, recorded);
+    // Stripe's fee larger than the Exos fee recorded: a commission rides in it.
+    let inFee = 0;
+    if (recorded != null && typeof charge.application_fee_amount === "number" && charge.application_fee_amount > recorded) {
+      const { data: cp, error: cpErr } = await sb.from("exos_checkout_commission_plans")
+        .select("commission_fee_cents").eq("session_id", sessionId).maybeSingle();
+      if (!cpErr) inFee = Number((cp as { commission_fee_cents?: number } | null)?.commission_fee_cents ?? 0) || 0;
+    }
+    const a = feeActualsFromCharge(charge, recorded, inFee);
     const { error } = await sb.rpc("exos_record_payment_fees", {
       p_payment_intent: paymentIntent,
       p_charge_id: a.charge_id,
