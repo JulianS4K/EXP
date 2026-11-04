@@ -87,6 +87,14 @@
           "example": "dk_live_4f2a…"
         },
         {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional, and worth sending on every reservation: 8-100 letters, digits, _ . : or -. A resend after a timeout with the same key and body answers the first reservation (same token, \"idempotent_replay\": true) instead of holding the seats again; the same key with other lines answers 400.",
+          "example": "sh-txn-88231-attempt"
+        },
+        {
           "name": "id",
           "location": "path",
           "type": "string (UUID)",
@@ -206,6 +214,21 @@
           "description": "The ticket type isn't offered to you (switch off, paused, sales window, not this event) or the event can't sell now.",
           "example": {
             "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
+            "reason": "not_available"
+          }
+        },
+        {
+          "status": 400,
+          "description": "The Idempotency-Key was already used for another reservation (other lines or event).",
+          "example": {
+            "error": "this Idempotency-Key was already used for another reservation"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The ticket type is in the organizer's member presale (partners can sell it once the presale ends), or isn't otherwise on sale through partners (reason: not_available).",
+          "example": {
+            "error": "Members is on presale for members right now; partners can sell it once the presale ends",
             "reason": "not_available"
           }
         }
@@ -674,6 +697,14 @@
           "example": "dk_live_4f2a…"
         },
         {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "Optional, and worth sending on every comp: 8-100 letters, digits, _ . : or -. A resend after a timeout with the same key and body answers the first reservation (same token, \"idempotent_replay\": true) instead of holding the seats again; the same key with other lines answers 400.",
+          "example": "sh-txn-88231-attempt"
+        },
+        {
           "name": "id",
           "location": "path",
           "type": "string (UUID)",
@@ -808,6 +839,13 @@
           "example": {
             "error": "ticket type 8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f is not available for distribution",
             "reason": "not_available"
+          }
+        },
+        {
+          "status": 400,
+          "description": "The Idempotency-Key was already used for another reservation (other lines or event).",
+          "example": {
+            "error": "this Idempotency-Key was already used for another reservation"
           }
         }
       ],

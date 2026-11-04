@@ -285,7 +285,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -380,7 +380,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -452,7 +452,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -536,7 +536,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -619,7 +619,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -715,7 +715,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -799,7 +799,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -872,7 +872,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -1028,7 +1028,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -1126,7 +1126,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -1205,7 +1205,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],
@@ -1285,7 +1285,7 @@
           "location": "header",
           "type": "string",
           "required": false,
-          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target answers 400.",
+          "description": "Optional. 8-100 letters, digits, _ . : or -. Resending a write with the same key replays the first answer (with \"idempotent_replay\": true) instead of doing it again; the same key on another action or target, or with a different body, answers 400.",
           "example": "7d0c9a52-2f1e-4b8e-9a43-6a1f0e2b5c77"
         }
       ],

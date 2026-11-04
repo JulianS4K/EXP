@@ -70,7 +70,15 @@ reserve ──201 token, expires_at──▶ charge your buyer ──▶ PUT att
   too, no distribution switch, `channel_source = 'api'`, and `/build` prices a reservation without holding.
 
 Expired reservations stop counting at `expires_at` whatever happens; the record is flipped to `expired` on the
-next touch or by `exos_partner_reservations_sweep()` (service role; not scheduled).
+next touch or by `exos_partner_reservations_sweep()` (service role), which pg_cron runs every minute
+(`exos-partner-reservations-sweep`, mig 20261104130000) so a gift card held on an abandoned reservation gets its
+balance back.
+
+- **Retries:** send an `Idempotency-Key` header (8-100 of `A-Za-z0-9_.:-`) on reserve and on comps. A resend with
+  the same key and body answers the first reservation (same token, `idempotent_replay: true`) instead of holding
+  the seats again or minting a second comp; the same key with other lines is 400. Keys are per partner.
+- **Member presales:** while an organizer's member presale runs on a ticket type, partners can't reserve it (422,
+  `reason: not_available`); organizer reservations still can.
 
 ## Delivery: a link to the live ticket
 
