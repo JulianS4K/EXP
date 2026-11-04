@@ -254,6 +254,7 @@ BEGIN
     END IF;
     PERFORM cron.schedule('exos-partner-reservations-sweep', '* * * * *',
       'SELECT public.exos_partner_reservations_sweep(500)');
+    PERFORM cron.alter_job(job_id := (SELECT jobid FROM cron.job WHERE jobname = 'exos-partner-reservations-sweep'), active := false);  -- created off (prod keeps Exos crons off; operator turns on)
   END IF;
 END $$;
 

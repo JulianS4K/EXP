@@ -1032,6 +1032,7 @@ BEGIN
     END IF;
     PERFORM cron.schedule('exos-posh-log-retention-daily', '17 4 * * *',
       $cron$SELECT public.exos_posh_purge_logs()$cron$);
+    PERFORM cron.alter_job(job_id := (SELECT jobid FROM cron.job WHERE jobname = 'exos-posh-log-retention-daily'), active := false);  -- created off (prod keeps Exos crons off; operator turns on)
   END IF;
 END $$;
 

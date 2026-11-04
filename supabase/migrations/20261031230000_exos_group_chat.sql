@@ -1937,11 +1937,13 @@ BEGIN
           coalesce(nullif(current_setting('app.exos_functions_url', true), ''),
                    'https://hzrizjeaxlqcxfrtczpq.supabase.co/functions/v1') || '/exos-sms-relay/cron', '{}'::jsonb);
       $cron$);
+      PERFORM cron.alter_job(job_id := (SELECT jobid FROM cron.job WHERE jobname = 'exos-sms-relay-1min'), active := false);  -- created off (prod keeps Exos crons off; operator turns on)
     END IF;
     IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'exos-group-chat-retention-daily') THEN
       PERFORM cron.unschedule('exos-group-chat-retention-daily');
     END IF;
     PERFORM cron.schedule('exos-group-chat-retention-daily', '17 7 * * *', 'SELECT public.exos_group_retention_sweep()');
+      PERFORM cron.alter_job(job_id := (SELECT jobid FROM cron.job WHERE jobname = 'exos-group-chat-retention-daily'), active := false);  -- created off (prod keeps Exos crons off; operator turns on)
   END IF;
 END $$;
 
