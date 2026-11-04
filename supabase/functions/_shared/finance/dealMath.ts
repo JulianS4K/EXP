@@ -1,5 +1,6 @@
 // Deal math for offers, settlements and profit and loss
-// (docs/offers-settlements.md). Pure TypeScript with no imports: the
+// (docs/offers-settlements.md). Pure TypeScript (its one import is the pure
+// ./dealBrackets.ts): the
 // dashboard (src/lib/dealMath.ts re-exports it), exos-api and vitest
 // (src/lib/dealMath.test.ts) all run this one file.
 //
@@ -31,6 +32,15 @@
 // member with a poolShare gets that percentage of it, and members without
 // one split what is left equally (any odd cents go to the first). Bonuses,
 // merch, adjustments and deposits stay per member.
+//
+// Tiered brackets (mig 20261102120000, ./dealBrackets.ts): an act's terms may
+// carry brackets that change its percentage past thresholds of the base or
+// of paid tickets sold. They replace the single percentage in versus, plus
+// and door deals (flat deals have no percentage, so brackets don't apply),
+// and the split point is where the tiered amount reaches the guarantee.
+// Pools pay from the pool's own terms, so a member's brackets don't apply.
+
+import { tieredAmount, tieredReachAt, type Brackets } from './dealBrackets.ts';
 
 export const DEAL_TYPES = ['flat', 'versus', 'plus', 'door'] as const;
 export type DealType = (typeof DEAL_TYPES)[number];
@@ -60,6 +70,8 @@ export interface DealTerms {
   /** Deposit agreed (already paid when depositPaid). */
   deposit: number;
   depositPaid: boolean;
+  /** Tiered percentage (versus, plus, door); null / absent = the single percentage. */
+  brackets?: Brackets | null;
 }
 
 /** A pool's shared deal: the deal fields plus a payout floor and cap. */
@@ -174,10 +186,17 @@ interface BaseResult {
 
 /** One deal's base answer, given the net box office and its expense base. */
 function dealBase(
-  t: { dealType: DealType; guarantee: number; percentage: number; expensesCap: number | null; promoterProfitPercent: number },
+  t: {
+    dealType: DealType; guarantee: number; percentage: number; expensesCap: number | null; promoterProfitPercent: number;
+    brackets?: Brackets | null;
+  },
   nbor: number,
   expenseBase: number,
+  paidSold = 0,
 ): BaseResult {
+  const tiered = t.brackets && t.brackets.tiers.length ? t.brackets : null;
+  const share = (amount: number) => (tiered ? tieredAmount(Math.max(0, amount), paidSold, clampPct(t.percentage), tiered).amount : pct(amount, clampPct(t.percentage)));
+  const reach = (amount: number) => (tiered ? tieredReachAt(amount, paidSold, clampPct(t.percentage), tiered) : reachAt(amount, clampPct(t.percentage)));
   const guarantee = nonNeg(t.guarantee);
   const percentage = clampPct(t.percentage);
   const cap = t.expensesCap === null || t.expensesCap === undefined ? null : nonNeg(t.expensesCap);
@@ -188,23 +207,23 @@ function dealBase(
   let splitPoint: number | null = null;
   switch (t.dealType) {
     case 'versus': {
-      percentageAmount = pct(nbor - expensesApplied, percentage);
+      percentageAmount = share(nbor - expensesApplied);
       base = Math.max(guarantee, percentageAmount);
-      const reach = reachAt(guarantee, percentage);
-      splitPoint = reach === null ? null : expensesApplied + reach;
+      const r = reach(guarantee);
+      splitPoint = r === null ? null : expensesApplied + r;
       break;
     }
     case 'plus': {
       const profit = pct(guarantee + expensesApplied, clampPct(t.promoterProfitPercent));
       splitPoint = guarantee + expensesApplied + profit;
-      percentageAmount = pct(nbor - splitPoint, percentage);
+      percentageAmount = share(nbor - splitPoint);
       base = guarantee + percentageAmount;
       break;
     }
     case 'door': {
-      percentageAmount = pct(nbor, percentage);
+      percentageAmount = share(nbor);
       base = Math.max(guarantee, percentageAmount);
-      splitPoint = guarantee > 0 ? reachAt(guarantee, percentage) : 0;
+      splitPoint = guarantee > 0 ? reach(guarantee) : 0;
       break;
     }
     default:
@@ -280,7 +299,7 @@ export function computeDealsWithPools(input: DealInput): { slots: SlotResult[]; 
       };
     } else {
       const supportCosts = guaranteeTotal - nonNeg(t.guarantee);
-      core = { ...dealBase(t, nbor, dealExpenses + supportCosts), supportCosts };
+      core = { ...dealBase(t, nbor, dealExpenses + supportCosts, nonNeg(input.paidSold)), supportCosts };
     }
     const bonus = (t.bonuses ?? [])
       .filter((b) => b.sold > 0 && input.paidSold >= b.sold)

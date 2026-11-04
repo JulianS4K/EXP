@@ -1,4 +1,4 @@
-// Link-out events (mig 20261029170000; docs/organizer-guide.md "List an
+// Link-out events (mig 20261029170500; docs/organizer-guide.md "List an
 // event you sell elsewhere"): events Exos lists while the organizer sells on
 // their own Eventbrite, Luma or Posh checkout. Exos sells nothing for them.
 //

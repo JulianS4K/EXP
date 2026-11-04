@@ -32,7 +32,7 @@ export interface CalendarEventRow {
   venue_key?: string | null;
   /** /me feed only: the subscriber holds tickets for this event. */
   has_tickets?: boolean;
-  /** Where to buy (exos_event_buy_link, mig 20261029170000): set when the
+  /** Where to buy (exos_event_buy_link, mig 20261029170500): set when the
    *  tickets are on another site (a link-out event, another backend, last
    *  call); NULL / absent: the Exos event page. */
   buy_on?: string | null;

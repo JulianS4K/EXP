@@ -129,7 +129,7 @@ for m in \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
-         20261029170000_exos_event_import \
+         20261029170500_exos_event_import \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
@@ -146,7 +146,22 @@ for m in \
          20261031210000_exos_matched_seats \
          20261031220000_exos_payments_paypal_cashapp_split \
          20261031230000_exos_group_chat \
-         20261101000000_exos_integration; do
+         20261101000000_exos_integration \
+         20261102100000_exos_membership_writes \
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras \
+         20261102130000_exos_templates_inbound \
+         20261102140000_exos_order_edits_recs \
+         20261102150000_exos_promoter_wedge \
+         20261102160000_exos_gaps_integration \
+         20261104100000_exos_sim_buyer_fixes \
+         20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
+         20261104130000_exos_sim_partner_fixes \
+         20261104150000_exos_posh_link_channel \
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -207,6 +222,12 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_pa
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_calendar_feeds.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_scaffold.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
+# Buyer mistake simulations (mig 20261104100000; races: race_sim_buyer.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_buyer.sql"
+# Organizer mistake simulations (mig 20261104110000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_organizer.sql"
+# Mistake simulations (door staff and scanner phones; mig 20261104120000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_door.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in \
          20260924215000_exos_fulfill_all_or_nothing \
@@ -310,7 +331,7 @@ for m in \
          20261029140000_exos_eventbrite_oauth \
          20261029150000_exos_posh_webhooks \
          20261029160000_exos_fixed_block \
-         20261029170000_exos_event_import \
+         20261029170500_exos_event_import \
          20261030100000_exos_booking \
          20261030110000_exos_artists_feed \
          20261030120000_exos_sales_counts \
@@ -327,7 +348,22 @@ for m in \
          20261031210000_exos_matched_seats \
          20261031220000_exos_payments_paypal_cashapp_split \
          20261031230000_exos_group_chat \
-         20261101000000_exos_integration; do
+         20261101000000_exos_integration \
+         20261102100000_exos_membership_writes \
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras \
+         20261102130000_exos_templates_inbound \
+         20261102140000_exos_order_edits_recs \
+         20261102150000_exos_promoter_wedge \
+         20261102160000_exos_gaps_integration \
+         20261104100000_exos_sim_buyer_fixes \
+         20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
+         20261104130000_exos_sim_partner_fixes \
+         20261104150000_exos_posh_link_channel \
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -390,3 +426,22 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_matched_s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_paypal_payments.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_chat.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_integration.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_membership_writes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_giving_writes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_finance_extras.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_templates_inbound.sql"
+# claude/exos-gap-orders
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_order_edits_recs.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_promoter_wedge.sql"
+# gaps integration (mig 20261102160000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gaps_integration.sql"
+# Mistake simulations: partner API + partner sales (mig 20261104130000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_partner.sql"
+# Posh third-party link discovery channel (mig 20261104150000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_link_channel.sql"
+# Org API permissions, venue requests, partner presale (mig 20261104180000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_access.sql"
+# claude/exos-commission-methods: four ways to fund promoter commissions (mig 20261104190000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
+# Partner caps, invite approval, drawer recount (mig 20261104200000; race: race_sim_partner.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"

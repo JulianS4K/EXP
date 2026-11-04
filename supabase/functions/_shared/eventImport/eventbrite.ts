@@ -1,4 +1,4 @@
-// Event import with link-out, Eventbrite side (mig 20261029170000): read an
+// Event import with link-out, Eventbrite side (mig 20261029170500): read an
 // organizer's events through the official API v3 and turn each into what
 // exos_link_out_import / exos_link_out_check_apply take.
 //

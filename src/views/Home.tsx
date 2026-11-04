@@ -74,7 +74,7 @@ function eventMeta(event: Event): string {
 
 /** "$30+" / "FREE" price stamp. */
 function priceStamp(event: Event): string {
-  // A link-out event whose source gave no price (mig 20261029170000).
+  // A link-out event whose source gave no price (mig 20261029170500).
   if (event.linkOut && event.linkOut.priceMin === null && !event.linkOut.isFree) return 'TICKETS';
   const p = eventFromPrice(event);
   if (!p || p <= 0) return 'FREE';

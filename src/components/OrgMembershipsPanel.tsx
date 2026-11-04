@@ -3,6 +3,7 @@
 // Editing a product never changes existing members (they keep their snapshot).
 
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BadgeCheck, Ticket } from 'lucide-react';
 import {
   giftMembership, listMembershipProducts, listPassProducts, majorToCents, saveMembershipProduct, savePassProduct,
@@ -36,6 +37,10 @@ export default function OrgMembershipsPanel({ orgId, canEdit, canScan }: { orgId
       <div>
         <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-2 flex items-center gap-2"><BadgeCheck className="w-4 h-4" /> Memberships</h2>
         <p className="text-xs text-slate-400 mb-3">Monthly / yearly (a Stripe subscription) or a one-time term. Member price, presales, free tickets each period, guests and household seats.</p>
+        {/* Owners / managers and finance (not scanners) see the tables. */}
+        {(canEdit || !canScan) && (
+          <p className="text-xs mb-3"><Link className="underline font-bold" to={`/orgs/${orgId}/memberships`}>Manage products, members and imported attendees →</Link></p>
+        )}
         {members.map((x) => (
           <div key={x.id} className="flex justify-between text-sm">
             <span className="font-bold">{x.name}{x.active === false ? ' (off)' : ''}</span>

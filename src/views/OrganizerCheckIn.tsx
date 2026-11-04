@@ -170,6 +170,7 @@ const REFUSAL_TEXT: Record<string, string> = {
   'wrong-list': "This ticket type isn't on this check-in list. Send them to the right door, or switch the list if this device covers it.",
   'invalid-time': "This check-in list isn't open right now (outside its hours).",
   'exit-not-allowed': "This list doesn't allow re-entry, so there's nothing to scan out. Switch to Entry.",
+  'not-inside': "This ticket hasn't been checked in, so it can't be scanned out. Switch to Entry to let them in.",
   'unknown-list': 'This check-in list no longer exists. Pick another list.',
   'already-inside': 'Already inside on this list. Scan them out first if they are leaving.',
   'name-needs-manager': 'Ask a manager. This event lets only owners and managers check people in by name.',
@@ -1081,7 +1082,7 @@ export default function OrganizerCheckIn() {
     // Who may do what is not a problem with the ticket: not audited.
     if (
       result.reason === 'needs-manager' || result.reason === 'name-needs-manager' || result.reason === 'name-checkin-off' ||
-      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list'
+      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list' || result.reason === 'not-inside'
     ) return;
     const audit =
       result.reason === 'barcode-expired' ? 'expired-code'
@@ -1197,10 +1198,11 @@ export default function OrganizerCheckIn() {
       case 'wrong-list':
       case 'invalid-time':
       case 'exit-not-allowed':
+      case 'not-inside':
         setStatus('invalid-barcode');
         setInvalidReason(REFUSAL_TEXT[d.reason]);
         if (id) pushScan(id, ctx.name, 'DENIED');
-        if (canAudit && d.reason !== 'exit-not-allowed') {
+        if (canAudit && d.reason !== 'exit-not-allowed' && d.reason !== 'not-inside') {
           void writeScanReject('not-found', ctx.src, { ticketIdAttempted: id, reasonDetail: d.reason });
         }
         return;
@@ -1795,6 +1797,7 @@ export default function OrganizerCheckIn() {
           syncing={extrasSyncing}
           incomingCode={guestCode}
           onIncomingHandled={() => setGuestCode(null)}
+          canUndo={canOverride}
         />
       </div>
       ) : (

@@ -111,7 +111,8 @@ export function reservationAttrs(p: Record<string, unknown>): Record<string, unk
     const v = p[k] ?? p[k === 'first_name' ? 'firstName' : 'lastName'];
     if (v === undefined) continue;
     if (v === null || v === '') { out[k] = null; continue; }
-    if (typeof v !== 'string' || v.trim().length > 60) throw new ParamError(`${k} must be at most 60 characters.`);
+    // Characters, as the SQL CHECK counts them (an emoji is one, not two UTF-16 units).
+    if (typeof v !== 'string' || [...v.trim()].length > 60) throw new ParamError(`${k} must be at most 60 characters.`);
     out[k] = v.trim();
   }
   if (p.email !== undefined) {

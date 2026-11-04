@@ -116,7 +116,10 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import {
   allowedMethods, API_METHODS, apiPath, isSharedKeyPath, matchRoute, publicAuthAt, type ApiMethod, type ApiRoute,
 } from "../_shared/api/routes.ts";
-import { formBody, MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
+import {
+  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, RPC_STATUS, userTokenMayCall,
+} from "../_shared/api/request.ts";
 import { effectiveScopes, hasScope, type Scope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
 import { parseCsv } from "../_shared/csvParse.ts";
@@ -130,6 +133,7 @@ import {
   venueView,
 } from "../_shared/api/booking.ts";
 import { parseSpotifyArtist, PARTNER_TYPES, spotifyLinks } from "../_shared/artists.ts";
+import { normalizePartnerCaps } from "../_shared/partners/caps.ts";
 import {
   buildFeedPage, etagMatches, FEED_MAX_AGE, feedEntry, FeedParamError, parseFeedQuery, SHARED_KEY_RE,
   type FeedSource, type SourceEvent,
@@ -137,10 +141,20 @@ import {
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { type FinDeps, handleFinance } from "./finance.ts";
+import { handleFinanceExtras } from "./financeExtras.ts";
+import { handleTemplates, type TemplateDeps } from "./templates.ts";
 import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } from "./core.ts";
+import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
+import { GIVING_ROUTES, handleGiving } from "./giving.ts";
+import { handleOrders, ORDER_ROUTES } from "./orders.ts";
+// claude/exos-org-access (mig 20261104180000).
+import {
+  handleOrgAccess, ORG_ACCESS_CREATED, ORG_ACCESS_ROUTES, OrgAccessError, orgAccessDbError, venueApprovalAnswer,
+} from "./orgAccess.ts";
+import { stripStaffVenueFields } from "../_shared/api/orgAccess.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
-  opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey, railsFormBody,
+  opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
   reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
 } from "../_shared/partners/sales.ts";
 
@@ -196,14 +210,15 @@ const GIFT_CARD_COLS =
   "issued_by, pos_drawer_id, expires_at, created_at";
 const CAMPAIGN_COLS =
   "id, name, slug, description, currency, goal_cents, starts_at, ends_at, active, checkout_add_on, round_up, " +
-  "suggested_cents, created_at";
+  "suggested_cents, created_at, completed_at";
 const MEMBERSHIP_PRODUCT_COLS =
   "id, name, price_cents, currency, billing, duration_days, discount_percent, presale, free_tickets_per_period, " +
-  "guest_allowance, household_seats, giftable, active, created_at";
+  "guest_allowance, household_seats, giftable, active, status, archived_at, created_at";
 const MEMBERSHIP_COLS =
   "id, product_id, product_name, billing, holder_email, status, current_period_start, current_period_end, " +
   "cancel_at_period_end, source, benefits, created_at";
 const MEMBERSHIP_STATUSES = new Set(["pending", "active", "past_due", "cancelled", "expired"]);
+const PRODUCT_STATUSES = new Set(["draft", "published", "unpublished", "archived"]);
 const TAG_COLS = "id, name, scope, color, canonical_tag_id, created_at, updated_at";
 const TAGGED_COLS = "id, tag_id, taggable_type, taggable_id, created_at";
 const TAGGABLE = new Set(["event", "fan", "artist"]);
@@ -309,7 +324,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Personal and OAuth tokens (#74) may call every GET and the platform routes.
   // Every other write records or checks an org API key id (exos_api_write,
   // booking, offers, listing keys), so it needs one.
-  if (cred.kind !== "api_key" && method !== "GET" && !PLATFORM_ROUTES.has(match.route.id)) {
+  if (!userTokenMayCall(cred.kind, method, match.route.id)) {
     return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
   }
 
@@ -322,8 +337,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Only lists read ?page / ?per_page; elsewhere they are ignored.
       page: parsePage(match.route.paged ? url.searchParams : new URLSearchParams()),
       body: method === "POST" || method === "PUT" || method === "PATCH"
-        ? await readBody(req, match.route.id === "import-sales-counts" ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES,
-          PLATFORM_ROUTES.has(match.route.id) ? "rails" : "flat")
+        ? await readBody(req, match.route.id === "import-sales-counts" || match.route.id === "preview-guest-list"
+            ? MAX_IMPORT_BODY_BYTES : MAX_BODY_BYTES,
+          PLATFORM_ROUTES.has(match.route.id) || ORDER_ROUTES.has(match.route.id) ? "rails" : "flat")
         : {},
       idempotencyKey: method === "GET" ? null : idempotencyKey(req),
     };
@@ -331,9 +347,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Answer) return json(out.body, out.status);
     if (out instanceof Created) return json(out.body, 201);
-    return json(out, CREATED.has(match.route.id) ? 201 : 200);
+    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
+    // A venue another org runs (mig 20261104180000): from any route.
+    const approval = venueApprovalAnswer(e);
+    if (approval) return json(approval, 403);
+    if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
+    if (ORG_ACCESS_ROUTES.has(match.route.id)) {
+      const oa = orgAccessDbError(e);
+      if (oa) return json(oa.body, oa.status);
+    }
     if (e instanceof PagingError || e instanceof BodyError || e instanceof ParamError) return json({ error: e.message }, 400);
+    if (e instanceof RequestError) return json({ error: e.message }, e.status);
     if (e instanceof ScopeError) {
       return json({ error: "insufficient scope", required_scope: e.scope }, 403, {
         "www-authenticate": `Bearer error="insufficient_scope", scope="${e.scope}"`,
@@ -348,7 +373,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // more codes; the artist / lineup / key functions raise the codes in
     // RPC_STATUS.
     // Fan and tag routes answer with rpcError alone, as on #73.
-    const db = CORE_ROUTES.has(match.route.id) ? sqlError(e)
+    const db = CORE_ROUTES.has(match.route.id) || MEMBERSHIP_ROUTES.has(match.route.id) ||
+        ORDER_ROUTES.has(match.route.id) ? sqlError(e)
       : FAN_ROUTES.has(match.route.id) ? rpcError(e)
       : (match.route.id.includes("sales-count") ? dbError(e) : null) ??
         bookingDbError(e as { code?: string; message?: string }) ?? rpcError(e);
@@ -385,9 +411,13 @@ async function resolveCredential(
   if (!kind) return null;
   const hash = await sha256Hex(token);
   if (kind === "api_key") {
-    const { data: k } = await sb.from("exos_api_keys")
-      .select("id, org_id, name, key_prefix, scopes, revoked_at")
-      .eq("key_hash", hash).is("revoked_at", null).maybeSingle();
+    // The key's scopes NOW: as stored, narrowed to its creator's role's set
+    // in the org (mig 20261104180000), so a lowered role applies at once.
+    const { data: k, error: kErr } = await sb.rpc("exos_api_key_auth", { p_hash: hash });
+    if (kErr) {
+      console.error("exos-api: key lookup failed", kErr.message);
+      return null;
+    }
     if (!k) return null;
     return {
       orgId: k.org_id as string,
@@ -415,24 +445,32 @@ async function resolveCredential(
   };
 }
 
-// Routes of the developer platform and partner sales (#74, migs 20261031130000 /
-// 130500). A personal or OAuth token may call these and every GET; any other
-// write needs an org API key, since those writes record or check an API key id
-// (exos_api_write, booking, offers, listing keys).
-const PLATFORM_ROUTES = new Set([
-  "list-distribution-partners", "create-distribution-partner", "update-distribution-partner",
-  "revoke-distribution-partner", "get-event-distribution", "set-event-distribution", "list-ticket-reservations",
-  "get-ticket-reservation", "build-organizer-reservation", "create-organizer-reservation",
-  "update-organizer-reservation", "cancel-organizer-reservation", "complete-organizer-reservation", "get-team",
-  "update-team", "list-team-members", "update-team-member", "remove-team-member", "list-team-invitations",
-  "create-team-invitation", "cancel-team-invitation", "list-team-roles", "list-my-memberships",
-  "revoke-current-token",
-]);
+// PLATFORM_ROUTES (what a personal or OAuth token may write): _shared/api/request.ts.
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  // claude/exos-org-access (mig 20261104180000): role API permissions, venue requests, co-hosts, partner presale.
+  if (ORG_ACCESS_ROUTES.has(route.id)) return await handleOrgAccess(route, c);
+  // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
+  if (GIVING_ROUTES.has(route.id)) {
+    return await handleGiving(route, {
+      sb, orgId, credId: c.cred.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
+  // Membership products, memberships, imported attendees (mig 20261102100000).
+  if (MEMBERSHIP_ROUTES.has(route.id)) {
+    return await handleMemberships(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+    });
+  }
+  // claude/exos-gap-orders (mig 20261102140000).
+  if (ORDER_ROUTES.has(route.id)) {
+    return await handleOrders(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
     });
   }
@@ -649,17 +687,22 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       const ids = list.map((x) => x.id);
       const totals = new Map<string, { raised_cents: number; donation_count: number }>();
       if (ids.length > 0) {
-        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents")
+        // Net of offline refunds (refunded_cents, mig 20261102110000).
+        const { data: ds, error: dErr } = await sb.from("exos_donations").select("campaign_id, amount_cents, refunded_cents")
           .eq("org_id", orgId).eq("status", "received").in("campaign_id", ids);
         if (dErr) throw dErr;
-        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number }[]) {
+        for (const d of (ds ?? []) as { campaign_id: string; amount_cents: number; refunded_cents?: number }[]) {
           const t = totals.get(d.campaign_id) ?? { raised_cents: 0, donation_count: 0 };
-          t.raised_cents += d.amount_cents;
+          t.raised_cents += Math.max(0, d.amount_cents - (d.refunded_cents ?? 0));
           t.donation_count += 1;
           totals.set(d.campaign_id, t);
         }
       }
-      const out = list.map((x) => ({ ...x, ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }) }));
+      const out = list.map((x) => ({
+        ...x,
+        status: (x as { completed_at?: string | null }).completed_at ? "completed" : (x as { active?: boolean }).active ? "active" : "draft",
+        ...(totals.get(x.id) ?? { raised_cents: 0, donation_count: 0 }),
+      }));
       if (route.id === "get-giving-campaign") {
         if (out.length === 0) throw new ApiError(404, "campaign not found");
         return { data: out[0] };
@@ -680,8 +723,18 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
-    case "list-membership-products":
-      return rows(await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId).order("created_at"));
+    case "list-membership-products": {
+      let q = sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS).eq("org_id", orgId);
+      // ?status=published, or Opendate's q[status_not_eq]=archived (mig 20261102100000).
+      const st = c.q.get("status");
+      const not = c.q.get("q[status_not_eq]") ?? c.q.get("status_not");
+      for (const v of [st, not]) {
+        if (v !== null && !PRODUCT_STATUSES.has(v)) throw new ApiError(400, "status must be draft, published, unpublished or archived.");
+      }
+      if (st !== null) q = q.eq("status", st);
+      if (not !== null) q = q.neq("status", not);
+      return rows(await q.order("created_at"));
+    }
 
     case "get-membership-product": {
       const { data, error } = await sb.from("exos_membership_products").select(MEMBERSHIP_PRODUCT_COLS)
@@ -1093,6 +1146,25 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       };
     }
 
+    // -- Per-partner caps (mig 20261104200000) ---------------------------------
+    case "get-event-partner-caps": {
+      const id = await ownEvent(c);
+      return { data: await rpc(sb, "_exos_partner_caps_json", { p_event_id: id }) };
+    }
+
+    case "set-event-partner-caps": {
+      const id = await ownEvent(c);
+      // Like the partner switch: owners and managers only.
+      requireRole(c, ["owner", "manager"]);
+      const caps = Array.isArray(c.body) ? c.body : c.body.caps;
+      if (!Array.isArray(caps)) throw new ApiError(400, "caps must be a list of { partner_id, ticket_type_id?, max_tickets }.");
+      return {
+        data: await rpc(sb, "_exos_partner_caps_set", {
+          p_org_id: orgId, p_event_id: id, p_caps: normalizePartnerCaps(caps), p_actor: c.cred.userId,
+        }),
+      };
+    }
+
     // -- Reservations of an event; organizer reservations --------------------
     case "list-ticket-reservations": {
       const id = await ownEvent(c);
@@ -1135,7 +1207,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return new Created({
         data: await rpc(sb, "_exos_partner_reserve", {
           p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
-          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items), p_attrs: reservationAttrs(p),
+          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items),
+          // An Idempotency-Key makes a resend the same reservation (mig 20261104130000).
+          p_attrs: c.idempotencyKey ? { ...reservationAttrs(p), idempotency_key: c.idempotencyKey } : reservationAttrs(p),
           p_comp: false, p_dry_run: false,
         }),
       });
@@ -1187,15 +1261,18 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
 
     case "list-team-members": {
       await requireOwner(c);
-      const { data, error } = await sb.from("exos_org_memberships").select("user_id, role, disabled")
+      const { data, error } = await sb.from("exos_org_memberships").select("user_id, role, disabled, status, pending_role")
         .eq("org_id", orgId).order("role").limit(500);
       if (error) throw error;
-      const members = (data ?? []) as { user_id: string; role: string; disabled: boolean }[];
+      const members = (data ?? []) as { user_id: string; role: string; disabled: boolean; status?: string; pending_role?: string | null }[];
       const emails = await Promise.all(members.slice(0, 200).map(async (m) => {
         const { data: u } = await sb.auth.admin.getUserById(m.user_id);
         return u?.user?.email ?? null;
       }));
-      return { data: members.map((m, i) => ({ id: m.user_id, user_id: m.user_id, email: emails[i] ?? null, role: m.role, disabled: m.disabled })) };
+      // status pending_approval / pending_role: a claimed invite waiting for
+      // approval in the dashboard (mig 20261104200000).
+      return { data: members.map((m, i) => ({ id: m.user_id, user_id: m.user_id, email: emails[i] ?? null, role: m.role, disabled: m.disabled,
+        status: m.status ?? "active", pending_role: m.pending_role ?? null })) };
     }
 
     case "update-team-member": {
@@ -1312,7 +1389,8 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       return pagedMap(await q.order("name").order("id").range(page.from, page.to), page, venueView);
     }
     case "create-venue": {
-      const row = parseVenue(c.body, false);
+      // Never `verified` / `listed_venue_id` from the org (mig 20261104180000).
+      const row = stripStaffVenueFields(parseVenue(c.body, false));
       return { data: venueView(await single(sb.from("exos_venues").insert({ ...row, org_id: orgId }).select(VENUE_COLS).single())) };
     }
     case "get-venue":
@@ -1322,7 +1400,7 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       };
     case "update-venue": {
       const id = uuidParam(c, "id", "venue");
-      const row = parseVenue(c.body, true);
+      const row = stripStaffVenueFields(parseVenue(c.body, true));
       return {
         data: venueView(await found(sb.from("exos_venues").update(row).eq("org_id", orgId).eq("id", id)
           .select(VENUE_COLS).maybeSingle(), "venue")),
@@ -1747,8 +1825,23 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
   // Offers, budgets, finance, settlements, P&L, ticket counts (./finance.ts).
   const fin = await handleFinance(route.id, c, FIN_DEPS);
   if (fin !== undefined) return fin;
+  // Brackets, ledger codes, imports, reporting rows, cash summary (./financeExtras.ts).
+  const extra = await handleFinanceExtras(route.id, c, FIN_DEPS);
+  if (extra !== undefined) return extra;
+  // Templates, rental invoices, inbound submissions, event delete (./templates.ts).
+  const tpl = await handleTemplates(route.id, c, TEMPLATE_DEPS);
+  if (tpl !== undefined) return tpl;
   throw new ApiError(404, "not found");
 }
+
+const TEMPLATE_DEPS: TemplateDeps = {
+  notFound: (what) => new ApiError(404, `${what} not found`),
+  conflict: (msg) => new ApiError(409, msg),
+  forbidden: (msg) => new ApiError(403, msg),
+  paged,
+  rpc,
+  created: (body) => new Created(body),
+};
 
 const FIN_DEPS: FinDeps = {
   notFound: (what) => new ApiError(404, `${what} not found`),
@@ -1976,9 +2069,7 @@ function unwrap(body: Record<string, unknown>, wrapper: string): Record<string, 
 }
 
 /** The SQLSTATEs the artist, lineup and key functions raise, as HTTP answers. */
-const RPC_STATUS: Record<string, number> = {
-  "22023": 400, "42501": 403, "P0002": 404, "23505": 409, "55000": 409, "54000": 409,
-};
+// RPC_STATUS (and the partner codes EX409 / EX422 / EXSLD): _shared/api/request.ts.
 
 function rpcError(e: unknown): { status: number; message: string } | null {
   const err = e as { code?: unknown; message?: unknown } | null;
@@ -2076,7 +2167,10 @@ async function partnerApi(req: Request, url: URL, path: string): Promise<Respons
 
   try {
     const body = method === "POST" || method === "PUT" ? await readBody(req, MAX_BODY_BYTES, "rails") : {};
-    const out = await partnerHandle(match.route.id, sb, p, match.params, url.searchParams, body);
+    // Reserve and comp take an Idempotency-Key: a resend answers the first
+    // reservation instead of holding the seats again (mig 20261104130000).
+    const idem = method === "GET" ? null : idempotencyKeyOf(req.headers.get("idempotency-key"));
+    const out = await partnerHandle(match.route.id, sb, p, match.params, url.searchParams, body, idem);
     return out instanceof Created ? json(out.body, 201, noStore) : json(out, 200, noStore);
   } catch (e) {
     return errorResponse(e, "exos-api partner", noStore);
@@ -2085,9 +2179,10 @@ async function partnerApi(req: Request, url: URL, path: string): Promise<Respons
 
 async function partnerHandle(
   id: string, sb: SupabaseClient, p: { id: string; org_id: string }, params: Record<string, string>,
-  q: URLSearchParams, body: Record<string, unknown>,
+  q: URLSearchParams, body: Record<string, unknown>, idem: string | null = null,
 ): Promise<unknown> {
   const org = p.org_id;
+  const keyed = (attrs: Record<string, unknown>) => idem ? { ...attrs, idempotency_key: idem } : attrs;
   const eventId = () => uuidOf(params.id, "Event not found.");
   switch (id) {
     case "public-list-ticket-types":
@@ -2100,7 +2195,7 @@ async function partnerHandle(
       }
       return new Created(await rpc(sb, "_exos_partner_reserve", {
         p_org_id: org, p_event_id: eventId(), p_partner_id: p.id, p_api_key_id: null,
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
         p_comp: false, p_dry_run: false,
       }));
     }
@@ -2141,7 +2236,7 @@ async function partnerHandle(
       const r = unwrapParams(body, "comp");
       return new Created((await rpc(sb, "_exos_partner_comp", {
         p_org_id: org, p_partner_id: p.id, p_event_id: eventId(),
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: reservationAttrs(r),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
         p_app_base: appBase(),
       }) as Record<string, unknown>).order);
     }
@@ -2217,14 +2312,13 @@ function rateLimited(): Response {
 function errorResponse(e: unknown, where: string, extra: Record<string, string> = {}): Response {
   if (e instanceof PagingError || e instanceof ParamError) return json({ error: e.message }, 400, extra);
   if (e instanceof ApiError) return json({ error: e.message, ...e.extra }, e.status, extra);
-  const err = e as { code?: unknown; message?: unknown } | null;
-  const code = typeof err?.code === "string" ? err.code : "";
-  if (code in RPC_STATUS) {
-    const body: Record<string, unknown> = { error: String(err?.message ?? "invalid request").slice(0, 300) };
-    if (code === "EXSLD") body.reason = "sold_out";
-    if (code === "EX422") body.reason = "not_available";
-    return json(body, RPC_STATUS[code], extra);
-  }
+  // A malformed body or Idempotency-Key (these were 500s on the platform routes).
+  if (e instanceof RequestError) return json({ error: e.message }, e.status, extra);
+  if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status, extra);
+  // EX409 / EX422 / EXSLD answer 409 / 422 / 409 (they had fallen out of
+  // RPC_STATUS in a merge and answered 500; tests/exos/sim_partner.sql).
+  const mapped = rpcAnswer(e);
+  if (mapped) return json(mapped.body, mapped.status, extra);
   console.error(`${where} error:`, e);
   return json({ error: "internal error" }, 500, extra);
 }
@@ -2385,26 +2479,13 @@ function importMapping(raw: unknown, header: string[]): SalesMapping {
  * a cap). Any other declared Content-Type is a 415.
  */
 async function readBody(req: Request, max: number, form: "flat" | "rails" = "flat"): Promise<Record<string, unknown>> {
-  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
-  const isForm = ct.includes("application/x-www-form-urlencoded");
   // The partner contract and the platform routes (#74) take any declared type
-  // and Rails-style nested forms, as on their branch.
-  if (form === "flat" && ct && !isForm && !ct.includes("json")) {
-    throw new ApiError(415, "send a JSON body (Content-Type: application/json) or a form-encoded one.");
-  }
+  // and Rails-style nested forms, as on their branch (_shared/api/request.ts).
+  const ct = req.headers.get("content-type");
+  parseBodyText(ct, "", form); // a wrong Content-Type is 415 before anything is read
   const text = await readCapped(req, max);
   if (text === null) throw new ApiError(413, "request body too large.");
-  if (!text.trim()) return {};
-  if (isForm) return form === "rails" ? railsFormBody(text) : formBody(text);
-  let v: unknown;
-  try {
-    v = JSON.parse(text);
-  } catch {
-    throw new ApiError(400, form === "rails" ? "the body must be JSON or form-encoded" : "the body is not valid JSON.");
-  }
-  // An array passes too: PUT /events/:id/lineup takes a bare list of slots.
-  if (!v || typeof v !== "object") throw new ApiError(400, "the body must be a JSON object.");
-  return v as Record<string, unknown>;
+  return parseBodyText(ct, text, form);
 }
 
 /** A Postgres error raised by a sales-count RPC as an HTTP answer with its own message. */

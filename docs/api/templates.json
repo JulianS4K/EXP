@@ -1,0 +1,1802 @@
+{
+  "file": "templates",
+  "name": "Templates",
+  "order": 16,
+  "description": "Saved setups the organization reuses, after Opendate's template inventory. An event template holds an event's setup (description, capacity, doors and length relative to the start, other settings, ticket types with prices, fee rules); making an event from one gives a draft with all of it. A note template is a booking note body to add to a show. A rental invoice template holds a venue rental's lines (fixed or per head), deposits and taxes; rental invoices are made from them (Rental invoices). Event templates need `events:read` / `events:write`, the others `booking:read` / `booking:write`. Opendate's underscore names (/v1/event_templates, /v1/note_templates, /v1/rental_invoice_templates) answer too. Money is in cents.",
+  "endpoints": [
+    {
+      "id": "list-event-templates",
+      "method": "GET",
+      "path": "/v1/event-templates",
+      "summary": "List event templates",
+      "description": "By name, then id.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status (or all, the default).",
+          "enum": [
+            "active",
+            "archived",
+            "all"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Friday club night",
+                "status": "active",
+                "event_name": "Club Night",
+                "description": "Late show. 21+.",
+                "capacity": 300,
+                "doors_offset_minutes": 60,
+                "duration_minutes": 240,
+                "event_fields": {
+                  "timezone": "America/Chicago",
+                  "venue_name": "Lincoln Hall",
+                  "min_age": 21
+                },
+                "tiers": [
+                  {
+                    "name": "GA",
+                    "price_cents": 2500,
+                    "capacity": 250,
+                    "ticket_type": "paid",
+                    "visibility": "public",
+                    "sort_order": 0
+                  },
+                  {
+                    "name": "VIP",
+                    "price_cents": 6000,
+                    "capacity": 50,
+                    "ticket_type": "paid",
+                    "visibility": "hidden",
+                    "sort_order": 1
+                  }
+                ],
+                "fee_rules": [
+                  {
+                    "name": "Facility fee",
+                    "recipient": "venue",
+                    "kind": "passed_on",
+                    "calc": "fixed",
+                    "amount_cents": 200,
+                    "per": "ticket",
+                    "taxable": true,
+                    "applies_to_addons": false
+                  }
+                ],
+                "inherit_org_fees": true,
+                "use_count": 4,
+                "last_used_at": "2026-11-02T15:04:05.000Z",
+                "created_at": "2026-11-02T15:04:05.000Z",
+                "updated_at": "2026-11-02T15:04:05.000Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-event-template",
+      "method": "POST",
+      "path": "/v1/event-templates",
+      "summary": "Create an event template",
+      "description": "From the fields below, or from one of your events: send from_event_id (and optionally name) to save that event's setup (settings, ticket types and prices, active event fee rules, doors and length relative to its start). At most 100 per organization.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "from_event_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Save this event's setup as the template."
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The template's name, 1-100 characters. Required on create.",
+          "example": "Friday club night"
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived. Archived templates stay listed but can't make events.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "event_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The new event's name (else the template's name), at most 200 characters.",
+          "example": "Club Night"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The new event's description, at most 20000 characters."
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "The event's capacity (total_tickets); else the sum of the ticket types.",
+          "example": 300
+        },
+        {
+          "name": "doors_offset_minutes",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Doors open this many minutes before the start (0-1440).",
+          "example": 60
+        },
+        {
+          "name": "duration_minutes",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "The show ends this many minutes after the start (1-10080).",
+          "example": 240
+        },
+        {
+          "name": "event_fields",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Other event settings, copied to the event: timezone, currency, venue_name, venue_location, venue_address, primary_performer_name, performer_names, category, genres, subgenres, image_url, purchase_limits, summary, description_md, faq, video_url, min_age, refund_policy, policy_notes, format, what_to_bring, noindex, allow_holder_release, release_cutoff_hours, accessibility, door_name_checkin, exos_venue_id, exos_room_id. Any other key is refused.",
+          "example": {
+            "timezone": "America/Chicago"
+          }
+        },
+        {
+          "name": "tiers",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 50 ticket types: { name, description?, price_cents, capacity, ticket_type (paid | free | donation), visibility (public | hidden), sort_order?, accessible?, accessible_note? }. Prices are the all-in price in cents. ticket_types is accepted too."
+        },
+        {
+          "name": "fee_rules",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 25 event fee rules (docs/fees.md): { name, recipient?, kind (passed_on | absorbed), calc (fixed | percent), amount_cents | percent, cap_cents?, per (ticket | order), taxable?, applies_to_addons? }. A per-order fee must be absorbed."
+        },
+        {
+          "name": "inherit_org_fees",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether events made from it also take the organization's fee rules (default true).",
+          "example": true
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Friday club night",
+              "status": "active",
+              "event_name": "Club Night",
+              "description": "Late show. 21+.",
+              "capacity": 300,
+              "doors_offset_minutes": 60,
+              "duration_minutes": 240,
+              "event_fields": {
+                "timezone": "America/Chicago",
+                "venue_name": "Lincoln Hall",
+                "min_age": 21
+              },
+              "tiers": [
+                {
+                  "name": "GA",
+                  "price_cents": 2500,
+                  "capacity": 250,
+                  "ticket_type": "paid",
+                  "visibility": "public",
+                  "sort_order": 0
+                },
+                {
+                  "name": "VIP",
+                  "price_cents": 6000,
+                  "capacity": 50,
+                  "ticket_type": "paid",
+                  "visibility": "hidden",
+                  "sort_order": 1
+                }
+              ],
+              "fee_rules": [
+                {
+                  "name": "Facility fee",
+                  "recipient": "venue",
+                  "kind": "passed_on",
+                  "calc": "fixed",
+                  "amount_cents": 200,
+                  "per": "ticket",
+                  "taxable": true,
+                  "applies_to_addons": false
+                }
+              ],
+              "inherit_org_fees": true,
+              "use_count": 4,
+              "last_used_at": "2026-11-02T15:04:05.000Z",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "tiers[0].ticket_type must be paid, free or donation"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The limit is reached.",
+          "example": {
+            "error": "at most 100 event templates per organization"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "name": "Friday club night",
+        "doors_offset_minutes": 60,
+        "tiers": [
+          {
+            "name": "GA",
+            "price_cents": 2500,
+            "capacity": 250
+          }
+        ]
+      }
+    },
+    {
+      "id": "get-event-template",
+      "method": "GET",
+      "path": "/v1/event-templates/:id",
+      "summary": "Get an event template",
+      "description": "",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Friday club night",
+              "status": "active",
+              "event_name": "Club Night",
+              "description": "Late show. 21+.",
+              "capacity": 300,
+              "doors_offset_minutes": 60,
+              "duration_minutes": 240,
+              "event_fields": {
+                "timezone": "America/Chicago",
+                "venue_name": "Lincoln Hall",
+                "min_age": 21
+              },
+              "tiers": [
+                {
+                  "name": "GA",
+                  "price_cents": 2500,
+                  "capacity": 250,
+                  "ticket_type": "paid",
+                  "visibility": "public",
+                  "sort_order": 0
+                },
+                {
+                  "name": "VIP",
+                  "price_cents": 6000,
+                  "capacity": 50,
+                  "ticket_type": "paid",
+                  "visibility": "hidden",
+                  "sort_order": 1
+                }
+              ],
+              "fee_rules": [
+                {
+                  "name": "Facility fee",
+                  "recipient": "venue",
+                  "kind": "passed_on",
+                  "calc": "fixed",
+                  "amount_cents": 200,
+                  "per": "ticket",
+                  "taxable": true,
+                  "applies_to_addons": false
+                }
+              ],
+              "inherit_org_fees": true,
+              "use_count": 4,
+              "last_used_at": "2026-11-02T15:04:05.000Z",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-event-template",
+      "method": "PATCH",
+      "path": "/v1/event-templates/:id",
+      "summary": "Update an event template",
+      "description": "Send only what changes; tiers and fee_rules replace the whole list. Events already made from it don't change.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The template's name, 1-100 characters. Required on create.",
+          "example": "Friday club night"
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived. Archived templates stay listed but can't make events.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "event_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The new event's name (else the template's name), at most 200 characters.",
+          "example": "Club Night"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The new event's description, at most 20000 characters."
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "The event's capacity (total_tickets); else the sum of the ticket types.",
+          "example": 300
+        },
+        {
+          "name": "doors_offset_minutes",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Doors open this many minutes before the start (0-1440).",
+          "example": 60
+        },
+        {
+          "name": "duration_minutes",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "The show ends this many minutes after the start (1-10080).",
+          "example": 240
+        },
+        {
+          "name": "event_fields",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Other event settings, copied to the event: timezone, currency, venue_name, venue_location, venue_address, primary_performer_name, performer_names, category, genres, subgenres, image_url, purchase_limits, summary, description_md, faq, video_url, min_age, refund_policy, policy_notes, format, what_to_bring, noindex, allow_holder_release, release_cutoff_hours, accessibility, door_name_checkin, exos_venue_id, exos_room_id. Any other key is refused.",
+          "example": {
+            "timezone": "America/Chicago"
+          }
+        },
+        {
+          "name": "tiers",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 50 ticket types: { name, description?, price_cents, capacity, ticket_type (paid | free | donation), visibility (public | hidden), sort_order?, accessible?, accessible_note? }. Prices are the all-in price in cents. ticket_types is accepted too."
+        },
+        {
+          "name": "fee_rules",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 25 event fee rules (docs/fees.md): { name, recipient?, kind (passed_on | absorbed), calc (fixed | percent), amount_cents | percent, cap_cents?, per (ticket | order), taxable?, applies_to_addons? }. A per-order fee must be absorbed."
+        },
+        {
+          "name": "inherit_org_fees",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether events made from it also take the organization's fee rules (default true).",
+          "example": true
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Friday club night",
+              "status": "active",
+              "event_name": "Club Night",
+              "description": "Late show. 21+.",
+              "capacity": 300,
+              "doors_offset_minutes": 60,
+              "duration_minutes": 240,
+              "event_fields": {
+                "timezone": "America/Chicago",
+                "venue_name": "Lincoln Hall",
+                "min_age": 21
+              },
+              "tiers": [
+                {
+                  "name": "GA",
+                  "price_cents": 2500,
+                  "capacity": 250,
+                  "ticket_type": "paid",
+                  "visibility": "public",
+                  "sort_order": 0
+                },
+                {
+                  "name": "VIP",
+                  "price_cents": 6000,
+                  "capacity": 50,
+                  "ticket_type": "paid",
+                  "visibility": "hidden",
+                  "sort_order": 1
+                }
+              ],
+              "fee_rules": [
+                {
+                  "name": "Facility fee",
+                  "recipient": "venue",
+                  "kind": "passed_on",
+                  "calc": "fixed",
+                  "amount_cents": 200,
+                  "per": "ticket",
+                  "taxable": true,
+                  "applies_to_addons": false
+                }
+              ],
+              "inherit_org_fees": true,
+              "use_count": 4,
+              "last_used_at": "2026-11-02T15:04:05.000Z",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "tiers[0].ticket_type must be paid, free or donation"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-event-template",
+      "method": "DELETE",
+      "path": "/v1/event-templates/:id",
+      "summary": "Delete an event template",
+      "description": "Events made from it keep their setup.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-event-from-template",
+      "method": "POST",
+      "path": "/v1/event-templates/:id/events",
+      "summary": "Create an event from a template",
+      "description": "A DRAFT event with the template's settings, description, capacity and ticket types, its event fee rules, and doors and end times worked out from starts_at. Publish it with POST /v1/events/:id/publish. The key's creator must be an owner or manager.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The event's name (else the template's event_name or name).",
+          "example": "Club Night: Dec 3"
+        },
+        {
+          "name": "starts_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "The start; doors and end follow from the template. Without it the draft has no dates.",
+          "example": "2026-12-04T03:00:00Z"
+        },
+        {
+          "name": "timezone",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "IANA zone, overriding the template's.",
+          "example": "America/Chicago"
+        },
+        {
+          "name": "exos_venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "One of your venues (GET /v1/venues). venue_id is accepted too."
+        },
+        {
+          "name": "exos_room_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A room of that venue. room_id is accepted too."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "event_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Club Night: Dec 3",
+                "status": "draft",
+                "starts_at": "2026-12-04T03:00:00+00:00",
+                "doors_at": "2026-12-04T02:00:00+00:00",
+                "total_tickets": 300,
+                "tiers": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "GA",
+                    "price": 25,
+                    "capacity": 250
+                  }
+                ],
+                "publish_blockers": []
+              }
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "The template is archived.",
+          "example": {
+            "error": "This template is archived; restore it first"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key's creator isn't an owner or manager now.",
+          "example": {
+            "error": "only a key created by an owner or manager can make or delete events"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ],
+      "request_example": {
+        "starts_at": "2026-12-04T03:00:00Z",
+        "name": "Club Night: Dec 3"
+      }
+    },
+    {
+      "id": "list-note-templates",
+      "method": "GET",
+      "path": "/v1/note-templates",
+      "summary": "List note templates",
+      "description": "By title, then id.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status (or all, the default).",
+          "enum": [
+            "active",
+            "archived",
+            "all"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "Advance checklist",
+                "body": "Parking: 2 spots. Hospitality: hot meal for 6.",
+                "status": "active",
+                "created_at": "2026-11-02T15:04:05.000Z",
+                "updated_at": "2026-11-02T15:04:05.000Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-note-template",
+      "method": "POST",
+      "path": "/v1/note-templates",
+      "summary": "Create a note template",
+      "description": "At most 200 per organization.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters. Required on create.",
+          "example": "Advance checklist"
+        },
+        {
+          "name": "body",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The note text, 1-5000 characters. Required on create."
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Advance checklist",
+              "body": "Parking: 2 spots. Hospitality: hot meal for 6.",
+              "status": "active",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "title is required."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-note-template",
+      "method": "GET",
+      "path": "/v1/note-templates/:id",
+      "summary": "Get a note template",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Advance checklist",
+              "body": "Parking: 2 spots. Hospitality: hot meal for 6.",
+              "status": "active",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-note-template",
+      "method": "PATCH",
+      "path": "/v1/note-templates/:id",
+      "summary": "Update a note template",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters. Required on create.",
+          "example": "Advance checklist"
+        },
+        {
+          "name": "body",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The note text, 1-5000 characters. Required on create."
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Advance checklist",
+              "body": "Parking: 2 spots. Hospitality: hot meal for 6.",
+              "status": "active",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-note-template",
+      "method": "DELETE",
+      "path": "/v1/note-templates/:id",
+      "summary": "Delete a note template",
+      "description": "Notes already added keep their text.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "apply-note-template",
+      "method": "POST",
+      "path": "/v1/note-templates/:id/apply",
+      "summary": "Add a template's note to a show",
+      "description": "Adds a staff note with the template's body to the event (GET /v1/events/:id/notes).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The show. calendar_event_id is accepted too.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "body": "Parking: 2 spots. Hospitality: hot meal for 6.",
+              "author_id": null,
+              "author_name": "",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-rental-invoice-templates",
+      "method": "GET",
+      "path": "/v1/rental-invoice-templates",
+      "summary": "List rental invoice templates",
+      "description": "By title, then id.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status (or all, the default).",
+          "enum": [
+            "active",
+            "archived",
+            "all"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "Back room rental",
+                "status": "active",
+                "currency": "USD",
+                "payee_name": "Lincoln Hall LLC",
+                "notes": "",
+                "terms": "<p>Net 30.</p>",
+                "attendance_count": 80,
+                "discount_cents": 5000,
+                "items": [
+                  {
+                    "title": "Room hire",
+                    "description": "",
+                    "category": "",
+                    "quantity": 1,
+                    "cost_type": "fixed",
+                    "cost_cents": 50000,
+                    "position": 0
+                  },
+                  {
+                    "title": "Security",
+                    "description": "",
+                    "category": "",
+                    "quantity": 1,
+                    "cost_type": "per_head",
+                    "cost_cents": 150,
+                    "position": 1
+                  }
+                ],
+                "deposits": [
+                  {
+                    "deposit_type": "percent",
+                    "value": 50,
+                    "due_date_type": "relative",
+                    "relative_due_days": 14
+                  }
+                ],
+                "tax_fees": [
+                  {
+                    "name": "Sales tax",
+                    "rate_percent": 8.875,
+                    "category": ""
+                  }
+                ],
+                "created_at": "2026-11-02T15:04:05.000Z",
+                "updated_at": "2026-11-02T15:04:05.000Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-rental-invoice-template",
+      "method": "POST",
+      "path": "/v1/rental-invoice-templates",
+      "summary": "Create a rental invoice template",
+      "description": "At most 100 per organization. Opendate's team_id, team_membership_id and type are ignored (the key decides).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters. Required on create.",
+          "example": "Back room rental"
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217 code (default USD).",
+          "example": "USD"
+        },
+        {
+          "name": "payee_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Who is paid, at most 200 characters."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 10000 characters (HTML is stored as sent)."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Terms and conditions, at most 20000 characters (HTML is stored as sent). terms_and_conditions is accepted too."
+        },
+        {
+          "name": "attendance_count",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Expected heads, for per_head lines.",
+          "example": 80
+        },
+        {
+          "name": "discount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Taken off the subtotal (never below zero).",
+          "example": 5000
+        },
+        {
+          "name": "items",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 100 lines: { title, description?, category?, quantity (default 1, 2 decimals), cost_type (fixed | per_head), cost_cents }. The list replaces the saved one. rental_invoice_items(_attributes) is accepted too."
+        },
+        {
+          "name": "deposits",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10: { deposit_type (flat: value in cents | percent: of the total), value, due_date_type (relative: relative_due_days before the rental date | specific: specific_due_date) }."
+        },
+        {
+          "name": "tax_fees",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10: { name, rate_percent, category? }, each on the subtotal less the discount. rental_invoice_tax_fees(_attributes) is accepted too."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Back room rental",
+              "status": "active",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "items[0].cost_type must be fixed or per_head"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "rental_invoice_template": {
+          "title": "Back room rental",
+          "items": [
+            {
+              "title": "Room hire",
+              "cost_cents": 50000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get-rental-invoice-template",
+      "method": "GET",
+      "path": "/v1/rental-invoice-templates/:id",
+      "summary": "Get a rental invoice template",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Back room rental",
+              "status": "active",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-rental-invoice-template",
+      "method": "PATCH",
+      "path": "/v1/rental-invoice-templates/:id",
+      "summary": "Update a rental invoice template",
+      "description": "Send only what changes; a list replaces the saved list. Invoices already made keep their own copy.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters. Required on create.",
+          "example": "Back room rental"
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active (default) or archived.",
+          "enum": [
+            "active",
+            "archived"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217 code (default USD).",
+          "example": "USD"
+        },
+        {
+          "name": "payee_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Who is paid, at most 200 characters."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 10000 characters (HTML is stored as sent)."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Terms and conditions, at most 20000 characters (HTML is stored as sent). terms_and_conditions is accepted too."
+        },
+        {
+          "name": "attendance_count",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Expected heads, for per_head lines.",
+          "example": 80
+        },
+        {
+          "name": "discount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Taken off the subtotal (never below zero).",
+          "example": 5000
+        },
+        {
+          "name": "items",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 100 lines: { title, description?, category?, quantity (default 1, 2 decimals), cost_type (fixed | per_head), cost_cents }. The list replaces the saved one. rental_invoice_items(_attributes) is accepted too."
+        },
+        {
+          "name": "deposits",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10: { deposit_type (flat: value in cents | percent: of the total), value, due_date_type (relative: relative_due_days before the rental date | specific: specific_due_date) }."
+        },
+        {
+          "name": "tax_fees",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10: { name, rate_percent, category? }, each on the subtotal less the discount. rental_invoice_tax_fees(_attributes) is accepted too."
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Back room rental",
+              "status": "active",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-rental-invoice-template",
+      "method": "DELETE",
+      "path": "/v1/rental-invoice-templates/:id",
+      "summary": "Delete a rental invoice template",
+      "description": "Invoices made from it keep their lines.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

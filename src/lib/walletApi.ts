@@ -117,6 +117,37 @@ export async function fetchApplePass(ticketId: string): Promise<Blob> {
   return new Blob([bytes], { type: 'application/vnd.apple.pkpass' });
 }
 
+/** A season-pass / flex-pack card (mig 20261102100000): .pkpass bytes or Google's save link. */
+async function postSeasonPass(passId: string, kind: WalletKind): Promise<Response> {
+  const base = walletBase();
+  if (!base) throw new WalletUnavailableError();
+  const { data } = await supabase.auth.getSession();
+  const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
+  return fetch(`${base}/season-pass`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(anon ? { apikey: anon } : {}),
+      Authorization: `Bearer ${data.session?.access_token ?? anon}`,
+    },
+    body: JSON.stringify({ pass_id: passId, kind }),
+  });
+}
+
+export async function fetchSeasonPassApple(passId: string): Promise<Blob> {
+  const res = await postSeasonPass(passId, 'apple');
+  if (!res.ok) throw await failure(res);
+  return new Blob([await res.arrayBuffer()], { type: 'application/vnd.apple.pkpass' });
+}
+
+export async function fetchSeasonPassGoogleUrl(passId: string): Promise<string> {
+  const res = await postSeasonPass(passId, 'google');
+  if (!res.ok) throw await failure(res);
+  const body = (await res.json().catch(() => null)) as { save_url?: unknown } | null;
+  if (!isGoogleSaveUrl(body?.save_url)) throw new Error(walletErrorMessage(null));
+  return body!.save_url as string;
+}
+
 /** Google's "save to wallet" link for a ticket the caller holds. */
 export async function fetchGoogleSaveUrl(ticketId: string): Promise<string> {
   const res = await postPass(ticketId, 'google');

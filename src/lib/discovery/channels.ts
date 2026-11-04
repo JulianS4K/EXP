@@ -14,6 +14,7 @@ import {
   type DiscoveryKind,
   type PublicationStatus,
 } from '../../../supabase/functions/_shared/discovery/channels.ts';
+import type { PoshLinkFacts } from './poshLink';
 
 export interface PublicationRecord {
   id: string;
@@ -47,6 +48,8 @@ export interface EventChannelsResponse {
   manual_used?: number;
   /** Manual minutes logged on this event (discovery pilot). */
   minutes_spent?: number;
+  /** Posh (third-party link) eligibility facts (mig 20261104150000). */
+  posh_link?: PoshLinkFacts;
   channels: Array<{
     id: string; name: string; kind: DiscoveryKind; region: string;
     submission_url: string | null; verified: boolean;

@@ -37,7 +37,8 @@ describe('matchRoute', () => {
     expect(matchRoute('DELETE', '/events/x/sales-counts')).toBeNull();
     expect(matchRoute('DELETE', '/artists/x')).toBeNull();
     expect(matchRoute('PUT', '/events')).toBeNull();
-    expect(matchRoute('DELETE', '/events/abc')).toBeNull();
+    // DELETE /events/:id deletes a draft (claude/exos-gap-templates); the list can't be deleted.
+    expect(matchRoute('DELETE', '/events')).toBeNull();
     expect(matchRoute('PATCH', '/public/orders')).toBeNull();
     expect(matchRoute('HEAD', '/me')).toBeNull();
     expect(matchRoute('GET', '/events/%E0%A4%A')).toBeNull();

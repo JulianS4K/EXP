@@ -26,6 +26,7 @@ const EventsMap = lazy(() => import('./views/EventsMap'));
 const OrgPromoters = lazy(() => import('./views/OrgPromoters'));
 const OrgArtists = lazy(() => import('./views/OrgArtists'));
 const PromoterPortal = lazy(() => import('./views/PromoterPortal'));
+const PhoneRsvp = lazy(() => import('./views/PhoneRsvp'));
 const PromoterBio = lazy(() => import('./views/PromoterBio'));
 const MyTickets = lazy(() => import('./views/MyTickets'));
 const TicketDetail = lazy(() => import('./views/TicketDetail'));
@@ -82,12 +83,21 @@ const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
 const OrgOffers = lazy(() => import('./views/OrgOffers'));
 const OfferEditor = lazy(() => import('./views/OfferEditor'));
 const OrgFinance = lazy(() => import('./views/OrgFinance'));
+const OrgLedger = lazy(() => import('./views/OrgLedger'));
 const OfferRespond = lazy(() => import('./views/OfferRespond'));
 const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
 const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
 const OrgFans = lazy(() => import('./views/OrgFans'));
+const OrgMemberships = lazy(() => import('./views/OrgMemberships'));
+// claude/exos-gap-giving: giving tables (mig 20261102110000).
+const OrgGiving = lazy(() => import('./views/OrgGiving'));
+const OrgOrders = lazy(() => import('./views/OrgOrders'));
 const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
+const OrgTemplates = lazy(() => import('./views/OrgTemplates'));
+const OrgInbound = lazy(() => import('./views/OrgInbound'));
+const OrgVenueRequests = lazy(() => import('./views/OrgVenueRequests'));
+const BookingRequest = lazy(() => import('./views/BookingRequest'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const MyGroups = lazy(() => import('./views/MyGroups'));
 const GroupChat = lazy(() => import('./views/GroupChat'));
@@ -183,10 +193,12 @@ export default function App() {
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />
                     <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />
                     <Route path="/signup/confirm" element={<SignupConfirm mode="confirm" />} />
+                    <Route path="/book/:orgSlug" element={<BookingRequest />} />
                     <Route path="/signup/unsubscribe" element={<SignupConfirm mode="unsubscribe" />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
+                    <Route path="/rsvp/:eventId" element={<PhoneRsvp />} />
                     <Route path="/l/:orgSlug/:code" element={<PromoterBio />} />
                     <Route path="/orgs/:orgId/promoters" element={<OrgPromoters />} />
                     <Route path="/orgs/:orgId/artists" element={<OrgArtists />} />
@@ -232,7 +244,14 @@ export default function App() {
                     <Route path="/orgs/:orgId/offers" element={<OrgOffers />} />
                     <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
                     <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
+                    <Route path="/orgs/:orgId/finance/ledger" element={<OrgLedger />} />
                     <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
+                    <Route path="/orgs/:orgId/memberships" element={<OrgMemberships />} />
+                    <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />
+                    <Route path="/orgs/:orgId/templates" element={<OrgTemplates />} />
+                    <Route path="/orgs/:orgId/booking-requests" element={<OrgInbound />} />
+                    <Route path="/orgs/:orgId/venue-requests" element={<OrgVenueRequests />} />
+                    <Route path="/orgs/:orgId/orders" element={<OrgOrders />} />
                     <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
                     <Route path="/groups" element={<MyGroups />} />
                     <Route path="/groups/:groupId" element={<GroupChat />} />

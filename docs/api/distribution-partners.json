@@ -453,6 +453,155 @@
           }
         ]
       }
+    },
+    {
+      "id": "get-event-partner-caps",
+      "method": "GET",
+      "path": "/v1/events/:id/partner-caps",
+      "summary": "List per-partner caps",
+      "description": "The optional caps on what one distribution partner may hold + sell for this event (docs/partner-sales.md \"Caps\"): per ticket type, or the whole event when `tier_id` is null. `used` is the partner's live holds plus its valid sales; `left` what it may still reserve. No caps: an empty list, and partners share what is left.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+                "partner_label": "StubHub",
+                "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "tier_name": "General admission",
+                "max_tickets": 50,
+                "used": 12,
+                "left": 38,
+                "updated_at": "2026-11-04T20:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-event-partner-caps",
+      "method": "PUT",
+      "path": "/v1/events/:id/partner-caps",
+      "summary": "Set or remove per-partner caps",
+      "description": "Owners and managers (a user token of another role is refused with 403 even with events:write). Caps not listed keep their value. A cap below what the partner already holds only stops new reservations. Over a cap, the partner's reservation answers 409 `partner_cap_reached` with `left`.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "caps",
+          "location": "body",
+          "type": "array of object",
+          "required": true,
+          "description": "[{ partner_id, ticket_type_id? (absent or null: the whole event), max_tickets (0-100000; 0 stops the partner; null removes the cap) }], 1-200 items.",
+          "example": [
+            {
+              "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+              "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "max_tickets": 50
+            }
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the event's caps.",
+          "example": {
+            "data": [
+              {
+                "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+                "partner_label": "StubHub",
+                "tier_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "tier_name": "General admission",
+                "max_tickets": 50,
+                "used": 12,
+                "left": 38,
+                "updated_at": "2026-11-04T20:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "A partner of another organization, a ticket type of another event, or max_tickets that isn't a whole number from 0 to 100000 (or null).",
+          "example": {
+            "error": "caps[0].max_tickets must be a whole number from 0 to 100000, or null."
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "caps": [
+          {
+            "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+            "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "max_tickets": 50
+          },
+          {
+            "partner_id": "b7e6d5c4-3b2a-4190-8f7e-6d5c4b3a2918",
+            "ticket_type_id": null,
+            "max_tickets": 120
+          }
+        ]
+      }
     }
   ]
 }

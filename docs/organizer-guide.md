@@ -15,7 +15,12 @@ A five-step wizard:
 
 Needs a signed-in account. Buying or holding tickets also needs a **confirmed email**.
 
-**Team** (`/orgs/:orgId/members`): invite by email with a role.
+**Team** (`/orgs/:orgId/members`): invite by email with a role. Whoever opens the invite link first can accept
+it with any account, so a mistyped address reaches a stranger. With **Approve new members** on (the default for
+organizations made from 2026-11-04; owners switch it on Members), an accepted invite gives no access until an
+owner approves it, or a manager for finance, content and scanner. The request shows the account email next to
+the address you typed, and the inviter is emailed. Reject removes them; an existing member who accepts an
+invite keeps their current role until it's approved (mig `20261104200000`).
 
 | Role | Can |
 |---|---|
@@ -126,7 +131,45 @@ tiers and discount codes, into a series of dates.
   - Add each promoter once and send them their private portal link. It shows their tickets and
     sales and has their kit.
   - Pause a promoter, or make a new link if one leaks.
-  - The leaderboard ranks everyone.
+  - The leaderboard ranks everyone. Promoters see it too on their portal: names and tickets, no money.
+  - **Commission.** A percent and/or a flat amount per paid ticket, after tax, with an optional **step**
+    ("10%, then 15% after 20 tickets"; counted per event). An event can have its own terms, step
+    included. Promoters watch their sales, earnings and payouts update live on their portal.
+  - **Paying them.** Pick the sales and record a payout you sent (Venmo, cash), or, once the org
+    **owner** turns on **Pay promoters through Stripe**, send it through Stripe: the promoter sets up a
+    free Stripe payout account from their portal, and the commission is taken back from what Stripe
+    paid you for those orders and sent to their bank. Only online Stripe sales can go this way, and
+    never for more than you received for them; door, PayPal and staff-issued sales are paid by hand.
+    Each payout is saved once even if you click twice. A Stripe payout that didn't go out can be sent
+    again or cancelled (its sales become unpaid again). Details: `docs/payouts.md`.
+- **How promoter commissions are paid** (on the Promoters page). Pick where the money comes from:
+  - **Manual** (the default): you pay promoters yourself (Venmo, cash) and record it. Exos keeps the ledger.
+  - **From your payouts**: when you pay a promoter here, Exos takes the commission back from what Stripe paid
+    you for those orders and sends it to them.
+  - **Inside the Exos fee**: the commission is added to the Exos fee on each order, so your Stripe dashboard
+    shows a bigger application fee on those orders. That extra part is the promoter's commission: Exos holds it
+    and sends it to them after the event. Refunds give that part back in proportion.
+  - **Split at sale**: each order is paid to Exos, and after the event Exos sends you your share and each
+    promoter their commission from that order. You're paid after the event instead of at once, and Exos handles
+    disputes on those orders. The org **owner** turns it on; your Stripe account must be an Express account.
+  - Set a default for the org, and change it for one event or one promoter (the promoter's choice wins, then the
+    event's). Buyers pay the same price whichever you pick. Once an event has sold, its method is locked: a
+    change applies only to future sales, and every sale keeps the method it was sold with.
+  - **Holdback**: a commission is payable a few days after the event (3 by default, 0 to 30), so refunds
+    can land first. It's set when each ticket sells: moving the event earlier doesn't make anything payable
+    sooner. When Exos pays (inside the fee, split at sale) it's at least 3 days, and a commission can be at
+    most 30% of what you make on the ticket unless Exos approves more.
+  - **Refunds on split-at-sale orders** after your share was paid take your part back from that payout first.
+    If Exos can't take it back (for example it was already refunded), the refund is refused and tells you how
+    much can be refunded. Refunds made outside Exos are taken off your next split order; past a limit, split at
+    sale pauses for your org until it's settled. On orders with the commission inside the Exos fee, once the
+    promoter has been paid a refund keeps the Exos fee, and what the promoter owes back is yours.
+  - **Refunds after a promoter was paid** are taken off their next commission, never pulled back from their
+    account. If no new commission comes in for a while (30 days by default), the balance shows as overdue so you
+    can sort it out with them. Each promoter's balance (held, payable by you, paid by Exos, on its way, paid,
+    owed back) is on the same page.
+  - Methods that need Exos to move money (inside the fee, split at sale) are switched on by Exos too; until
+    then those sales are recorded as manual. Details: `docs/payouts.md` "Commission methods".
 - **Per-event campaigns.** Name a campaign and that becomes a promoter code.
   - Send each promoter their **kit link** (`/promoter/:eventId/:code`, no login needed). It gives
     them a buy-now link with the cart pre-filled, a story poster, and tracked links for Instagram,
@@ -267,7 +310,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   `exos_calendar_public_feed` whether the event is in the org's `.ics`. Live means *in the feed*: Google reads it only
   once Exos is in its events ticketing program, and ad platforms only once the organizer adds the catalog URL.
 - **Calendars and listings sites (manual):** DoNYC, Time Out New York, CitySpark local calendars, Resident Advisor,
-  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown. **Queue for submission** puts the event in the operator's
+  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, Posh (third-party link). **Queue for submission** puts the event in the operator's
   queue; a person submits it on the channel's form and records **Submitted**, **Live** (with the listing's URL) or
   **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
   again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
@@ -280,8 +323,10 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   that step took (0-600, optional). They add up per record; `exos_discovery_minutes(org, since, until)` totals them per
   event (with the minutes per channel) and per org, with minutes per event. The operator screen shows the totals; the
   Promote page shows the event's total.
-- Some channels only take the organizer's own account (RA, Meetup, Songkick, Bandsintown): the organizer submits and
-  records **I submitted it** / **It's live** on the same screen.
+- Some channels only take the organizer's own account (RA, Meetup, Songkick, Bandsintown, Posh): the organizer submits
+  and records **I submitted it** / **It's live** on the same screen.
+- **Posh (third-party link)** (`posh_link`, mig `20261104150000_exos_posh_link_channel.sql`): a free Posh event page
+  whose **Get Tickets** button opens your Exos ticket link. See *Listing on Posh with a third-party link* below.
 - Each channel's "How to submit" link was looked up on 2026-10-29; links marked *not verified* point at the site, not
   a submission page.
 - **Tracking:** the ticket link given to each channel is the event page with `utm_source=<channel id>`,
@@ -303,6 +348,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
 | Meetup | manual | global | the organizer's own group (no) |
 | Songkick | manual | global | Songkick help: "Add an event" footer link (yes) |
 | Bandsintown | manual | global | Bandsintown for Artists "Add an event", per artist (yes) |
+| Posh (third-party link) | manual | global | posh.vip web: Create Event → External tickets, your own Posh account (no: no help page found) |
 
 **Why Edmtrain and Meetup aren't automatic:** Edmtrain's public API is read-only (event and location listings with a
 client key) and takes no submissions. Meetup's GraphQL API has `createEvent`, but only for an organizer of the group
@@ -510,6 +556,34 @@ Posh tells Exos about every sale.
   wrong quantity, unmatched when it shouldn't be), tell support; the delivery is kept for 30 days so it can be
   replayed once the parser is fixed. Posh documents no signature, so the secret URL is the only check: keep it
   private. Details: `docs/marketplace/posh.md`.
+- **Selling on Exos and only want a Posh page?** That's Posh's third-party link mode, not this: see *Listing on Posh
+  with a third-party link*.
+
+### Listing on Posh with a third-party link (tickets stay on Exos)
+
+Posh's **Third-Party Links** (launched 2026-10-05) give your event a Posh page while tickets stay on Exos: **Get
+Tickets** on Posh opens your Exos ticket link. It's free to list on Posh, and any organizer with a Posh account can use
+it. Posh has no API for it, so you make the page by hand; Exos never writes to Posh.
+
+- **Promote page → Discovery listings → Posh (third-party link) → Queue for submission.** It counts as one of the free
+  tier's 5 listing sites, like any other.
+- **On Posh (web only for now; not in the Posh app yet):** Create Event → **External tickets** (next to Sell tickets
+  and RSVP). Open **Posh kit** on the Posh row and copy each field across: title, start / end date and time in the
+  event's time zone, venue and address, the description (trimmed to fit), the image URL and the **external ticket URL**
+  (your Exos event page tagged `utm_source=posh_link`, `utm_medium=listing`, `utm_campaign=discovery`). Publish it.
+- Back on Exos: **I submitted it**, then **It's live** with the Posh event link.
+- **Posh numbers:** Posh counts page views and ticket-link clicks on its side. Once the row is live, enter them under
+  **Posh numbers** with an "as of" date, as often as you like (one reading per day; saving a day again replaces it,
+  and a wrong one can be deleted). Exos shows **Posh views → ticket clicks → Exos orders** (checkouts that came in
+  with `utm_source=posh_link`, with tickets and money net of refunds) and the rates between them, using your latest
+  reading. Free RSVPs that don't go through checkout carry no tag and aren't counted.
+- **Not for events sold on Posh.** An event you list from Posh, Eventbrite or Luma (*List an event you sell
+  elsewhere*) can't use it: a Posh-sold event already has a Posh page, and Exos refuses it with that message. If Posh
+  webhooks are connected for the event (*Selling on Posh too*), the row warns that third-party link mode is for events
+  sold on Exos, not Posh.
+- Access as for the other listings: owners and managers queue and enter numbers; finance sees them. RPCs:
+  `exos_posh_link_record_stats`, `exos_posh_link_delete_stats`, `exos_posh_link_funnel` (table
+  `exos_discovery_posh_stats`). Tests: `tests/exos/test_posh_link_channel.sql`, `src/lib/discovery/poshLink.test.ts`.
 
 ### Selling a block for DICE, Shotgun, RA or your box office (fixed block)
 
@@ -641,6 +715,31 @@ Add lists in **Edit event → Venue & seating → Check-in lists** when the door
 - While online, the door refreshes its list every minute with only what changed since the last
   refresh, and downloads the whole list every 10 minutes (or when you tap **Download for offline**).
 
+### Phone RSVP (free events)
+
+Event report → **RSVP by phone** (owners and managers; events with a free ticket type). Turn it on, pick
+the free ticket type and how many plus-ones a guest may bring, and share the RSVP link
+(`/rsvp/:eventId`; the event page also shows **RSVP with your phone**, and `?promoter=` credits a
+promoter as usual).
+
+- The guest types a name and a mobile number. Exos texts them a 6-digit code from **your** Twilio or
+  Telnyx number (Integrations; sending must be live, the same switch as your text campaigns). If you
+  can't text, the page asks for an email and sends the code there. Neither: phone RSVP says it isn't
+  available.
+- The code works for 10 minutes and 5 tries. Then the guest gets their ticket link by text (and on
+  screen): the live QR code that changes every 30 seconds, no app, no account. Each plus-one gets
+  their own link to forward.
+- One RSVP per number per event: asking again resends the same tickets, but only by text to that
+  number, or to the same email that RSVP'd. Nothing on the page says whether a number already RSVP'd. Capacity, quotas and the
+  event cap apply; when it's full the page offers the waitlist. Numbers that replied STOP to your
+  texts get the code by email instead.
+- Limits stop bots: a few codes per number, per network and per event every few minutes, and a hidden
+  form field only bots fill in.
+- Signed in to Exos later, a guest can **Save to my Exos account** from the ticket link; the old link
+  stops working and the ticket shows in My tickets (transfers, wallet passes and the door as usual).
+- The panel lists who RSVP'd (name, plus-ones, last 4 digits). Only owners and managers see guests'
+  numbers.
+
 ### End-of-night door summary
 
 The event report's **Overview** has an **End-of-night door summary** (owners and managers also get a
@@ -655,6 +754,15 @@ The event report's **Overview** has an **End-of-night door summary** (owners and
 **Copy** puts it on the clipboard as plain text, for a message to the team or the venue. **CSV**
 downloads the same numbers. It has no buyer names or emails. Owners, managers, finance and the event's
 door staff can see it.
+
+### Money so far
+
+The event report's **Overview** starts with **Money so far** (owners, managers, finance), refreshed every
+minute: what came in online (gross, fees, refunds, your net, and how much in the last hour), the door
+(cash, card, tips), promoter commission still owed, and a take-home number (online net plus door, less
+commission owed). It also counts tickets (paid, free, by phone, comps) and check-ins. **Copy** gives a
+text for the group chat. Your Stripe money is already in your Stripe account; **Get paid now** on the
+Payouts page sends some of it to your bank today where Stripe allows it (below).
 
 ## 6. After a sale
 
@@ -693,6 +801,11 @@ them anyway).
   orders it covers and any clawbacks (a cancelled order that was already paid, taken off a later
   payout). **Export CSV** gives one row per payout line. Accounting-software export (QuickBooks, Xero)
   isn't built.
+- **Get paid now** (same page, org **owner** only, when the operator has switched it on): Stripe
+  normally pays your balance out on its schedule (in the US, usually two business days). Where Stripe
+  offers **Instant Payouts** for your account (an eligible debit card or bank, settled funds), you can
+  send part of the balance now. The page shows what's available and Stripe's fee (about 1.5%, at least
+  $0.50) before you confirm; the fee comes out of your Stripe balance. At most 5 a day.
 - Both screens are read-only. If your database doesn't have the money views yet, the Money section and
   the Payouts page stay hidden or say they aren't available.
 

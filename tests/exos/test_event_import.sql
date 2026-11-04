@@ -1,5 +1,5 @@
 -- ============================================================================
--- Event import with link-out (mig 20261029170000).
+-- Event import with link-out (mig 20261029170500).
 --   I1 Eventbrite import: a published link-out event (backend, URL, primary,
 --      door link); importing the same Eventbrite event again updates it,
 --      never a second event, and leaves the organizer's edits alone

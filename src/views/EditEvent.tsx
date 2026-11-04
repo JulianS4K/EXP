@@ -25,9 +25,11 @@ import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
+import { EventPartnerPresale } from '../components/PartnerPresalePanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
+import EventTemplateActions from '../components/EventTemplateActions';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
 import CurrencySelect from '../components/CurrencySelect';
@@ -1773,7 +1775,7 @@ export default function EditEvent() {
            </div>
         </section>
 
-        {/* Listed from Eventbrite / Luma / Posh: sold only there (mig 20261029170000). */}
+        {/* Listed from Eventbrite / Luma / Posh: sold only there (mig 20261029170500). */}
         {eventId && <LinkOutStatusPanel eventId={eventId} />}
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
@@ -1794,6 +1796,8 @@ export default function EditEvent() {
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Distribution partners per ticket type (mig 20261031130000). */}
         {eventId && <TierDistributionPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Partners during this event's member presale (mig 20261104180000; the SQL checks the role). */}
+        {eventId && eventData.orgId && <EventPartnerPresale orgId={eventData.orgId} eventId={eventId} canEdit />}
 
         {SHOW_MARKETPLACES && (<>
         {/* Marketplaces: pick them, then seats per ticket type (MarketplaceGrid). */}
@@ -1970,6 +1974,10 @@ export default function EditEvent() {
               Cancel this event
             </button>
           </section>
+        )}
+        {/* Save as template / delete a draft that never sold (mig 20261102130000). */}
+        {eventId && (isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')) && (
+          <EventTemplateActions eventId={eventId} status={String(eventData.status ?? '')} ticketsSold={Number(eventData.ticketsSold || 0)} />
         )}
       </form>
 

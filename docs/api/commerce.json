@@ -2,7 +2,7 @@
   "file": "commerce",
   "name": "Gift cards, giving, memberships and passes",
   "order": 40,
-  "description": "Gift cards (products, issued cards and their ledgers), giving campaigns and donations, membership products and members, season passes and flex packs, and member presales. Every route here needs `commerce:read`. Amounts ending in `_cents` are integers in the currency's minor unit. Creating these (selling a gift card at the box office, recording a cash gift, gifting a membership) is done in Org settings for now.",
+  "description": "Gift cards (products, issued cards and their ledgers), giving campaigns and donations, membership products and members, season passes and flex packs, and member presales. Every route here needs `commerce:read`. Amounts ending in `_cents` are integers in the currency's minor unit. Membership products and staff-issued memberships are written with the routes under Memberships: products, members and imported attendees; the rest (selling a gift card at the box office, recording a cash gift) is done in Org settings for now.",
   "endpoints": [
     {
       "id": "list-gift-card-products",
@@ -422,10 +422,39 @@
       "method": "GET",
       "path": "/v1/membership-products",
       "summary": "List membership products",
-      "description": "Membership products: price per period (month, year) or for a one-time term, and the benefits a new member gets.",
+      "description": "Membership products: price per period (month, year) or for a one-time term, and the benefits a new member gets. Each has a status (draft, published, unpublished, archived; mig 20261102100000): only published products are on sale. Filter with ?status=, or leave archived ones out with ?q[status_not_eq]=archived (Opendate's spelling).",
       "auth": "api_key",
       "scope": "commerce:read",
-      "parameters": [],
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only products in this status.",
+          "enum": [
+            "draft",
+            "published",
+            "unpublished",
+            "archived"
+          ],
+          "example": "published"
+        },
+        {
+          "name": "q[status_not_eq]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Leave out products in this status (Opendate's filter).",
+          "enum": [
+            "draft",
+            "published",
+            "unpublished",
+            "archived"
+          ],
+          "example": "archived"
+        }
+      ],
       "responses": [
         {
           "status": 200,
@@ -446,6 +475,8 @@
                 "household_seats": 1,
                 "giftable": true,
                 "active": true,
+                "status": "published",
+                "archived_at": null,
                 "created_at": "2026-10-30T12:00:00+00:00"
               }
             ]
@@ -501,6 +532,8 @@
               "household_seats": 1,
               "giftable": true,
               "active": true,
+              "status": "published",
+              "archived_at": null,
               "created_at": "2026-10-30T12:00:00+00:00"
             }
           }

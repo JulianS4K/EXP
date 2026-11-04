@@ -9,6 +9,7 @@ import {
   type PoolTerms, type SettlementResult, type SlotInput, type ExosSales, type SoldElsewhereLine,
   MERCH_CATEGORY, TALENT_CATEGORY, VENUE_RENTAL_CATEGORY,
 } from './dealMath.ts';
+import { bracketsFromJson } from './dealBrackets.ts';
 
 // ── The inputs, as the database returns them ─────────────────────────────
 
@@ -66,6 +67,29 @@ export interface AdjustmentJson {
   at?: string;
 }
 
+/** An imported ledger entry on the show (mig 20261102120000): amounts signed, cents. */
+export interface ImportedEntryJson {
+  id: string;
+  source: string;
+  description: string;
+  amount_cents: number;
+  tax_amount_cents: number;
+  gl_code: string | null;
+  posted_at: string;
+  source_system: string;
+}
+
+/** Imported entry sources (exos_imported_ledger_entries.source). */
+export const IMPORTED_SOURCES = [
+  'box_office', 'bar', 'merchandise', 'donation', 'membership', 'delivery', 'ticket_insurance', 'gift_card', 'other',
+] as const;
+export const IMPORTED_SOURCE_LABEL: Record<string, string> = {
+  box_office: 'Box office', bar: 'Bar / F&B', merchandise: 'Merchandise', donation: 'Donations', membership: 'Memberships',
+  delivery: 'Delivery', ticket_insurance: 'Ticket insurance', gift_card: 'Gift cards', other: 'Other',
+};
+/** P&L key prefix of imported lines: they are flagged, never merged with Exos lines. */
+export const IMPORTED_KEY = 'imported:';
+
 export interface BudgetLineJson {
   kind: 'income' | 'expense';
   label: string;
@@ -95,6 +119,10 @@ export interface SettlementInputs {
   } | null;
   rental: { status: string; fee_cents: number; deposit_cents: number; currency: string } | null;
   promoter_mode: boolean;
+  /** Offer id → { basis, tiers } (mig 20261102120000; absent before it). */
+  deal_brackets?: Record<string, unknown>;
+  /** Imported ledger entries on the show (mig 20261102120000). */
+  imported_entries?: ImportedEntryJson[];
   settlement: {
     adjustments: AdjustmentJson[];
     deposits_paid: Record<string, boolean>;
@@ -113,7 +141,7 @@ const optNum = (v: unknown): number | null => (v === null || v === undefined || 
 const DEALS: readonly string[] = ['flat', 'versus', 'plus', 'door'];
 const dealType = (v: unknown): DealType => (DEALS.includes(String(v)) ? (v as DealType) : 'flat');
 
-export function termsFromJson(t: TermsJson | null | undefined, depositPaid = false): DealTerms {
+export function termsFromJson(t: TermsJson | null | undefined, depositPaid = false, brackets: unknown = null): DealTerms {
   const x = t ?? {};
   return {
     dealType: dealType(x.deal_type),
@@ -125,6 +153,7 @@ export function termsFromJson(t: TermsJson | null | undefined, depositPaid = fal
     merchArtistPercent: optNum(x.merch_artist_percent),
     deposit: num(x.deposit_cents),
     depositPaid,
+    brackets: bracketsFromJson(brackets),
   };
 }
 
@@ -164,10 +193,30 @@ function sumLines(lines: { kind: string; category_key: string | null; amount: nu
       m.expensesTotal += a;
       if (l.category_key === TALENT_CATEGORY) m.talentExpenses += a;
       if (l.category_key === VENUE_RENTAL_CATEGORY) m.rental += a;
-    } else if (l.category_key === MERCH_CATEGORY) m.merchIncome += a;
+    } else if (l.category_key === MERCH_CATEGORY || l.category_key === `${IMPORTED_KEY}merchandise`) m.merchIncome += a;
     else m.otherIncome += a;
   }
   return m;
+}
+
+/**
+ * Imported entries as P&L / settlement lines: income when positive, expense
+ * when negative, keyed imported:<source> so they never merge with Exos lines.
+ * Tax is not income, so tax_amount_cents stays out.
+ */
+export function importedLines(entries: ImportedEntryJson[] | null | undefined): { kind: 'income' | 'expense'; category_key: string; label: string; amount: number }[] {
+  const by = new Map<string, { kind: 'income' | 'expense'; category_key: string; label: string; amount: number }>();
+  for (const e of entries ?? []) {
+    const a = Math.round(num(e.amount_cents));
+    if (!a) continue;
+    const kind = a > 0 ? 'income' : 'expense';
+    const key = `${IMPORTED_KEY}${e.source}`;
+    const k = `${kind}|${key}`;
+    const cur = by.get(k) ?? { kind, category_key: key, label: `Imported · ${IMPORTED_SOURCE_LABEL[e.source] ?? e.source}`, amount: 0 };
+    cur.amount += Math.abs(a);
+    by.set(k, cur);
+  }
+  return [...by.values()];
 }
 
 /** Acts (accepted offers in the show's currency) and pools in pool mode. */
@@ -177,6 +226,7 @@ function actsOf(
   currency: string,
   depositsPaid: Record<string, boolean>,
   adjustments: AdjustmentJson[],
+  brackets: Record<string, unknown> = {},
 ): { slots: SlotInput[]; pools: PoolInput[]; excluded: string[] } {
   const live = pools.filter((p) => p.mode === 'pool');
   const excluded: string[] = [];
@@ -190,7 +240,7 @@ function actsOf(
     slots.push({
       slotId: o.id,
       name: o.artist_name,
-      terms: termsFromJson(o.terms, depositsPaid[o.id] === true),
+      terms: termsFromJson(o.terms, depositsPaid[o.id] === true, brackets[o.id] ?? null),
       adjustments: adjustments.filter((a) => a.offer_id === o.id).reduce((s, a) => s + num(a.amount_cents), 0),
       poolId: pool ? pool.budget_id : null,
       poolShare: o.pool_share_percent === null || o.pool_share_percent === undefined ? null : num(o.pool_share_percent),
@@ -218,9 +268,12 @@ export interface SettlementView {
 export function settle(inp: SettlementInputs): SettlementView {
   const currency = (inp.event.currency || 'USD').toUpperCase();
   const bo = boxOffice(inp.box_office, inp.sold_elsewhere?.lines ?? [], currency);
-  const m = sumLines((inp.items ?? []).map((i) => ({ kind: i.kind, category_key: i.category_key, amount: itemAt(i, 'actual') })));
+  const m = sumLines([
+    ...(inp.items ?? []).map((i) => ({ kind: i.kind, category_key: i.category_key, amount: itemAt(i, 'actual') })),
+    ...importedLines(inp.imported_entries),
+  ]);
   const adjustments = inp.settlement?.adjustments ?? [];
-  const acts = actsOf(inp.offers ?? [], inp.pools ?? [], currency, inp.settlement?.deposits_paid ?? {}, adjustments);
+  const acts = actsOf(inp.offers ?? [], inp.pools ?? [], currency, inp.settlement?.deposits_paid ?? {}, adjustments, inp.deal_brackets ?? {});
   const actIds = new Set(acts.slots.map((s) => s.slotId));
   const house = adjustments.filter((a) => !a.offer_id || !actIds.has(a.offer_id));
   const result = computeSettlement({
@@ -253,6 +306,8 @@ export interface PnlRow {
   forecast: number;
   estimate: number;
   actual: number;
+  /** From imported ledger entries (an old box office, a bar POS), not Exos. */
+  imported?: boolean;
 }
 
 export interface ShowPnl {
@@ -293,7 +348,8 @@ export function showPnl(inp: SettlementInputs, now: number = Date.now()): ShowPn
   // Forecast and estimate acts: the accepted offers, else the budget's open ones.
   const forecastOffers = (inp.offers?.length ? inp.offers : (budget?.offers ?? []).map((o) => ({ ...o, budget_id: budget!.id, currency })));
   const forecastPools = inp.offers?.length ? (inp.pools ?? []) : (budget?.pool ? [{ budget_id: budget.id, ...budget.pool }] : []);
-  const acts = actsOf(forecastOffers, forecastPools, currency, {}, []);
+  const acts = actsOf(forecastOffers, forecastPools, currency, {}, [], inp.deal_brackets ?? {});
+  const imported = importedLines(inp.imported_entries);
 
   const run = (gross: number, deductions: number, sold: number, lines: ColumnNumbers['lines']): ColumnNumbers => {
     const m = sumLines(lines);
@@ -330,11 +386,15 @@ export function showPnl(inp: SettlementInputs, now: number = Date.now()): ShowPn
   const eLines = [
     ...budgetLines.filter((l) => !itemCats.has(l.category_key ?? `label:${l.label}`)),
     ...items.map((i) => ({ kind: i.kind, category_key: i.category_key, label: i.category_name ?? i.label, amount: itemAt(i, 'estimate') })),
+    ...imported,
   ];
   const estimate = run(pace.estimatedGross, eDeductions, pace.estimatedSold, eLines);
 
   // Actual: the settlement itself.
-  const aLines = items.map((i) => ({ kind: i.kind, category_key: i.category_key, label: i.category_name ?? i.label, amount: itemAt(i, 'actual') }));
+  const aLines = [
+    ...items.map((i) => ({ kind: i.kind, category_key: i.category_key, label: i.category_name ?? i.label, amount: itemAt(i, 'actual') })),
+    ...imported,
+  ];
   const actual: ColumnNumbers = { gross: bo.gross, deductions: bo.deductions, sold: bo.paidSold, lines: aLines, result: view.result };
 
   const cols: Record<PnlColumn, ColumnNumbers> = { forecast, estimate, actual };
@@ -353,6 +413,7 @@ export function showPnl(inp: SettlementInputs, now: number = Date.now()): ShowPn
       const sum = (c: ColumnNumbers) => c.lines.filter((l) => l.kind === kind && (l.category_key ?? `label:${l.label}`) === key)
         .reduce((s, l) => s + Math.max(0, Math.round(l.amount)), 0) * (kind === 'expense' ? -1 : 1);
       row(`${kind}:${key}`, label, kind, sum);
+      if (key.startsWith(IMPORTED_KEY)) rows[rows.length - 1].imported = true;
     }
   }
   row('artist_payouts', 'Artist payouts', 'payout', (c) => -c.result.artistsTotal);
@@ -438,7 +499,7 @@ export function orgPnlCsv(p: OrgPnl): string {
 /** One show's P&L as CSV. */
 export function showPnlCsv(p: ShowPnl): string {
   const lines = [['line', 'section', 'currency', 'forecast', 'estimate', 'actual'].join(',')];
-  for (const r of p.rows) lines.push([r.label, r.section, p.currency, major(r.forecast), major(r.estimate), major(r.actual)].map(csvCell).join(','));
+  for (const r of p.rows) lines.push([r.imported ? `${r.label} (imported)` : r.label, r.section, p.currency, major(r.forecast), major(r.estimate), major(r.actual)].map(csvCell).join(','));
   return lines.join('\r\n') + '\r\n';
 }
 

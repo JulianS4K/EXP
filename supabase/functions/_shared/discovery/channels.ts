@@ -41,6 +41,8 @@ export interface DiscoveryChannel {
   submitter?: Submitter;
   /** Feed channels: what "live" means for this channel. */
   liveMeans?: string;
+  /** Manual channels: the steps to submit, shown under "How to submit". */
+  steps?: readonly string[];
   notes: string;
 }
 
@@ -109,6 +111,23 @@ export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
     id: 'bandsintown', name: 'Bandsintown', kind: 'manual', region: 'global',
     submissionUrl: 'https://help.artists.bandsintown.com/en/articles/7039442-add-an-event', verified: true, submitter: 'organizer',
     notes: "Each artist adds the date in Bandsintown for Artists (a lineup entry doesn't add it to the other artists' pages). The ticketing-partner feed (KANBAN) would replace this.",
+  },
+  {
+    // Posh "Third-Party Links" (2026-10-05): a Posh event page whose Get
+    // Tickets button opens an outside ticket page. No API: the organizer makes
+    // it by hand on posh.vip. Seeded by mig 20261104150000; refused for
+    // link-out events (src/lib/discovery/poshLink.ts, _exos_posh_link_blocked).
+    // No Posh help page for it was found, so the link is the site.
+    id: 'posh_link', name: 'Posh (third-party link)', kind: 'manual', region: 'global',
+    submissionUrl: 'https://posh.vip', verified: false, submitter: 'organizer',
+    steps: [
+      'Sign in to Posh on the web (posh.vip). Creating and editing these events is web-only for now, not in the Posh app.',
+      'Open Create Event and pick External tickets (next to Sell tickets and RSVP).',
+      'Fill in the event from the Posh kit below (title, date and time, venue, description, image).',
+      'Paste the Exos ticket link from the kit as the external ticket URL, so Get Tickets on Posh opens Exos.',
+      'Publish on Posh, then come back and mark it live here with the Posh event link.',
+    ],
+    notes: "Your event gets a Posh page; Get Tickets sends fans to your Exos ticket link, and they buy on Exos. Free to list. Posh counts page views and ticket-link clicks on its side: enter them here to see views -> clicks -> Exos orders. Exos never writes to Posh. Not for events you sell on Posh.",
   },
 ];
 

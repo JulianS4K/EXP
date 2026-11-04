@@ -1,4 +1,4 @@
-// The event page's ticket card for a link-out event (mig 20261029170000):
+// The event page's ticket card for a link-out event (mig 20261029170500):
 // the imported price range and ticket types (display only) and a "Buy on
 // Eventbrite / Luma / Posh" button to the organizer's own checkout. Exos
 // sells nothing here: no tier picker, quantity, voucher or checkout.

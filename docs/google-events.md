@@ -63,7 +63,7 @@ Organizers see whether each event is in the feed, with the reason when it isn't,
 **Discovery listings** (`docs/organizer-guide.md`); that status is `feedBlocker` run on the same columns, not a
 stored guess.
 
-### Events sold on another checkout (mig `20261029170000`)
+### Events sold on another checkout (mig `20261029170500`)
 
 Where to buy comes from one SQL function, `exos_event_buy_link`, which the storefront reads too; the feed gets it
 through `exos_feed_where_to_buy`.

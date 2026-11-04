@@ -11,6 +11,7 @@ import {
   myGiftCards, myMemberships, myPasses, openBillingPortal, passLeftLabel, setHousehold, type MyMembership, type MyPass,
 } from '../lib/commerce';
 import { useAuth } from '../context/AuthContext';
+import { fetchSeasonPassApple, fetchSeasonPassGoogleUrl, WalletUnavailableError } from '../lib/walletApi';
 import { formatCurrency, publicUrl } from '../lib/utils';
 
 export default function MyMemberships() {
@@ -89,6 +90,21 @@ export default function MyMemberships() {
             <p className="font-black">{p.org_name} · {p.name}</p>
             <p>{p.status === 'active' ? passLeftLabel(p) : 'voided'}{p.valid_until ? ` · valid until ${p.valid_until.slice(0, 10)}` : ''}</p>
             <p className="text-xs text-slate-500">Use it from an event page: "Use my pass".</p>
+            {p.status === 'active' && (
+              <p className="text-xs mt-1 flex gap-3">
+                <button className="underline" onClick={async () => {
+                  try {
+                    const url = URL.createObjectURL(await fetchSeasonPassApple(p.id));
+                    const a = document.createElement('a'); a.href = url; a.download = `exos-pass-${p.id}.pkpass`; a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+                  } catch (x) { setErr(x instanceof WalletUnavailableError ? 'Apple Wallet isn\'t set up yet.' : (x as Error).message); }
+                }}>Add to Apple Wallet</button>
+                <button className="underline" onClick={async () => {
+                  try { window.location.assign(await fetchSeasonPassGoogleUrl(p.id)); }
+                  catch (x) { setErr(x instanceof WalletUnavailableError ? 'Google Wallet isn\'t set up yet.' : (x as Error).message); }
+                }}>Save to Google Wallet</button>
+              </p>
+            )}
           </div>
         ))}
       </section>

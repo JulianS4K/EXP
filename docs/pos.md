@@ -27,6 +27,7 @@ PAN, expiry, CVC, cardholder name or track data, and `test_pos_scaffold.sql` P1 
 |---|---|---|
 | Data model, RLS, grants | ✅ authored, not applied | `supabase/migrations/20260929074000_exos_pos_scaffold.sql` |
 | 86 an item, open / close a tab, close a drawer | ✅ SQL functions | `exos_pos_set_86`, `exos_pos_open_tab`, `exos_pos_close_tab`, `exos_pos_close_drawer` |
+| Recount a closed drawer (owner / manager, a reason, 7 days, 3 times; the replaced count kept in `exos_pos_drawer_recounts`) and the drawer report on the event report | ✅ SQL function + UI | `exos_pos_recount_drawer` (mig 20261104200000), `components/PosDrawersPanel` |
 | Settlement summary and records | ✅ SQL functions | `exos_pos_settlement_summary`, `exos_pos_record_settlement` |
 | Line and cart totals with tax, tips, tabs, split tenders, drawer math, settlement report, promoter and artist hooks | ✅ pure TS | `supabase/functions/_shared/pos/`, re-exported from `src/lib/pos` |
 | `PaymentTerminal` interface, `FakeTerminal`, `NotWiredTerminal` | ✅ | `_shared/pos/terminal.ts` |
@@ -98,6 +99,7 @@ The database, not the register, is the source of truth for anything to do with m
 | Ring orders, bar and merch lines, cash and comp tenders; open drawers; open and close tabs | door staff for the event: `exos_pos_can_ring` = `exos_can_door_event` (owner, manager, or a scanner who is org-wide or assigned to the event in `exos_event_staff`) |
 | 86 an item | owner, manager; door staff for an event-scoped item |
 | Ticket lines and card tenders | **service role only** (the walk-up mint path and the terminal integration) |
+| Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
 | Anyone outside the org | nothing (`test_pos_scaffold.sql` P3 and P9b check this) |

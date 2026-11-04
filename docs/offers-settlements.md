@@ -77,6 +77,26 @@ Per act, from the net box office:
 Worked example: $1,000 versus 85 %, net box office $5,000, expenses $2,000 → 85 % × $3,000 = $2,550 (split point
 $3,176.48); with a $1,500 expenses cap, $2,975.
 
+### Tiered deals (brackets)
+
+An offer can carry up to 20 brackets (`exos_deal_brackets`, mig 20261102120000; Offer page → Terms → Tiered
+percentage; `/v1/deal-brackets`, also `/v3_deal_brackets`). Each changes the percentage from a threshold upward; below
+the lowest threshold the offer's own percentage applies (a bracket at 0 replaces it). One basis per offer:
+
+- `amount`: thresholds are cents of the base the percentage applies to (net after expenses for versus, net box office
+  for door, the overage above the split point for plus). 85 % with a bracket at $20,000 → 90 % pays 85 % of the first
+  $20,000 and 90 % of the rest.
+- `tickets`: thresholds are paid tickets sold; each tier gets the share of the base its tickets are of all paid
+  tickets (so a uniform price gives the same answer as tiering the money).
+
+Thresholds are unique per offer, so in order they are strictly increasing and tiers never overlap or leave gaps. Each
+tier is rounded half-up once with exact integer arithmetic, then summed. Brackets apply to versus, plus and door (flat
+has no percentage); a versus or door split point is where the tiered amount first reaches the guarantee. Pools pay
+from the pool's terms, so a member's brackets don't apply. Brackets change only while the offer is a draft (they are
+deal terms); they reach the settlement inputs (`deal_brackets`) and are frozen in a finalized snapshot. The maths is
+`_shared/finance/dealBrackets.ts`; `_exos_bracket_amount` is its SQL twin, checked against the same fixtures
+(`src/lib/dealBrackets.test.ts`, `tests/exos/test_finance_extras.sql`).
+
 ## Settlement
 
 `_exos_settlement_inputs` gathers everything one show's settlement reads; the deal math runs on it in the browser and
@@ -123,6 +143,32 @@ income, Other. Talent, Venue rental, Merch income and Other are built in (the ma
 renamed and coded, not deleted or re-kinded. Each category carries one code from the org's chart of accounts
 (`exos_gl_codes`, discarded rather than deleted; discarding unlinks it).
 
+### Ledger codes and reporting (mig 20261102120000)
+
+- **Revenue types** (`exos_gl_revenue_codes`): tickets, buyer fees, tax, donations, refunds, platform fees, POS,
+  payouts and the imported sources (box office, bar, merchandise, memberships, delivery, ticket insurance, gift
+  cards, other) each post to one of the org's codes. Finance → Ledger → Revenue codes; `/v1/gl-revenue-codes`.
+- **Per-event overrides** (`exos_gl_code_assignments`): one per revenue type and show; deleting one falls back to the
+  org's code. Event report → Settlement → Ledger codes; `/v1/events/:id/gl-code-assignments`.
+- **Reporting rows** (`exos_reporting_rows`): one row per money line with its code: per order the ticket value (order
+  value less tax, buyer fees and donations), tax, buyer fees, donations and the platform fee (negative); each refund
+  (negative); each Stripe transfer (payout rows are money moved, not revenue); each paid POS sale and its tax; and
+  each imported entry (`imported: true`). Finance → Ledger (CSV); `/v1/reporting-rows`.
+- **Backfill** (`_exos_gl_backfill`): rebuilds one show's Exos rows from its orders, refunds, payouts and POS sales,
+  removes rows whose source is gone, and re-tags every row (imported ones without their own code included) with the
+  code in force. It never changes money. Idempotent (a second run reports 0 / 0 / 0) and serialized per show (an
+  advisory lock). `POST /v1/events/:id/gl-backfill`.
+- **Imported ledger entries** (`exos_imported_ledger_entries`): accounting lines from another system, at most 500 per
+  import, identified by (`source_system`, `source_line_id`): the same line again is `exists` and writes nothing; the
+  same id with other values is an error naming the stored entry. Amounts are signed integer cents. Entries are never
+  edited (delete and import again). An entry on a show counts in its settlement and P&L as income (positive; merchandise
+  as merch income) or expense (negative), under "Imported · <source>" lines flagged in the P&L and its CSV; its tax
+  doesn't. Finance → Ledger → Imported entries (CSV); `/v1/imported-ledger-entries`.
+- **Cash summary** (`_exos_cash_summary`): a show's gross (online order value plus POS payments), fees, tax, refunds and
+  net (gross − tax − refunds − platform fees), split by payment method (card, Cash App, PayPal, Venmo, gift card,
+  cash and card at the POS, comps), comps, and payouts (Stripe transferred / pending, PayPal owed / held). Optional
+  window. Event report → Settlement; `/v1/events/:id/cash-summary`.
+
 ## Ticket-count emails
 
 Per show (event report → Settlement & P&L, or `/v1/events/:id/ticket-counts`): daily at a local time or weekly on a
@@ -147,9 +193,11 @@ to an offer or a show. Offers page → Deals; `/v1/deals`.
 
 ## Not built
 
-- Deal brackets (tiered deals by tickets or gross), tax withholding, charity and facility-fee deductions, door-deal
-  revenue bases: a deal is one of the four types above.
-- Ledger-code overrides per event, backfilling codes onto sold tickets, organizer fee components: one code per
-  category.
+- Tax withholding, charity and facility-fee deductions, door-deal revenue bases: a deal is one of the four types
+  above (with optional brackets). Opendate's bracket widths (`quantity` / `gross_amount`), `dollar_amount`,
+  `dollar_or_percentage_operator` and `cap_overflow_target` are not modelled: brackets are thresholds with a
+  percentage, and flat amounts are bonuses.
+- Organizer fee components and ledger overrides of a single tax or fee rule (overrides are per revenue type).
+- Live stamping of reporting rows at sale time: a show's Exos rows are built by its backfill.
 - Offer imports from PDFs or multi-sheet workbooks (CSV only, mapped in the browser); Opendate's offer blueprints.
 - Attachments on emails (links instead), currency conversion between offers and the show.

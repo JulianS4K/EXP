@@ -26,6 +26,42 @@ parser `supabase/functions/_shared/posh/payload.ts` (+ `payload_test.ts`), SQL h
 
 Every Posh call is inbound. Exos never sends anything to Posh (there is nothing to call).
 
+## Third-Party Links (discovery channel `posh_link`)
+
+Posh shipped **Third-Party Links** on 2026-10-05: an event gets a Posh page, and **Get
+Tickets** opens the organizer's external ticketing page. Free to list, for any organizer
+with a Posh account; created and edited on Posh web only (Create Event → **External
+tickets**, next to Sell tickets and RSVP); mobile app support later. Posh tracks page
+views and ticket-link clicks on its side.
+
+| Item | Status |
+|---|---|
+| API to create or update a third-party link event | **none**: the organizer makes it by hand |
+| Help page | **not found** from the build session; the channel links to posh.vip (marked not verified) |
+| Page views / ticket-link clicks | shown to the organizer on Posh; no export or API, so typed into Exos |
+
+In Exos it is the manual, organizer-account discovery channel `posh_link` (mig
+`20261104150000_exos_posh_link_channel.sql`; organizer steps: `docs/organizer-guide.md`
+"Listing on Posh with a third-party link"). It is the opposite of the capped tier above:
+the event is **sold on Exos**, Posh is only a listing.
+
+- The external ticket URL is the Exos event page with `utm_source=posh_link`,
+  `utm_medium=listing`, `utm_campaign=discovery` (`discoveryTicketLink`), so checkouts
+  from Posh are attributed.
+- `exos_discovery_queue` refuses `posh_link` for a link-out event (sold on Posh,
+  Eventbrite or Luma: `_exos_posh_link_blocked`). `exos_discovery_event_channels` returns
+  `posh_link` facts (`link_out`, `link_out_platform`, `ticket_backend`, `posh_webhooks`,
+  `blocked`); `posh_webhooks` is true when the org's hook is active and the event is
+  linked, capped or has Posh orders, and the Promote page then warns.
+- `exos_discovery_posh_stats`: one reading per listing per day (`as_of`, `page_views`,
+  `link_clicks`, non-negative integers), written only by `exos_posh_link_record_stats` /
+  `exos_posh_link_delete_stats` (owner, manager, admin) on a live or removed listing;
+  read by owner / manager / finance / admin (RLS). `exos_posh_link_funnel(event)` returns
+  the readings and the Exos orders with that `utm_source` (fulfilled or partly refunded;
+  live tickets; cents net of refunds); the rates are `poshFunnel` in
+  `src/lib/discovery/poshLink.ts`.
+- Nothing here calls Posh.
+
 ## The receiver
 
 `POST /functions/v1/exos-posh-webhook/<token>` (deploy with `--no-verify-jwt`).

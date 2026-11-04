@@ -100,6 +100,20 @@
 // and the membership like a Stripe one; the donation is a charge line, so
 // Stripe and PayPal charge it the same.
 
+// Commission methods (mig 20261104190000, docs/payouts.md): with
+// EXOS_SPLIT_AT_SALE=on or EXOS_PLATFORM_FEE_COMMISSIONS=on (both default
+// off), a Stripe order asks exos_commission_checkout_plan how it is charged:
+//   destination (every order today, and whenever a switch is off): exactly
+//     as before, application_fee_amount + transfer_data;
+//   platform_fee: the same destination charge with the promoter's commission
+//     added to application_fee_amount;
+//   split (split_at_sale + the org owner's switch): a separate charge on the
+//     platform with a transfer_group; exos-promoter-payouts transfers the
+//     organizer's share and the commissions after the holdback.
+// The buyer pays the same all-in price either way. The plan is recorded with
+// the session (exos_record_commission_plan); an order charged a new way whose
+// plan can't be recorded is expired, never left without one. With both
+// switches off no plan is asked for and nothing here changes.
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
@@ -117,12 +131,16 @@ import {
 import { isEmptyAdIds, normalizeConsent, readAdIds, truncateUserAgent } from "../_shared/adIds.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import {
-  giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeGiftCardCode, parseDonationCents,
+  giftCardApplied, giftCardOrderFee, memberPriceApplies, memberUnitCents, normalizeAnyGiftCardCode, parseDonationCents,
 } from "../_shared/commerce.ts";
 import { chargeTotalCents, stripeLineItems, type ChargeLine } from "../_shared/chargeLines.ts";
 import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
 import { approveUrl, newPayPalSessionId, PAYPAL_CURRENCIES, paypalOrderBody } from "../_shared/paypal/model.ts";
 import { PAYPAL_FEE } from "../_shared/platformFee.ts";
+import {
+  checkoutChargeMetadata, commissionEnv, needsCommissionPlan, parsePlan, paymentIntentData, planChangesCharge,
+  type CommissionPlan,
+} from "../_shared/payouts/commissionMethods.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -587,7 +605,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // exos: gift cards — quoted now (nothing reserved), held after the session
   // row exists. Rate-limited per account or hashed IP in SQL.
-  const giftCode = p.gift_card_code ? normalizeGiftCardCode(p.gift_card_code) : null;
+  const giftCode = p.gift_card_code ? normalizeAnyGiftCardCode(p.gift_card_code) /* exos: imported codes too (mig 20261102110000) */ : null;
   if (p.gift_card_code && !giftCode) return json({ error: "that gift card code isn't valid (check for a typo)" }, 400);
   const giftBucket = buyerUid
     ? `u:${buyerUid}`
@@ -995,6 +1013,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const stripe = new Stripe(stripeKey!, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  // Commission methods: how this order is charged. Asked only when a platform
+  // switch is on; any problem means the destination charge, as before.
+  let commissionPlan: CommissionPlan | null = null;
+  if (needsCommissionPlan(commissionEnv((k) => Deno.env.get(k))) && chargeCents > 0) {
+    const cEnv = commissionEnv((k) => Deno.env.get(k));
+    const addonNet = addonsForSession.reduce((n, a) => n + a.quantity * a.unit_price_cents, 0);
+    const { data: cp, error: cpErr } = await sb.rpc("exos_commission_checkout_plan", {
+      p_event_id: event_id, p_tier_id: tier_id, p_promoter_code: promoterId ?? null, p_quantity: quantity,
+      p_charge_cents: chargeCents, p_addon_net_cents: addonNet, p_tax_cents: recordedTax,
+      p_application_fee_cents: applicationFee, p_processor: "stripe",
+      p_split_on: cEnv.splitAtSale, p_fee_on: cEnv.platformFeeCommissions,
+    });
+    if (cpErr) console.error("exos-checkout: commission plan unavailable; destination charge as before", cpErr.message);
+    else commissionPlan = parsePlan(cp);
+  }
   // Cash App Pay next to cards: platform switch + org opt-in + USD.
   const cashApp = Deno.env.get("EXOS_STRIPE_CASHAPP") === "on" && orgMethods.cashapp && currency === "usd";
 
@@ -1026,10 +1059,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       payment_method_types: cashApp ? ["card", "cashapp"] : ["card"],
       line_items: lineItems,
       ...(giftCoupon ? { discounts: [{ coupon: giftCoupon }] } : {}),
-      payment_intent_data: {
-        application_fee_amount: applicationFee,
-        transfer_data: { destination: payments.connectedAccountId },
-      },
+      // Destination charge (application fee + transfer), unless the
+      // commission plan says split at sale or a commission in the fee.
+      payment_intent_data: paymentIntentData(commissionPlan, {
+        applicationFeeCents: applicationFee, destination: payments.connectedAccountId!,
+      }),
       // Embedded: card payments finish in place (the iframe's onComplete);
       // only redirect-based methods come back through return_url.
       ...(embedded
@@ -1045,6 +1079,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         ...(timedSlot ? { exos_slot: timedSlot } : {}),
         ...(giftCents > 0 ? { exos_gift_card_cents: String(giftCents), exos_gift_card_last4: giftLast4 } : {}),
         ...(donationCampaign ? { exos_donation_cents: String(donationCents) } : {}),
+        ...checkoutChargeMetadata(commissionPlan),
       },
     });
   } catch (e) {
@@ -1076,6 +1111,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.error("exos-checkout: ledger insert failed", insErr);
     await releaseHold(sb, holdId);
     return json({ error: "could not record session" }, 500);
+  }
+
+  // The commission plan sits next to the session. An order charged a new way
+  // (split, or a commission in the fee) must have it: otherwise expire it.
+  if (commissionPlan) {
+    const { data: recorded, error: recErr } = await sb.rpc("exos_record_commission_plan", {
+      p_session_id: session.id, p_plan: commissionPlan,
+    });
+    if ((recErr || recorded !== true) && planChangesCharge(commissionPlan)) {
+      console.error("exos-checkout: commission plan not recorded; expiring", session.id, recErr?.message);
+      try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", session.id).eq("status", "pending");
+      return json({ error: "could not start checkout, try again" }, 503);
+    }
+    if (recErr) console.error("exos-checkout: commission plan not recorded (destination charge, non-fatal)", recErr.message);
   }
 
   // Link the hold to the now-existing session so fulfillment consumes it (and it

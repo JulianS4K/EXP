@@ -150,16 +150,21 @@ BEGIN
        -- last call and where to buy, nothing else (mig 20261029100000)
        'exos_public_event_sale',
        -- the public link-out view calls it as the reader: published link-out
-       -- events' checkout URL, status and display prices (mig 20261029170000)
+       -- events' checkout URL, status and display prices (mig 20261029170500)
        'exos_public_link_out',
        -- bearer-token gated (64-hex unsubscribe token / promoter kit uuid)
        'exos_mail_unsubscribe',
        'exos_promoter_kit', 'exos_promoter_earnings', 'exos_promoter_guest_lists',
        'exos_promoter_limit_flags', 'exos_promoter_note_limit_flag', 'exos_promoter_add_guest',
        'exos_promoter_remove_guest', 'exos_promoter_set_guest_access_needs', 'exos_promoter_set_socials',
+       -- the org's promoters ranked by tickets: names + counts, kit token (mig 20261102150000)
+       'exos_promoter_leaderboard',
        -- signup forms (mig 20261031120000): an active form's public text, and
        -- the 64-hex confirm / unsubscribe tokens; none returns fan data
-       'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe');
+       'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',
+       -- inbound booking requests (mig 20261102130000): an org's form text
+       -- when it is on, and the rate-limited, honeypotted, 16 KB-capped submit
+       'exos_inbound_form_public', 'exos_inbound_submit');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

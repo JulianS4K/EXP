@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
-import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart } from 'lucide-react';
+import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart, FileText, Inbox, Receipt } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
@@ -148,6 +148,21 @@ export default function OrganizerDashboard() {
                     <Calendar className="w-4 h-4" /><span>Booking calendar</span>
                   </Link>
                 )}
+                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/templates`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <FileText className="w-4 h-4" /><span>Templates</span>
+                  </Link>
+                )}
+                {(isAdmin || ['owner', 'manager', 'content'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/booking-requests`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Inbox className="w-4 h-4" /><span>Booking requests</span>
+                  </Link>
+                )}
+                {(isAdmin || ['owner', 'manager', 'content'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/venue-requests`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <MapPin className="w-4 h-4" /><span>Venue requests</span>
+                  </Link>
+                )}
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/offers`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Handshake className="w-4 h-4" /><span>Offers</span>
@@ -156,6 +171,11 @@ export default function OrganizerDashboard() {
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/finance`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <PieChart className="w-4 h-4" /><span>Finance & P&L</span>
+                  </Link>
+                )}
+                {canSeeMoney(activeRole, isAdmin) && (
+                  <Link to={`/orgs/${activeOrg.id}/orders`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <Receipt className="w-4 h-4" /><span>Orders</span>
                   </Link>
                 )}
                 {canSeeMoney(activeRole, isAdmin) && (
@@ -194,7 +214,7 @@ export default function OrganizerDashboard() {
           </div>
         </div>
 
-        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170000). */}
+        {/* List an event sold on Eventbrite / Luma / Posh (mig 20261029170500). */}
         {activeOrg && (isAdmin || activeRole === 'owner' || activeRole === 'manager') && <ImportEventsPanel orgId={activeOrg.id} />}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">

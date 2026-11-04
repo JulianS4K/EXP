@@ -391,6 +391,8 @@ export async function myPasses(): Promise<MyPass[]> {
 }
 
 export async function myMemberships(): Promise<MyMembership[]> {
+  // Memberships staff issued to my email before I had an account (mig 20261102100000).
+  await supabase.rpc('exos_claim_my_memberships');
   const { data, error } = await supabase.rpc('exos_my_memberships');
   if (error) throw error;
   return (data ?? []) as MyMembership[];

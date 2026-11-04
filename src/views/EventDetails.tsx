@@ -43,6 +43,7 @@ import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
+import PhoneRsvpLink from '../components/PhoneRsvpLink';
 import SaveEventButton from '../components/SaveEventButton';
 import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
@@ -1117,7 +1118,7 @@ export default function EventDetails() {
           <div className="lg:col-span-1">
             <div id="buy" ref={buyCardRef} className="lg:sticky top-24 bg-[#111] border border-white/10 overflow-hidden scroll-mt-24">
               <div className="p-7">
-                {/* Link-out (mig 20261029170000): sold only on the organizer's checkout. */}
+                {/* Link-out (mig 20261029170500): sold only on the organizer's checkout. */}
                 {event.linkOut ? (
                   <LinkOutBuyCard event={event} linkOut={event.linkOut}
                     onBuy={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })} />
@@ -1456,6 +1457,11 @@ export default function EventDetails() {
                       </a>
                     )}
                   </div>
+                )}
+
+                {/* Phone-number RSVP, when the organizer turned it on (mig 20261102150000). */}
+                {!elsewhere && (
+                  <PhoneRsvpLink eventId={event.id} hasFreeTier={(event.ticketTiers ?? []).some((t) => Number(t.price) === 0)} />
                 )}
 
                 {soldOut && !canBypass && !elsewhere && (

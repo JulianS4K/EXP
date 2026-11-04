@@ -61,7 +61,46 @@ amounts in major units, formula cells escaped (`src/lib/csv.ts`).
 The Exos platform fee applies to the card charge as for any payment (a donation is part of the charge). Organizer fee
 rules (`docs/fees.md`) never apply to a donation line.
 
+## Campaign lifecycle (mig 20261102110000)
+
+A campaign is **draft** (not taking gifts), **active** or **completed** (`completed_at`: closed for good). The
+dashboard's Giving tables (`/orgs/:orgId/giving`) and the partner API both use `_exos_giving_campaign_op`:
+create (a draft over the API), update, activate (refused once completed or past `ends_at`), complete (off the public
+page and checkout; every monthly gift to it is cancelled in Stripe), delete (only with no donations and no monthly
+gifts, otherwise 409 "complete it instead"). Owner / manager.
+
+## Monthly gifts (`exos_recurring_donations`)
+
+A donor gives monthly through a Stripe subscription, the same plumbing as membership subscriptions:
+`exos-commerce` `donate_monthly` (signed in) or `POST /v1/giving-campaigns/:id/recurring-donations` (a partner's
+key, returns a Checkout link) writes the plan as `pending`, then opens a subscription-mode Checkout session on the
+platform account with a destination charge and the usual application fee as a percent of each charge. The plan id
+rides in the subscription metadata. `stripe-webhook`:
+
+- `checkout.session.completed` -> `exos_commerce_fulfill` attaches the subscription (plan `active`);
+- `invoice.paid` -> one donation per invoice (key `inv:<invoice id>`, receipt mailed), even when the first invoice
+  lands before the session event;
+- `invoice.payment_failed` -> `past_due` (once per Stripe event), back to `active` when a retry pays;
+- `customer.subscription.updated` / `.deleted` -> status; a cancelled plan is never revived (a late charge is still
+  recorded as a gift);
+- a full refund of a monthly charge marks that one donation refunded.
+
+Cancel: the donor or owner / manager / finance (`exos-commerce` `cancel_recurring_donation`, `DELETE
+/v1/recurring-donations/:id`) cancels the subscription now. Stripe calls use `STRIPE_SECRET_KEY` (a test key in
+test mode) and answer 503 without it; every event is idempotent (`exos_recurring_donation_events`).
+
+## Deleting and offline refunds
+
+- Delete (owner / manager; `DELETE /v1/donations/:id`): only a cash / check / other gift recorded by hand with no
+  payment behind it and no refund recorded. Anything else answers 409: refund it instead. The deletion is kept in
+  `exos_donation_ledger` with a snapshot of the row.
+- Offline refund (owner / manager / finance; `POST /v1/donations/:id/offline-refund`): money given back outside
+  Stripe. Never calls Stripe. One `exos_donation_ledger` row per refund, idempotent per reference, never more than
+  is left (`refunded_cents`); the donation reads `refunded` when nothing is left. Campaign totals are net of it.
+
 ## Not covered yet
 
-- Recurring donations (Stripe subscriptions for gifts): the membership subscription plumbing would carry them.
-- `exos-api` routes for donations (see the mapping in `docs/memberships.md`).
+- Monthly gifts are monthly only (no yearly or weekly), and their amount can't be changed after the start (cancel
+  and start a new one).
+- A Stripe cancel that fails when a campaign is completed is reported (the plan keeps `cancel_requested_at`); staff
+  cancel it again from the Monthly gifts table. There is no sweep.

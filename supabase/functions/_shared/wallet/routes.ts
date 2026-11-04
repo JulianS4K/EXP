@@ -3,6 +3,7 @@
 // Owner routes (Supabase JWT):
 //   POST {base}/pass      { ticket_id, kind: "apple" | "google" }
 //   POST {base}/reissue   { ticket_id }
+//   POST {base}/season-pass { pass_id, kind: "apple" | "google" } (mig 20261102100000)
 // Link holders (a partner ticket's live link, mig 20261031130000):
 //   POST {base}/link-pass { ticket_id, link_key, kind }
 // Cron (x-cron-secret):
@@ -19,6 +20,7 @@ export type WalletRoute =
   | { kind: "issue" }
   | { kind: "link-pass" }
   | { kind: "reissue" }
+  | { kind: "season-pass" }
   | { kind: "push" }
   | { kind: "register"; device: string; passType: string; serial: string }
   | { kind: "unregister"; device: string; passType: string; serial: string }
@@ -51,6 +53,7 @@ export function routeWallet(method: string, pathname: string): WalletRoute {
     if (p[0] === "pass") return { kind: "issue" };
     if (p[0] === "link-pass") return { kind: "link-pass" };
     if (p[0] === "reissue") return { kind: "reissue" };
+    if (p[0] === "season-pass") return { kind: "season-pass" };
     if (p[0] === "push") return { kind: "push" };
   }
   if (p[0] !== "apple" || p[1] !== "v1") return { kind: "not-found" };

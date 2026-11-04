@@ -1,4 +1,4 @@
-// Event import with link-out (mig 20261029170000; docs/organizer-guide.md
+// Event import with link-out (mig 20261029170500; docs/organizer-guide.md
 // "List an event you sell elsewhere"): reading a pasted Eventbrite, Luma or
 // Posh event link.
 //

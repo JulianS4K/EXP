@@ -137,7 +137,7 @@ END $$;
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.exos_events ADD COLUMN IF NOT EXISTS link_out boolean NOT NULL DEFAULT false;
 COMMENT ON COLUMN public.exos_events.link_out IS
-  'Link-out: listed by Exos, sold only on the organizer''s own checkout (exos_event_imports). Exos sells nothing for it. Set by exos_link_out_import only. mig 20261029170000.';
+  'Link-out: listed by Exos, sold only on the organizer''s own checkout (exos_event_imports). Exos sells nothing for it. Set by exos_link_out_import only. mig 20261029170500.';
 
 SELECT pg_temp.exos_check_add('public.exos_events', 'exos_events_primary_source_check', 'primary_source', ARRAY['posh']);
 SELECT pg_temp.exos_check_add('public.exos_events', 'exos_events_ticket_backend_chk', 'ticket_backend', ARRAY['posh']);
@@ -198,7 +198,7 @@ DROP POLICY IF EXISTS exos_event_imports_sel ON public.exos_event_imports;
 CREATE POLICY exos_event_imports_sel ON public.exos_event_imports FOR SELECT TO authenticated
   USING (public.exos_is_admin() OR public.exos_has_org_role(org_id, ARRAY['owner', 'manager', 'finance']));
 COMMENT ON TABLE public.exos_event_imports IS
-  'Link-out events: where each one is sold (Eventbrite / Luma / Posh), its status and display-only prices, and the re-check state. Written by exos_link_out_import / exos_link_out_check_apply only. mig 20261029170000.';
+  'Link-out events: where each one is sold (Eventbrite / Luma / Posh), its status and display-only prices, and the re-check state. Written by exos_link_out_import / exos_link_out_check_apply only. mig 20261029170500.';
 
 CREATE OR REPLACE FUNCTION public.exos_event_is_link_out(p_event_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -286,42 +286,42 @@ END $$;
 --    feed, and the backend can't be switched back to Exos.
 -- ---------------------------------------------------------------------------
 SELECT pg_temp.exos_patch_n('public.exos_event_is_free_tier(uuid)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$  SELECT coalesce(public.exos_event_capacity_bounded(p_event_id), false)
      AND public.exos_event_tier_size(p_event_id) <= public.exos_free_tier_max_capacity()$o$,
-  $n$  SELECT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170000): Exos sells nothing
+  $n$  SELECT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170500): Exos sells nothing
      OR (coalesce(public.exos_event_capacity_bounded(p_event_id), false)
          AND public.exos_event_tier_size(p_event_id) <= public.exos_free_tier_max_capacity())$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_event_fee_terms(uuid, uuid, integer)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$'free_tier', x.bounded AND greatest(x.cap, x.sold + x.adm) <= x.cut)$o$,
-  $n$'free_tier', e.link_out /* link-out (mig 20261029170000) */ OR (x.bounded AND greatest(x.cap, x.sold + x.adm) <= x.cut))$n$, 1);
+  $n$'free_tier', e.link_out /* link-out (mig 20261029170500) */ OR (x.bounded AND greatest(x.cap, x.sold + x.adm) <= x.cut))$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_resale_unlocked(uuid)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$     AND (NOT public.exos_resale_consent_required() OR public.exos_resale_consent_active(p_event_id))$o$,
   $n$     AND (NOT public.exos_resale_consent_required() OR public.exos_resale_consent_active(p_event_id))
-     AND NOT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170000): never resold$n$, 1);
+     AND NOT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170500): never resold$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_event_last_call(uuid)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$    SELECT e.status IS DISTINCT FROM 'cancelled'$o$,
   $n$    SELECT e.status IS DISTINCT FROM 'cancelled'
-           AND NOT e.link_out   -- link-out (mig 20261029170000): Exos is no channel$n$, 1);
+           AND NOT e.link_out   -- link-out (mig 20261029170500): Exos is no channel$n$, 1);
 
 -- Anchored on the start of the last-call line, not its end: the fixed-block
 -- migration (20261029160000) appends its own line after it.
 SELECT pg_temp.exos_patch_n('public._exos_feed_eligible(uuid)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$    AND NOT public.exos_event_last_call(p_event_id)$o$,
-  $n$    AND NOT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170000): no inventory to offer
+  $n$    AND NOT public.exos_event_is_link_out(p_event_id)   -- link-out (mig 20261029170500): no inventory to offer
     AND NOT public.exos_event_last_call(p_event_id)$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_set_ticket_backend(uuid, text, text)',
-  'link-out (mig 20261029170000)',
+  'link-out (mig 20261029170500)',
   $o$  IF p_backend IS NULL OR p_backend NOT IN ('exos', 'eventbrite', 'pretix', 'hievents', 'luma') THEN$o$,
-  $n$  IF e.link_out THEN   -- link-out (mig 20261029170000)
+  $n$  IF e.link_out THEN   -- link-out (mig 20261029170500)
     RAISE EXCEPTION 'exos_set_ticket_backend: this event is listed from the organizer''s own checkout; re-import it to change the link'
       USING ERRCODE = '22023';
   END IF;
@@ -401,7 +401,7 @@ SELECT e.id AS event_id, l.platform, l.url, l.source_status, l.price_min, l.pric
 REVOKE ALL ON public.exos_public_link_outs FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.exos_public_link_outs TO anon, authenticated, service_role;
 COMMENT ON VIEW public.exos_public_link_outs IS
-  'Published link-out events: the organizer''s checkout URL, source status and display-only prices. mig 20261029170000.';
+  'Published link-out events: the organizer''s checkout URL, source status and display-only prices. mig 20261029170500.';
 
 -- For the service-role feeds (Google, calendar): where to buy for many events
 -- at once, any status, plus the link-out details.
@@ -427,7 +427,7 @@ GRANT EXECUTE ON FUNCTION public.exos_feed_where_to_buy(uuid[]) TO service_role;
 SELECT pg_temp.exos_patch_n('public.exos_calendar_event_rows(uuid[], uuid[])',
   'buy_url',
   $o$             'has_tickets', e.id = ANY (coalesce(p_ticketed, '{}')))$o$,
-  $n$             'buy_on', (SELECT b.sells_on FROM public.exos_event_buy_link(e.id) b),   -- mig 20261029170000
+  $n$             'buy_on', (SELECT b.sells_on FROM public.exos_event_buy_link(e.id) b),   -- mig 20261029170500
              'buy_url', (SELECT b.url FROM public.exos_event_buy_link(e.id) b),
              'has_tickets', e.id = ANY (coalesce(p_ticketed, '{}')))$n$, 1);
 

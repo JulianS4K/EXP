@@ -1,4 +1,4 @@
-// Organizer dashboard → "List an event you sell elsewhere" (mig 20261029170000;
+// Organizer dashboard → "List an event you sell elsewhere" (mig 20261029170500;
 // docs/organizer-guide.md). Two ways in:
 //   * From the connected Eventbrite account: pick one or many, imported
 //     published (re-importing one updates it).

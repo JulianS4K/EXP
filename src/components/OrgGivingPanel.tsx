@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { HeartHandshake, Download } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   donationsCsv, donationsExport, listCampaigns, majorToCents, recordOfflineDonation, saveCampaign, type GivingCampaign,
 } from '../lib/commerce';
@@ -77,7 +78,11 @@ export default function OrgGivingPanel({ orgId, orgSlug, canEdit, canRecord }: P
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><HeartHandshake className="w-4 h-4" /> Giving</h2>
-        <button onClick={exportCsv} className="text-xs underline flex items-center gap-1"><Download className="w-3 h-3" /> Donations CSV</button>
+        <span className="flex items-center gap-3">
+          {/* Tables with sorting, filters and row actions (mig 20261102110000). */}
+          <Link to={`/orgs/${orgId}/giving`} className="text-xs underline">Open giving tables</Link>
+          <button onClick={exportCsv} className="text-xs underline flex items-center gap-1"><Download className="w-3 h-3" /> Donations CSV</button>
+        </span>
       </div>
       <p className="text-xs text-slate-400 mb-4">
         Campaigns get a public page and can be offered as add-a-donation at ticket checkout (its own line after tax,

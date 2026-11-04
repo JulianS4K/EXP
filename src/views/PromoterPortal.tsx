@@ -1,7 +1,9 @@
 // /p/:token — a promoter's private portal (mig 20260924233000). No login: the
 // token in the link is the secret. Shows their own tickets + gross per event
 // and, for any event, their kit (buy-now link, story poster, tracked links).
-// Earnings (commission owed / paid, mig 20260926020000): PromoterEarningsPanel.
+// Earnings (commission owed / paid, mig 20260926020000; live, steps and
+// Stripe payouts, mig 20261102150000): PromoterEarningsPanel. The org's
+// leaderboard (names + tickets): PromoterLeaderboard.
 
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -17,6 +19,7 @@ import PromoterKitPanel from '../components/PromoterKitPanel';
 import PromoterSocialsForm from '../components/PromoterSocialsForm';
 import PromoterGuestListForm from '../components/PromoterGuestListForm';
 import PromoterEarningsPanel from '../components/PromoterEarningsPanel';
+import PromoterLeaderboard from '../components/PromoterLeaderboard';
 import PromoterLimitFlags from '../components/PromoterLimitFlags';
 import { getPromoterLimitFlags, type PromoterLimitFlag } from '../lib/marketplace/linksApi';
 
@@ -76,6 +79,7 @@ export default function PromoterPortal() {
         </button>
       </div>
       {token && <PromoterEarningsPanel token={token} />}
+      {token && <PromoterLeaderboard token={token} events={kit.events.map((e) => ({ event_id: e.event_id, name: e.name }))} />}
       {token && (
         <PromoterSocialsForm
           token={token}

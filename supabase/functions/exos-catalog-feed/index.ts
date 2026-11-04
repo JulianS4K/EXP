@@ -118,7 +118,7 @@ async function readCatalogInput(sb: SupabaseClient, slug: string, now: Date) {
     if (tErr?.code === "42703") ({ data: t, error: tErr } = await run(TIER_COLS));
     if (tErr) throw new Error(`tiers: ${tErr.message}`);
     tiers.push(...((t ?? []) as unknown as CatalogTierRow[]));
-    // Link-out events (mig 20261029170000): the organizer's checkout and the
+    // Link-out events (mig 20261029170500): the organizer's checkout and the
     // imported prices. Before the migration the view is missing (42P01 /
     // PGRST205): none.
     const { data: lo, error: lErr } = await sb.from("exos_public_link_outs").select("*").in("event_id", ids.slice(i, i + 200));

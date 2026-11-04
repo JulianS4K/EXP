@@ -76,9 +76,14 @@ export function ticketShares(poolCents: number, n: number): number[] {
   return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
-/** "12.34" / "12" / "$12.3" -> 1234 / 1200 / 1230. null when not a positive amount with at most 2 decimals. */
+/** "12.34" / "12" / "$12.3" / "1,000" -> 1234 / 1200 / 1230 / 100000. null when not a positive amount with at most 2
+ *  decimals. A comma is only a thousands separator: "1,00" or "12,5" (a decimal comma) is refused, not read as 100 / 125. */
 export function parseAmountToCents(input: string): number | null {
-  const s = input.trim().replace(/^\$/, '').replace(/,/g, '');
+  let s = input.trim().replace(/^\$/, '');
+  if (s.includes(',')) {
+    if (!/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(s)) return null;
+    s = s.replace(/,/g, '');
+  }
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
   const [whole, frac = ''] = s.split('.');
   const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2));

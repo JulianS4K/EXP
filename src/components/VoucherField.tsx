@@ -144,6 +144,9 @@ export function voucherErrorMessage(reason: string | null): string {
   switch (reason) {
     case 'expired': return 'That code has expired.';
     case 'already used': return 'That code has already been used.';
+    // The per-account throttle (10 misses / 10 min) answers this even for a
+    // right code: "check the spelling" sent buyers retyping a correct code.
+    case 'too many attempts': return 'Too many tries. Wait 10 minutes, then enter the code again.';
     case 'reserved for another buyer': return 'That code has already been claimed.';
     default: return "That code isn't valid for this event. Check the spelling and try again.";
   }

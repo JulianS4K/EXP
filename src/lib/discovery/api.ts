@@ -4,6 +4,7 @@
 import { supabase } from '../supabase';
 import type { DiscoveryEvent, EventChannelsResponse, PublicationRecord } from './channels';
 import type { PublicationStatus } from '../../../supabase/functions/_shared/discovery/channels.ts';
+import type { PoshExosOrders, PoshReading } from './poshLink';
 
 export async function eventChannels(eventId: string): Promise<EventChannelsResponse> {
   const { data, error } = await supabase.rpc('exos_discovery_event_channels', { p_event_id: eventId });
@@ -68,4 +69,34 @@ export async function listingQueue(status: PublicationStatus = 'queued', channel
   });
   if (error) throw error;
   return (data ?? []) as QueueItem[];
+}
+
+// ── Posh (third-party link), mig 20261104150000 ────────────────────────
+
+export interface PoshFunnelResponse {
+  event_id: string;
+  publication: PublicationRecord | null;
+  readings: PoshReading[];
+  exos: PoshExosOrders;
+}
+
+/** Posh readings + Exos orders with utm_source=posh_link (owner / manager / finance). */
+export async function poshLinkFunnel(eventId: string): Promise<PoshFunnelResponse> {
+  const { data, error } = await supabase.rpc('exos_posh_link_funnel', { p_event_id: eventId });
+  if (error) throw error;
+  return data as PoshFunnelResponse;
+}
+
+/** Record Posh's page views + ticket-link clicks as of a day (same day again replaces it). */
+export async function recordPoshStats(publicationId: string, asOf: string, pageViews: number, linkClicks: number): Promise<PoshReading> {
+  const { data, error } = await supabase.rpc('exos_posh_link_record_stats', {
+    p_publication_id: publicationId, p_as_of: asOf, p_page_views: pageViews, p_link_clicks: linkClicks,
+  });
+  if (error) throw error;
+  return data as PoshReading;
+}
+
+export async function deletePoshStats(statId: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_posh_link_delete_stats', { p_stat_id: statId });
+  if (error) throw error;
 }
