@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prod rollout for the Exos build on PR #79 / #80: the remaining 38 migrations, then
+# Prod rollout for the Exos build on PR #79 / #80: the remaining migrations, then
 # every edge function. Run from the repo root on branch claude/exos-gaps.
 #
 #   DB_URL='postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' \
@@ -59,6 +59,7 @@ MIGRATIONS=(
   20261104120000_exos_sim_door_fixes
   20261104130000_exos_sim_partner_fixes
   20261104150000_exos_posh_link_channel
+  20261104180000_exos_org_access    # exos-api / exos-mcp call exos_api_key_auth: apply before deploying them
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt
