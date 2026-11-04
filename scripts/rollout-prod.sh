@@ -60,6 +60,7 @@ MIGRATIONS=(
   20261104130000_exos_sim_partner_fixes
   20261104150000_exos_posh_link_channel
   20261104180000_exos_org_access    # exos-api / exos-mcp call exos_api_key_auth: apply before deploying them
+  20261104190000_exos_commission_methods
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt
