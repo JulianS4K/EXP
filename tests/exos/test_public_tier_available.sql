@@ -26,7 +26,7 @@ SET ROLE anon;
 DO $$
 DECLARE r record; n int;
 BEGIN
-  SELECT count(*) INTO n FROM public.exos_public_tiers WHERE event_id::text LIKE 'b7%';
+  SELECT count(*) INTO n FROM public.exos_public_tiers WHERE event_id IN ('b7000000-0000-0000-0000-0000000000e1','b7000000-0000-0000-0000-0000000000e2');
   ASSERT n = 1, 'P1 FAIL: anon sees ' || n || ' tiers';
   SELECT * INTO r FROM public.exos_public_tiers WHERE id = 'b7000000-0000-0000-0000-0000000000d1';
   ASSERT r.available IS NOT DISTINCT FROM public.exos_public_tier_available(r.id), 'P2 FAIL';
@@ -36,7 +36,7 @@ RESET ROLE;
 SET ROLE authenticated;
 DO $$
 BEGIN
-  PERFORM * FROM public.exos_public_tiers WHERE event_id::text LIKE 'b7%';
+  PERFORM * FROM public.exos_public_tiers WHERE event_id IN ('b7000000-0000-0000-0000-0000000000e1','b7000000-0000-0000-0000-0000000000e2');
   RAISE NOTICE 'OK  P1 authenticated reads exos_public_tiers';
 END $$;
 RESET ROLE;

@@ -76,7 +76,7 @@ Vault (`exos_integration:<org>:<provider>`), read only by edge functions, never 
 
 ## 4. The web app
 
-Any Node 20+ host (Render blueprint in `render.yaml`; Fly, Railway, a VM all work):
+Any Node 22.12+ host (Render blueprint in `render.yaml`; Fly, Railway, a VM all work):
 
 ```bash
 npm ci --include=dev && npm run build && npm start

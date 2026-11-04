@@ -30,7 +30,7 @@ function apiSpecPlugin(): Plugin {
     },
     configureServer(server) {
       if (process.env.VITEST) return;
-      const dir = path.resolve(__dirname, 'docs/api');
+      const dir = path.resolve(import.meta.dirname, 'docs/api');
       server.watcher.add(dir);
       server.watcher.on('change', (file) => {
         if (!file.startsWith(dir) || !file.endsWith('.json')) return;
@@ -61,7 +61,7 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {
