@@ -313,7 +313,10 @@ async function startServer() {
     // must fail loudly instead of parsing HTML as JS).
     const ASSET_EXT = /\.(js|mjs|css|map|json|svg|png|jpe?g|webp|ico|woff2?|txt|webmanifest)$/i;
 
-    app.get("/bridge/*", async (req, res, next) => {
+    // Express 5 (path-to-regexp 8) has no bare `*`: `{/*splat}` is an
+    // optional named wildcard, so this still matches "/bridge/" itself
+    // (as Express 4's "/bridge/*" did) as well as every deeper path.
+    app.get("/bridge{/*splat}", async (req, res, next) => {
       if (ASSET_EXT.test(req.path)) return next();
       res.setHeader("Cache-Control", "no-cache");
       // Link-unfurl bots don't run JS: give them the event / org preview
@@ -331,7 +334,10 @@ async function startServer() {
           console.error(JSON.stringify({ lvl: "error", msg: "link preview failed", path: req.path, error: String(err) }));
         }
       }
-      res.sendFile(indexPath);
+      // Relative to `root`: Express 5's send ignores any path with a dotfile
+      // segment, and with an absolute path that check covers the whole path
+      // (so a checkout under e.g. ~/.cache would 404 every page).
+      res.sendFile("index.html", { root: distPath });
     });
   }
 
@@ -356,7 +362,13 @@ async function startServer() {
       .json({ error: isProd ? "Internal Server Error" : err?.message });
   });
 
-  const server = app.listen(PORT, HOST, () => {
+  // Express 5 hands listen errors (EADDRINUSE, EACCES) to this callback
+  // instead of throwing them, so check before claiming the server is up.
+  const server = app.listen(PORT, HOST, (err?: Error) => {
+    if (err) {
+      console.error("Failed to start server", err);
+      process.exit(1);
+    }
     console.log(`Server running on http://${HOST}:${PORT}`);
   });
 
