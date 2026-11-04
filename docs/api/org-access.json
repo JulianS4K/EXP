@@ -1,0 +1,2103 @@
+{
+  "file": "org-access",
+  "name": "Access: role permissions, venue requests, partner presale",
+  "order": 62,
+  "description": "Who may do what, set by the organization. **Role API permissions**: the owner chooses which scopes each role's API keys and personal / OAuth tokens may carry, within a fixed ceiling per role; every credential is held to it at each request, so lowering a role applies at once. **Venue requests**: a venue another organization runs on Exos can't take your events or holds directly (403 `venue_approval_required`, with `venue_id` and `request_endpoint`); send its organization a booking request, and once approved it shares the event with you with the scopes it chooses (co-hosted events). The event stays the venue's: it sells, refunds and settles as their other events. **Partner presale**: whether distribution partners may sell during a member presale. Writes need an org API key (sk_live_…) whose creator holds the role named on each route.",
+  "endpoints": [
+    {
+      "id": "get-role-api-scopes",
+      "method": "GET",
+      "path": "/v1/role-api-scopes",
+      "summary": "Read API permissions per role",
+      "description": "For each role: the scopes its keys and tokens may carry in this organization (`effective` for user tokens, `key_effective` for org API keys), today's `default` (tokens) and `key_default` (keys) that apply while the owner has set nothing, the `ceiling` no setting can exceed, and the owner's `configured` set (null: none). The owner always has every scope.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "scopes": [
+                "events:read",
+                "events:write",
+                "orders:read",
+                "refunds:write",
+                "fans:read",
+                "fans:write",
+                "tickets:read",
+                "tickets:write",
+                "checkin:write",
+                "booking:read",
+                "booking:write",
+                "finance:read",
+                "finance:write",
+                "commerce:read",
+                "commerce:write",
+                "webhooks:read",
+                "webhooks:write",
+                "org:admin"
+              ],
+              "roles": [
+                {
+                  "role": "finance",
+                  "configurable": true,
+                  "default": [
+                    "events:read",
+                    "orders:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "ceiling": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "fans:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "configured": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "effective": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "key_default": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "fans:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "key_effective": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "updated_at": "2026-11-04T15:04:05.120+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-role-api-scopes",
+      "method": "PUT",
+      "path": "/v1/role-api-scopes/:role",
+      "summary": "Set a role's API permissions",
+      "description": "The owner sets which scopes a role's keys and tokens may carry, within the role's ceiling (content never gets finance or refunds; scanners stay at the door; only owners have org:admin). Takes effect on every existing key and token of that role at their next request: a scope taken away is refused at once, and giving it back restores what each key was made with (never more). `scopes: null` (or `reset: true`) goes back to the default. Needs a key created by the owner.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "role",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "manager, finance, content or scanner.",
+          "example": "finance",
+          "enum": [
+            "manager",
+            "finance",
+            "content",
+            "scanner"
+          ]
+        },
+        {
+          "name": "scopes",
+          "location": "body",
+          "type": "array of strings",
+          "required": true,
+          "description": "The scopes the role may carry (or null for the default).",
+          "example": [
+            "events:read",
+            "orders:read",
+            "refunds:write"
+          ]
+        },
+        {
+          "name": "reset",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true: back to the default (same as scopes: null).",
+          "example": false
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "scopes": [
+                "events:read",
+                "events:write",
+                "orders:read",
+                "refunds:write",
+                "fans:read",
+                "fans:write",
+                "tickets:read",
+                "tickets:write",
+                "checkin:write",
+                "booking:read",
+                "booking:write",
+                "finance:read",
+                "finance:write",
+                "commerce:read",
+                "commerce:write",
+                "webhooks:read",
+                "webhooks:write",
+                "org:admin"
+              ],
+              "roles": [
+                {
+                  "role": "finance",
+                  "configurable": true,
+                  "default": [
+                    "events:read",
+                    "orders:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "ceiling": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "fans:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "configured": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "effective": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "key_default": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "fans:read",
+                    "tickets:read",
+                    "booking:read",
+                    "finance:read",
+                    "finance:write",
+                    "commerce:read"
+                  ],
+                  "key_effective": [
+                    "events:read",
+                    "orders:read",
+                    "refunds:write",
+                    "tickets:read",
+                    "finance:read",
+                    "finance:write"
+                  ],
+                  "updated_at": "2026-11-04T15:04:05.120+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A scope above the role's ceiling, or a key not created by the owner.",
+          "example": {
+            "error": "the content role can never be given finance:read"
+          }
+        },
+        {
+          "status": 400,
+          "description": "An unknown role or scope.",
+          "example": {
+            "error": "role must be manager, finance, content or scanner (the owner always has every scope)."
+          }
+        }
+      ],
+      "request_example": {
+        "scopes": [
+          "events:read",
+          "orders:read",
+          "refunds:write",
+          "tickets:read",
+          "finance:read",
+          "finance:write"
+        ]
+      }
+    },
+    {
+      "id": "list-venue-directory",
+      "method": "GET",
+      "path": "/v1/venue-directory",
+      "summary": "Find venues to request",
+      "description": "Venues other organizations run on Exos that take booking requests, by name or city (at least 2 characters, up to 25 results), with their rooms. Never their contacts or notes. An event, hold or template at one of these venues needs that organization's approval: send a booking request.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "Part of the venue's name or city, 2-100 characters.",
+          "example": "brooklyn"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "region": "NY",
+                "timezone": "America/New_York",
+                "capacity": 500,
+                "verified": true,
+                "org": {
+                  "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall Inc."
+                },
+                "rooms": [
+                  {
+                    "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Main Room",
+                    "capacity": 300
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "q missing or too short.",
+          "example": {
+            "error": "q must be 2 to 100 characters (a venue name or city)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-venue-listing-suggestions",
+      "method": "GET",
+      "path": "/v1/venues/:id/listing-suggestions",
+      "summary": "Suggest the venue your record stands for",
+      "description": "For one of your rented or partner venues: owned venues of other organizations with the same name and city, every match listed (two are never decided for you), each with `verified` (Exos staff checked that organization runs it; it clears when that organization edits the venue's name, address or relationship). Only venues that take booking requests, as in the directory. Nothing is linked until you choose one (PUT /v1/venues/:id/listed-venue): anyone can call a venue owned, so a name match is only a suggestion.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Your venue's id. Another organization's answers 404.",
+          "example": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "venue_id": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "listed_venue_id": null,
+              "suggestions": [
+                {
+                  "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": true,
+                  "accepts_requests": true,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Lincoln Hall Inc."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your venues.",
+          "example": {
+            "error": "venue not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "link-listed-venue",
+      "method": "PUT",
+      "path": "/v1/venues/:id/listed-venue",
+      "summary": "Link your record to the venue it stands for",
+      "description": "Say that your rented or partner venue is another organization's owned venue. From then on events and holds at your record need that organization's approval (venue_approval_required), and booking requests through it go to them. The link stays: only Exos staff can remove it. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Your venue's id.",
+          "example": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "listed_venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The owned venue (from the suggestions or the directory).",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "venue_id": "e0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "listed_venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "suggestions": [
+                {
+                  "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": true,
+                  "accepts_requests": true,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Lincoln Hall Inc."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your venues.",
+          "example": {
+            "error": "venue not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "Not a venue another organization runs on Exos that takes booking requests (the same answer whatever the id is), or your venue isn't rented / partner.",
+          "example": {
+            "error": "listed_venue_id must be a venue another organization runs on Exos that takes booking requests"
+          }
+        }
+      ],
+      "request_example": {
+        "listed_venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    {
+      "id": "list-venue-requests",
+      "method": "GET",
+      "path": "/v1/venue-requests",
+      "summary": "List booking requests",
+      "description": "Requests your organization received (direction=received, the default: you run the venue) or sent (direction=sent: you asked another organization's venue), newest first.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "direction",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "received (default) or sent.",
+          "example": "received",
+          "enum": [
+            "received",
+            "sent"
+          ]
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status.",
+          "example": "pending",
+          "enum": [
+            "pending",
+            "approved",
+            "declined",
+            "withdrawn"
+          ]
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "status": "pending",
+                "date": "2026-12-12",
+                "start_time": "21:00",
+                "title": "Promoter Night",
+                "message": "Two DJs, 250 expected.",
+                "expected_draw": 250,
+                "venue": {
+                  "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall",
+                  "city": "Brooklyn",
+                  "timezone": "America/New_York"
+                },
+                "room": {
+                  "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Main Room",
+                  "capacity": 300
+                },
+                "venue_org": {
+                  "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall Inc."
+                },
+                "requester_org": {
+                  "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Night Shift Promotions"
+                },
+                "outcome": null,
+                "hold_id": null,
+                "event_id": null,
+                "grant_scopes": null,
+                "grant": null,
+                "decline_reason": null,
+                "decided_at": null,
+                "created_via": "api",
+                "created_at": "2026-11-04T15:04:05.120+00:00",
+                "updated_at": "2026-11-04T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad direction or status.",
+          "example": {
+            "error": "direction must be received or sent."
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-venue-request",
+      "method": "POST",
+      "path": "/v1/venue-requests",
+      "summary": "Send a booking request",
+      "description": "Ask the organization that runs a venue for a date (and a room). Use this when creating an event or hold there answers 403 venue_approval_required. The venue's owners and managers approve it (a hold on their calendar, or a draft event they share with you) or decline it. One pending request per venue, room and date; at most 50 pending and 30 a day. A venue_id of your own record of the venue (a rented or partner venue linked to it) asks the venue it stands for. An Idempotency-Key makes a retry return the first request. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The venue (from /v1/venue-directory, or the venue_id in a venue_approval_required answer).",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A room of that venue (default: the whole venue).",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "date",
+          "location": "body",
+          "type": "string (date)",
+          "required": true,
+          "description": "The night, in the venue's calendar: today or later.",
+          "example": "2026-12-12"
+        },
+        {
+          "name": "start_time",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "HH:MM, venue-local.",
+          "example": "21:00"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The show, at most 100 characters.",
+          "example": "Promoter Night"
+        },
+        {
+          "name": "message",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "For the venue, at most 2000 characters.",
+          "example": "Two DJs, 250 expected."
+        },
+        {
+          "name": "expected_draw",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Expected attendance.",
+          "example": 250
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "8-100 letters, digits, _ . : or -.",
+          "example": "req-2026-12-12-a"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "pending",
+              "date": "2026-12-12",
+              "start_time": "21:00",
+              "title": "Promoter Night",
+              "message": "Two DJs, 250 expected.",
+              "expected_draw": 250,
+              "venue": {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "timezone": "America/New_York"
+              },
+              "room": {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 300
+              },
+              "venue_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "requester_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "outcome": null,
+              "hold_id": null,
+              "event_id": null,
+              "grant_scopes": null,
+              "grant": null,
+              "decline_reason": null,
+              "decided_at": null,
+              "created_via": "api",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a venue another organization runs.",
+          "example": {
+            "error": "venue not found (send requests to a venue another organization runs)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A pending request for that date and room already, the venue takes no requests, or a limit.",
+          "example": {
+            "error": "you already have a pending request for that date and room"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid.",
+          "example": {
+            "error": "date must be today or later (within three years)"
+          }
+        }
+      ],
+      "request_example": {
+        "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "date": "2026-12-12",
+        "start_time": "21:00",
+        "title": "Promoter Night",
+        "message": "Two DJs, 250 expected.",
+        "expected_draw": 250
+      }
+    },
+    {
+      "id": "get-venue-request",
+      "method": "GET",
+      "path": "/v1/venue-requests/:id",
+      "summary": "Get a booking request",
+      "description": "One request your organization sent or received (`direction` says which).",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The request's id. Another organization's answers 404.",
+          "example": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "pending",
+              "date": "2026-12-12",
+              "start_time": "21:00",
+              "title": "Promoter Night",
+              "message": "Two DJs, 250 expected.",
+              "expected_draw": 250,
+              "venue": {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "timezone": "America/New_York"
+              },
+              "room": {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 300
+              },
+              "venue_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "requester_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "outcome": null,
+              "hold_id": null,
+              "event_id": null,
+              "grant_scopes": null,
+              "grant": null,
+              "decline_reason": null,
+              "decided_at": null,
+              "created_via": "api",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00",
+              "direction": "received"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of yours.",
+          "example": {
+            "error": "request not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "approve-venue-request",
+      "method": "POST",
+      "path": "/v1/venue-requests/:id/approve",
+      "summary": "Approve a booking request",
+      "description": "The venue's side. Puts the night on your calendar as a hold (create=hold, the default) or a hold converted into a draft event of your organization at the venue (create=event), and decides what the requester may do on that event: `scopes`, from events:read, events:write, tickets:read and finance:read (default events:read, events:write, tickets:read; events:write brings events:read). Refunds are never shared: the event is yours and sells, refunds and settles like your other events. With create=hold, the grant starts when you convert the hold. Only a pending request (409 otherwise). Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The request's id.",
+          "example": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "create",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "hold (default) or event.",
+          "example": "event",
+          "enum": [
+            "hold",
+            "event"
+          ]
+        },
+        {
+          "name": "scopes",
+          "location": "body",
+          "type": "array of strings",
+          "required": false,
+          "description": "What the requester may do on the event.",
+          "example": [
+            "events:write",
+            "tickets:read"
+          ]
+        },
+        {
+          "name": "time",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "With create=event: start, HH:MM venue-local (default the request's start_time, else 20:00).",
+          "example": "21:00"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "With create=event: the ticket type's size (default the room, else the venue).",
+          "example": 250
+        },
+        {
+          "name": "level",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The hold's level in that night's line (default last).",
+          "example": 1
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "approved",
+              "date": "2026-12-12",
+              "start_time": "21:00",
+              "title": "Promoter Night",
+              "message": "Two DJs, 250 expected.",
+              "expected_draw": 250,
+              "venue": {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "timezone": "America/New_York"
+              },
+              "room": {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 300
+              },
+              "venue_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "requester_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "outcome": "event",
+              "hold_id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "grant_scopes": [
+                "events:read",
+                "events:write",
+                "tickets:read"
+              ],
+              "grant": {
+                "id": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "scopes": [
+                  "events:read",
+                  "events:write",
+                  "tickets:read"
+                ],
+                "revoked_at": null
+              },
+              "decline_reason": null,
+              "decided_at": "2026-11-04T15:04:05.120+00:00",
+              "created_via": "api",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00",
+              "hold": {
+                "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "Promoter Night",
+                "status": "converted"
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a request your organization received.",
+          "example": {
+            "error": "request not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already decided or withdrawn.",
+          "example": {
+            "error": "this request is already approved"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A scope that can't be shared (refunds), or another bad field.",
+          "example": {
+            "error": "a promoter can be given only events:read, events:write, tickets:read, finance:read on an event, not refunds:write"
+          }
+        }
+      ],
+      "request_example": {
+        "create": "event",
+        "scopes": [
+          "events:write",
+          "tickets:read"
+        ],
+        "capacity": 250
+      }
+    },
+    {
+      "id": "decline-venue-request",
+      "method": "POST",
+      "path": "/v1/venue-requests/:id/decline",
+      "summary": "Decline a booking request",
+      "description": "The venue's side. Only a pending request. The reason is shown to the requester.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The request's id.",
+          "example": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 500 characters.",
+          "example": "Booked that night."
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "declined",
+              "date": "2026-12-12",
+              "start_time": "21:00",
+              "title": "Promoter Night",
+              "message": "Two DJs, 250 expected.",
+              "expected_draw": 250,
+              "venue": {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "timezone": "America/New_York"
+              },
+              "room": {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 300
+              },
+              "venue_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "requester_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "outcome": null,
+              "hold_id": null,
+              "event_id": null,
+              "grant_scopes": null,
+              "grant": null,
+              "decline_reason": "Booked that night.",
+              "decided_at": "2026-11-04T15:04:05.120+00:00",
+              "created_via": "api",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a request your organization received.",
+          "example": {
+            "error": "request not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already decided or withdrawn.",
+          "example": {
+            "error": "this request is already declined"
+          }
+        }
+      ],
+      "request_example": {
+        "reason": "Booked that night."
+      }
+    },
+    {
+      "id": "withdraw-venue-request",
+      "method": "POST",
+      "path": "/v1/venue-requests/:id/withdraw",
+      "summary": "Withdraw a booking request",
+      "description": "The requester's side: a pending request you sent.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The request's id.",
+          "example": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "withdrawn",
+              "date": "2026-12-12",
+              "start_time": "21:00",
+              "title": "Promoter Night",
+              "message": "Two DJs, 250 expected.",
+              "expected_draw": 250,
+              "venue": {
+                "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall",
+                "city": "Brooklyn",
+                "timezone": "America/New_York"
+              },
+              "room": {
+                "id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Main Room",
+                "capacity": 300
+              },
+              "venue_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "requester_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "outcome": null,
+              "hold_id": null,
+              "event_id": null,
+              "grant_scopes": null,
+              "grant": null,
+              "decline_reason": null,
+              "decided_at": null,
+              "created_via": "api",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a request your organization sent.",
+          "example": {
+            "error": "request not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already decided.",
+          "example": {
+            "error": "this request is already approved"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-partner-grants",
+      "method": "GET",
+      "path": "/v1/partner-grants",
+      "summary": "List event grants you gave",
+      "description": "The venue's side: which organizations may work on which of your events, and with what. Live grants only unless include_revoked=true.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "include_revoked",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "Also revoked grants (default false).",
+          "example": false
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event": {
+                  "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Promoter Night",
+                  "starts_at": "2026-12-13T02:00:00+00:00",
+                  "status": "draft"
+                },
+                "grantee_org": {
+                  "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Night Shift Promotions"
+                },
+                "request_id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "scopes": [
+                  "events:read",
+                  "events:write",
+                  "tickets:read"
+                ],
+                "revoked_at": null,
+                "created_at": "2026-11-04T15:04:05.120+00:00",
+                "updated_at": "2026-11-04T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-partner-grant",
+      "method": "PATCH",
+      "path": "/v1/partner-grants/:id",
+      "summary": "Change an event grant",
+      "description": "Replace what the organization may do on the event (events:read, events:write, tickets:read, finance:read). Applies to its next request. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The grant's id.",
+          "example": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "scopes",
+          "location": "body",
+          "type": "array of strings",
+          "required": true,
+          "description": "The new scopes.",
+          "example": [
+            "events:read",
+            "tickets:read"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event": {
+                "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Promoter Night",
+                "starts_at": "2026-12-13T02:00:00+00:00",
+                "status": "draft"
+              },
+              "grantee_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "request_id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "scopes": [
+                "events:read",
+                "tickets:read"
+              ],
+              "revoked_at": null,
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a live grant of your organization.",
+          "example": {
+            "error": "grant not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A scope that can't be shared.",
+          "example": {
+            "error": "a promoter can be given only events:read, events:write, tickets:read, finance:read on an event, not refunds:write"
+          }
+        }
+      ],
+      "request_example": {
+        "scopes": [
+          "events:read",
+          "tickets:read"
+        ]
+      }
+    },
+    {
+      "id": "revoke-partner-grant",
+      "method": "DELETE",
+      "path": "/v1/partner-grants/:id",
+      "summary": "Revoke an event grant",
+      "description": "The organization loses the event at once: its next request is 404. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The grant's id.",
+          "example": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event": {
+                "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Promoter Night",
+                "starts_at": "2026-12-13T02:00:00+00:00",
+                "status": "draft"
+              },
+              "grantee_org": {
+                "id": "b2c3d4e5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Night Shift Promotions"
+              },
+              "request_id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "scopes": [
+                "events:read",
+                "events:write",
+                "tickets:read"
+              ],
+              "revoked_at": "2026-11-04T15:04:05.120+00:00",
+              "created_at": "2026-11-04T15:04:05.120+00:00",
+              "updated_at": "2026-11-04T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not a live grant of your organization.",
+          "example": {
+            "error": "grant not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-cohosted-events",
+      "method": "GET",
+      "path": "/v1/cohosted-events",
+      "summary": "List events shared with you",
+      "description": "The promoter's side: events other organizations (venues) approved for you, with the scopes their grant gives. Each route on one needs the scope in your key AND in the grant.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Promoter Night",
+                "status": "draft",
+                "starts_at": "2026-12-13T02:00:00+00:00",
+                "timezone": "America/New_York",
+                "venue_name": "Lincoln Hall — Main Room",
+                "host_org": {
+                  "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Lincoln Hall Inc."
+                },
+                "grant_id": "9e63c4d5-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "scopes": [
+                  "events:read",
+                  "events:write",
+                  "tickets:read"
+                ],
+                "request_id": "6c41a2b3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-cohosted-event",
+      "method": "GET",
+      "path": "/v1/cohosted-events/:id",
+      "summary": "Get a shared event",
+      "description": "The event and its ticket types. Needs events:read in the venue's grant.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Promoter Night",
+              "status": "draft",
+              "starts_at": "2026-12-13T02:00:00+00:00",
+              "doors_at": null,
+              "ends_at": null,
+              "timezone": "America/New_York",
+              "currency": "usd",
+              "description": "Two DJs, all night.",
+              "summary": null,
+              "description_md": null,
+              "image_url": null,
+              "video_url": null,
+              "venue_name": "Lincoln Hall — Main Room",
+              "total_tickets": 250,
+              "host_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "scopes": [
+                "events:read",
+                "events:write",
+                "tickets:read"
+              ],
+              "ticket_types": [
+                {
+                  "id": "d0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "General Admission",
+                  "price": 0,
+                  "capacity": 250,
+                  "ticket_type": "free"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The venue's grant doesn't include the scope this route needs.",
+          "example": {
+            "error": "grant_scope_required",
+            "message": "the venue has not given you events:write on this event"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No live grant for your organization on this event (never shared, revoked, or another org's id).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-cohosted-event",
+      "method": "PATCH",
+      "path": "/v1/cohosted-events/:id",
+      "summary": "Edit a shared event's copy",
+      "description": "Name, description, summary, description_md, image_url and video_url (https). Prices, capacity, dates, status and money settings stay with the venue. Needs events:write in the venue's grant and a key created by an owner or manager of your organization; each edit is logged for both organizations with who made it.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-200 characters.",
+          "example": "Promoter Night Live"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Plain text.",
+          "example": "Two DJs, all night."
+        },
+        {
+          "name": "summary",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "One line.",
+          "example": "Two DJs, all night."
+        },
+        {
+          "name": "description_md",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Markdown.",
+          "example": "**Two DJs**, all night."
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "https URL.",
+          "example": "https://cdn.example.com/night.jpg"
+        },
+        {
+          "name": "video_url",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "https URL.",
+          "example": "https://www.youtube.com/watch?v=abc"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Promoter Night Live",
+              "status": "draft",
+              "starts_at": "2026-12-13T02:00:00+00:00",
+              "doors_at": null,
+              "ends_at": null,
+              "timezone": "America/New_York",
+              "currency": "usd",
+              "description": "Two DJs, all night.",
+              "summary": null,
+              "description_md": null,
+              "image_url": null,
+              "video_url": null,
+              "venue_name": "Lincoln Hall — Main Room",
+              "total_tickets": 250,
+              "host_org": {
+                "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Lincoln Hall Inc."
+              },
+              "scopes": [
+                "events:read",
+                "events:write",
+                "tickets:read"
+              ],
+              "ticket_types": [
+                {
+                  "id": "d0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "General Admission",
+                  "price": 0,
+                  "capacity": 250,
+                  "ticket_type": "free"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The venue's grant doesn't include the scope this route needs.",
+          "example": {
+            "error": "grant_scope_required",
+            "message": "the venue has not given you events:write on this event"
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No live grant for your organization on this event (never shared, revoked, or another org's id).",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field a co-host can't change, or a bad value.",
+          "example": {
+            "error": "a co-host can change name, description, summary, description_md, image_url, video_url, not total_tickets."
+          }
+        }
+      ],
+      "request_example": {
+        "name": "Promoter Night Live",
+        "description": "Two DJs, all night."
+      }
+    },
+    {
+      "id": "get-cohosted-event-sales",
+      "method": "GET",
+      "path": "/v1/cohosted-events/:id/sales",
+      "summary": "A shared event's sales",
+      "description": "Tickets sold and checked in per ticket type (no attendees). gross_cents (what buyers paid for tickets still held) only when BOTH the venue's grant and your key have finance:read. Needs tickets:read in the venue's grant.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "ticket_types": [
+                {
+                  "id": "d0c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "General Admission",
+                  "capacity": 250,
+                  "sold": 120,
+                  "checked_in": 0,
+                  "gross_cents": 240000
+                }
+              ],
+              "scopes": [
+                "events:read",
+                "tickets:read",
+                "finance:read"
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "The venue's grant doesn't include the scope this route needs.",
+          "example": {
+            "error": "grant_scope_required",
+            "message": "the venue has not given you events:write on this event"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No live grant for your organization on this event (never shared, revoked, or another org's id).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-partner-presale",
+      "method": "GET",
+      "path": "/v1/partner-presale",
+      "summary": "Read the partner presale setting",
+      "description": "Whether distribution partners may sell a ticket type while its member presale runs: block (the default: members buy first on Exos) or allow. Events can override it (/v1/events/:id/partner-presale).",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_mode": "block"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-partner-presale",
+      "method": "PUT",
+      "path": "/v1/partner-presale",
+      "summary": "Set the partner presale setting",
+      "description": "block or allow, for the organization's events without their own setting. With allow, partners sell presale ticket types during the presale; buyers on Exos itself still need a membership. Needs a key created by the owner.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "partner_presale",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "block or allow.",
+          "example": "allow",
+          "enum": [
+            "block",
+            "allow"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_mode": "allow"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not a key created by the owner.",
+          "example": {
+            "error": "only a key created by an organization owner can do this"
+          }
+        },
+        {
+          "status": 400,
+          "description": "Not block or allow.",
+          "example": {
+            "error": "partner_presale must be block or allow."
+          }
+        }
+      ],
+      "request_example": {
+        "partner_presale": "allow"
+      }
+    },
+    {
+      "id": "get-event-partner-presale",
+      "method": "GET",
+      "path": "/v1/events/:id/partner-presale",
+      "summary": "Read an event's partner presale setting",
+      "description": "The organization's mode, the event's own (null: follows the organization) and what applies.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_mode": "block",
+              "event_id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_mode": "allow",
+              "effective": "allow"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-event-partner-presale",
+      "method": "PUT",
+      "path": "/v1/events/:id/partner-presale",
+      "summary": "Set an event's partner presale setting",
+      "description": "block, allow, or inherit (null) to follow the organization. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "partner_presale",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "block, allow or inherit (null).",
+          "example": "allow",
+          "enum": [
+            "block",
+            "allow",
+            "inherit"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_mode": "block",
+              "event_id": "8d52b3c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_mode": "allow",
+              "effective": "allow"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "A user token, or an API key whose creator is not an owner or manager of the organization now.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "Not block, allow or inherit.",
+          "example": {
+            "error": "partner_presale must be block, allow or inherit (null)."
+          }
+        }
+      ],
+      "request_example": {
+        "partner_presale": "allow"
+      }
+    }
+  ]
+}

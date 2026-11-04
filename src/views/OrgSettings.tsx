@@ -44,6 +44,8 @@ import OrgGivingPanel from '../components/OrgGivingPanel';
 import OrgMembershipsPanel from '../components/OrgMembershipsPanel';
 import DistributionPartnersPanel from '../components/DistributionPartnersPanel';
 import OrgConnectedApps from '../components/OrgConnectedApps';
+import RoleApiScopesPanel from '../components/RoleApiScopesPanel';
+import PartnerPresalePanel from '../components/PartnerPresalePanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -675,9 +677,16 @@ export default function OrgSettings() {
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />
 
+            {/* API permissions per role: owner edits, staff read (mig 20261104180000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <RoleApiScopesPanel orgId={org.id} />}
+
             {/* Distribution partners: keys for the partner sales API (mig 20261031130000). */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
               <DistributionPartnersPanel orgId={org.id} canEdit={activeRole === 'owner'} />
+            )}
+            {/* Partners during member presales: block / allow (mig 20261104180000). Owners set it. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+              <PartnerPresalePanel orgId={org.id} canEdit={activeRole === 'owner'} />
             )}
 
             {/* OAuth apps members connected (mig 20261031130500). Owners. */}

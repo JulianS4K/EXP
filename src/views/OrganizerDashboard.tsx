@@ -158,6 +158,11 @@ export default function OrganizerDashboard() {
                     <Inbox className="w-4 h-4" /><span>Booking requests</span>
                   </Link>
                 )}
+                {(isAdmin || ['owner', 'manager', 'content'].includes(activeRole ?? '')) && (
+                  <Link to={`/orgs/${activeOrg.id}/venue-requests`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
+                    <MapPin className="w-4 h-4" /><span>Venue requests</span>
+                  </Link>
+                )}
                 {canSeeMoney(activeRole, isAdmin) && (
                   <Link to={`/orgs/${activeOrg.id}/offers`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Handshake className="w-4 h-4" /><span>Offers</span>

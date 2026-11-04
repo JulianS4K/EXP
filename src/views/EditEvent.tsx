@@ -25,6 +25,7 @@ import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
+import { EventPartnerPresale } from '../components/PartnerPresalePanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
@@ -1795,6 +1796,8 @@ export default function EditEvent() {
         {eventId && <TicketBackendPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Distribution partners per ticket type (mig 20261031130000). */}
         {eventId && <TierDistributionPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Partners during this event's member presale (mig 20261104180000; the SQL checks the role). */}
+        {eventId && eventData.orgId && <EventPartnerPresale orgId={eventData.orgId} eventId={eventId} canEdit />}
 
         {SHOW_MARKETPLACES && (<>
         {/* Marketplaces: pick them, then seats per ticket type (MarketplaceGrid). */}
