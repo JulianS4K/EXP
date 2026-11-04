@@ -266,6 +266,36 @@ Each write is logged in `exos_api_writes` (owner / manager can read their
 org's rows); refunds and comps are flagged `money_moving`. Tests:
 `tests/exos/test_core_api.sql` (C1-C16), races: `tests/exos/race_core_api.sh`.
 
+### Organizer-controlled access (mig 20261104180000)
+
+Per-role API permissions, venue booking requests with event-scoped grants,
+and the partner presale setting (docs/org-access.md). Nothing is granted to
+anon. Signed-in RPCs (`exos_org_role_scopes_get` / `_set` / `_reset`,
+`exos_venue_directory`, `exos_venue_request_create` / `_decide`,
+`exos_venue_requests`, `exos_partner_grants`, `exos_partner_grant_set` /
+`_revoke`, `exos_cohost_events`, `exos_partner_presale_get` / `_set`,
+`exos_event_partner_presale_set`) check the caller's live role in the org they
+act for; the `_exos_*` cores are service-role only (exos-api passes the key's
+org; writes need a key whose creator holds the role now,
+`_exos_api_key_actor`). Points to review:
+
+- **Scopes are computed at request time.** `exos_api_key_auth` (exos-api,
+  exos-mcp) and the three API write functions read `_exos_api_key_scopes`:
+  the key's stored scopes narrowed to its creator's live role's set in the
+  org. Tokens go through the patched `exos_api_token_auth`. Lowering a role
+  is enforced on the next request, never only at creation. The set can't
+  exceed `exos_role_scope_ceiling(role)` (a trigger on
+  `exos_org_role_scopes` enforces it for every writer, the service role
+  included); only the owner may change it.
+- **The venue gate** (`_exos_venue_gate`) runs inside the event, hold-night
+  and event-template write paths, so the dashboard, the API and templates
+  answer alike. Its refusal names only the venue id the caller already sent.
+- **Grants**: a co-host reads or writes another org's event only through the
+  `_exos_cohost_*` functions, which require a live grant with the scope
+  (revoked: `P0002`, as for an event that doesn't exist, so ids can't be
+  probed) and touch whitelisted copy fields only. A grant can never carry
+  refunds; the venue directory never shows contacts or notes.
+
 ### Search path
 
 `exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function

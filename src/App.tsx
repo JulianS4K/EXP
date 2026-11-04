@@ -96,6 +96,7 @@ const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const OrgTemplates = lazy(() => import('./views/OrgTemplates'));
 const OrgInbound = lazy(() => import('./views/OrgInbound'));
+const OrgVenueRequests = lazy(() => import('./views/OrgVenueRequests'));
 const BookingRequest = lazy(() => import('./views/BookingRequest'));
 const NotFound = lazy(() => import('./views/NotFound'));
 const MyGroups = lazy(() => import('./views/MyGroups'));
@@ -249,6 +250,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />
                     <Route path="/orgs/:orgId/templates" element={<OrgTemplates />} />
                     <Route path="/orgs/:orgId/booking-requests" element={<OrgInbound />} />
+                    <Route path="/orgs/:orgId/venue-requests" element={<OrgVenueRequests />} />
                     <Route path="/orgs/:orgId/orders" element={<OrgOrders />} />
                     <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
                     <Route path="/groups" element={<MyGroups />} />

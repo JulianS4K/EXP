@@ -79,6 +79,8 @@ balance back.
   the seats again or minting a second comp; the same key with other lines is 400. Keys are per partner.
 - **Member presales:** while an organizer's member presale runs on a ticket type, partners can't reserve it (422,
   `reason: not_available`); organizer reservations still can.
+  That is the default (`block`); an organizer can set `allow` for the organization or one event, and partners then
+  sell during the presale too (docs/org-access.md, `PUT /v1/partner-presale`).
 
 ## Delivery: a link to the live ticket
 

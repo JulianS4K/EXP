@@ -539,6 +539,29 @@ export const ROUTES: readonly ApiRoute[] = [
     id: 'list-event-fan-recommendations', method: 'GET', auth: K, path: '/events/:id/fan-recommendations', scope: 'fans:read', paged: true,
     aliases: ['/confirms/:id/fans/recommendations'],
   },
+  // claude/exos-org-access (mig 20261104180000, docs/org-access.md): per-role
+  // API permissions, venue booking requests and event-scoped grants, the
+  // partner presale setting.
+  { id: 'get-role-api-scopes', method: 'GET', auth: K, path: '/role-api-scopes', scope: 'org:admin', paged: false },
+  { id: 'update-role-api-scopes', method: 'PUT', auth: K, path: '/role-api-scopes/:role', scope: 'org:admin', paged: false },
+  { id: 'list-venue-directory', method: 'GET', auth: K, path: '/venue-directory', scope: 'booking:read', paged: false },
+  { id: 'list-venue-requests', method: 'GET', auth: K, path: '/venue-requests', scope: 'booking:read', paged: true },
+  { id: 'create-venue-request', method: 'POST', auth: K, path: '/venue-requests', scope: 'booking:write', paged: false },
+  { id: 'get-venue-request', method: 'GET', auth: K, path: '/venue-requests/:id', scope: 'booking:read', paged: false },
+  { id: 'approve-venue-request', method: 'POST', auth: K, path: '/venue-requests/:id/approve', scope: 'booking:write', paged: false },
+  { id: 'decline-venue-request', method: 'POST', auth: K, path: '/venue-requests/:id/decline', scope: 'booking:write', paged: false },
+  { id: 'withdraw-venue-request', method: 'POST', auth: K, path: '/venue-requests/:id/withdraw', scope: 'booking:write', paged: false },
+  { id: 'list-partner-grants', method: 'GET', auth: K, path: '/partner-grants', scope: 'booking:read', paged: false },
+  { id: 'update-partner-grant', method: 'PATCH', auth: K, path: '/partner-grants/:id', scope: 'booking:write', paged: false },
+  { id: 'revoke-partner-grant', method: 'DELETE', auth: K, path: '/partner-grants/:id', scope: 'booking:write', paged: false },
+  { id: 'list-cohosted-events', method: 'GET', auth: K, path: '/cohosted-events', scope: 'events:read', paged: false },
+  { id: 'get-cohosted-event', method: 'GET', auth: K, path: '/cohosted-events/:id', scope: 'events:read', paged: false },
+  { id: 'update-cohosted-event', method: 'PATCH', auth: K, path: '/cohosted-events/:id', scope: 'events:write', paged: false },
+  { id: 'get-cohosted-event-sales', method: 'GET', auth: K, path: '/cohosted-events/:id/sales', scope: 'tickets:read', paged: false },
+  { id: 'get-partner-presale', method: 'GET', auth: K, path: '/partner-presale', scope: 'events:read', paged: false },
+  { id: 'update-partner-presale', method: 'PUT', auth: K, path: '/partner-presale', scope: 'org:admin', paged: false },
+  { id: 'get-event-partner-presale', method: 'GET', auth: K, path: '/events/:id/partner-presale', scope: 'events:read', paged: false },
+  { id: 'update-event-partner-presale', method: 'PUT', auth: K, path: '/events/:id/partner-presale', scope: 'events:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

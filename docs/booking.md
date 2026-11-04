@@ -102,4 +102,7 @@ The partner API acts for the key's org: `booking:read` for reads,
 - Artists: `artist_ids` is stored, not resolved (the artists port).
 - Offers and settlements read holds, nights and rental terms later.
 - A hold on a venue another Exos org owns reserves nothing on that org's
-  calendar (no cross-org rental requests yet).
+  calendar. Since mig 20261104180000 an event or hold at another org's owned
+  venue (or at your own record of it, once linked) is refused with
+  `venue_approval_required`: send that org a booking request instead
+  (docs/org-access.md).

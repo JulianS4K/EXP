@@ -146,6 +146,10 @@ import { Answer, CORE_ROUTES, CoreError, handleCore, idempotencyKey, sqlError } 
 import { handleMemberships, MEMBERSHIP_ROUTES } from "./memberships.ts";
 import { GIVING_ROUTES, handleGiving } from "./giving.ts";
 import { handleOrders, ORDER_ROUTES } from "./orders.ts";
+// claude/exos-org-access (mig 20261104180000).
+import {
+  handleOrgAccess, ORG_ACCESS_CREATED, ORG_ACCESS_ROUTES, OrgAccessError, orgAccessDbError, venueApprovalAnswer,
+} from "./orgAccess.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -341,8 +345,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Answer) return json(out.body, out.status);
     if (out instanceof Created) return json(out.body, 201);
-    return json(out, CREATED.has(match.route.id) ? 201 : 200);
+    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
+    // A venue another org runs (mig 20261104180000): from any route.
+    const approval = venueApprovalAnswer(e);
+    if (approval) return json(approval, 403);
+    if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
+    if (ORG_ACCESS_ROUTES.has(match.route.id)) {
+      const oa = orgAccessDbError(e);
+      if (oa) return json(oa.body, oa.status);
+    }
     if (e instanceof PagingError || e instanceof BodyError || e instanceof ParamError) return json({ error: e.message }, 400);
     if (e instanceof RequestError) return json({ error: e.message }, e.status);
     if (e instanceof ScopeError) {
@@ -397,9 +409,13 @@ async function resolveCredential(
   if (!kind) return null;
   const hash = await sha256Hex(token);
   if (kind === "api_key") {
-    const { data: k } = await sb.from("exos_api_keys")
-      .select("id, org_id, name, key_prefix, scopes, revoked_at")
-      .eq("key_hash", hash).is("revoked_at", null).maybeSingle();
+    // The key's scopes NOW: as stored, narrowed to its creator's role's set
+    // in the org (mig 20261104180000), so a lowered role applies at once.
+    const { data: k, error: kErr } = await sb.rpc("exos_api_key_auth", { p_hash: hash });
+    if (kErr) {
+      console.error("exos-api: key lookup failed", kErr.message);
+      return null;
+    }
     if (!k) return null;
     return {
       orgId: k.org_id as string,
@@ -431,6 +447,8 @@ async function resolveCredential(
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  // claude/exos-org-access (mig 20261104180000): role API permissions, venue requests, co-hosts, partner presale.
+  if (ORG_ACCESS_ROUTES.has(route.id)) return await handleOrgAccess(route, c);
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {

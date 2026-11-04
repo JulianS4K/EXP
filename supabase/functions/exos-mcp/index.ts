@@ -101,8 +101,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ctx.scopes = tok.scopes ?? [];
     bucket = { token: `${kind}:${tok.credential_id}` };
   } else if (key) {
-    const { data: row } = await sb.from("exos_api_keys").select("id, org_id, scopes")
-      .eq("key_hash", await sha256Hex(key)).is("revoked_at", null).maybeSingle();
+    // Scopes as of now: narrowed to the key creator's role's set (mig 20261104180000).
+    const { data: row, error: kErr } = await sb.rpc("exos_api_key_auth", { p_hash: await sha256Hex(key) });
+    if (kErr) {
+      console.error("exos-mcp: key lookup failed", kErr.message);
+      return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
+    }
     if (!row) {
       return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": challenge() });
     }

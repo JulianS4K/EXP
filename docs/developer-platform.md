@@ -31,6 +31,10 @@ grant (`exos_role_token_scopes`, mirrored by `ROLE_SCOPES` and kept equal by `sr
 | content | `events:read`, `events:write`, `booking:read` |
 | scanner | `events:read`, `tickets:read`, `checkin:write` |
 
+These are the **defaults**. The owner can set each role's API permissions per organization (Settings, API
+permissions; `PUT /v1/role-api-scopes/:role`), within a ceiling per role, and the setting then holds for the role's
+tokens and org API keys alike, at request time (docs/org-access.md, mig 20261104180000).
+
 A `:write` the role has lost still gives its `:read` if the role has that. So:
 
 - **A demotion takes effect at once**, on the next request, with no token change.
