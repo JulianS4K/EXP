@@ -274,9 +274,14 @@ const HEADERS: Record<string, keyof ImportCard | 'balance' | 'initial'> = {
   recipient_name: 'recipient_name', 'recipient name': 'recipient_name', name: 'recipient_name',
 };
 
-/** "25", "$25.00", "1,250.5" -> cents; null if it isn't an amount. */
+/** "25", "$25.00", "1,250.5" -> cents; null if it isn't an amount. A comma is only a thousands separator:
+ *  "25,00" (a decimal comma, e.g. a European export) is refused, not read as 2500. */
 export function majorCents(v: string): number | null {
-  const t = v.trim().replace(/^[^\d-]+/, '').replace(/,/g, '');
+  let t = v.trim().replace(/^[^\d-]+/, '');
+  if (t.includes(',')) {
+    if (!/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(t)) return null;
+    t = t.replace(/,/g, '');
+  }
   if (!/^\d{1,9}(\.\d{1,2})?$/.test(t)) return null;
   const [a, b = ''] = t.split('.');
   return Number(a) * 100 + Number((b + '00').slice(0, 2));
