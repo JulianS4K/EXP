@@ -51,6 +51,7 @@
 --              exos_venue_request_create, exos_venue_request_decide,
 --              exos_venue_request_withdraw, exos_venue_requests,
 --              exos_venue_link_suggestions, exos_venue_link,
+--              exos_admin_set_venue_verified (platform admins),
 --              exos_partner_grant_set, exos_partner_grant_revoke,
 --              exos_cohost_events (authenticated), trigger
 --              _exos_tg_event_partner_grant, exos_event_partner_grant_vocab
@@ -493,7 +494,7 @@ COMMENT ON COLUMN public.exos_venues.accepts_requests IS
 COMMENT ON COLUMN public.exos_venues.listed_venue_id IS
   'mig 20261104180000: this rented / partner record is another org''s owned venue (linked by its own org, never automatically); events and holds here need that org''s approval.';
 COMMENT ON COLUMN public.exos_venues.verified IS
-  'mig 20261104180000: Exos staff checked the org runs this venue. Shown in suggestions and the directory; the venue gate does not require it.';
+  'mig 20261104180000: Exos staff checked the org runs this venue (exos_admin_set_venue_verified only; cleared when anyone else edits its name, address, relationship or org). Shown in suggestions and the directory; the venue gate does not require it.';
 
 -- The venue gate: may org p_org put an event / hold night / template at
 -- p_venue on its own? Another org's owned venue, or this org's record linked
@@ -582,22 +583,25 @@ SELECT pg_temp.exos_patch_n('public._exos_tg_event_template()',
 -- or the column through RLS); _exos_venue_link_suggestions lists candidates,
 -- ambiguous ones included, with `verified`. Once a promoter has linked, the
 -- link stays (a platform admin may clear it), so it can't be dropped to get
--- around the gate. `verified` is set by platform admins (or the service
--- role) only and is shown, never required.
+-- around the gate. `verified` is set by platform admins only
+-- (exos_admin_set_venue_verified) and is shown, never required.
 CREATE OR REPLACE FUNCTION public._exos_tg_venue_listing()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  -- Staff only: a platform admin, or the staff verify flow
+  -- (exos_admin_set_venue_verified sets exos.venue_verify for its own
+  -- statement). Never a bare service-role caller: exos-api runs org API-key
+  -- writes as the service role.
+  v_staff boolean := public.exos_is_admin() OR coalesce(current_setting('exos.venue_verify', true), '') = 'on';
 BEGIN
-  IF (TG_OP = 'INSERT' AND NEW.verified) OR (TG_OP = 'UPDATE' AND NEW.verified IS DISTINCT FROM OLD.verified) THEN
-    IF NOT (public.exos_is_admin() OR public._exos_caller_is_service()) THEN
-      RAISE EXCEPTION 'only Exos staff verify a venue' USING ERRCODE = '42501';
-    END IF;
+  IF NEW.verified AND (TG_OP = 'INSERT' OR NOT OLD.verified) AND NOT v_staff THEN
+    RAISE EXCEPTION 'only Exos staff verify a venue' USING ERRCODE = '42501';
   END IF;
-  -- Verification is of this name, place, relationship and org: an org's own
+  -- Verification is of this name, place, relationship and org: anyone else's
   -- edit of any of them drops it (staff verify again).
-  IF TG_OP = 'UPDATE' AND NEW.verified
+  IF TG_OP = 'UPDATE' AND NEW.verified AND NOT v_staff
      AND (NEW.name IS DISTINCT FROM OLD.name OR NEW.address IS DISTINCT FROM OLD.address
-          OR NEW.relationship IS DISTINCT FROM OLD.relationship OR NEW.org_id IS DISTINCT FROM OLD.org_id)
-     AND NOT (public.exos_is_admin() OR public._exos_caller_is_service()) THEN
+          OR NEW.relationship IS DISTINCT FROM OLD.relationship OR NEW.org_id IS DISTINCT FROM OLD.org_id) THEN
     NEW.verified := false;
   END IF;
   -- (The owned venue being deleted clears it: ON DELETE SET NULL.)
@@ -627,6 +631,27 @@ REVOKE ALL ON FUNCTION public._exos_tg_venue_listing() FROM PUBLIC, anon, authen
 DROP TRIGGER IF EXISTS exos_venues_listing ON public.exos_venues;
 CREATE TRIGGER exos_venues_listing BEFORE INSERT OR UPDATE ON public.exos_venues
   FOR EACH ROW EXECUTE FUNCTION public._exos_tg_venue_listing();
+
+-- The staff verify flow: a platform admin marks an owned venue verified (or
+-- not). The only path that may set the flag besides an admin's own writes.
+CREATE OR REPLACE FUNCTION public.exos_admin_set_venue_verified(p_venue_id uuid, p_verified boolean)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v public.exos_venues%ROWTYPE;
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.exos_is_admin() THEN
+    RAISE EXCEPTION 'Exos staff only' USING ERRCODE = '42501';
+  END IF;
+  IF p_verified IS NULL THEN RAISE EXCEPTION 'verified must be true or false' USING ERRCODE = '22023'; END IF;
+  PERFORM set_config('exos.venue_verify', 'on', true);
+  UPDATE public.exos_venues SET verified = p_verified
+   WHERE id = p_venue_id AND (NOT p_verified OR relationship = 'owned')
+  RETURNING * INTO v;
+  PERFORM set_config('exos.venue_verify', 'off', true);
+  IF v.id IS NULL THEN RAISE EXCEPTION 'owned venue not found' USING ERRCODE = 'P0002'; END IF;
+  RETURN jsonb_build_object('id', v.id, 'name', v.name, 'org_id', v.org_id, 'verified', v.verified);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_admin_set_venue_verified(uuid, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_admin_set_venue_verified(uuid, boolean) TO authenticated;
 
 -- Owned venues of other orgs that may be the same place as this org's
 -- rented / partner record (same name and city, case and spaces aside), each

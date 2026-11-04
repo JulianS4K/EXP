@@ -150,6 +150,7 @@ import { handleOrders, ORDER_ROUTES } from "./orders.ts";
 import {
   handleOrgAccess, ORG_ACCESS_CREATED, ORG_ACCESS_ROUTES, OrgAccessError, orgAccessDbError, venueApprovalAnswer,
 } from "./orgAccess.ts";
+import { stripStaffVenueFields } from "../_shared/api/orgAccess.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -1365,7 +1366,8 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       return pagedMap(await q.order("name").order("id").range(page.from, page.to), page, venueView);
     }
     case "create-venue": {
-      const row = parseVenue(c.body, false);
+      // Never `verified` / `listed_venue_id` from the org (mig 20261104180000).
+      const row = stripStaffVenueFields(parseVenue(c.body, false));
       return { data: venueView(await single(sb.from("exos_venues").insert({ ...row, org_id: orgId }).select(VENUE_COLS).single())) };
     }
     case "get-venue":
@@ -1375,7 +1377,7 @@ async function handleBooking(route: ApiRoute, c: Ctx): Promise<unknown> {
       };
     case "update-venue": {
       const id = uuidParam(c, "id", "venue");
-      const row = parseVenue(c.body, true);
+      const row = stripStaffVenueFields(parseVenue(c.body, true));
       return {
         data: venueView(await found(sb.from("exos_venues").update(row).eq("org_id", orgId).eq("id", id)
           .select(VENUE_COLS).maybeSingle(), "venue")),

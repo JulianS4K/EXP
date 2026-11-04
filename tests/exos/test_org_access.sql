@@ -109,6 +109,22 @@ CREATE FUNCTION pg_temp.kid(p text) RETURNS text LANGUAGE sql STABLE SECURITY DE
   SELECT id::text FROM public.exos_api_keys WHERE key_hash = encode(extensions.digest(p, 'sha256'), 'hex')
 $$;
 GRANT EXECUTE ON FUNCTION pg_temp.h(text), pg_temp.kid(text) TO authenticated, service_role;
+-- exos_is_admin() as Supabase defines it (the JWT's app_metadata.admin; the
+-- harness stub answers false). Rolled back.
+CREATE OR REPLACE FUNCTION public.exos_is_admin() RETURNS boolean LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+  SELECT coalesce((auth.jwt() -> 'app_metadata' ->> 'admin') = 'true', false)
+$$;
+-- Exos staff (a platform admin) verifying a venue through the staff flow.
+CREATE FUNCTION pg_temp.staff_verify(p_venue uuid, p_on boolean) RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE v jsonb;
+BEGIN
+  PERFORM set_config('app.uid', 'ac000000-0000-0000-0000-0000000000ad', true),
+          set_config('app.jwt', '{"app_metadata":{"admin":"true"}}', true);
+  v := public.exos_admin_set_venue_verified(p_venue, p_on);
+  PERFORM set_config('app.uid', '', true), set_config('app.jwt', '', true);
+  RETURN v;
+END $$;
+GRANT EXECUTE ON FUNCTION pg_temp.staff_verify(uuid, boolean) TO authenticated, service_role;
 CREATE FUNCTION pg_temp.day(p int) RETURNS text LANGUAGE sql STABLE AS $$ SELECT to_char(current_date + p, 'YYYY-MM-DD') $$;
 GRANT EXECUTE ON FUNCTION pg_temp.day(int) TO authenticated, service_role;
 
@@ -139,7 +155,7 @@ BEGIN
       'public.exos_partner_grant_set(uuid,text[])', 'public.exos_partner_grant_revoke(uuid)', 'public.exos_cohost_events(uuid)',
       'public.exos_partner_presale_get(uuid,uuid)', 'public.exos_partner_presale_set(uuid,text)',
       'public.exos_event_partner_presale_set(uuid,text)', 'public.exos_venue_link_suggestions(uuid)',
-      'public.exos_venue_link(uuid,uuid)'] LOOP
+      'public.exos_venue_link(uuid,uuid)', 'public.exos_admin_set_venue_verified(uuid,boolean)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND has_function_privilege('authenticated', f, 'EXECUTE'),
       'OA1 authenticated: ' || f;
   END LOOP;
@@ -428,8 +444,27 @@ BEGIN
   PERFORM pg_temp.act(NULL);
 END $$;
 RESET ROLE;
--- Exos staff (here the service role) verify the real hall: it leads the suggestions.
-UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1';
+-- Neither the service role (exos-api runs org keys as it) nor the database
+-- owner can verify; only the staff flow, for a platform admin.
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE s text;
+BEGIN
+  s := pg_temp.st($q$UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1'$q$);
+  ASSERT s LIKE '42501%', 'OA6 the service role can''t verify: ' || s;
+  s := pg_temp.st($q$SELECT public.exos_admin_set_venue_verified('ac000000-0000-0000-0000-0000000000e1', true)$q$);
+  ASSERT s LIKE '42501%', 'OA6 the staff RPC needs a platform admin: ' || s;
+END $$;
+RESET ROLE;
+DO $$
+DECLARE s text;
+BEGIN
+  s := pg_temp.st($q$UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1'$q$);
+  ASSERT s LIKE '42501%', 'OA6 a direct write can''t verify: ' || s;
+  ASSERT (pg_temp.staff_verify(pg_temp.u('e1')::uuid, true)->>'verified')::boolean, 'OA6 the staff RPC verifies';
+  s := pg_temp.st(format($q$SELECT pg_temp.staff_verify(%L, true)$q$, pg_temp.v('copy')));
+  ASSERT s LIKE 'P0002%', 'OA6 only an owned venue is verified: ' || s;
+END $$;
 SET LOCAL ROLE service_role;
 DO $$
 DECLARE sg jsonb;
@@ -454,7 +489,22 @@ BEGIN
   PERFORM pg_temp.act(NULL);
 END $$;
 RESET ROLE;
-UPDATE public.exos_venues SET verified = true WHERE id IN ('ac000000-0000-0000-0000-0000000000e1', pg_temp.v('squat')::uuid);
+SELECT pg_temp.staff_verify('ac000000-0000-0000-0000-0000000000e1', true), pg_temp.staff_verify(pg_temp.v('squat')::uuid, true);
+-- The API path: exos-api writes an org key's venue PATCH as the service role.
+-- A rename that way still drops the badge; staff verify again.
+SET LOCAL ROLE service_role;
+DO $$
+BEGIN
+  UPDATE public.exos_venues SET name = 'AC Hall Two' WHERE id = pg_temp.u('e1')::uuid;
+  UPDATE public.exos_venues SET name = 'AC Hall' WHERE id = pg_temp.u('e1')::uuid;
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT NOT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.u('e1')::uuid), 'OA6 an API (service role) rename drops verified';
+  PERFORM pg_temp.staff_verify(pg_temp.u('e1')::uuid, true);
+  ASSERT (SELECT verified FROM public.exos_venues WHERE id = pg_temp.u('e1')::uuid), 'OA6 re-verified';
+END $$;
 SET LOCAL ROLE authenticated;
 DO $$
 DECLARE s text; sg jsonb; v0 uuid;
@@ -483,7 +533,7 @@ BEGIN
 END $$;
 RESET ROLE;
 -- Staff verify the real hall again (the directory check in OA7 expects it).
-UPDATE public.exos_venues SET verified = true WHERE id = 'ac000000-0000-0000-0000-0000000000e1';
+SELECT pg_temp.staff_verify('ac000000-0000-0000-0000-0000000000e1', true);
 -- The API path (a template-made event) answers the same.
 SET LOCAL ROLE service_role;
 DO $$

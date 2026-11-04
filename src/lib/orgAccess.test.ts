@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { ORG_ROLES, ROLE_SCOPES } from '../../supabase/functions/_shared/api/credentials.ts';
 import {
   cleanGrantScopes, cohostAllowed, cohostMoneyAllowed, CONFIGURABLE_ROLES, DEFAULT_GRANT_SCOPES, effectivePartnerPresale, GRANT_SCOPES,
-  ORG_SCOPES, orgRoleScopes, ROLE_SCOPE_CEILING, roleScopesProblem, toggleScope, venueApprovalVenue, venueRequestBody,
+  ORG_SCOPES, orgRoleScopes, ROLE_SCOPE_CEILING, roleScopesProblem, stripStaffVenueFields, toggleScope,
+  venueApprovalVenue, venueRequestBody,
 } from '../../supabase/functions/_shared/api/orgAccess.ts';
 import { matchRoute } from '../../supabase/functions/_shared/api/routes.ts';
 
@@ -123,6 +124,11 @@ describe('venue requests and grants', () => {
     expect(cohostMoneyAllowed(['finance:read'], ['tickets:read'])).toBe(false);
     expect(cohostMoneyAllowed(['finance:read'], ['finance:read'])).toBe(true);
     expect(cohostMoneyAllowed(['finance:write'], ['finance:read'])).toBe(true);
+  });
+
+  it('an org\'s venue write never carries the staff fields', () => {
+    expect(stripStaffVenueFields({ name: 'Hall', verified: true, listed_venue_id: 'x', capacity: 5 }))
+      .toEqual({ name: 'Hall', capacity: 5 });
   });
 
   it('checks a request body\'s shape', () => {

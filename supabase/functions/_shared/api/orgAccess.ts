@@ -162,6 +162,20 @@ export function venueRequestBody(b: Record<string, unknown>): { ok: true; body: 
   return { ok: true, body: b as unknown as VenueRequestBody };
 }
 
+/**
+ * exos_venues columns an organization never writes through the API's venue
+ * routes: `verified` is Exos staff's (exos_admin_set_venue_verified) and
+ * `listed_venue_id` goes through PUT /v1/venues/:id/listed-venue. Dropped
+ * from a venue row before it is written (the SQL refuses or clears them too).
+ */
+export const STAFF_VENUE_FIELDS = ['verified', 'listed_venue_id'] as const;
+
+export function stripStaffVenueFields<T extends Record<string, unknown>>(row: T): T {
+  const out = { ...row };
+  for (const k of STAFF_VENUE_FIELDS) delete (out as Record<string, unknown>)[k];
+  return out;
+}
+
 /** The fields a co-host may change on the venue's event. */
 export const COHOST_EVENT_FIELDS = ['name', 'description', 'summary', 'description_md', 'image_url', 'video_url'] as const;
 

@@ -292,9 +292,13 @@ org; writes need a key whose creator holds the role now,
   answer alike. Its refusal names only the venue id the caller already sent.
   `owned` is self-declared, so nothing links a promoter's record to an owned
   venue but the promoter itself (`exos_venue_link`); name matches are only
-  suggestions, ambiguous ones shown as such, with `verified` (staff-only,
-  trigger-enforced, cleared when the org edits the venue's name, address,
-  relationship or org) as a hint. Suggestions and links see only venues the
+  suggestions, ambiguous ones shown as such, with `verified` as a hint.
+  `verified` is set only by a platform admin (`exos_admin_set_venue_verified`,
+  which sets the transaction-local `exos.venue_verify` for its own update);
+  the trigger never trusts a bare service-role caller, because exos-api runs
+  org API-key writes as the service role. Any other edit of the venue's
+  name, address, relationship or org clears it, and exos-api drops
+  `verified` / `listed_venue_id` from venue bodies. Suggestions and links see only venues the
   directory shows (`accepts_requests`); a refused link says nothing about
   the target. A squatter's "owned" venue gates no one else.
 - **Grants**: a co-host reads or writes another org's event only through the
