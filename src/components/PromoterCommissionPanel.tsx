@@ -24,6 +24,7 @@ import {
   settlePromoter,
   type PromoterCommissionSummary, type PromoterEventTerms, type PromoterPayoutRow, type SettleRow,
 } from '../lib/promoters';
+import { listCommissionPayable } from '../lib/commissionMethodsApi';
 
 const money = (cents: number, currency?: string | null) => formatCurrency(cents / 100, (currency || 'usd').toUpperCase());
 const today = () => new Date().toISOString().slice(0, 10);
@@ -358,11 +359,16 @@ function PayoutForm({
   const [note, setNote] = useState('');
   const [paidOn, setPaidOn] = useState(today());
   const [busy, setBusy] = useState(false);
+  // Commission methods (mig 20261104190000): sales still in the holdback, or
+  // paid by Exos (split at sale, inside the Exos fee), aren't settled here.
+  const [heldBack, setHeldBack] = useState(0);
 
   const rows = via === 'stripe' ? allRows.filter((r) => r.fundable) : allRows;
   const load = async (mode: 'manual' | 'stripe' = via) => {
     try {
-      const all = await listSettleRows(promoterId);
+      const [all0, payable] = await Promise.all([listSettleRows(promoterId), listCommissionPayable(promoterId)]);
+      const all = all0.filter((x) => { const p = payable.get(x.id); return !p || (p.settleHere && p.payable); });
+      setHeldBack(all0.length - all.length);
       setAllRows(all);
       const r = mode === 'stripe' ? all.filter((x) => x.fundable) : all;
       const cur = r[0]?.currency ?? '';
@@ -450,6 +456,11 @@ function PayoutForm({
           ? `Stripe takes the commission back from what you were paid for these orders and sends it to ${promoterName}'s bank. Only online Stripe sales can go this way.`
           : `Record a payout you sent ${promoterName}. Exos doesn't move the money.`}
       </p>
+      {heldBack > 0 && (
+        <p className="text-[11px] text-white/50">
+          {heldBack} more sale{heldBack === 1 ? ' is' : 's are'} not listed: still in the refund holdback, or paid by Exos (see "How commissions are paid").
+        </p>
+      )}
       {rows.length === 0 ? (
         <p className="text-[11px] text-white/40 italic">Nothing unpaid right now.</p>
       ) : (

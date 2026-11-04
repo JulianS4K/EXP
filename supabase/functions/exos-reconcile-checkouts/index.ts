@@ -31,6 +31,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
+import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
@@ -184,7 +185,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Same key + params as stripe-webhook's auto-refund (_shared/auto-refund.ts):
       // if both paths fire for one session, Stripe returns the first refund.
       const refund = await stripe.refunds.create(
-        autoRefundParams(pi, row.session_id),
+        autoRefundParams(pi, row.session_id, chargeModelFromMetadata(cs.metadata as Record<string, string> | null)),
         { idempotencyKey: autoRefundIdempotencyKey(row.session_id) },
       );
       // Ledger row by Stripe refund id (idempotent); it also moves the

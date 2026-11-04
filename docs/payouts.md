@@ -202,6 +202,119 @@ secrets `STRIPE_SECRET_KEY`, `EXOS_REDIRECT_ORIGINS`, `EXOS_APP_URL`, `EXOS_GUES
 `EXOS_PROMOTER_TRANSFERS`, `EXOS_INSTANT_PAYOUTS` (both off by default). Stripe Connect must allow Express
 accounts for promoters on the platform.
 
+## Commission methods: where a promoter's commission comes from
+
+Migration `20261104190000_exos_commission_methods.sql`; pure rules
+`supabase/functions/_shared/payouts/commissionMethods.ts`; transfers in `exos-promoter-payouts` (`/run`,
+`/ct-cancel`). Tests: `tests/exos/test_commission_methods.sql` (CM1-CM14), `src/lib/commissionMethods.test.ts`.
+Organizer-facing explanation: `docs/organizer-guide.md` "How promoter commissions are paid".
+
+Four methods, chosen case by case. A per-org default (`exos_org_commission_settings`), a per-event override
+(`exos_event_commission_settings.method`) and a per-promoter override (`exos_promoters.commission_method`).
+**Most specific wins: promoter, then event, then org, then `manual`.** A method whose switch is off falls back
+to `manual` at checkout (`method_source = 'fallback'`), so a sale is never charged a way Exos can't pay out.
+
+| Method | How the money moves | Pros | Cons | Requirements |
+|---|---|---|---|---|
+| **A. `clawback`** (the wedge above) | Destination charge as before. At settle time Exos reverses the commission out of the organizer's order transfers and transfers it to the promoter. | Organizer paid at once; nothing changes at checkout; Exos never holds the commission. | Needs money still in the organizer's Stripe balance (reversal can fail if they paid out); only online Stripe sales; up to 10 orders per payout. | Owner switch `stripe_transfers` + `EXOS_PROMOTER_TRANSFERS=on`; promoter Express account. |
+| **B. `split_at_sale`** | Separate charges and transfers: the charge stays on the platform (no `transfer_data`), `transfer_group = exos-order-<uuid>`. After the holdback Exos transfers the organizer's share and each promoter's commission with `source_transaction` = that charge. | Commission set aside at the sale; no reversals; promoter paid from the order itself. | Organizer is paid only after the event + holdback; **Exos handles disputes on these charges**; refunds after the transfer are netted from the organizer's next split order. | `EXOS_SPLIT_AT_SALE=on` **and** the owner's org switch (`split_at_sale_enabled`); organizer and promoter on **Express** accounts (`EXOS_CONNECT_ACCOUNT_TYPE=express`). |
+| **C. `platform_fee`** | Destination charge; the commission is **added to `application_fee_amount`**. After the holdback Exos transfers it from the platform balance to the promoter. | Organizer still paid at once; no reversals; one transfer per promoter. | The organizer's Stripe dashboard shows a bigger application fee (it includes the commission; the dashboard says so); refunds return the fee in proportion, so a partial refund shrinks what's held. | `EXOS_PLATFORM_FEE_COMMISSIONS=on`; promoter Express account. |
+| **D. `manual`** (default) | The ledger only. The organizer pays by Venmo / cash and records it (`exos_settle_promoter`, via `manual`). | Works for every sale (door, PayPal, staff); no setup. | Exos can't enforce payment; the organizer chases refunds after payout themselves (netting helps). | None. |
+
+**When to use which.** `manual` while you pay your team yourself or sell mostly at the door. `platform_fee` when
+promoters want to be paid by Exos and you want your money at once (the usual pick). `split_at_sale` when you'd
+rather the commission never touches your balance, and can wait until after the event for your share. `clawback`
+when you already pay out through Stripe and want promoters paid the moment you settle.
+
+- **Buyers see the same all-in price** whichever method. Checkout asks `exos_commission_checkout_plan` only when
+  one of the two platform switches is on; with both off (the default) nothing in `exos-checkout` changes.
+  Existing destination-charge events are unchanged: a plan of `manual` / `clawback` charges exactly as before
+  (`paymentIntentData` returns the old object, pinned by a test). The plan is stored in
+  `exos_checkout_commission_plans` (not on the buyer-readable session row); an order charged a new way whose
+  plan can't be recorded is expired.
+- **Accrual records the method.** `exos_promoter_commissions.method` / `method_source` are set when the sale
+  accrues (from the order's plan, else resolved then) and never rewritten. A `platform_fee` sale's commission
+  is the checkout quote (what the fee collected); re-pricing leaves it.
+- **Locking.** An event's method is pinned (`locked_method`) by its first paid ticket, and before any org default
+  change, so a new default never moves an event that has sold. Changing a sold event needs
+  `p_future_sales_only = true` and reaches only later sales. Every change is logged
+  (`exos_commission_method_changes`).
+- **Holdback, frozen at the sale.** Each order's plan and each accrual store `payable_at` when the ticket sells:
+  the event's later of `starts_at` / `ends_at` at that moment plus the holdback (org setting 0-30, default 3).
+  For the Exos-funded methods the holdback is never below the platform minimum
+  (`exos_platform_settings.commission_min_holdback_days`, default 3; org staff can't lower it) and also counts
+  from the sale itself, so dating an event in the past doesn't make a fresh sale payable. The time actually used
+  is the later of the frozen one and the event as it is now (`_exos_commission_payable_at`): moving an event
+  earlier never makes anything payable sooner, a reschedule later pushes it out, and a plan's `payable_at` can't
+  be before the event's original start (CHECK). The frozen value is set once (the gate trigger keeps it).
+  Enforced on the row (`exos_promoter_commissions_gate`): always for Exos-moved payouts; for `manual` /
+  `clawback` once the org has saved commission settings (orgs that never did keep today's behaviour). Every Exos
+  send claim re-checks it (`_exos_ct_hold`).
+- **Self-dealing cap.** An Exos-funded commission is at most `exos_funded_commission_max_bps` (platform setting,
+  default 3000 = 30%) of the ticket's net to the organizer (its base less its share of the Exos fee). Checkout
+  falls back to `manual` (`fallback_reason: commission_cap`) when any ticket is over; the accrual clamps to the
+  cap if terms changed since. Higher needs a platform-admin row in `exos_commission_cap_approvals` (service role
+  only; per org or per promoter, optional expiry).
+- **The reserve.** Nothing Exos-funded is planned or sent for an order with an open dispute or a refund in flight
+  (a pending refund, a claimed / pending refund request); the send claim re-checks it, so a refund started after
+  planning holds the transfer (`refund_in_flight`).
+- **Netting.** A sale refunded after it was paid is a negative line in `exos_commission_netting`, owed back by
+  the promoter and **taken off their next payout by whoever funded it** (`funder`): organizer-funded lines
+  (`manual`, `clawback`) by `exos_settle_promoter` / `exos_record_promoter_payout`; Exos-funded lines (`split`,
+  `platform_fee`) by the Exos transfers. Never reversed from the promoter's account. Whole lines, oldest first,
+  never more than the payout. A line still open after `netting_alert_days` (default 30) is flagged overdue on
+  the dashboard (`exos_commission_balances`).
+- **Split orders and refunds.** Before the transfer, the shares are computed from the order as it is
+  (`_exos_split_entitlement`: net = charge - refunds; fee = Exos fee less its refunded share; organizer =
+  net - fee - commission still standing). After the organizer's share is planned, any later refund, void or lost
+  dispute is a **true-up** line (`_exos_split_true_up`, idempotent, from triggers on `exos_order_refunds`,
+  `exos_checkout_sessions.dispute_status` and the commission rows), taken off (or, for a credit, added to, up to
+  that order's fee) the organizer's next split transfer; what doesn't fit carries forward. Orders with an open
+  dispute or a refund in flight wait.
+- **Organizer refunds of split orders** (`exos_refund_charge_prepare`, decided once per refund request in
+  `exos_refund_charge_plans`, so retries send the same parameters). Before the organizer's share went out, the
+  unsent transfer is cancelled and planned again from the smaller order. Once it was sent, the organizer's part
+  of the refund (their share before minus their share after) is **taken back from that transfer first**: a
+  Stripe transfer reversal (`exos_split_reversals`, lease, reconcile by `metadata.exos_split_reversal_id`, key
+  `exos-ctr:<id>`), then the refund (no Connect flags). If the transfer can't cover it (already reversed, or the
+  share was fully netted) the refund is **refused** with how much Exos can take back; Exos never funds it. If
+  the reversal is refused by Stripe, so is the refund; if the refund then fails after a reversal, the money taken
+  is credited back (`exos_split_reversal_unused`). A refund while the share is being sent waits (`busy`).
+  A commission Exos already paid and then refunded stays counted against the organizer until the promoter's
+  clawback is netted, then the organizer is credited, so Exos never fronts it.
+- **The fallback and the debt cap.** Refunds made outside Exos, disputes, or a reversal that couldn't happen are
+  true-up lines with an alert on the transfer. Over `split_org_debt_cap_cents` (platform setting, default
+  50000) of open debt, the org gets no new split-at-sale checkouts (`fallback_reason: split_debt_cap`) and no
+  split money: shares bigger than the debt aren't planned and planned ones are held (`debt_cap`) until the debt
+  is netted or settled.
+- **Fee orders and refunds.** While the commission is still held, the refund returns the application fee in
+  proportion (`refund_application_fee` on, whatever `EXOS_REFUND_KEEP_PLATFORM_FEE` says), so the payout for
+  each order is capped at what the fee still holds; any difference is a `shortfall` line. Once the commission
+  went out (planned or sent), the refund **keeps the fee** (`refund_application_fee` off; the organizer bears the
+  refund, as with a clawback) and the promoter's clawback is owed to the organizer
+  (`exos_commission_refund_marks`, netting `funder = organizer`). So a refund never costs Exos more than the fee
+  it collected.
+- **Exos transfers** (`exos_commission_transfers`, one row = one Stripe transfer, key `exos-ct:<id>`):
+  `exos_commission_plan_due` plans what is past the holdback (amounts fixed when planned); `/run` (cron
+  `exos-commission-transfers-15min`, created inactive, or an owner / manager for their org) sends what is
+  due. Same rules and numbers as the clawback sends: `exos_ct_claim` leases for 6 minutes (never extended),
+  `exos_ct_lease_ok` is checked right before the Stripe call, every claim mints a new token, a retry after an
+  unreconciled send reconciles first (transfer group + `metadata.exos_ct_id`), a reconcile or cancel waits 10
+  minutes after a send began, `'sent'` always wins (a late one restores the sales a cancel freed and sets an
+  alert). A dry run (switch off) records `dry_run` and is retried when the switch is on; `failed` is retried up
+  to 5 times, then by hand (Retry on the dashboard). `/ct-cancel` cancels one that never went out: the sales are
+  unpaid again, netting re-opened, nothing to return (the money never left the platform).
+- **Webhook and refunds.** `stripe-webhook` fulfils both charge models the same way; the auto-refund drops the
+  two Connect flags for split orders (`chargeModelFromMetadata`, which the reconcile sweep reads the same way;
+  nothing was transferred yet for an unfulfilled order). Organizer refunds go through `refundRun` as above.
+- **Fee actuals.** For a fee order, `exos_order_payments.application_fee_cents` is Stripe's (Exos fee +
+  commission); `net_cents` leaves the commission out.
+
+Operator setup (all operator-gated): apply `20261104190000`; redeploy `exos-checkout`, `stripe-webhook`,
+`exos-refund`, `exos-api`, `exos-reconcile-checkouts`, `exos-promoter-payouts`; set `CRON_SECRET` for
+`exos-promoter-payouts`; turn on the cron `exos-commission-transfers-15min`; then, when ready,
+`EXOS_PLATFORM_FEE_COMMISSIONS=on` and / or `EXOS_SPLIT_AT_SALE=on` (both off by default, test mode first).
+
 ## Disputes (chargebacks)
 
 Exos checkouts are destination charges, so a chargeback is opened against the **Exos platform's** Stripe account:

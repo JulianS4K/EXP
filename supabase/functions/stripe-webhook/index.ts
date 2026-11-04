@@ -79,6 +79,14 @@
 // the best-effort session.payment_intent column — so a dropped column write
 // can't strand a refund/dispute.
 //
+// Commission methods (mig 20261104190000, docs/payouts.md): a split-at-sale
+// order is a separate charge on the platform (metadata.exos_charge_model =
+// 'split', no transfer_data). Fulfilment, the payment row, refunds and
+// disputes go through the same calls; only the auto-refund drops the two
+// Connect flags (chargeModelFromMetadata, the same value the reconcile sweep
+// derives). A refund on a split order trues the organizer's share up in SQL
+// (exos_order_refunds trigger). Destination orders are unchanged.
+//
 // Required secrets (operator, at deploy): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 // SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (platform-injected). Optional:
 // STRIPE_CONNECT_WEBHOOK_SECRET — the signing secret of the second endpoint that
@@ -91,6 +99,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
+import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
 
 // exos: commerce orders (exos-commerce). Stripe metadata.exos_kind values.
@@ -311,7 +320,7 @@ async function fulfillSettledSession(
         // Same key + params as the reconcile sweep (_shared/auto-refund.ts), so
         // the two can never both refund one session.
         refund = await stripe.refunds.create(
-          autoRefundParams(pi, session.id),
+          autoRefundParams(pi, session.id, chargeModelFromMetadata(session.metadata)),
           { idempotencyKey: autoRefundIdempotencyKey(session.id) },
         );
       } catch (e) {

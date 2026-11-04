@@ -23,6 +23,25 @@
 // has a deterministic idempotency key (payout id + order), so a retry or a
 // crash mid-way never moves money twice.
 //
+// Commission methods (mig 20261104190000, docs/payouts.md "Commission
+// methods"): the Exos-made transfers for split at sale and commissions inside
+// the Exos fee (exos_commission_transfers), with the same lease / fence /
+// reconcile rules and timing as the clawback sends above.
+//   POST /run       { org_id?, transfer_id? }  cron (X-Cron-Secret, every org)
+//                                             or org owner / manager (JWT, their
+//                                             org): plan what is past the
+//                                             holdback, record missing charge
+//                                             ids, then send what is due (at
+//                                             most RUN_MAX_TRANSFERS, within
+//                                             RUN_BUDGET_MS). transfer_id (JWT)
+//                                             retries one, even after 5 failures.
+//   POST /ct-cancel { transfer_id }           org owner / manager: cancel one that
+//                                             never went out (Stripe is asked
+//                                             first when a send was started)
+// Money moves only with EXOS_SPLIT_AT_SALE=on (split transfers) /
+// EXOS_PLATFORM_FEE_COMMISSIONS=on (fee transfers); otherwise dry runs.
+// Secrets also: CRON_SECRET.
+//
 // Deploy with --no-verify-jwt (the promoter routes carry a kit token, not a
 // JWT; /send and /cancel check the JWT themselves). Secrets: STRIPE_SECRET_KEY,
 // SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
@@ -38,6 +57,11 @@ import {
   STRIPE_TIMEOUT_MS, stripeErrorText, timedFetch, transferKey, transfersMode,
   type ClaimAnswer, type StripeReversalLite, type StripeTransferLite,
 } from "../_shared/payouts/promoterTransfers.ts";
+import {
+  commissionEnv, ctClaimAction, ctLive, ctReconcileDecision, ctTransferKey, ctTransferParams, RUN_BUDGET_MS, RUN_MAX_TRANSFERS,
+  type CtClaim, type CtClaimAnswer,
+} from "../_shared/payouts/commissionMethods.ts";
+import { requireCronSecret } from "../_shared/cron-auth.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let CORS: Record<string, string> = {};
@@ -66,6 +90,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (route === "onboard" || route === "status") return await promoterRoute(route, body, stripe, sb);
+    if (route === "run") {
+      // The cron carries X-Cron-Secret; an organizer carries their JWT.
+      let user: string | null = null;
+      if (req.headers.get("x-cron-secret")) {
+        const authErr = requireCronSecret(req);
+        if (authErr) return authErr;
+      } else {
+        user = await caller(req);
+        if (!user) return json({ error: "unauthorized" }, 401);
+      }
+      const orgId = body.org_id === undefined || body.org_id === null ? null : String(body.org_id);
+      if (orgId !== null && !UUID.test(orgId)) return json({ error: "bad org_id" }, 400);
+      if (user && !orgId) return json({ error: "org_id is required" }, 400);
+      const one = body.transfer_id === undefined ? null : String(body.transfer_id);
+      if (one !== null && (!UUID.test(one) || !user)) return json({ error: "bad transfer_id" }, 400);
+      return await runCommissions(orgId, user, one, stripe, sb);
+    }
+    if (route === "ct-cancel") {
+      const user = await caller(req);
+      if (!user) return json({ error: "unauthorized" }, 401);
+      const id = String(body.transfer_id ?? "");
+      if (!UUID.test(id)) return json({ error: "transfer_id is required" }, 400);
+      return await cancelCt(id, user, stripe, sb);
+    }
     if (route === "send" || route === "cancel") {
       const user = await caller(req);
       if (!user) return json({ error: "unauthorized" }, 401);
@@ -318,6 +366,168 @@ async function cancel(payoutId: string, user: string, stripe: Stripe, sb: Supaba
     return json({ status: "cancelled", returned_cents: ret.amount_cents });
   } catch (e) {
     return await stop(`Stripe: ${stripeErrorText(e)}. Cancel again to finish.`);
+  }
+}
+
+// --- Commission methods: Exos-made transfers --------------------------------
+// One row = one Stripe transfer with key exos-ct:<id>. Claim (lease token),
+// re-check the lease right before the Stripe call, mark the outcome durably;
+// a retry after a crash reconciles first (transfer_group + metadata
+// exos_ct_id), so a transfer is never made twice.
+
+async function runCommissions(orgId: string | null, user: string | null, one: string | null, stripe: Stripe, sb: SupabaseClient) {
+  const started = Date.now();
+  const out = { planned: 0, charges: 0, sent: 0, dry_run: 0, failed: 0, skipped: 0, results: [] as unknown[] };
+  if (user) {
+    // An organizer runs their own org only (the claim re-checks per transfer).
+    const { data: m } = await sb.from("exos_org_memberships").select("role").eq("org_id", orgId!).eq("user_id", user)
+      .in("role", ["owner", "manager"]).not("disabled", "is", true).maybeSingle();
+    if (!m) return json({ error: "not_found" }, 404);
+  }
+  if (!one) {
+    const { data: plan, error: pErr } = await sb.rpc("exos_commission_plan_due", { p_org_id: orgId, p_limit: 25 });
+    if (pErr) throw pErr;
+    const p = plan as { planned?: number; needs_charge?: { session_id: string; payment_intent: string }[] } | null;
+    out.planned = p?.planned ?? 0;
+    // Split orders whose charge id the webhook didn't record yet: read it.
+    for (const n of p?.needs_charge ?? []) {
+      if (Date.now() - started > RUN_BUDGET_MS / 4) break;
+      try {
+        const pi = await stripe.paymentIntents.retrieve(n.payment_intent);
+        const ch = typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge?.id ?? null;
+        if (ch) {
+          const { data: ok } = await sb.rpc("exos_commission_record_charge", {
+            p_session_id: n.session_id, p_payment_intent: n.payment_intent, p_charge_id: ch,
+          });
+          if (ok === true) out.charges++;
+        }
+      } catch (e) {
+        console.error("exos-promoter-payouts: charge lookup failed", n.session_id, stripeErrorText(e));
+      }
+    }
+  }
+  let ids: string[] = [];
+  if (one) ids = [one];
+  else {
+    const { data: due, error: dErr } = await sb.rpc("exos_ct_due", { p_org_id: orgId, p_limit: RUN_MAX_TRANSFERS });
+    if (dErr) throw dErr;
+    ids = ((due ?? []) as unknown[]).map((x) => String(typeof x === "object" && x !== null ? Object.values(x)[0] : x));
+  }
+  for (const id of ids.slice(0, RUN_MAX_TRANSFERS)) {
+    // Each send is bounded on its own; stop starting new ones near the budget.
+    if (Date.now() - started > RUN_BUDGET_MS) { out.skipped++; continue; }
+    const r = await sendCt(id, user, stripe, sb);
+    out.results.push({ id, ...r });
+    if (r.status === "sent") out.sent++;
+    else if (r.status === "dry_run") out.dry_run++;
+    else if (r.status === "failed") out.failed++;
+    else out.skipped++;
+  }
+  return json(out);
+}
+
+async function ctClaim(sb: SupabaseClient, id: string, user: string | null, purpose: "send" | "reconcile" | "cancel"): Promise<CtClaimAnswer> {
+  const { data, error } = await sb.rpc("exos_ct_claim", { p_id: id, p_purpose: purpose, p_user: user });
+  if (error) throw error;
+  return data as CtClaimAnswer;
+}
+
+// Look Stripe up for this row (under a reconcile or cancel lease).
+async function ctReconcile(c: CtClaim, stripe: Stripe, sb: SupabaseClient): Promise<"sent" | "reconciled"> {
+  const list = await stripe.transfers.list({ transfer_group: c.transfer_group, limit: 100 });
+  const found = ctReconcileDecision(c, list.data.map((t) => ({
+    id: t.id, destination: typeof t.destination === "string" ? t.destination : t.destination?.id ?? null,
+    metadata: (t.metadata ?? {}) as Record<string, string>,
+  })));
+  const { data, error } = await sb.rpc("exos_ct_reconcile", { p_id: c.id, p_lease_token: c.lease_token, p_transfer_id: found });
+  if (error) throw error;
+  return data as "sent" | "reconciled";
+}
+
+async function ctMark(
+  sb: SupabaseClient, id: string, status: "sent" | "dry_run" | "failed",
+  transferId: string | null = null, err: string | null = null, leaseToken: string | null = null,
+): Promise<boolean> {
+  const { data, error } = await sb.rpc("exos_ct_mark", {
+    p_id: id, p_status: status, p_transfer_id: transferId, p_error: err, p_lease_token: leaseToken,
+  });
+  if (error) console.error("exos-promoter-payouts: ct mark failed", id, status, redactError(error));
+  return !error && data === true;
+}
+
+async function sendCt(id: string, user: string | null, stripe: Stripe, sb: SupabaseClient): Promise<{ status: string; error?: string; transfer_id?: string }> {
+  try {
+    let a = await ctClaim(sb, id, user, "send");
+    let act = ctClaimAction(a);
+    if (act === "reconcile_first") {
+      const r = await ctClaim(sb, id, user, "reconcile");
+      const ra = ctClaimAction(r);
+      if (typeof ra === "object") return { status: "skipped", error: ra.stop };
+      if ((await ctReconcile(r as Extract<CtClaimAnswer, { ok: true }>, stripe, sb)) === "sent") return { status: "sent" };
+      a = await ctClaim(sb, id, user, "send");
+      act = ctClaimAction(a);
+    }
+    if (typeof act === "object") return { status: "skipped", error: act.stop };
+    if (act !== "proceed") return { status: "skipped", error: "needs_reconcile" };
+    const c = a as Extract<CtClaimAnswer, { ok: true }>;
+    const claimedAt = Date.now();
+    const plan = ctTransferParams(c);
+    if ("error" in plan) {
+      await ctMark(sb, id, "failed", null, plan.error, c.lease_token);
+      return { status: "failed", error: plan.error };
+    }
+    if (!ctLive(c.kind, commissionEnv((k) => Deno.env.get(k)))) {
+      await ctMark(sb, id, "dry_run", null, null, c.lease_token);
+      return { status: "dry_run" };
+    }
+    // Fence: the lease must still be ours, with time left for the call.
+    const { data: held } = await sb.rpc("exos_ct_lease_ok", { p_id: id, p_lease_token: c.lease_token });
+    if (!mayCallStripe(Date.now() - claimedAt) || held !== true) {
+      return { status: "skipped", error: "taken over (cancelled or timed out); nothing was sent" };
+    }
+    try {
+      const tr = await stripe.transfers.create(plan.params, { idempotencyKey: ctTransferKey(id) });
+      // The transfer exists at Stripe: 'sent' must stick. If it can't be
+      // written, leave 'sending'; the next run reconciles first.
+      if (!(await durably(() => ctMark(sb, id, "sent", tr.id)))) {
+        console.error("exos-promoter-payouts: ct sent not recorded", id, tr.id);
+        return { status: "sending", transfer_id: tr.id, error: "sent at Stripe, not recorded yet" };
+      }
+      return { status: "sent", transfer_id: tr.id };
+    } catch (e) {
+      // It may or may not have reached Stripe: the next send reconciles first.
+      const msg = stripeErrorText(e);
+      await ctMark(sb, id, "failed", null, msg, c.lease_token);
+      return { status: "failed", error: msg };
+    }
+  } catch (e) {
+    console.error("exos-promoter-payouts: ct send failed", id, redactError(e));
+    return { status: "skipped", error: "something went wrong" };
+  }
+}
+
+async function cancelCt(id: string, user: string, stripe: Stripe, sb: SupabaseClient) {
+  const a = await ctClaim(sb, id, user, "cancel");
+  const act = ctClaimAction(a);
+  if (typeof act === "object") return json({ error: act.stop }, act.stop === "not_found" ? 404 : 409);
+  const c = a as Extract<CtClaimAnswer, { ok: true }>;
+  const stop = async (msg: string, status = 502) => {
+    await sb.rpc("exos_ct_lease_release", { p_id: id, p_lease_token: c.lease_token });
+    return json({ status: "not_cancelled", error: msg }, status);
+  };
+  try {
+    if (act === "reconcile_first" && (await ctReconcile(c, stripe, sb)) === "sent") {
+      return json({ status: "sent", error: "Stripe had already sent this transfer; it stays paid." }, 409);
+    }
+    const done = await durably(async () => {
+      const { data: ok, error } = await sb.rpc("exos_ct_cancel", { p_id: id, p_lease_token: c.lease_token });
+      if (error) throw error;
+      return ok === true;
+    });
+    if (!done) return await stop("Couldn't cancel it. Try again.", 409);
+    return json({ status: "cancelled" });
+  } catch (e) {
+    return await stop(`Stripe: ${stripeErrorText(e)}. Try again.`);
   }
 }
 

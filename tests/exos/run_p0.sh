@@ -159,7 +159,8 @@ for m in \
          20261104120000_exos_sim_door_fixes \
          20261104130000_exos_sim_partner_fixes \
          20261104150000_exos_posh_link_channel \
-         20261104180000_exos_org_access; do
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -359,7 +360,8 @@ for m in \
          20261104120000_exos_sim_door_fixes \
          20261104130000_exos_sim_partner_fixes \
          20261104150000_exos_posh_link_channel \
-         20261104180000_exos_org_access; do
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -437,3 +439,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_partner.sq
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_link_channel.sql"
 # Org API permissions, venue requests, partner presale (mig 20261104180000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_access.sql"
+# claude/exos-commission-methods: four ways to fund promoter commissions (mig 20261104190000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
