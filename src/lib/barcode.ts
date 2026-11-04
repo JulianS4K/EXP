@@ -165,12 +165,20 @@ export interface VerifyResult {
  * "secret" segment for legacy barcodes because there's no integrity
  * guarantee on it — a fresh implementation would have used HMAC.
  */
+/** A reader that lower-cases ("t-…", "w-…"): the prefix in upper case, as the
+ *  server reads it (exos_check_in_ticket compares it case-insensitively). The
+ *  rest of the code is case-sensitive and left alone. */
+export function normalizeCodePrefix(payload: string): string {
+  return typeof payload === 'string' && /^[tw]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
+}
+
 export async function verifyBarcode(
-  payload: string,
+  rawPayload: string,
   /** The door's keys for the ticket, or (holder-side tools, tests) its secret. */
   keys: DoorKeys | string | null,
   options: { now?: number } = {},
 ): Promise<VerifyResult> {
+  const payload = normalizeCodePrefix(rawPayload);
   // Wallet pass codes (W-…, Apple static / Google TOTP; docs/wallet.md). The
   // signature is checked here; the server also requires the pass to be live
   // at that epoch (a voided / reissued pass is refused there).
@@ -253,7 +261,8 @@ export async function verifyBarcode(
  */
 export function extractTicketIdFromAny(payload: string): string | null {
   if (!payload || typeof payload !== 'string') return null;
-  const trimmed = payload.startsWith('T-') || payload.startsWith('W-') ? payload.slice(2) : payload;
+  const p = normalizeCodePrefix(payload);
+  const trimmed = p.startsWith('T-') || p.startsWith('W-') ? p.slice(2) : p;
   const id = trimmed.split(':')[0];
   return id || null;
 }

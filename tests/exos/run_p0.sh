@@ -153,7 +153,8 @@ for m in \
          20261102130000_exos_templates_inbound \
          20261102140000_exos_order_edits_recs \
          20261102150000_exos_promoter_wedge \
-         20261102160000_exos_gaps_integration; do
+         20261102160000_exos_gaps_integration \
+         20261104120000_exos_sim_door_fixes; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -214,6 +215,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_pa
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_calendar_feeds.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_scaffold.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
+# Mistake simulations (door staff and scanner phones; mig 20261104120000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_door.sql"
 # Replay: every pending migration again, in order, must be a no-op.
 for m in \
          20260924215000_exos_fulfill_all_or_nothing \
@@ -341,7 +344,8 @@ for m in \
          20261102130000_exos_templates_inbound \
          20261102140000_exos_order_edits_recs \
          20261102150000_exos_promoter_wedge \
-         20261102160000_exos_gaps_integration; do
+         20261102160000_exos_gaps_integration \
+         20261104120000_exos_sim_door_fixes; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

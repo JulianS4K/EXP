@@ -35,7 +35,7 @@
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
 
-import { extractTicketIdFromAny } from '../barcode';
+import { extractTicketIdFromAny, normalizeCodePrefix } from '../barcode';
 import {
   effectiveDirection,
   listAdmitsTier,
@@ -65,7 +65,7 @@ export interface ParsedDoorCode {
 /** A camera read is never a bare override: a scanned bare id is a forgery
  *  downgrade and fails the signature check. */
 export function parseDoorCode(raw: string, source: DoorSource): ParsedDoorCode {
-  const v = (raw || '').trim();
+  const v = normalizeCodePrefix((raw || '').trim());
   const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.includes(':');
   const id = v ? extractTicketIdFromAny(v) || v : null;
   // Ticket ids are UUIDs: anything over 128 chars can't be one.
@@ -169,7 +169,9 @@ export type DoorRejectReason =
   /** Re-entry list: the last scan on it was an entry (no exit since). */
   | 'already-inside'
   /** An exit where the list doesn't allow re-entry (or there is no list). */
-  | 'exit-not-allowed';
+  | 'exit-not-allowed'
+  /** An exit for a ticket that was never admitted. */
+  | 'not-inside';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -280,6 +282,12 @@ function decideOnSavedList(
   if (direction === 'exit') {
     // Exits aren't held by the doors time; in the test window nothing counts.
     if (testWindow) return { action: 'admit', ticketId, test: true, queue: false, ...named, direction: 'exit' };
+    // Never admitted (as far as this device knows): an exit would let them in
+    // without using the ticket (a phone left in Exit mode). The server
+    // refuses it too (mig 20261104120000).
+    if (!entry.used && !Object.values(entry.lists ?? {}).includes('entry')) {
+      return { action: 'reject', ticketId, reason: 'not-inside' };
+    }
     return { action: 'admit', ticketId, test: false, queue: true, ...named, direction: 'exit' };
   }
   if (entry.pendingTransferId && !(byName && entry.parked)) return { action: 'reject', ticketId, reason: 'in-transfer' };

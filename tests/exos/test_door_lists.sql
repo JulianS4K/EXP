@@ -396,10 +396,16 @@ BEGIN
   PERFORM pg_temp.act('d1000000-0000-0000-0000-0000000000a4');   -- assigned to e2 only
   r := pg_temp.scan('c1001', 'aa01');
   ASSERT r ->> 'reason' = 'not-assigned', 'L7: not assigned, got ' || r::text;
-  r := public.exos_check_in_offline('d1000000-0000-0000-0000-0000000f0201', pg_temp.tk('c3001'),
-         'd1000000-0000-0000-0000-0000000000e1', now() - interval '5 minutes', NULL, 'camera', NULL, 'Door X',
-         'd1000000-0000-0000-0000-00000000aa01', 'entry');
-  ASSERT r ->> 'reason' = 'not-assigned' AND NOT (r ? 'forced'), 'L7: offline not assigned, got ' || r::text;
+  -- Since mig 20261104120000 an upload by a scanner not on the event is an
+  -- auth error (42501, the phone keeps the scan for a manager), not an answer.
+  BEGIN
+    r := public.exos_check_in_offline('d1000000-0000-0000-0000-0000000f0201', pg_temp.tk('c3001'),
+           'd1000000-0000-0000-0000-0000000000e1', now() - interval '5 minutes', NULL, 'camera', NULL, 'Door X',
+           'd1000000-0000-0000-0000-00000000aa01', 'entry');
+    ASSERT r ->> 'reason' = 'not-assigned' AND NOT (r ? 'forced'), 'L7: offline not assigned, got ' || r::text;
+  EXCEPTION WHEN insufficient_privilege THEN
+    ASSERT SQLERRM LIKE '%not assigned%', 'L7: offline not assigned, got ' || SQLERRM;
+  END;
   ASSERT (SELECT count(*) FROM public.exos_event_checkins WHERE ticket_id = pg_temp.tk('c3001')) = 1,
          'L7: no forced row for an unassigned scanner';
   ASSERT public._exos_record_forced_checkin(pg_temp.tk('c3001'), 'd1000000-0000-0000-0000-0000000000e1', NULL,

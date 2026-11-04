@@ -30,6 +30,7 @@ import {
 } from '../lib/guestLists';
 import {
   guestCheckIn,
+  guestUndoArrival,
   loadPendingArrivals,
   savePendingArrivals,
   type DoorExtras,
@@ -51,6 +52,7 @@ export default function GuestListDoor({
   syncing,
   incomingCode,
   onIncomingHandled,
+  canUndo = false,
 }: {
   eventId: string;
   isOffline: boolean;
@@ -63,6 +65,8 @@ export default function GuestListDoor({
   /** A code read by the ticket scanner that belongs to an imported guest. */
   incomingCode?: { text: string; at: number } | null;
   onIncomingHandled?: () => void;
+  /** Owner / manager: may undo an arrival (wrong person checked in). */
+  canUndo?: boolean;
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
@@ -102,6 +106,24 @@ export default function GuestListDoor({
   // (even if the component re-rendered or unmounted mid-loop), so a flap in
   // the middle of a replay can't leave the queue stuck until a reload. Scans
   // that couldn't reach the server retry on a timer.
+  // Undo an arrival (the wrong "Sam Lee"): online, owner / manager, with a reason.
+  const undoArrival = async (g: GuestEntry) => {
+    const reason = typeof window !== 'undefined' ? window.prompt(`Undo ${g.guestName}'s check-in? Reason:`, 'wrong guest') : null;
+    if (!reason || reason.trim().length < 3) return;
+    try {
+      const r = await withDeadline(() => guestUndoArrival(eventId, g.id, reason.trim()));
+      if (r.ok) {
+        patchGuest(g.id, (e) => ({ ...e, arrived: r.arrived ?? 0, arrivedAt: (r.arrived ?? 0) > 0 ? e.arrivedAt : null }));
+        setFlash({ id: g.id, text: 'Check-in undone.', ok: true });
+      } else {
+        setFlash({ id: g.id, text: r.reason === 'needs-manager' ? 'Only an owner or manager can undo a check-in.' : `Not undone (${r.reason}).`, ok: false });
+      }
+    } catch (err) {
+      console.error('guest undo failed', err);
+      setFlash({ id: g.id, text: 'Could not undo right now. Try again when online.', ok: false });
+    }
+  };
+
   const replayingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -420,6 +442,15 @@ export default function GuestListDoor({
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 shrink-0">
                     <Users className="w-3.5 h-3.5" /> {headsIn(g)}/{partySize(g)}
                   </span>
+                  {canUndo && !isOffline && g.arrived > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void undoArrival(g)}
+                      className="text-[10px] font-black text-slate-500 hover:text-slate-900 uppercase tracking-widest shrink-0"
+                    >
+                      Undo
+                    </button>
+                  )}
                   {g.elsewhere && !g.voided && (
                     <span
                       className="text-[10px] font-black text-sky-700 uppercase tracking-widest shrink-0"
