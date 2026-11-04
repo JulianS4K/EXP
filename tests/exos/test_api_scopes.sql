@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Partner API scopes (mig 20261027090000). Self-contained (a5 prefix), rolled back.
---   S1 vocabulary: 15 scopes, the same list as _shared/api/scopes.ts
+--   S1 vocabulary: 16 scopes, the same list as _shared/api/scopes.ts
 --   S2 create with scopes: cleaned (deduped, vocabulary order); unknown and
 --      empty lists refused
 --   S3 the old (org, name) form still makes a `read` key
@@ -34,12 +34,16 @@ DECLARE
   i       int;
 BEGIN
   -- S1
-  IF cardinality(public.exos_api_scope_names()) <> 15
+  -- 18 since the build-phase integration (mig 20261101000000): + refunds:write
+  -- (mig 20261031110000) and fans:read / fans:write (mig 20261031120000).
+  IF cardinality(public.exos_api_scope_names()) <> 18
      OR (public.exos_api_scope_names())[1] <> 'events:read'
-     OR (public.exos_api_scope_names())[15] <> 'org:admin' THEN
+     OR (public.exos_api_scope_names())[4] <> 'refunds:write'
+     OR (public.exos_api_scope_names())[5] <> 'fans:read'
+     OR (public.exos_api_scope_names())[18] <> 'org:admin' THEN
     RAISE EXCEPTION 'S1 FAIL: %', public.exos_api_scope_names();
   END IF;
-  RAISE NOTICE 'S1 ok: 15 scopes';
+  RAISE NOTICE 'S1 ok: % scopes', cardinality(public.exos_api_scope_names());
 
   -- S2
   PERFORM set_config('app.uid', 'a5000000-0000-0000-0000-0000000000a1', true);

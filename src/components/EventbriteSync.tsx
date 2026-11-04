@@ -2,14 +2,22 @@
 // (mig 20261013100000). New buyers show up at the door within a couple of
 // minutes and refunded tickets stop working. Eventbrite is only read: no
 // check-ins go back to it.
+//
+// Connecting (mig 20261029140000): "Connect Eventbrite" signs in on
+// Eventbrite (exos-eventbrite-oauth) when this server has the OAuth app
+// configured, and comes back here (?eventbrite=pick) with the event list
+// open. The pasted private token stays: it is the only way when OAuth isn't
+// configured, and a fallback under "Use a private token instead" when it is.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link2, Loader2, RefreshCw, Unlink } from 'lucide-react';
 import EventbriteInventory from './EventbriteInventory';
 import {
-  connectEventbrite, disconnectEventbrite, fetchEventbriteStatus, linkEventbrite, listEventbriteEvents,
-  syncEventbrite, syncSummaryText, unlinkEventbrite, type EventbriteEventChoice, type EventbriteStatus,
+  connectEventbrite, disconnectEventbrite, eventbriteOAuthAvailable, fetchEventbriteStatus, linkEventbrite,
+  listEventbriteEvents, startEventbriteConnect, syncEventbrite, syncSummaryText, unlinkEventbrite,
+  type EventbriteEventChoice, type EventbriteStatus,
 } from '../lib/door/eventbrite';
+import { eventbriteErrorMessage, wantsEventbritePick } from '../lib/eventbriteConnect';
 
 const TOKEN_HELP = 'https://www.eventbrite.com/platform/api-keys';
 
@@ -28,6 +36,16 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const [oauth, setOauth] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  /** Opened from "Connect Eventbrite" (?eventbrite=pick): list the events once. */
+  const autoPick = useRef(typeof window !== 'undefined' && wantsEventbritePick(window.location.search));
+
+  useEffect(() => {
+    let live = true;
+    void eventbriteOAuthAvailable().then((v) => { if (live) setOauth(v); });
+    return () => { live = false; };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +79,32 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
     }
   };
 
+  const showEvents = () => run('events', async () => {
+    const list = await listEventbriteEvents(orgId);
+    setChoices(list);
+    setPick(list[0]?.id ?? '');
+    return list.length === 0 ? 'No upcoming events on this Eventbrite account.' : undefined;
+  });
+
+  // Back from "Connect Eventbrite": open the event list once.
+  useEffect(() => {
+    if (!autoPick.current || !status?.connected || status.link || !status.canManage || choices !== null) return;
+    autoPick.current = false;
+    void showEvents();
+    // eslint-disable-next-line
+  }, [status]);
+
+  const connectWithEventbrite = async () => {
+    setBusy('oauth');
+    setNote(null);
+    try {
+      window.location.assign(await startEventbriteConnect(orgId, eventId));
+    } catch (err: any) {
+      setNote({ text: eventbriteErrorMessage(err?.reason ?? 'unknown'), ok: false });
+      setBusy(null);
+    }
+  };
+
   if (status === undefined) {
     return <p className="text-xs text-slate-400 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Checking Eventbrite…</p>;
   }
@@ -85,7 +129,25 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
         <p className="text-xs text-slate-600">Ask an owner or manager to connect Eventbrite.</p>
       )}
 
-      {!status.connected && status.canManage && (
+      {!status.connected && status.canManage && oauth && (
+        <div className="space-y-2">
+          <button type="button" disabled={busy !== null} onClick={() => void connectWithEventbrite()}
+            className={`${btn} bg-slate-900 text-white`}>
+            {busy === 'oauth' && <Loader2 className="w-3 h-3 animate-spin" />} Connect Eventbrite
+          </button>
+          <p className="text-[11px] text-slate-500">
+            You sign in on Eventbrite and allow Exos, then come back here to pick the event. Exos only reads your
+            events and attendees.
+          </p>
+          {!showToken && (
+            <button type="button" onClick={() => setShowToken(true)} className="text-[11px] text-slate-400 underline">
+              Use a private token instead
+            </button>
+          )}
+        </div>
+      )}
+
+      {!status.connected && status.canManage && (!oauth || showToken) && (
         <form
           className="space-y-2"
           onSubmit={(e) => {
@@ -113,8 +175,9 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
             <a href={TOKEN_HELP} target="_blank" rel="noreferrer noopener" className="underline">private token</a>.
             It is stored encrypted and only used to read your attendee list.
           </p>
-          <button type="submit" disabled={busy !== null || token.trim().length < 8} className={`${btn} bg-slate-900 text-white`}>
-            {busy === 'connect' && <Loader2 className="w-3 h-3 animate-spin" />} Connect Eventbrite
+          <button type="submit" disabled={busy !== null || token.trim().length < 8}
+            className={`${btn} ${oauth ? 'border border-slate-200 text-slate-700' : 'bg-slate-900 text-white'}`}>
+            {busy === 'connect' && <Loader2 className="w-3 h-3 animate-spin" />} {oauth ? 'Connect with the token' : 'Connect Eventbrite'}
           </button>
         </form>
       )}
@@ -127,12 +190,7 @@ export default function EventbriteSync({ eventId, orgId, onSynced }: { eventId: 
           </p>
           {status.canManage && (choices === null ? (
             <button type="button" disabled={busy !== null}
-              onClick={() => void run('events', async () => {
-                const list = await listEventbriteEvents(orgId);
-                setChoices(list);
-                setPick(list[0]?.id ?? '');
-                return list.length === 0 ? 'No upcoming events on this Eventbrite account.' : undefined;
-              })}
+              onClick={() => void showEvents()}
               className={`${btn} border border-slate-200 text-slate-700`}>
               {busy === 'events' && <Loader2 className="w-3 h-3 animate-spin" />} Show my Eventbrite events
             </button>

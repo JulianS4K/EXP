@@ -1,0 +1,71 @@
+{
+  "file": "event-delete",
+  "name": "Events: delete",
+  "order": 15.5,
+  "description": "Deleting an event outright, for drafts that never sold. Anything with orders, tickets, reservations or payments must be cancelled instead (cancelling keeps the record and tells ticket holders); a published event is unpublished first (POST /v1/events/:id/unpublish). Needs `events:write`, and the key's creator must be an owner or manager.",
+  "endpoints": [
+    {
+      "id": "delete-event",
+      "method": "DELETE",
+      "path": "/v1/events/:id",
+      "summary": "Delete a draft event",
+      "description": "Deletes the event with its ticket types, schedule, notes and settings. 409 when it is published or has any order, ticket, reservation, payment or invoice: cancel it instead.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "Published, or something was sold.",
+          "example": {
+            "error": "The event has orders, tickets or payments (tickets): cancel it instead"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key's creator isn't an owner or manager now.",
+          "example": {
+            "error": "only a key created by an owner or manager can make or delete events"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

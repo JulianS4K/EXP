@@ -25,6 +25,7 @@ import {
   type SourceDimension,
   type SourceSessionRow,
 } from '../lib/sourceReport';
+import { listSalesCounts, type SalesCountRow } from '../lib/salesCounts';
 
 const PAGE = 1000;
 const BASE_COLS = 'session_id, status, quantity, amount_cents, currency, promoter_id, attribution';
@@ -71,12 +72,18 @@ const DIMENSIONS: { key: SourceDimension; label: string }[] = [
 export default function SourcesPanel({ event, canView }: { event: Event; canView: boolean }) {
   const [data, setData] = useState<{ rows: SourceSessionRow[]; hasAdIds: boolean } | null>(null);
   const [dim, setDim] = useState<SourceDimension>('all');
+  // Tickets sold on other platforms (mig 20261030120000): listed under the
+  // table, not counted in it (they aren't Exos orders and have no UTM data).
+  const [elsewhere, setElsewhere] = useState<SalesCountRow[]>([]);
 
   useEffect(() => {
     if (!canView) return undefined;
     let cancelled = false;
     void getEventSourceSessions(event.id).then((d) => {
       if (!cancelled) setData(d);
+    });
+    void listSalesCounts(event.id).then((r) => {
+      if (!cancelled) setElsewhere(r ?? []);
     });
     return () => {
       cancelled = true;
@@ -164,6 +171,20 @@ export default function SourcesPanel({ event, canView }: { event: Event; canView
               </tr>
             </tfoot>
           </table>
+        </div>
+      )}
+
+      {elsewhere.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Sold on other platforms (not in the table)</p>
+          <ul className="text-sm space-y-1">
+            {elsewhere.map((r) => (
+              <li key={r.id} className="flex justify-between gap-4">
+                <span className="text-slate-700">{r.label}</span>
+                <span className="tabular-nums text-slate-500">{r.sold} tickets · {formatCents(r.gross_cents, r.currency)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

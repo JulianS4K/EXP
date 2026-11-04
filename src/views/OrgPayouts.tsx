@@ -5,7 +5,8 @@
 // orders it covers and any clawbacks. Owner / manager / finance (RLS on
 // exos_org_payouts / _lines enforces it); a CSV export per line. Below them,
 // the org's chargebacks on Exos checkout orders (DisputesPanel, mig
-// 20261001101000).
+// 20261001101000). Above them, the owner's "get paid now" (Stripe Instant
+// Payouts, InstantPayoutPanel, mig 20261102150000).
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -16,6 +17,7 @@ import { formatCents } from '../lib/refunds';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import { getOrgPayouts } from '../lib/settlementApi';
 import DisputesPanel from '../components/DisputesPanel';
+import InstantPayoutPanel from '../components/InstantPayoutPanel';
 import {
   canSeeMoney,
   groupPayouts,
@@ -100,6 +102,10 @@ export default function OrgPayouts() {
           This page lists what Exos pays you for <strong>marketplace</strong> sales, after the marketplace pays us.
           A cancelled order that was already paid is taken off a later payout (a clawback).
         </p>
+
+        {/* Stripe Instant Payouts from the org's own Stripe balance (owner only;
+            hidden unless EXOS_INSTANT_PAYOUTS is on; mig 20261102150000). */}
+        {orgId && <InstantPayoutPanel orgId={orgId} isOwner={entry?.membership.role === 'owner'} />}
 
         {payouts === undefined ? (
           <p className="text-slate-400 text-sm">Loading…</p>

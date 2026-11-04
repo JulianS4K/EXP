@@ -27,6 +27,7 @@ import { listOrgEvents } from '../lib/events';
 import ScannerEventScope, { type ScopeEvent } from '../components/ScannerEventScope';
 import { queueEmail } from '../lib/mail';
 import { OrgMembership, OrgRole } from '../types';
+import PendingApprovalsPanel from '../components/PendingApprovalsPanel';
 
 const ROLE_OPTIONS: OrgRole[] = ['manager', 'finance', 'content', 'scanner'];
 
@@ -280,9 +281,14 @@ export default function OrgMembers() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-3 uppercase tracking-widest">
-              We email them a link; whoever accepts it first joins (any account) and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
+              We email them a link; whoever accepts it first (any account) joins, or waits for your approval when "Approve new members" is on, and you're emailed who it was. Invite expires in 14 days. Ownership transfer requires admin tooling.
             </p>
           </div>
+        )}
+
+        {/* Accepted invites waiting for approval (mig 20261104200000): owners and managers. */}
+        {orgId && (isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+          <PendingApprovalsPanel orgId={orgId} viewerRole={(activeRole as OrgRole | null) ?? null} onChange={refresh} />
         )}
 
         {/* Roster */}
@@ -384,14 +390,16 @@ export default function OrgMembers() {
                             </span>
                           </td>
                           <td className="px-6 py-4">
-                            {m.disabled ? (
+                            {m.status === 'pending_approval' ? (
+                              <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">◔ Waiting for approval</span>
+                            ) : m.disabled ? (
                               <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">● Disabled</span>
                             ) : (
                               <span className="text-[10px] font-bold text-green-600 uppercase tracking-widest">● Active</span>
                             )}
                           </td>
                           <td className="px-6 py-4">
-                            {canManage && !isOwner ? (
+                            {canManage && !isOwner && m.status !== 'pending_approval' ? (
                               <div className="flex items-center justify-end gap-2">
                                 <select
                                   value={m.role}

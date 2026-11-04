@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import TicketSeats from '../components/seating/TicketSeats';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Ticket, Event, Transfer } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +19,7 @@ import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
 import MyCalendarFeed from '../components/MyCalendarFeed';
+import MyRefundAsks from '../components/MyRefundAsks';
 import WalletButtons, { useAvailableWallets } from '../components/WalletButtons';
 import { walletEligible } from '../lib/walletButtons';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
@@ -310,6 +312,9 @@ export default function MyTickets() {
           </div>
         )}
 
+        {/* Refund requests the buyer made from a ticket page (mig 20261031120000). */}
+        <MyRefundAsks className="mb-16" />
+
         {/* Date changed: refund or give back, until the organizer's deadline. */}
         {offers.length > 0 && (
           <section className="mb-16" aria-labelledby="date-changes-title">
@@ -425,6 +430,23 @@ export default function MyTickets() {
                         RECEIPTS
                       </button>
                     </div>
+                    {(() => {
+                      // Split with friends: an order of 2+ tickets this buyer
+                      // paid for through checkout (mig 20261031220000).
+                      const counts = new Map<string, number>();
+                      for (const tk of eventTickets) {
+                        if (tk.orderId && /^(cs|pp)_/.test(tk.orderId)) counts.set(tk.orderId, (counts.get(tk.orderId) ?? 0) + 1);
+                      }
+                      const order = [...counts].find(([, n]) => n >= 2)?.[0];
+                      return order ? (
+                        <Link
+                          to={`/split/${encodeURIComponent(order)}`}
+                          className="disp block text-center mt-3 border border-white/20 text-white/60 py-3 text-base tracking-wide hover:border-white hover:text-white transition-colors"
+                        >
+                          SPLIT WITH FRIENDS
+                        </Link>
+                      ) : null;
+                    })()}
                     <TicketWallets tickets={eventTickets} viewerId={user.uid} />
                   </div>
 
@@ -510,6 +532,7 @@ export default function MyTickets() {
                              {firstTicket.tierName || 'GENERAL'} <span className="type text-white/60 text-xs ml-2 normal-case tracking-normal">× {tickets.length}</span>
                           </h4>
                           <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">{firstTicket.purchaseDate ? format(firstTicket.purchaseDate.toDate(), 'PPP p') : 'N/A'}</p>
+                          <TicketSeats ticketIds={tickets.map((tk) => tk.id)} className="text-white/80 mt-1" />
                           {invoice && (
                             <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-1">
                               {formatDocNumber(invoice.number)} · {formatCents(invoice.totalCents, invoice.currency)}

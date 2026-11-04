@@ -4,6 +4,7 @@ import { Settings } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import DeleteAccountPanel from '../components/DeleteAccountPanel';
 import AccountSecurityPanel from '../components/AccountSecurityPanel';
+import DeveloperTokensPanel from '../components/DeveloperTokensPanel';
 
 export default function Profile() {
   const { user } = useAuth();
@@ -78,6 +79,9 @@ export default function Profile() {
             </div>
 
             <AccountSecurityPanel />
+
+            {/* Personal access tokens and connected apps (mig 20261031130500). */}
+            <DeveloperTokensPanel />
 
           </div>
 

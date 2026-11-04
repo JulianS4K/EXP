@@ -1,0 +1,618 @@
+{
+ "file": "series",
+ "name": "Series, collections and timed entry",
+ "order": 15,
+ "description": "Recurring series (each date is an ordinary event), collections (public pages grouping events) and timed entry (ticket types sold by date and time slot, with a capacity per slot). Read only, like the rest of the API: organizers create and change them in the dashboard. Public pages read the same data without a key through the published-only functions listed in docs/series-timed-entry.md.",
+ "endpoints": [
+  {
+   "id": "list-series",
+   "method": "GET",
+   "path": "/v1/series",
+   "summary": "List event series",
+   "description": "The organization's recurring series, newest first. Each date of a series is an ordinary event (see Events); `template_event_id` is the event the series copies, and `rule` the recurrence the dashboard expands into dates.",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "status",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only series in this status.",
+     "enum": [
+      "active",
+      "archived",
+      "cancelled"
+     ],
+     "example": "active"
+    },
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 50,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "6c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+        "name": "Jazz Fridays",
+        "kind": "recurring",
+        "status": "active",
+        "description": "Live jazz every Friday.",
+        "image_url": "https://cdn.example.com/jazz.png",
+        "template_event_id": "9a0c7d3b-1e5f-4a2b-8c6d-0f1e2d3c4b5a",
+        "timezone": "America/New_York",
+        "rule": {
+         "freq": "weekly",
+         "interval": 1,
+         "weekdays": [
+          5
+         ],
+         "startDate": "2026-11-06",
+         "count": 12,
+         "time": "20:00",
+         "exceptions": [
+          "2026-11-27"
+         ],
+         "overrides": {}
+        },
+        "created_at": "2026-10-30T15:02:11.410+00:00",
+        "updated_at": "2026-10-30T15:10:40.002+00:00",
+        "cancelled_at": null
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "Bad status, page or per_page.",
+     "example": {
+      "error": "status must be active, archived or cancelled."
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-series",
+   "method": "GET",
+   "path": "/v1/series/:id",
+   "summary": "Get an event series",
+   "description": "One series with `summary_stats` (dates in the series, cancelled dates, tickets sold, gross of fulfilled orders in cents, average share of capacity sold over dates with a capacity) and `schedule`: every date the series generated, cancelled, skipped or had removed, in date order (first 500; page through `/v1/series/:id/dates` for more). `occ_date` and `occ_time` are wall clock in the series' timezone.",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series's id. One of another organization answers 404.",
+     "example": "6c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "6c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+       "name": "Jazz Fridays",
+       "kind": "recurring",
+       "status": "active",
+       "description": "Live jazz every Friday.",
+       "image_url": "https://cdn.example.com/jazz.png",
+       "template_event_id": "9a0c7d3b-1e5f-4a2b-8c6d-0f1e2d3c4b5a",
+       "timezone": "America/New_York",
+       "rule": {
+        "freq": "weekly",
+        "interval": 1,
+        "weekdays": [
+         5
+        ],
+        "startDate": "2026-11-06",
+        "count": 12,
+        "time": "20:00",
+        "exceptions": [
+         "2026-11-27"
+        ],
+        "overrides": {}
+       },
+       "created_at": "2026-10-30T15:02:11.410+00:00",
+       "updated_at": "2026-10-30T15:10:40.002+00:00",
+       "cancelled_at": null,
+       "summary_stats": {
+        "events_in_series": 2,
+        "events_cancelled": 0,
+        "tickets_sold": 143,
+        "gross_cents": 286000,
+        "average_capacity_sold": 0.477
+       },
+       "schedule": [
+        {
+         "occ_date": "2026-11-06",
+         "occ_time": "20:00:00",
+         "starts_at": "2026-11-07T01:00:00+00:00",
+         "event_id": "9a0c7d3b-1e5f-4a2b-8c6d-0f1e2d3c4b5a",
+         "status": "generated"
+        },
+        {
+         "occ_date": "2026-11-13",
+         "occ_time": "20:00:00",
+         "starts_at": "2026-11-14T01:00:00+00:00",
+         "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+         "status": "generated"
+        },
+        {
+         "occ_date": "2026-11-20",
+         "occ_time": "20:00:00",
+         "starts_at": "2026-11-21T01:00:00+00:00",
+         "event_id": null,
+         "status": "skipped"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such series in the key's organization (or the id is malformed).",
+     "example": {
+      "error": "series not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-series-dates",
+   "method": "GET",
+   "path": "/v1/series/:id/dates",
+   "summary": "List a series' dates",
+   "description": "The series' schedule, paged, in date order. `status` is `generated` (a date with its event), `cancelled` (its event was cancelled), `skipped` (cancelled before an event was made; never generated) or `removed` (the show was detached and sells on its own).",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series's id. One of another organization answers 404.",
+     "example": "6c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"
+    },
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 50,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "occ_date": "2026-11-06",
+        "occ_time": "20:00:00",
+        "starts_at": "2026-11-07T01:00:00+00:00",
+        "event_id": "9a0c7d3b-1e5f-4a2b-8c6d-0f1e2d3c4b5a",
+        "status": "generated"
+       },
+       {
+        "occ_date": "2026-11-13",
+        "occ_time": "20:00:00",
+        "starts_at": "2026-11-14T01:00:00+00:00",
+        "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+        "status": "generated"
+       },
+       {
+        "occ_date": "2026-11-20",
+        "occ_time": "20:00:00",
+        "starts_at": "2026-11-21T01:00:00+00:00",
+        "event_id": null,
+        "status": "skipped"
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 3,
+       "total_pages": 1
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such series in the key's organization (or the id is malformed).",
+     "example": {
+      "error": "series not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-collections",
+   "method": "GET",
+   "path": "/v1/collections",
+   "summary": "List collections",
+   "description": "The organization's collections: public pages that group events, at `/c/<org slug>/<slug>` once `published`. `mode` `manual` lists `event_ids` (up to 100); `rule` matches the org's events by `rule_kind` (`series` id, `artist`, `venue` or `tag`, case-insensitive) on every read.",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "default": 50,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "7e8f9a0b-1c2d-4e3f-a4b5-c6d7e8f90a1b",
+        "name": "Winter season",
+        "slug": "winter",
+        "description": "Every show at the Blue Room this winter.",
+        "image_url": null,
+        "mode": "rule",
+        "event_ids": [],
+        "rule_kind": "venue",
+        "rule_value": "Blue Room",
+        "published": true,
+        "sort_order": 0,
+        "created_at": "2026-10-30T15:20:00.000+00:00",
+        "updated_at": "2026-10-30T15:20:00.000+00:00"
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-collection",
+   "method": "GET",
+   "path": "/v1/collections/:id",
+   "summary": "Get a collection",
+   "description": "One collection with its `events` resolved now (manual list or rule), every status, soonest first. The public page shows only the upcoming published ones.",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The collection's id. One of another organization answers 404.",
+     "example": "7e8f9a0b-1c2d-4e3f-a4b5-c6d7e8f90a1b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "7e8f9a0b-1c2d-4e3f-a4b5-c6d7e8f90a1b",
+       "name": "Winter season",
+       "slug": "winter",
+       "description": "Every show at the Blue Room this winter.",
+       "image_url": null,
+       "mode": "rule",
+       "event_ids": [],
+       "rule_kind": "venue",
+       "rule_value": "Blue Room",
+       "published": true,
+       "sort_order": 0,
+       "created_at": "2026-10-30T15:20:00.000+00:00",
+       "updated_at": "2026-10-30T15:20:00.000+00:00",
+       "events": [
+        {
+         "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+         "name": "Warehouse Night",
+         "slug": "warehouse-night",
+         "status": "published",
+         "starts_at": "2026-12-05T03:00:00+00:00",
+         "currency": "USD",
+         "tickets_sold": 57,
+         "total_tickets": 400,
+         "created_at": "2026-10-01T15:12:09.120+00:00"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such collection in the key's organization (or the id is malformed).",
+     "example": {
+      "error": "collection not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-timed-entry",
+   "method": "GET",
+   "path": "/v1/events/:id/timed-entry",
+   "summary": "Get an event's timed-entry settings",
+   "description": "Which ticket types sell a date and time slot, the slot length, places per slot (all timed types together) and optional per-type caps, the entry window (`entry_window_minutes` after the start, null = until the slot ends; `early_entry_minutes` before it), opening hours per weekday (`'0'` = Sunday), the dates sold and closed dates. Slot ids are the wall-clock start, `YYYYMMDDTHHMM`, in the event's timezone.",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event's id. One of another organization answers 404.",
+     "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+       "tier_ids": [
+        "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712"
+       ],
+       "slot_minutes": 30,
+       "capacity": 40,
+       "tier_capacity": {
+        "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712": 30
+       },
+       "entry_window_minutes": 15,
+       "early_entry_minutes": 10,
+       "hours": {
+        "2": [
+         {
+          "open": "10:00",
+          "close": "17:00"
+         }
+        ],
+        "6": [
+         {
+          "open": "09:00",
+          "close": "13:00"
+         },
+         {
+          "open": "14:00",
+          "close": "18:00"
+         }
+        ]
+       },
+       "start_date": "2026-11-03",
+       "end_date": "2027-02-28",
+       "closed_dates": [
+        "2026-12-25"
+       ],
+       "version": 1793370000000,
+       "updated_at": "2026-10-30T15:30:00.000+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such event in the key's organization, or it isn't timed.",
+     "example": {
+      "error": "this event has no timed entry"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-slots",
+   "method": "GET",
+   "path": "/v1/events/:id/slots",
+   "summary": "List an event's time slots",
+   "description": "The slot report: every scheduled slot between `from` and `to` (default yesterday to 30 days on, at most 62 days) plus any slot with tickets, with capacity (`custom` when staff changed it), closed, sold, live holds, checked in, gross of active tickets and sales per ticket type.",
+   "auth": "api_key",
+   "scope": "tickets:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event's id. One of another organization answers 404.",
+     "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+    },
+    {
+     "name": "from",
+     "location": "query",
+     "type": "string (date)",
+     "required": false,
+     "description": "First date (YYYY-MM-DD, event timezone).",
+     "example": "2026-11-14"
+    },
+    {
+     "name": "to",
+     "location": "query",
+     "type": "string (date)",
+     "required": false,
+     "description": "Last date (YYYY-MM-DD); at most 61 days after `from`.",
+     "example": "2026-11-15"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "slot_id": "20261114T1030",
+        "slot_date": "2026-11-14",
+        "slot_time": "10:30",
+        "starts_at": "2026-11-14T15:30:00+00:00",
+        "capacity": 40,
+        "custom": false,
+        "closed": false,
+        "sold": 31,
+        "held": 2,
+        "checked_in": 12,
+        "gross": 465.0,
+        "tier_sold": {
+         "b4e2d3c5-6a7f-4081-9ba2-c3d4e5f60712": 31
+        }
+       }
+      ]
+     }
+    },
+    {
+     "status": 400,
+     "description": "A bad date.",
+     "example": {
+      "error": "from must be a date (YYYY-MM-DD)."
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks tickets:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such event in the key's organization (or the id is malformed).",
+     "example": {
+      "error": "event not found"
+     }
+    }
+   ]
+  }
+ ]
+}

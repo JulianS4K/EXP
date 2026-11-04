@@ -2,7 +2,7 @@
   "file": "webhooks",
   "name": "Webhooks",
   "order": 40,
-  "description": "The organization's webhook endpoints. Needs `webhooks:read`. Endpoints are added and removed in Org settings; the signing secret is never returned here.",
+  "description": "The organization's webhook endpoints. Needs `webhooks:read`. Endpoints are added and removed in Org settings; the signing secret is never returned here. Booking events: hold.created and hold.updated carry `data.hold` (as GET /v1/holds/:id answers it); a hold whose level moved because another hold changed gets hold.updated with `data.reason` = `level_changed`; hold.converted adds `data.position_id` and `data.event` (id, name, status, starts_at, timezone, venue_name, total_tickets).",
   "endpoints": [
     {
       "id": "list-webhooks",

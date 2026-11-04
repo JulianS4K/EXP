@@ -13,6 +13,7 @@ import { formatInTz } from '../lib/datetime';
 import { publicUrl } from '../lib/utils';
 import { useEmbedHost, useEmbedResize } from '../hooks/useEmbedResize';
 import { upcomingForEmbed, groupByMonth } from '../lib/embedWidgets';
+import { getPublicLineups, lineupLine, type LineupSlot } from '../lib/artists';
 
 export default function EmbedOrg() {
   const { slug } = useParams();
@@ -24,6 +25,8 @@ export default function EmbedOrg() {
   const [org, setOrg] = useState<Organization | null>(null);
   const [events, setEvents] = useState<Event[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // Lineups (mig 20261030110000): one read for the whole list; names only.
+  const [lineups, setLineups] = useState<Record<string, LineupSlot[]>>({});
 
   useEffect(() => {
     let alive = true;
@@ -32,7 +35,10 @@ export default function EmbedOrg() {
         const o = slug ? await getPublicOrgBySlug(slug) : null;
         if (!o) throw new Error('not found');
         const list = await listPublicEventsForOrg(o.id);
-        if (alive) { setOrg(o); setEvents(upcomingForEmbed(list)); }
+        const upcoming = upcomingForEmbed(list);
+        if (alive) { setOrg(o); setEvents(upcoming); }
+        const l = await getPublicLineups(upcoming.map((e) => e.id));
+        if (alive) setLineups(l);
       } catch {
         if (alive) setFailed(true);
       }
@@ -48,6 +54,11 @@ export default function EmbedOrg() {
           {e.date ? formatInTz(e.date.toDate(), e.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}
           {e.location ? ` · ${e.location}` : ''}
         </p>
+        {(lineups[e.id]?.length || e.performers?.length) ? (
+          <p data-testid="embed-org-lineup" className="type text-[11px] text-white/80 truncate">
+            {lineups[e.id]?.length ? lineupLine(lineups[e.id]) : (e.performers ?? []).slice(0, 4).join(', ')}
+          </p>
+        ) : null}
       </div>
       {e.ticketBackend && e.ticketBackend !== 'exos' && e.externalTicketUrl ? (
         <a href={e.externalTicketUrl} target="_blank" rel="noopener noreferrer"

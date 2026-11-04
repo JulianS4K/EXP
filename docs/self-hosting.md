@@ -38,11 +38,16 @@ supabase functions deploy <name> --project-ref <ref>               # most functi
 supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the table
 ```
 
-`--no-verify-jwt` (they check auth themselves, or are called by Stripe / cron / public feeds):
-`stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-conversions-drain`, `exos-distribute`,
-`exos-channel-sync`, `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-integrations`, `exos-mail-drain`,
-`exos-marketplace-sales`, `exos-mcp`, `exos-oauth-google`, `exos-payouts`, `exos-reconcile-checkouts`, `exos-reconcile-stripe`,
-`exos-s4k-feed`, `exos-sms-drain`, `exos-wallet`, `exos-webhook-drain`. The rest keep JWT verification.
+`--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
+public feeds): `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
+`exos-commerce`, `exos-conversions-drain`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
+`exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
+`exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,
+`exos-payouts`, `exos-paypal`, `exos-posh-webhook`, `exos-promoter-payouts`, `exos-reconcile-checkouts`,
+`exos-reconcile-stripe`, `exos-rsvp`, `exos-s4k-feed`, `exos-signup`, `exos-sms-drain`, `exos-sms-relay`,
+`exos-wallet`, `exos-webhook-drain`. Only `exos-checkout`, `exos-refund`, `exos-connect-onboard`, `exos-pos` and
+`exos-geocode` keep JWT verification: the `VERIFY_JWT` list in `scripts/rollout-prod.sh`, which deploys
+everything else with `--no-verify-jwt`.
 
 ## 3. Secrets (Project settings → Edge functions → Secrets)
 
@@ -57,14 +62,16 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 | `RESEND_API_KEY`, `EXOS_MAIL_FROM` | ticket / transfer / refund mail | without them the mail drain answers 500 and nothing sends |
 | `GOOGLE_MAPS_SERVER_KEY` | geocoding | optional |
 | `EXOS_GUEST_IP_SALT` | guest checkout | any long random string |
+| `EXOS_EVENTBRITE_CLIENT_ID`, `EXOS_EVENTBRITE_CLIENT_SECRET` | "Connect Eventbrite" (OAuth) | your Eventbrite app's API key and client secret (`docs/eventbrite-app.md`). Unset: the button is hidden and organizers paste a private token. Optional `EXOS_EVENTBRITE_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-eventbrite-oauth/callback`) |
 | `EXOS_EVENTBRITE_WRITES` | Eventbrite capacity sync + event mirroring | `on` to allow; each org also switches it on |
+| `EXOS_OAUTH_ISSUER`, `EXOS_OAUTH_DCR` | `exos-oauth`, `exos-mcp` (docs/developer-platform.md) | issuer defaults to `<SUPABASE_URL>/functions/v1/exos-oauth`; dynamic client registration stays off unless `EXOS_OAUTH_DCR=on` |
 | `EXOS_LUMA_ENABLED` | Luma at all | `on` to let Exos call Luma's API (needs the organizer's Luma Plus). Off: Luma is plugged in but never called |
 | `EXOS_LUMA_WRITES` | Luma event mirroring + capacity + comps | `on` to allow; each org also switches it on |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
-Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite). They're stored in
+Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
 Vault (`exos_integration:<org>:<provider>`), read only by edge functions, never shown again.
 
 ## 4. The web app
@@ -115,7 +122,30 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 | `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events, Luma door sync) |
 | `exos-channel-sync-2min` | 2 min (odd) | `exos-channel-sync/cron` (Eventbrite / Luma mirrors, Luma's count) |
 | `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
+| `exos-event-import-check-15min` | 15 min (:07) | `exos-event-import/cron` (re-reads imported Eventbrite events: sold out, moved, cancelled). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-event-import-check-15min';` |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
+
+## Client IPs for rate limits
+
+Public forms (the booking-request form, `exos_inbound_submit`) rate limit
+per network, so the database needs the caller's real IP. It only trusts
+headers your proxy sets, chosen by one setting in `exos_platform_settings`
+(service role; `_exos_request_ip()`, docs/templates-inbound.md):
+
+| `request_ip_source` | Uses | Pick it when |
+|---|---|---|
+| `cloudflare` (default) | `cf-connecting-ip`, else the last `X-Forwarded-For` entry | Hosted Supabase, or your own stack behind Cloudflare (Cloudflare overwrites `cf-connecting-ip`) |
+| `xff_last` | only the last `X-Forwarded-For` entry | **Not behind Cloudflare.** Otherwise a client can send its own `cf-connecting-ip` and pick its bucket. Your reverse proxy (nginx, Kong, ...) must append the client address to `X-Forwarded-For` |
+
+```sql
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('request_ip_source', '"xff_last"')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+The first `X-Forwarded-For` entry is never used (the client writes it).
+IPv6 callers are limited per /64. Requests with no usable IP share one
+`unknown` bucket with the same caps, so a misconfigured proxy shows up as
+legitimate requests being limited together, never as no limit.
 
 ## Upstream rules (kept in code, not configuration)
 

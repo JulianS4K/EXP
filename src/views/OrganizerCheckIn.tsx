@@ -40,10 +40,12 @@ import {
   type QueuedScan,
 } from '../lib/offlineCheckins';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
+import { getSeatRoster } from '../lib/seatingApi';
 import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
+import { EventScheduleReadOnly } from '../components/booking/EventBookingPanels';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   getDoorExtras,
@@ -105,6 +107,9 @@ import {
   type RosterProtection,
 } from '../lib/door/roster';
 import { fetchDoorEvent, pingServer } from '../lib/door/api';
+// timed entry (mig 20261030150000): "Admit anyway" outside a slot's entry window.
+import { admitOutsideWindow } from '../lib/seriesTimedApi';
+import { entryWindowMessage } from '../lib/slots';
 
 // The cached roster holds every ticket's barcode secret, so it is dropped
 // 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
@@ -165,6 +170,7 @@ const REFUSAL_TEXT: Record<string, string> = {
   'wrong-list': "This ticket type isn't on this check-in list. Send them to the right door, or switch the list if this device covers it.",
   'invalid-time': "This check-in list isn't open right now (outside its hours).",
   'exit-not-allowed': "This list doesn't allow re-entry, so there's nothing to scan out. Switch to Entry.",
+  'not-inside': "This ticket hasn't been checked in, so it can't be scanned out. Switch to Entry to let them in.",
   'unknown-list': 'This check-in list no longer exists. Pick another list.',
   'already-inside': 'Already inside on this list. Scan them out first if they are leaving.',
   'name-needs-manager': 'Ask a manager. This event lets only owners and managers check people in by name.',
@@ -346,6 +352,27 @@ export default function OrganizerCheckIn() {
   const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
   const [extrasSyncing, setExtrasSyncing] = useState(false);
   const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+  // Reserved seating (mig 20261030140000): ticket id → seat label, cached on
+  // the device so the result card shows the seat offline too (labels only).
+  const [seatByTicket, setSeatByTicket] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!eventId) return undefined;
+    const key = `exos.door.seats.${eventId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) setSeatByTicket(JSON.parse(raw) as Record<string, string>);
+    } catch { /* storage blocked */ }
+    let live = true;
+    const pull = () => getSeatRoster(eventId).then((m) => {
+      if (!live || m.size === 0) return;
+      const next = Object.fromEntries(m);
+      setSeatByTicket(next);
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage full or blocked */ }
+    }).catch(() => undefined);
+    void pull();
+    const id = window.setInterval(() => void pull(), 60_000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [eventId]);
   // A door-only event (no Exos tickets, guests imported from another
   // platform) opens on the guest-list door.
   useEffect(() => {
@@ -997,6 +1024,24 @@ export default function OrganizerCheckIn() {
       return;
     }
     pushScan(ticketId, name, 'DENIED');
+    // timed entry (mig 20261030150000): outside the ticket's slot window.
+    // Nothing is written until staff decide; "Admit anyway" records the
+    // override and the next scan of this ticket checks them in.
+    if (result.reason === 'outside-entry-window') {
+      const w = result as CheckInResult & { window?: 'early' | 'late'; entry_from?: string; entry_until?: string };
+      const now = serverNow();
+      const msg = w.window && w.entry_from && w.entry_until
+        ? entryWindowMessage({ ok: false, window: w.window, from: Date.parse(w.entry_from), until: Date.parse(w.entry_until) }, now)
+        : 'Outside this ticket’s entry window.';
+      setStatus('invalid-barcode');
+      setInvalidReason(`Outside entry window. ${msg}.`);
+      if (eventId && window.confirm(`${name || 'This ticket'}: ${msg}.\n\nAdmit anyway?`)) {
+        void admitOutsideWindow(ticketId, eventId)
+          .then(() => setInvalidReason(`Admit anyway recorded for ${name || 'this ticket'}. Scan the ticket again to check them in.`))
+          .catch((e: unknown) => setInvalidReason(`Could not record the override: ${e instanceof Error ? e.message : String(e)}`));
+      }
+      return;
+    }
     if (result.reason === 'used' || result.reason === 'already-inside') {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });
@@ -1037,7 +1082,7 @@ export default function OrganizerCheckIn() {
     // Who may do what is not a problem with the ticket: not audited.
     if (
       result.reason === 'needs-manager' || result.reason === 'name-needs-manager' || result.reason === 'name-checkin-off' ||
-      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list'
+      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list' || result.reason === 'not-inside'
     ) return;
     const audit =
       result.reason === 'barcode-expired' ? 'expired-code'
@@ -1153,10 +1198,11 @@ export default function OrganizerCheckIn() {
       case 'wrong-list':
       case 'invalid-time':
       case 'exit-not-allowed':
+      case 'not-inside':
         setStatus('invalid-barcode');
         setInvalidReason(REFUSAL_TEXT[d.reason]);
         if (id) pushScan(id, ctx.name, 'DENIED');
-        if (canAudit && d.reason !== 'exit-not-allowed') {
+        if (canAudit && d.reason !== 'exit-not-allowed' && d.reason !== 'not-inside') {
           void writeScanReject('not-found', ctx.src, { ticketIdAttempted: id, reasonDetail: d.reason });
         }
         return;
@@ -1751,6 +1797,7 @@ export default function OrganizerCheckIn() {
           syncing={extrasSyncing}
           incomingCode={guestCode}
           onIncomingHandled={() => setGuestCode(null)}
+          canUndo={canOverride}
         />
       </div>
       ) : (
@@ -1959,6 +2006,12 @@ export default function OrganizerCheckIn() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
+                 {seatByTicket[foundTicket.id] && (
+                   <div className="p-4 bg-white rounded-2xl border border-green-50 text-left" data-testid="door-seat">
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
+                     <p className="font-bold text-slate-900">{seatByTicket[foundTicket.id]}</p>
+                   </div>
+                 )}
                  {tableByTicket[foundTicket.id] && (() => {
                    const tb = tableByTicket[foundTicket.id];
                    return (
@@ -2327,6 +2380,9 @@ export default function OrganizerCheckIn() {
 
           {/* Refused-scan audit — reads exos_scan_rejects (written by the
               scanner above on every refusal); polled, exportable. */}
+          {/* Day-of schedule (load in, doors, sets, curfew), read-only (mig 20261030100000). */}
+          {eventId && <EventScheduleReadOnly eventId={eventId} light />}
+
           {eventId && <ScanRejectAudit eventId={eventId} eventTitle={event.title} />}
         </div>
       </div>

@@ -150,6 +150,8 @@ export interface EventSummary {
   orgName?: string;
   // In person / online / hybrid (mig 20261005090000); in person when absent.
   format: AttendanceFormat;
+  // performer_names: the lineup's first 10 names once it has one (mig 20261030110000).
+  performers?: string[];
 }
 
 type Row = Record<string, unknown>;
@@ -177,6 +179,9 @@ export function eventSummary(event: Row | null | undefined, tiers: TierRow[], or
     currency,
     orgName: str(org?.name),
     format: parseAttendanceFormat(event.format),
+    performers: Array.isArray(event.performer_names)
+      ? event.performer_names.filter((n): n is string => typeof n === 'string' && !!n.trim()).map((n) => n.trim()).slice(0, 20)
+      : undefined,
   };
 }
 
@@ -241,6 +246,7 @@ export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: s
   const location = schemaLocation(s.format, place, canonicalUrl);
   if (location) ld.location = location;
   if (s.orgName) ld.organizer = { '@type': 'Organization', name: s.orgName };
+  if (s.performers?.length) ld.performer = s.performers.map((name) => ({ '@type': 'PerformingGroup', name }));
   if (s.fromCents !== null) {
     ld.offers = {
       '@type': 'Offer',
@@ -304,7 +310,7 @@ export type PublicReader = (
 export type PromoterReader = (orgSlug: string, code: string) => Promise<string | null>;
 
 const EVENT_COLS =
-  'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url';
+  'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url,performer_names';
 // Added by mig 20261005090000; read with a fallback until prod has it.
 const ONLINE_COLS = ',format,noindex';
 

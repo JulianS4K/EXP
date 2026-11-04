@@ -228,6 +228,37 @@ capped at a quarter of what's left for the event (at least 10 seats). Organizers
 **Guest checkout** in Edit event (`purchase_limits.guestCheckout = false`). Capacity-bypass codes and free claims
 still need an account. The embedded (venue-site iframe) checkout still signs in first.
 
+## Venmo / PayPal and Cash App Pay (mig 20261031220000)
+
+Operator approval 2026-10-30: PayPal is a second processor, to take Venmo. Its only writes are order create,
+capture and refund on the **platform's** PayPal account (`_shared/paypal/client.ts` refuses anything else).
+
+1. **Apply `20261031220000` first.** `exos-checkout` refuses a PayPal order it can't record with its processor.
+2. **Secrets:** `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (the sandbox app's first), `PAYPAL_WEBHOOK_ID`.
+   `EXOS_PAYPAL_ENV=live` (and the live app's keys) switches to live; anything else is sandbox. Optional:
+   `EXOS_PAYPAL_FEE_BPS` / `EXOS_PAYPAL_FEE_FIXED_CENTS` (default 349 / 49, PayPal's US rate, used in the fee
+   split exactly as Stripe's card fee is), `EXOS_PAYPAL_BRAND_NAME`.
+3. **Deploy** `exos-paypal` with `--no-verify-jwt` (PayPal can't send a JWT; the webhook signature, the order id
+   and `CRON_SECRET` are the gates) and redeploy `exos-checkout`, `exos-refund`, `exos-reconcile-checkouts` and
+   `exos-mail-drain` (PayPal dispute mails).
+4. **Webhook:** in the PayPal app, add `https://<project>.supabase.co/functions/v1/exos-paypal` with
+   `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `.PENDING`, `.DECLINED`, `.DENIED`, `.REFUNDED`,
+   `.REVERSED` and `CUSTOMER.DISPUTE.CREATED`, `.UPDATED`, `.RESOLVED`. Its id is `PAYPAL_WEBHOOK_ID`.
+5. **SPA:** build with `VITE_PAYPAL_CLIENT_ID` (the public client id, sandbox first). Organizers switch
+   "Venmo / PayPal" on in org settings; the event page then shows **Pay with Venmo / PayPal**.
+6. **Reconcile:** `{"action":"reconcile"}` to `exos-paypal` with the cron secret settles stuck PayPal orders,
+   refunds paid-but-unissued ones and returns a read-only report against PayPal's transactions. Not scheduled
+   (a cron change is operator-gated); run it daily next to `exos-reconcile-stripe`.
+
+**Paying organizers is not automated.** PayPal money stays on the platform's PayPal account.
+`exos_paypal_order_owed` / `exos_paypal_org_balances` say what each org is owed (net of the same fees as a card
+sale, net of refunds, held while a dispute is open, nothing once one is lost); the operator pays it out by hand
+and records it with `exos_record_paypal_remittance(org, cents, reference)`. The org sees the balance in org settings.
+
+**Cash App Pay** is a Stripe method: set `EXOS_STRIPE_CASHAPP=on` and the org switches it on; USD events then
+offer it next to cards on Stripe Checkout. It settles at once like a card, so `stripe-webhook`, holds, refunds
+and disputes work unchanged. Turn Cash App Pay on in the Stripe dashboard (Settings → Payment methods) too.
+
 ## Known gaps (see `KANBAN.md`)
 
 Fixed since this list was first written: redirect URLs are allow-listed (`EXOS_REDIRECT_ORIGINS`),

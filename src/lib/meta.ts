@@ -62,6 +62,9 @@ export interface SchemaEvent {
   // events point their VirtualLocation at `pageUrl` (the public page).
   format?: AttendanceFormat;
   pageUrl?: string;
+  // schema.org performers: the lineup (Spotify URL as sameAs) or the
+  // free-text names (lib/artists.ts jsonLdPerformers).
+  performers?: { '@type': 'PerformingGroup'; name: string; sameAs?: string }[];
 }
 
 export function applyMeta(input: MetaInput): void {
@@ -155,6 +158,7 @@ export function buildEventJsonLd(ev: SchemaEvent) {
   if (ev.endDate) out.endDate = ev.endDate;
   if (ev.image) out.image = ev.image;
   if (ev.description) out.description = ev.description;
+  if (ev.performers?.length) out.performer = ev.performers;
   if (ev.organizer) {
     out.organizer = {
       '@type': 'Organization',

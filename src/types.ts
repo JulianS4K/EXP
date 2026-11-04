@@ -126,6 +126,9 @@ export interface OrgMembership {
   // Soft-disable without revoking the doc. A disabled membership is
   // ignored by the rule helper but kept for audit history.
   disabled?: boolean;
+  // 'pending_approval': joined through an invite, waiting for an owner or
+  // manager to approve (disabled meanwhile; mig 20261104200000).
+  status?: 'pending_approval';
 }
 
 /**
@@ -364,8 +367,12 @@ export interface Event {
   noindex?: boolean;
   // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
   // organizer's own shop on another platform, linked from the buy button.
-  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma';
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh';
   externalTicketUrl?: string;
+  // Link-out (mig 20261029170500): listed by Exos, sold only on the
+  // organizer's own checkout. The source's status and display-only prices
+  // (exos_public_link_outs); undefined for every other event.
+  linkOut?: import('./lib/linkOut').PublicLinkOut;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

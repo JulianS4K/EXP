@@ -18,6 +18,8 @@ export interface WalletPayload {
     attendee_name: string | null;
     in_transfer: boolean;
     check_in_at: string | null;
+    /** Reserved seat (mig 20261030140000); null / absent for general admission. */
+    seat?: { section: string | null; row: string | null; number: string | null; label: string | null } | null;
   };
   event: {
     id: string;

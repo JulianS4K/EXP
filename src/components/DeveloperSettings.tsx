@@ -72,7 +72,7 @@ function ScopePicker({ value, onChange, idPrefix }: { value: readonly Scope[]; o
         ))}
       </div>
       <p className="text-[11px] text-white/40">
-        The API is read-only today; write scopes and the booking, finance and commerce scopes are for routes to come.
+        Writes exist for booking only (venues, holds, show schedules); the finance and commerce scopes are for routes to come.
       </p>
     </fieldset>
   );
@@ -196,7 +196,7 @@ export default function DeveloperSettings({ orgId, canEdit }: { orgId: string; c
           <span className="text-[11px] font-black uppercase tracking-widest">API keys</span>
         </div>
         <p className="text-white/40 text-xs">
-          Authenticate the read-only REST API with <code className="text-brand-primary">Authorization: Bearer &lt;key&gt;</code>.
+          Authenticate the REST API with <code className="text-brand-primary">Authorization: Bearer &lt;key&gt;</code>.
           Shown once at creation — store it safely. Give each key only the scopes its integration needs.{' '}
           <Link to="/developers" className="inline-flex items-center gap-1 text-brand-primary hover:underline">
             <BookOpen className="w-3 h-3" aria-hidden="true" /> API reference

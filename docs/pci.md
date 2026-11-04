@@ -1,6 +1,7 @@
 # PCI DSS: Exos is SAQ A
 
-Card data never touches Exos. Buyers type their card into Stripe's own pages, so Exos is a **SAQ A** merchant
+Card data never touches Exos. Buyers type their card into Stripe's own pages (or pay through PayPal / Venmo on
+PayPal's), so Exos is a **SAQ A** merchant
 (the shortest self-assessment, PCI DSS v4.0.1). This doc is what an RFP's "PCI compliance" line points to, and
 what keeps us eligible for SAQ A as the product grows.
 
@@ -10,6 +11,8 @@ what keeps us eligible for SAQ A as the product grows.
 |---|---|---|
 | Event page → **Stripe Checkout** (redirect to `checkout.stripe.com`) | Stripe-hosted page | SAQ A |
 | Venue embed (`/bridge/embed/event/:id`) → **Stripe Embedded Checkout** | Stripe's iframe on our page | SAQ A, as long as our page can't be tampered with (below) |
+| Event page → **Cash App Pay** (on Stripe Checkout, mig 20261031220000) | Stripe-hosted page, next to cards | SAQ A, same as cards |
+| Event page → **Pay with Venmo / PayPal** → `/bridge/pay/paypal` | PayPal's JS SDK buttons (PayPal / Venmo log-ins in PayPal's windows; card funding switched off) on a page of its own | No card data on our page. See "PayPal / Venmo" below |
 | Box office (`exos-pos`) | Cash and comp only; card is `501` (`docs/pos.md`) | Out of scope until Stripe Terminal is wired |
 
 - No Exos code, table, log or email holds a card number, CVC or expiry. Exos keeps Stripe ids
@@ -31,6 +34,27 @@ what keeps us eligible for SAQ A as the product grows.
 **Rule for new work:** never add a script, pixel, chat widget or analytics tag to `/bridge/embed/*` or any page
 that renders a Stripe card field. If a page ever needs Stripe Elements (card fields on our page), re-read this doc
 first: that's still SAQ A only with the same script lock-down.
+
+## PayPal / Venmo (operator approval 2026-10-30)
+
+PayPal is a second processor, added to take Venmo. **PayPal's JS SDK is never loaded on a page that has a Stripe
+card field**, and Stripe's is never loaded on the PayPal page:
+
+- The event page has no card field (Stripe Checkout is a redirect). Its "Pay with Venmo / PayPal" button does a
+  full page load to `/bridge/pay/paypal` (`src/views/PayPalCheckout.tsx`), so no script from the event page carries
+  over. The SDK is injected only there.
+- That path has its own CSP: `script-src 'self'` plus PayPal's and Venmo's hosts, no `js.stripe.com`, no pixels, no
+  Maps (`src/lib/hosting/headers.ts` `isPayPalPagePath`). Every other page's CSP leaves PayPal out, the embed (Stripe
+  Embedded Checkout) included. `headers.test.ts` pins both directions.
+- The venue embed (`/bridge/embed/*`) never offers PayPal (`exos-checkout` refuses `processor: 'paypal'` with
+  `ui_mode: 'embedded'`).
+- The SDK is loaded with `disable-funding=card,credit,paylater`: PayPal's own guest card form is off, so the only
+  ways to pay there are a PayPal or Venmo account, in PayPal's windows.
+- A redirect flow (`paypal_flow: 'redirect'`, PayPal's hosted approval page, back to `/bridge/pay/paypal/return`)
+  exists for browsers where the buttons won't render.
+- Payment confirmation comes from the capture call and PayPal's verified webhook (`exos-paypal`), not the browser.
+  Exos keeps PayPal ids (order, capture `ppcap_…`, refund `pprf_…`) and amounts only.
+- PayPal is a PCI DSS Level 1 service provider; add its AOC to the bid kit next to Stripe's.
 
 **Box office cards:** when Stripe Terminal is wired (`docs/pos.md`), use Stripe's readers only (card data stays
 in the reader). Re-check the SAQ type then (likely SAQ B-IP or a P2PE assessment) before taking a card.

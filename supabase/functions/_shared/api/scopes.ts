@@ -8,11 +8,13 @@
 //     column default). It covers every `:read` scope and nothing else, which is
 //     exactly what those keys could do.
 //   * A `:write` scope covers the `:read` scope of the same resource.
+//   * `refunds:write` (mig 20261031110000) is the only scope that can refund;
+//     no other scope implies it.
 //
 // The vocabulary is the same as the Firebase build's (PR #1, server/apiScopes.ts)
 // so keys can be narrowed now for areas whose routes arrive later (booking,
 // finance, commerce). The SQL side validates against the same list
-// (exos_api_scope_names(), mig 20261027090000); src/lib/apiScopes.test.ts
+// (exos_api_scope_names(), latest in mig 20261031110000); src/lib/apiScopes.test.ts
 // checks the two agree.
 //
 // Pure TypeScript with no Deno or Supabase imports, so vitest can import it.
@@ -21,6 +23,9 @@ export const SCOPES = [
   'events:read',
   'events:write',
   'orders:read',
+  'refunds:write',
+  'fans:read',
+  'fans:write',
   'tickets:read',
   'tickets:write',
   'checkin:write',
@@ -44,14 +49,17 @@ export const LEGACY_READ = 'read';
 export const SCOPE_INFO: Record<Scope, { label: string; description: string }> = {
   'events:read': { label: 'Read events', description: 'Events, ticket types, add-ons and promo codes.' },
   'events:write': { label: 'Manage events', description: 'Create and edit events, ticket types, add-ons and promo codes.' },
-  'orders:read': { label: 'Read orders', description: 'Orders with buyer email and amounts, invoices, refunds and the waitlist.' },
+  'orders:read': { label: 'Read orders', description: 'Orders with buyer email and amounts, invoices, refunds, refund requests and the waitlist.' },
+  'refunds:write': { label: 'Refund orders', description: 'Refund orders to the buyer\'s card (moves money; nothing else grants it).' },
+  'fans:read': { label: 'Read fans', description: 'Fan profiles (contact, order history, consent shown read-only), tags on fans and signup forms.' },
+  'fans:write': { label: 'Manage fans', description: 'Add, rename and remove fan contacts and tag fans. Never changes a fan\'s consent.' },
   'tickets:read': { label: 'Read tickets', description: 'Attendees (never the barcode secret), check-ins, check-in lists and guest lists.' },
   'tickets:write': { label: 'Manage tickets', description: 'Transfer tickets, add guest-list entries and comps.' },
   'checkin:write': { label: 'Check in', description: 'Check tickets in and out, and door settings.' },
   'booking:read': { label: 'Read booking', description: 'Venues, rooms, holds, offers and show schedules.' },
   'booking:write': { label: 'Manage booking', description: 'Create and change holds, offers, venues and show schedules.' },
-  'finance:read': { label: 'Read finance', description: 'Settlements, finance items, profit and loss, ticket counts.' },
-  'finance:write': { label: 'Manage finance', description: 'Finance items, settlement adjustments, ticket-count emails.' },
+  'finance:read': { label: 'Read finance', description: 'Settlements, finance items, profit and loss, tickets sold on other platforms.' },
+  'finance:write': { label: 'Manage finance', description: 'Record tickets sold on other platforms (manual counts and CSV imports), finance items, settlement adjustments.' },
   'commerce:read': { label: 'Read memberships and gift cards', description: 'Membership, pass, gift-card and giving products and records.' },
   'commerce:write': { label: 'Manage memberships and gift cards', description: 'Create and change those products and issue gift cards.' },
   'webhooks:read': { label: 'Read webhooks', description: 'Webhook endpoints and the event types they receive (never the signing secret).' },

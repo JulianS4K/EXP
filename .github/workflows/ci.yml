@@ -32,6 +32,16 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+      # The partner API reference (docs/api/*.json) against the route table,
+      # and the Opendate coverage table (docs/opendate-coverage.json) against
+      # both: every Opendate endpoint accounted for, every Exos route it names
+      # real and documented, docs/opendate-coverage.md current.
+      - name: API reference (api-spec --check)
+        run: node scripts/api-spec.mjs --check
+
+      - name: Opendate coverage
+        run: node scripts/check-opendate-coverage.mjs
+
       - name: Build (Vite)
         # Placeholder Supabase keys — the build succeeds without a live connection.
         env:
@@ -70,8 +80,8 @@ jobs:
           done
           exit $fail
 
-      - name: Deno tests (ssrf, ticket backends, sms)
-        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts
+      - name: Deno tests (ssrf, ticket backends, sms, posh)
+        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)

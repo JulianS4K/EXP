@@ -2,7 +2,7 @@
   "file": "orders",
   "name": "Orders and money",
   "order": 30,
-  "description": "Orders with buyer email and amounts, invoices, refunds and the waitlist. Every route here needs `orders:read`. Amounts ending in `_cents` are integers in the currency's minor unit; currencies are ISO 4217 codes.",
+  "description": "Orders with buyer email and amounts, invoices, refunds, refund requests and the waitlist. Every route here needs `orders:read`. Amounts ending in `_cents` are integers in the currency's minor unit; currencies are ISO 4217 codes.",
   "endpoints": [
     {
       "id": "list-orders",
@@ -419,6 +419,110 @@
           "description": "No such event in the key's organization (or the id is malformed).",
           "example": {
             "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-refund-requests",
+      "method": "GET",
+      "path": "/v1/refund-requests",
+      "summary": "List refund requests",
+      "description": "Buyers' requests for their money back, asked from the ticket page within the event's refund policy, newest first. Nothing is refunded until a staff member approves it in the dashboard, which runs the usual refund (Stripe, the ticket voided, the refund mail); `status` is then refunded. declined carries the note the buyer sees; withdrawn means the buyer took it back. Read-only here: deciding needs a signed-in staff member.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only requests in this status.",
+          "enum": [
+            "open",
+            "refunded",
+            "declined",
+            "withdrawn"
+          ],
+          "example": "open"
+        },
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only requests for this event.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "2d4f6b8c-0e2a-4d4f-9b6c-8e0a2c4e6a8b",
+                "ticket_id": "4e6a8c0d-1f3b-4e5a-8c7d-9f1b3d5f7b9c",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "event_name": "Late Show",
+                "starts_at": "2026-11-14T01:00:00+00:00",
+                "tier_name": "GA",
+                "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                "buyer_email": "dana@example.com",
+                "reason": "Can't make it",
+                "amount_cents": 3260,
+                "currency": "usd",
+                "status": "open",
+                "decline_note": null,
+                "created_at": "2026-10-20T09:30:00+00:00",
+                "decided_at": null,
+                "ticket_status": "active",
+                "checked_in": false
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter.",
+          "example": {
+            "error": "status must be open, refunded, declined or withdrawn."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
           }
         }
       ]
