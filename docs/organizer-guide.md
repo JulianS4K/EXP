@@ -150,8 +150,15 @@ tiers and discount codes, into a series of dates.
   - Set a default for the org, and change it for one event or one promoter (the promoter's choice wins, then the
     event's). Buyers pay the same price whichever you pick. Once an event has sold, its method is locked: a
     change applies only to future sales, and every sale keeps the method it was sold with.
-  - **Holdback**: a commission is payable a few days after the event ends (3 by default, 0 to 30), so refunds
-    can land first.
+  - **Holdback**: a commission is payable a few days after the event (3 by default, 0 to 30), so refunds
+    can land first. It's set when each ticket sells: moving the event earlier doesn't make anything payable
+    sooner. When Exos pays (inside the fee, split at sale) it's at least 3 days, and a commission can be at
+    most 30% of what you make on the ticket unless Exos approves more.
+  - **Refunds on split-at-sale orders** after your share was paid take your part back from that payout first.
+    If Exos can't take it back (for example it was already refunded), the refund is refused and tells you how
+    much can be refunded. Refunds made outside Exos are taken off your next split order; past a limit, split at
+    sale pauses for your org until it's settled. On orders with the commission inside the Exos fee, once the
+    promoter has been paid a refund keeps the Exos fee, and what the promoter owes back is yours.
   - **Refunds after a promoter was paid** are taken off their next commission, never pulled back from their
     account. If no new commission comes in for a while (30 days by default), the balance shows as overdue so you
     can sort it out with them. Each promoter's balance (held, payable by you, paid by Exos, on its way, paid,

@@ -19,12 +19,13 @@
 //                              in _shared/auto-refund.ts by default.
 
 //
-// Commission methods (mig 20261104190000): `charge` says how the order was
-// charged (exos_checkout_commission_plans; refundRun reads it). A split-at-
-// sale order sends neither Connect flag (the charge is the platform's; the
-// shares are trued up in SQL); an order whose fee carries a promoter
-// commission always refunds the fee in proportion. Default: as before.
-import { type ChargeModel, refundFlags } from "./payouts/commissionMethods.ts";
+// Commission methods (mig 20261104190000): `mode` is decided once per refund
+// request in SQL (exos_refund_charge_prepare; refundRun asks). Split orders
+// send neither Connect flag (the organizer's part was reversed from their
+// transfer first); a fee that still holds a promoter commission is always
+// refunded; once the commission went out the fee is kept (keep_fee). Default
+// 'standard': as before.
+import { type RefundMode, refundFlagsForMode } from "./payouts/commissionMethods.ts";
 
 export function organizerRefundIdempotencyKey(requestId: string): string {
   return `exos_refund_${requestId}`;
@@ -41,13 +42,13 @@ export interface ClaimedRequest {
 export function organizerRefundParams(
   req: ClaimedRequest,
   keepPlatformFee: boolean,
-  charge: { model: ChargeModel; commissionInFee: boolean } = { model: "destination", commissionInFee: false },
+  mode: RefundMode = "standard",
 ) {
   return {
     payment_intent: req.payment_intent,
     amount: req.amount_cents,
     reason: "requested_by_customer" as const,
-    ...refundFlags(charge.model, { keepPlatformFee, commissionInFee: charge.commissionInFee }),
+    ...refundFlagsForMode(mode, keepPlatformFee),
     metadata: {
       exos_refund_request_id: req.request_id,
       exos_session_id: req.session_id,

@@ -40,14 +40,14 @@ export const METHOD_INFO: Record<CommissionMethod, MethodInfo> = {
     label: 'Inside the Exos fee',
     short: 'The commission is added to the Exos fee on each order; Exos pays the promoter after the event.',
     how: 'Your Stripe dashboard shows a bigger application fee on these orders: it includes the promoter\'s commission, which Exos holds and transfers to them after the holdback. Refunds give the fee back in proportion.',
-    needs: ['Turned on for Exos (platform switch)', 'The promoter has a Stripe payout account'],
+    needs: ['Turned on for Exos (platform switch)', 'The promoter has a Stripe payout account', 'Commission at most 30% of your net per ticket (more needs Exos approval)'],
     paidBy: 'Exos',
   },
   split_at_sale: {
     label: 'Split at sale',
     short: 'The buyer\'s payment lands with Exos; after the event Exos pays your share and each promoter\'s commission from it.',
-    how: 'Each order is charged on the Exos account (separate charges and transfers). After the holdback Exos transfers your share and the promoter\'s commission from that order\'s charge. Exos handles disputes on these charges.',
-    needs: ['Turned on by the org owner and for Exos (platform switch)', 'Your Stripe account is an Express account', 'The promoter has a Stripe payout account'],
+    how: 'Each order is charged on the Exos account (separate charges and transfers). After the holdback Exos transfers your share and the promoter\'s commission from that order\'s charge. Exos handles disputes on these charges. A refund after your share was paid takes your part back from that payout first, and is refused if it can\'t.',
+    needs: ['Turned on by the org owner and for Exos (platform switch)', 'Your Stripe account is an Express account', 'The promoter has a Stripe payout account', 'Commission at most 30% of your net per ticket (more needs Exos approval)'],
     paidBy: 'Exos',
   },
 };
@@ -91,7 +91,7 @@ export interface PromoterBalance {
 
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : Number(v) || 0);
 
-export function normalizeBalances(raw: unknown): { promoters: PromoterBalance[]; organizer: { currency: string; owedToExosCents: number; since: string | null; overdue: boolean }[]; alertDays: number } {
+export function normalizeBalances(raw: unknown): { promoters: PromoterBalance[]; organizer: { currency: string; owedToExosCents: number; since: string | null; overdue: boolean; overCap: boolean }[]; alertDays: number } {
   const r = (raw ?? {}) as Record<string, any>;
   return {
     alertDays: n(r.netting_alert_days) || 30,
@@ -104,7 +104,7 @@ export function normalizeBalances(raw: unknown): { promoters: PromoterBalance[];
       nettingSince: p.netting_since ?? null, nettingOverdue: !!p.netting_overdue, balanceCents: n(p.balance_cents),
     })),
     organizer: (Array.isArray(r.organizer) ? r.organizer : []).map((o: any) => ({
-      currency: String(o.currency ?? 'usd'), owedToExosCents: n(o.owed_to_exos_cents), since: o.since ?? null, overdue: !!o.overdue,
+      currency: String(o.currency ?? 'usd'), owedToExosCents: n(o.owed_to_exos_cents), since: o.since ?? null, overdue: !!o.overdue, overCap: !!o.over_cap,
     })),
   };
 }

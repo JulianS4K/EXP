@@ -26,7 +26,7 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 
 export default function CommissionMethodsPanel({ orgId, canWrite, isOwner }: { orgId: string; canWrite: boolean; isOwner: boolean }) {
   const { toast } = useToast();
   const [s, setS] = useState<CommissionSettings | null>(null);
-  const [balances, setBalances] = useState<{ promoters: PromoterBalance[]; organizer: { currency: string; owedToExosCents: number; since: string | null; overdue: boolean }[]; transfers: CommissionTransferRow[] } | null>(null);
+  const [balances, setBalances] = useState<{ promoters: PromoterBalance[]; organizer: { currency: string; owedToExosCents: number; since: string | null; overdue: boolean; overCap: boolean }[]; transfers: CommissionTransferRow[] } | null>(null);
   const [method, setMethod] = useState<CommissionMethod>('manual');
   const [holdback, setHoldback] = useState('3');
   const [alertDays, setAlertDays] = useState('30');
@@ -100,7 +100,8 @@ export default function CommissionMethodsPanel({ orgId, canWrite, isOwner }: { o
           )}
         </div>
         <p className="text-[11px] text-white/50">
-          {holdbackText(parseHoldbackDays(holdback) ?? s.holdbackDays)} Applies to every method{s.configured ? '' : ' once you save'}.
+          {holdbackText(parseHoldbackDays(holdback) ?? s.holdbackDays)} Applies to every method{s.configured ? '' : ' once you save'}; for the
+          methods Exos pays, at least 3 days, counted from the event date when each ticket sold (moving the event earlier never makes anything payable sooner).
           A refund after a promoter was paid is taken off their next commission, never pulled back from their account.
         </p>
       </fieldset>
@@ -236,6 +237,7 @@ export default function CommissionMethodsPanel({ orgId, canWrite, isOwner }: { o
                 ? `You owe Exos ${money(o.owedToExosCents, o.currency)} for split-at-sale refunds after your share was paid; it comes off your next split order.`
                 : `Exos owes you ${money(-o.owedToExosCents, o.currency)}; it is added to your next split order.`}
               {o.overdue && ' Open for a while: contact Exos to settle it.'}
+              {o.overCap && ' Over the limit: no new split-at-sale orders or split payouts until it is settled.'}
             </p>
           ))}
           {balances.transfers.length > 0 && (

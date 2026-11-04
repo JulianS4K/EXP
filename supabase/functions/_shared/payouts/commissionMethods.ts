@@ -308,3 +308,70 @@ export function ctReconcileDecision(
 export const RUN_BUDGET_MS = 100_000;
 /** At most this many transfers per /run. */
 export const RUN_MAX_TRANSFERS = 10;
+
+// --- Organizer refunds of Exos-funded orders (exos_refund_charge_prepare) --
+
+/** How a refund is sent, decided once per refund request in SQL. */
+export type RefundMode = "standard" | "commission_fee" | "keep_fee" | "split" | "reverse";
+
+export interface RefundPrep {
+  mode: RefundMode | "busy" | "refuse";
+  error?: string;
+  reversal_id?: string;
+  org_transfer_id?: string;
+  amount_cents?: number;
+  status?: string;
+  stripe_reversal_id?: string | null;
+  recoverable_cents?: number;
+  max_refund_cents?: number;
+}
+
+/**
+ * The Connect flags for each mode.
+ *   standard        as before (reverse the transfer; the fee back unless kept)
+ *   commission_fee  a fee that still holds a promoter commission: always back
+ *   keep_fee        the commission already went out: the fee stays with Exos
+ *                   and the organizer bears the refund (like a clawback)
+ *   split / reverse a charge on the platform: no flags (the organizer's part
+ *                   was reversed from their transfer first, for 'reverse')
+ */
+export function refundFlagsForMode(mode: RefundMode, keepPlatformFee: boolean): { reverse_transfer?: true; refund_application_fee?: boolean } {
+  switch (mode) {
+    case "split":
+    case "reverse":
+      return {};
+    case "keep_fee":
+      return { reverse_transfer: true, refund_application_fee: false };
+    case "commission_fee":
+      return refundFlags("destination", { commissionInFee: true });
+    default:
+      return refundFlags("destination", { keepPlatformFee });
+  }
+}
+
+/** What refundRun does with a prepare answer. */
+export function refundPrepAction(p: RefundPrep | null):
+  | { action: "refund"; mode: RefundMode }
+  | { action: "reverse_then_refund"; reversalId: string; transferId: string; amountCents: number; taken: boolean }
+  | { action: "retry"; message: string }
+  | { action: "refuse"; message: string } {
+  if (!p) return { action: "retry", message: "Couldn't check how this order was paid; try again" };
+  if (p.mode === "busy") return { action: "retry", message: "Exos is paying out your share of this order right now; try again in about 10 minutes" };
+  if (p.mode === "refuse") return { action: "refuse", message: p.error || "Exos can't take back your share of this refund, so it was refused" };
+  if (p.mode === "reverse") {
+    if (!p.reversal_id || !/^tr_[A-Za-z0-9]{1,64}$/.test(p.org_transfer_id ?? "") || !(Number(p.amount_cents) > 0)) {
+      return { action: "retry", message: "The reversal isn't ready; try again" };
+    }
+    return { action: "reverse_then_refund", reversalId: p.reversal_id, transferId: p.org_transfer_id!, amountCents: Number(p.amount_cents), taken: p.status === "taken" };
+  }
+  return { action: "refund", mode: p.mode };
+}
+
+/** One key per reversal row (the refund request's), so a retry never takes twice. */
+export const splitReversalKey = (id: string) => `exos-ctr:${id}`;
+
+/** A reversal an earlier attempt already made on the organizer's transfer, if any. */
+export function findSplitReversal(id: string, reversals: { id: string; metadata?: Record<string, string> | null }[]): string | null {
+  const r = reversals.find((x) => x.metadata?.exos_split_reversal_id === id && /^trr_[A-Za-z0-9]{1,64}$/.test(x.id));
+  return r?.id ?? null;
+}

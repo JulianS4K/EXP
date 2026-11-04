@@ -75,6 +75,16 @@ SELECT public.exos_set_promoter_terms(current_setting('test.r')::uuid, 1000, 0);
 SELECT set_config('app.uid','',false);
 SELECT public.exos_record_promoter_stripe(current_setting('test.p')::uuid, 'acct_cmP', true, true, true);
 
+-- Time travel for one order: its sale was days ago (the frozen payable time
+-- is set once and the gate keeps it, so the gate is paused for the test).
+CREATE FUNCTION pg_temp.age(p_sid text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE public.exos_checkout_commission_plans SET payable_at = greatest(now() - interval '1 day', coalesce(event_starts_at, now() - interval '1 day'))
+   WHERE session_id = p_sid;
+  ALTER TABLE public.exos_promoter_commissions DISABLE TRIGGER exos_promoter_commissions_gate;
+  UPDATE public.exos_promoter_commissions SET payable_at = now() - interval '1 day' WHERE session_id = p_sid;
+  ALTER TABLE public.exos_promoter_commissions ENABLE TRIGGER exos_promoter_commissions_gate;
+END $$;
 -- An order the way exos-checkout + stripe-webhook leave it: session row,
 -- the commission plan (p_plan, from exos_commission_checkout_plan), fulfilment,
 -- the payment (charge id for split orders, a transfer id for destination ones).
@@ -89,6 +99,9 @@ BEGIN
     ASSERT public.exos_record_commission_plan(p_sid, p_plan), 'record plan ' || p_sid;
   END IF;
   PERFORM public.exos_fulfill_checkout(p_sid);
+  -- An order at an event that already happened stands for one sold a while
+  -- ago: its frozen payable time (sale + holdback) is in the past.
+  IF (SELECT starts_at FROM public.exos_events WHERE id = v_ev) < now() THEN PERFORM pg_temp.age(p_sid); END IF;
   INSERT INTO public.exos_order_payments(session_id,org_id,event_id,payment_intent,charge_id,amount_cents,currency,status,transfer_id)
   VALUES (p_sid, v_org, v_ev, 'pi_' || replace(p_sid, '-', ''), 'ch_' || replace(p_sid, '-', ''), p_qty * 2000, 'usd', 'succeeded',
           CASE WHEN v_split THEN NULL ELSE 'tr_' || replace(p_sid, '-', '') END);
@@ -380,7 +393,7 @@ BEGIN
   VALUES ('cm-s1',a,'re_cms1',2000,'usd','succeeded',true);
   ASSERT pg_temp.org_owed(a) = 1900, 'CM8: half refunded, tickets valid: organizer owes 3400 - (2000 - 100 - 400): ' || pg_temp.org_owed(a);
   PERFORM pg_temp.void1('cm-s1');
-  ASSERT pg_temp.org_owed(a) = 1700, 'CM8: one ticket voided: its commission goes back to the organizer side (1700)';
+  ASSERT pg_temp.org_owed(a) = 1900, 'CM8: one ticket voided: its paid commission stays reserved until P repays it (1900)';
   ASSERT (SELECT amount_cents FROM public.exos_commission_netting WHERE party = 'promoter' AND kind = 'clawback'
             AND promoter_id = current_setting('test.p')::uuid AND session_id = 'cm-s1') = -200,
          'CM8: the promoter owes 200 back (a negative line)';
@@ -388,11 +401,11 @@ BEGIN
          'CM8: owed to Exos, which paid it';
   -- Replaying the refund row changes nothing.
   UPDATE public.exos_order_refunds SET status = 'succeeded' WHERE refund_id = 're_cms1';
-  ASSERT pg_temp.org_owed(a) = 1700, 'CM8: true-up is idempotent';
-  -- The organizer's next split share (cm-s2: 6000 - 300 - 600 = 5100) nets the 1700.
+  ASSERT pg_temp.org_owed(a) = 1900, 'CM8: true-up is idempotent';
+  -- The organizer's next split share (cm-s2: 6000 - 300 - 600 = 5100) nets the 1900.
   r := public.exos_commission_plan_due(a);
   SELECT * INTO o FROM public.exos_commission_transfers WHERE session_id = 'cm-s2' AND kind = 'split_org';
-  ASSERT o.gross_cents = 5100 AND o.netted_cents = 1700 AND o.amount_cents = 3400, 'CM8: next share netted: ' || row_to_json(o)::text;
+  ASSERT o.gross_cents = 5100 AND o.netted_cents = 1900 AND o.amount_cents = 3200, 'CM8: next share netted: ' || row_to_json(o)::text;
   ASSERT pg_temp.org_owed(a) = 0, 'CM8: nothing owed after netting';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_commission_transfers WHERE session_id = 'cm-s2' AND kind = 'split_promoter'),
          'CM8: Q waits for a payout account';
@@ -406,17 +419,18 @@ BEGIN
            WHERE c.session_id = 'cm-s3'), 'CM8: P''s commission netted against the refund';
   ASSERT (SELECT applied_payout_id IS NOT NULL FROM public.exos_commission_netting WHERE party = 'promoter' AND session_id = 'cm-s1'),
          'CM8: the line is applied';
+  ASSERT pg_temp.org_owed(a) = -200, 'CM8: P repaid: the organizer is credited the 200 it had covered';
   -- A large organizer debt carries forward when a share can't cover it.
   INSERT INTO public.exos_order_refunds(session_id,org_id,refund_id,amount_cents,currency,status,is_partial)
   VALUES ('cm-s2',a,'re_cms2',6000,'usd','succeeded',false);
   v := pg_temp.org_owed(a);
-  ASSERT v = 5100, 'CM8: full refund after transfer: organizer owes its whole planned share: ' || v;
+  ASSERT v = 4900, 'CM8: full refund after transfer: organizer owes its whole planned share, less the credit: ' || v;
   PERFORM pg_temp.ord('cm-s7', d1, NULL, 1, 100, pg_temp.plan(d1, NULL, 1, 100, true, false));
   r := public.exos_commission_plan_due(a);
   SELECT * INTO o FROM public.exos_commission_transfers WHERE session_id = 'cm-s7' AND kind = 'split_org';
   ASSERT o.gross_cents = 1900 AND o.amount_cents = 0 AND o.status = 'netted', 'CM8: a share fully netted moves nothing';
-  ASSERT pg_temp.org_owed(a) = 3200, 'CM8: the rest (5100 - 1900) is carried forward';
-  ASSERT EXISTS (SELECT 1 FROM public.exos_commission_netting WHERE kind = 'carry' AND carried_from = o.id AND amount_cents = -3200),
+  ASSERT pg_temp.org_owed(a) = 3000, 'CM8: the rest (4900 - 1900) is carried forward';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_commission_netting WHERE kind = 'carry' AND carried_from = o.id AND amount_cents = -3000),
          'CM8: a carry line';
   RAISE NOTICE 'OK  CM8 refunds after transfer: true-up, negative lines, netting, carry';
 END $$;
@@ -514,7 +528,7 @@ BEGIN
   ASSERT (row->>'netting_owed_to_exos_cents')::int = 400 AND (row->>'netting_owed_to_you_cents')::int = 200
      AND (row->>'netting_overdue')::boolean, 'CM11: balances show both, overdue: ' || row::text;
   ASSERT jsonb_array_length(b->'transfers') >= 5, 'CM11: recent transfers listed';
-  ASSERT (SELECT (e->>'owed_to_exos_cents')::int FROM jsonb_array_elements(b->'organizer') e) = 3200, 'CM11: organizer balance owed';
+  ASSERT (SELECT (e->>'owed_to_exos_cents')::int FROM jsonb_array_elements(b->'organizer') e) = 3000, 'CM11: organizer balance owed';
   PERFORM set_config('app.uid','',false);
   RAISE NOTICE 'OK  CM11 netting per funder, balances, overdue';
 END $$;
@@ -536,6 +550,217 @@ BEGIN
   UPDATE public.exos_checkout_sessions SET dispute_status = 'lost' WHERE session_id = 'cm-s4';
   ASSERT pg_temp.org_owed(a) = before + 1700, 'CM12: a lost dispute: the organizer owes their whole share';
   RAISE NOTICE 'OK  CM12 late account, lost dispute';
+END $$;
+
+-- A claimed organizer refund request (what exos_refund_claim leaves).
+CREATE FUNCTION pg_temp.rq(p_sid text, p_amount integer) RETURNS uuid LANGUAGE sql AS $$
+  INSERT INTO public.exos_refund_requests(session_id, org_id, event_id, scope, amount_cents, currency, nonce, status, payment_intent)
+  SELECT session_id, org_id, event_id, 'tickets', p_amount, 'usd', 'cmnonce-' || gen_random_uuid(), 'claimed', 'pi_' || replace(session_id, '-', '')
+    FROM public.exos_checkout_sessions WHERE session_id = p_sid
+  RETURNING id
+$$;
+CREATE FUNCTION pg_temp.send(p_ct uuid, p_tr text) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE c jsonb;
+BEGIN
+  c := public.exos_ct_claim(p_ct, 'send');
+  ASSERT (c->>'ok')::boolean, 'send claim: ' || c::text;
+  ASSERT public.exos_ct_mark(p_ct, 'sent', p_tr), 'mark sent';
+END $$;
+
+-- CM15. The holdback is frozen at the sale: editing the event earlier never
+-- makes anything payable sooner; a reschedule later pushes it out; Exos-funded
+-- methods keep the platform minimum even when the org sets 0.
+DO $$
+DECLARE a uuid := '0d0d0000-0000-0000-0000-000000000001'; d2 uuid := '0d0d0000-0000-0000-0000-0000000000d2';
+        d1 uuid := '0d0d0000-0000-0000-0000-0000000000d1'; r jsonb; pa timestamptz; ok boolean := false;
+BEGIN
+  PERFORM pg_temp.ord('cm-z1', d2, 'cm-p', 1, 100, pg_temp.plan(d2, 'cm-p', 1, 100, true, false));
+  pa := (SELECT payable_at FROM public.exos_checkout_commission_plans WHERE session_id = 'cm-z1');
+  ASSERT pa > now() + interval '9 days', 'CM15: frozen at event start + 3 days';
+  -- The organizer moves the event into the past.
+  UPDATE public.exos_events SET starts_at = now() - interval '20 days', ends_at = now() - interval '19 days'
+   WHERE id = '0d0d0000-0000-0000-0000-0000000000e2';
+  r := public.exos_commission_plan_due(a);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_commission_transfers WHERE session_id = 'cm-z1'), 'CM15: nothing planned after moving the event earlier';
+  ASSERT (SELECT payable_at FROM public.exos_promoter_commissions WHERE session_id = 'cm-z1') > now() + interval '9 days', 'CM15: the accrual keeps its time';
+  PERFORM set_config('app.uid','0d0d0000-0000-0000-0000-0000000000a2',false);
+  ASSERT NOT (SELECT bool_and(payable) FROM public.exos_commission_payable(current_setting('test.p')::uuid) x
+               JOIN public.exos_promoter_commissions c ON c.id = x.id WHERE c.session_id = 'cm-z1'), 'CM15: still held on the settle screen';
+  PERFORM set_config('app.uid','',false);
+  -- Even a forced send claim is held.
+  UPDATE public.exos_checkout_commission_plans SET payable_at = payable_at WHERE session_id = 'cm-z1';
+  -- A reschedule later pushes it out.
+  UPDATE public.exos_events SET starts_at = now() + interval '30 days', ends_at = NULL WHERE id = '0d0d0000-0000-0000-0000-0000000000e2';
+  ASSERT (SELECT public._exos_commission_payable_at(c.event_id, c.accrued_at, c.method, c.payable_at) FROM public.exos_promoter_commissions c
+           WHERE c.session_id = 'cm-z1') > now() + interval '32 days', 'CM15: a later date pushes it out';
+  -- Holdback 0 at the org: Exos-funded still waits the platform minimum (3) from the sale.
+  PERFORM set_config('app.uid','0d0d0000-0000-0000-0000-0000000000a2',false);
+  PERFORM public.exos_set_commission_settings(a, 'manual', 0);
+  PERFORM set_config('app.uid','',false);
+  ASSERT public._exos_commission_frozen_payable('0d0d0000-0000-0000-0000-0000000000e1', 'split_at_sale') > now() + interval '2 days 23 hours',
+         'CM15: platform minimum from the sale';
+  ASSERT public._exos_commission_frozen_payable('0d0d0000-0000-0000-0000-0000000000e4', 'manual') < now(), 'CM15: manual follows the org (0)';
+  INSERT INTO public.exos_platform_settings(key, value) VALUES ('commission_min_holdback_days', '7')
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  ASSERT public._exos_commission_holdback_days(a, 'platform_fee') = 7 AND public._exos_commission_holdback_days(a, 'manual') = 0,
+         'CM15: the platform minimum is the platform''s';
+  DELETE FROM public.exos_platform_settings WHERE key = 'commission_min_holdback_days';
+  PERFORM set_config('app.uid','0d0d0000-0000-0000-0000-0000000000a2',false);
+  PERFORM public.exos_set_commission_settings(a, 'manual', 3);
+  PERFORM set_config('app.uid','',false);
+  -- A plan's payable time can't be before the event's original start.
+  BEGIN UPDATE public.exos_checkout_commission_plans SET payable_at = event_starts_at - interval '1 day' WHERE session_id = 'cm-z1';
+  EXCEPTION WHEN check_violation THEN ok := true; END;
+  ASSERT ok, 'CM15: never before the original start';
+  RAISE NOTICE 'OK  CM15 holdback frozen at the sale';
+END $$;
+
+-- CM16. The self-dealing cap: Exos-funded commissions at most 30% of the
+-- ticket's net to the organizer unless a platform admin approved more.
+DO $$
+DECLARE a uuid := '0d0d0000-0000-0000-0000-000000000001'; d1 uuid := '0d0d0000-0000-0000-0000-0000000000d1';
+        d3 uuid := '0d0d0000-0000-0000-0000-0000000000d3'; x jsonb; ap uuid;
+BEGIN
+  PERFORM set_config('app.uid','0d0d0000-0000-0000-0000-0000000000a2',false);
+  PERFORM public.exos_set_promoter_terms(current_setting('test.q')::uuid, 5000, 0);
+  PERFORM set_config('app.uid','',false);
+  x := pg_temp.plan(d1, 'cm-q', 1, 100, true, false);
+  ASSERT x->>'method' = 'manual' AND x->>'fallback_reason' = 'commission_cap', 'CM16: 50% on split refused: ' || x::text;
+  x := pg_temp.plan(d3, 'cm-q', 1, 100, false, true);
+  ASSERT x->>'method' = 'manual' AND x->>'fallback_reason' = 'commission_cap', 'CM16: 50% inside the fee refused';
+  INSERT INTO public.exos_commission_cap_approvals(org_id, promoter_id, max_bps, reason, approved_by)
+  VALUES (a, current_setting('test.q')::uuid, 6000, 'reviewed street team deal', 'ops@exos') RETURNING id INTO ap;
+  x := pg_temp.plan(d1, 'cm-q', 1, 100, true, false);
+  ASSERT x->>'method' = 'split_at_sale', 'CM16: approved up to 60%';
+  -- Approval withdrawn before the sale lands: the accrual is clamped to 30% of (2000 - 100).
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,status,promoter_id,application_fee_cents,exos_fee_cents,card_fee_est_cents)
+  VALUES ('cm-k1','0d0d0000-0000-0000-0000-0000000000e1',d1,a,'0d0d0000-0000-0000-0000-0000000000a5','cmbuyer@x.com',1,2000,'pending','cm-q',100,100,0);
+  PERFORM public.exos_record_commission_plan('cm-k1', x);
+  DELETE FROM public.exos_commission_cap_approvals WHERE id = ap;
+  PERFORM public.exos_fulfill_checkout('cm-k1');
+  ASSERT (SELECT commission_cents FROM public.exos_promoter_commissions WHERE session_id = 'cm-k1') = 570,
+         'CM16: clamped to the cap: ' || (SELECT commission_cents FROM public.exos_promoter_commissions WHERE session_id = 'cm-k1');
+  PERFORM set_config('app.uid','0d0d0000-0000-0000-0000-0000000000a2',false);
+  PERFORM public.exos_set_promoter_terms(current_setting('test.q')::uuid, 1000, 0);
+  PERFORM set_config('app.uid','',false);
+  RAISE NOTICE 'OK  CM16 commission cap';
+END $$;
+
+-- CM19. Split debt over the cap: no new split sales, no split money out.
+DO $$
+DECLARE a uuid := '0d0d0000-0000-0000-0000-000000000001'; d1 uuid := '0d0d0000-0000-0000-0000-0000000000d1'; x jsonb; xd jsonb; r jsonb;
+        owed bigint := pg_temp.org_owed('0d0d0000-0000-0000-0000-000000000001');
+BEGIN
+  ASSERT owed = 4700, 'CM19: the org owes Exos 3000 + 1700 (CM8, CM12): ' || owed;
+  xd := pg_temp.plan(d1, NULL, 3, 300, true, false);
+  INSERT INTO public.exos_platform_settings(key, value) VALUES ('split_org_debt_cap_cents', '1000')
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  x := pg_temp.plan(d1, 'cm-p', 1, 100, true, false);
+  ASSERT x->>'method' = 'manual' AND x->>'fallback_reason' = 'split_debt_cap', 'CM19: no new split sales: ' || x::text;
+  -- An order sold just before: its share (5700) is more than the debt, so nothing is planned.
+  PERFORM pg_temp.ord('cm-d1', d1, NULL, 3, 300, xd);
+  r := public.exos_commission_plan_due(a);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_commission_transfers WHERE session_id = 'cm-d1'), 'CM19: no split payout over the cap';
+  ASSERT public.exos_ct_claim((SELECT id FROM public.exos_commission_transfers WHERE session_id = 'cm-s2' AND kind = 'split_org'), 'send')->>'error'
+         = 'debt_cap', 'CM19: a planned share is held too';
+  DELETE FROM public.exos_platform_settings WHERE key = 'split_org_debt_cap_cents';
+  r := public.exos_commission_plan_due(a);
+  ASSERT (SELECT netted_cents = 4700 AND amount_cents = 1000 FROM public.exos_commission_transfers WHERE session_id = 'cm-d1' AND kind = 'split_org'),
+         'CM19: under the cap again: planned, netting the debt';
+  ASSERT pg_temp.org_owed(a) = 0, 'CM19: debt cleared';
+  RAISE NOTICE 'OK  CM19 split debt cap';
+END $$;
+
+-- CM17. An organizer refund after their split share was sent: their part is
+-- reversed from that transfer first; refused when it can't be; a share not
+-- sent yet is cancelled and planned again; one in flight waits.
+DO $$
+DECLARE a uuid := '0d0d0000-0000-0000-0000-000000000001'; d1 uuid := '0d0d0000-0000-0000-0000-0000000000d1';
+        r jsonb; q1 uuid; q2 uuid; q3 uuid; ct uuid; c jsonb; owed bigint;
+BEGIN
+  PERFORM pg_temp.ord('cm-r1', d1, NULL, 1, 100, pg_temp.plan(d1, NULL, 1, 100, true, false));
+  PERFORM pg_temp.ord('cm-r3', d1, NULL, 1, 100, pg_temp.plan(d1, NULL, 1, 100, true, false));
+  r := public.exos_commission_plan_due(a);
+  SELECT id INTO ct FROM public.exos_commission_transfers WHERE session_id = 'cm-r1' AND kind = 'split_org';
+  ASSERT (SELECT gross_cents FROM public.exos_commission_transfers WHERE id = ct) = 1900, 'CM17: share 1900';
+  -- A refund in flight holds the send (the reserve).
+  q1 := pg_temp.rq('cm-r1', 1000);
+  c := public.exos_ct_claim(ct, 'send');
+  ASSERT c->>'error' = 'refund_in_flight', 'CM17: no send while a refund is in flight: ' || c::text;
+  UPDATE public.exos_refund_requests SET status = 'canceled' WHERE id = q1;
+  PERFORM pg_temp.send(ct, 'tr_cmR1');
+  owed := pg_temp.org_owed(a);
+  q1 := pg_temp.rq('cm-r1', 1000);
+  r := public.exos_refund_charge_prepare(q1);
+  ASSERT r->>'mode' = 'reverse' AND (r->>'amount_cents')::int = 950 AND r->>'org_transfer_id' = 'tr_cmR1',
+         'CM17: half refunded: take back 1900 - (1000 - 50) = 950: ' || r::text;
+  ASSERT public.exos_refund_charge_prepare(q1)->>'reversal_id' = r->>'reversal_id', 'CM17: prepare is idempotent per request';
+  c := public.exos_split_reversal_claim((r->>'reversal_id')::uuid);
+  ASSERT (c->>'ok')::boolean AND NOT (c->>'needs_reconcile')::boolean, 'CM17: reversal claim';
+  ASSERT public.exos_split_reversal_claim((r->>'reversal_id')::uuid)->>'error' = 'busy', 'CM17: leased';
+  ASSERT public.exos_split_reversal_mark((r->>'reversal_id')::uuid, (c->>'lease_token')::uuid, 'taken', 'trr_cmR1'), 'CM17: taken';
+  ASSERT public.exos_split_reversal_mark((r->>'reversal_id')::uuid, NULL, 'taken', 'trr_cmR1'), 'CM17: taken is idempotent';
+  INSERT INTO public.exos_order_refunds(session_id,org_id,refund_id,amount_cents,currency,status,is_partial)
+  VALUES ('cm-r1',a,'re_cmr1',1000,'usd','succeeded',true);
+  UPDATE public.exos_refund_requests SET status = 'succeeded' WHERE id = q1;
+  ASSERT pg_temp.org_owed(a) = owed, 'CM17: recovered by the reversal, no debt left behind';
+  -- The rest: the transfer still holds 950, enough.
+  q2 := pg_temp.rq('cm-r1', 1000);
+  r := public.exos_refund_charge_prepare(q2);
+  ASSERT r->>'mode' = 'reverse' AND (r->>'amount_cents')::int = 950, 'CM17: the rest reverses the other 950';
+  UPDATE public.exos_refund_requests SET status = 'canceled' WHERE id = q2;
+  -- A fully netted share (cm-s7) can't be reversed: refused, with what's possible.
+  q3 := pg_temp.rq('cm-s7', 1000);
+  r := public.exos_refund_charge_prepare(q3);
+  ASSERT r->>'mode' = 'refuse' AND (r->>'recoverable_cents')::int = 0 AND r->>'error' LIKE 'Exos can take back only 0 cents%',
+         'CM17: refused when it can''t be recovered: ' || r::text;
+  UPDATE public.exos_refund_requests SET status = 'canceled' WHERE id = q3;
+  -- Not sent yet: cancelled, planned again from the smaller order.
+  q3 := pg_temp.rq('cm-r3', 1000);
+  r := public.exos_refund_charge_prepare(q3);
+  ASSERT r->>'mode' = 'split' AND (SELECT status FROM public.exos_commission_transfers WHERE session_id = 'cm-r3' AND kind = 'split_org') = 'cancelled',
+         'CM17: unsent share cancelled: ' || r::text;
+  INSERT INTO public.exos_order_refunds(session_id,org_id,refund_id,amount_cents,currency,status,is_partial)
+  VALUES ('cm-r3',a,'re_cmr3',1000,'usd','succeeded',true);
+  UPDATE public.exos_refund_requests SET status = 'succeeded' WHERE id = q3;
+  r := public.exos_commission_plan_due(a);
+  ASSERT (SELECT gross_cents FROM public.exos_commission_transfers WHERE session_id = 'cm-r3' AND kind = 'split_org' AND status <> 'cancelled') = 950,
+         'CM17: planned again at 950';
+  -- A share being sent: wait.
+  c := public.exos_ct_claim((SELECT id FROM public.exos_commission_transfers WHERE session_id = 'cm-r3' AND status = 'planned'), 'send');
+  q3 := pg_temp.rq('cm-r3', 500);
+  ASSERT public.exos_refund_charge_prepare(q3)->>'mode' = 'busy', 'CM17: busy while a send is in flight';
+  UPDATE public.exos_refund_requests SET status = 'canceled' WHERE id = q3;
+  RAISE NOTICE 'OK  CM17 split refunds reverse first, or are refused';
+END $$;
+
+-- CM18. A refund of a platform_fee order after its commission went out keeps
+-- the fee (the organizer bears it; the clawback is owed to them); before,
+-- the fee goes back in proportion.
+DO $$
+DECLARE a uuid := '0d0d0000-0000-0000-0000-000000000001'; d3 uuid := '0d0d0000-0000-0000-0000-0000000000d3';
+        r jsonb; q uuid;
+BEGIN
+  -- P's earlier clawbacks were settled with Exos outside the app.
+  UPDATE public.exos_commission_netting SET voided_at = now()
+   WHERE promoter_id = current_setting('test.p')::uuid AND applied_payout_id IS NULL AND voided_at IS NULL;
+  PERFORM pg_temp.ord('cm-f2', d3, 'cm-p', 1, 100, pg_temp.plan(d3, 'cm-p', 1, 100, false, true));
+  q := pg_temp.rq('cm-f2', 2000);
+  ASSERT public.exos_refund_charge_prepare(q)->>'mode' = 'commission_fee', 'CM18: commission still held: refund the fee';
+  ASSERT public.exos_refund_charge_prepare(q)->>'mode' = 'commission_fee', 'CM18: decided once per request';
+  UPDATE public.exos_refund_requests SET status = 'canceled' WHERE id = q;
+  r := public.exos_commission_plan_due(a);
+  ASSERT EXISTS (SELECT 1 FROM public.exos_promoter_commissions WHERE session_id = 'cm-f2' AND status = 'paid'), 'CM18: commission planned';
+  q := pg_temp.rq('cm-f2', 2000);
+  ASSERT public.exos_refund_charge_prepare(q)->>'mode' = 'keep_fee', 'CM18: commission gone out: keep the fee';
+  ASSERT (SELECT public.exos_ct_claim(t.id, 'send')->>'error' FROM public.exos_commission_transfers t
+           WHERE t.payout_id = (SELECT payout_id FROM public.exos_promoter_commissions WHERE session_id = 'cm-f2')) = 'refund_in_flight',
+         'CM18: the fee transfer waits for the refund';
+  PERFORM pg_temp.void1('cm-f2');
+  ASSERT (SELECT funder FROM public.exos_commission_netting WHERE session_id = 'cm-f2' AND kind = 'clawback') = 'organizer',
+         'CM18: the clawback is owed to the organizer, who bore it';
+  UPDATE public.exos_refund_requests SET status = 'succeeded' WHERE id = q;
+  RAISE NOTICE 'OK  CM18 platform fee refunds never cost Exos more than its fee';
 END $$;
 
 -- CM13. RLS, grants and cross-org isolation.
@@ -621,7 +846,9 @@ DECLARE bad text;
                       '_exos_fee_plan_promoter', 'exos_commission_plan_due', 'exos_commission_record_charge', '_exos_ct_mirror',
                       'exos_ct_due', 'exos_ct_claim', 'exos_ct_lease_ok', 'exos_ct_mark', 'exos_ct_reconcile',
                       'exos_ct_lease_release', 'exos_ct_cancel', 'exos_tg_pc_method', 'exos_tg_pc_gate', 'exos_tg_pc_netting',
-                      'exos_tg_split_true_up'];
+                      'exos_tg_split_true_up', '_exos_cm_setting_int', '_exos_commission_holdback_days', '_exos_commission_frozen_payable',
+                      '_exos_commission_cap_bps', '_exos_commission_cap_cents', '_exos_org_split_debt', '_exos_pc_funder', '_exos_ct_hold',
+                      'exos_refund_charge_prepare', 'exos_split_reversal_claim', 'exos_split_reversal_mark', 'exos_split_reversal_unused'];
   usr text[] := ARRAY['exos_get_commission_settings', 'exos_set_commission_settings', 'exos_set_event_commission_method',
                       'exos_set_promoter_commission_method', 'exos_commission_balances', 'exos_commission_payable'];
 BEGIN

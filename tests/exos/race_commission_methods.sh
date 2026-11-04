@@ -46,7 +46,12 @@ order() { # session tier qty fee split fee_on
          SELECT public.exos_fulfill_checkout('$1');
          INSERT INTO exos_order_payments(session_id,org_id,event_id,payment_intent,charge_id,amount_cents,currency,status,transfer_id)
            SELECT '$1','$O',event_id,'pi_'||replace('$1','-',''),'ch_'||replace('$1','-',''),$3*2000,'usd','succeeded',
-                  CASE WHEN $5 THEN NULL ELSE 'tr_'||replace('$1','-','') END FROM exos_ticket_tiers WHERE id='$2';" >/dev/null
+                  CASE WHEN $5 THEN NULL ELSE 'tr_'||replace('$1','-','') END FROM exos_ticket_tiers WHERE id='$2';
+         -- sold a while ago: past its frozen holdback
+         UPDATE exos_checkout_commission_plans SET payable_at = greatest(now() - interval '1 day', coalesce(event_starts_at, now())) WHERE session_id='$1';
+         ALTER TABLE exos_promoter_commissions DISABLE TRIGGER exos_promoter_commissions_gate;
+         UPDATE exos_promoter_commissions SET payable_at = now() - interval '1 day' WHERE session_id='$1';
+         ALTER TABLE exos_promoter_commissions ENABLE TRIGGER exos_promoter_commissions_gate;" >/dev/null
 }
 order race-cm-s1 "$T" 2 200 true false
 order race-cm-f1 "$TF" 1 100 false true

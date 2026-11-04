@@ -10,6 +10,7 @@ import {
   applicationFeeWithCommission, chargeModelFromMetadata, checkoutChargeMetadata, commissionEnv, ctClaimAction, ctLive,
   ctReconcileDecision, ctTransferKey, ctTransferParams, feeHeldCents, needsCommissionPlan, netOrganizerShare, nettedPayout,
   parsePlan, paymentIntentData, planChangesCharge, quoteTotal, refundFlags, RUN_BUDGET_MS, splitShares, trueUpCents,
+  findSplitReversal, refundFlagsForMode, refundPrepAction, splitReversalKey,
   type CommissionPlan, type CtClaim,
 } from '../../supabase/functions/_shared/payouts/commissionMethods.ts';
 import { autoRefundParams } from '../../supabase/functions/_shared/auto-refund.ts';
@@ -155,11 +156,13 @@ describe('webhook + refund branching', () => {
     const req = { request_id: 'r1', amount_cents: 500, payment_intent: 'pi_1', session_id: 'cs_1', scope: 'tickets' };
     expect(organizerRefundParams(req, false)).toMatchObject({ reverse_transfer: true, refund_application_fee: true });
     expect(organizerRefundParams(req, true)).toMatchObject({ reverse_transfer: true, refund_application_fee: false });
-    const split = organizerRefundParams(req, true, { model: 'split', commissionInFee: false });
+    const split = organizerRefundParams(req, true, 'split');
     expect(split).not.toHaveProperty('reverse_transfer');
     expect(split).not.toHaveProperty('refund_application_fee');
     expect(split).toMatchObject({ amount: 500, payment_intent: 'pi_1' });
-    expect(organizerRefundParams(req, true, { model: 'destination', commissionInFee: true })).toMatchObject({ reverse_transfer: true, refund_application_fee: true });
+    expect(organizerRefundParams(req, true, 'commission_fee')).toMatchObject({ reverse_transfer: true, refund_application_fee: true });
+    expect(organizerRefundParams(req, false, 'keep_fee')).toMatchObject({ reverse_transfer: true, refund_application_fee: false });
+    expect(organizerRefundParams(req, false, 'reverse')).not.toHaveProperty('reverse_transfer');
     expect(refundFlags('split', { keepPlatformFee: true, commissionInFee: true })).toEqual({});
   });
   it('fee actuals: a commission in the fee is not Exos\'s net', () => {
@@ -167,6 +170,36 @@ describe('webhook + refund branching', () => {
     expect(feeActualsFromCharge(charge, 200).net_cents).toBe(454);
     expect(feeActualsFromCharge(charge, 200, 400).net_cents).toBe(54);
     expect(feeActualsFromCharge(charge, 200, 400).application_fee_cents).toBe(600);
+  });
+});
+
+describe('organizer refund branching (exos_refund_charge_prepare)', () => {
+  it('flags per mode: standard unchanged, fee with a commission back, kept once paid, none for split', () => {
+    expect(refundFlagsForMode('standard', false)).toEqual({ reverse_transfer: true, refund_application_fee: true });
+    expect(refundFlagsForMode('standard', true)).toEqual({ reverse_transfer: true, refund_application_fee: false });
+    expect(refundFlagsForMode('commission_fee', true)).toEqual({ reverse_transfer: true, refund_application_fee: true });
+    expect(refundFlagsForMode('keep_fee', false)).toEqual({ reverse_transfer: true, refund_application_fee: false });
+    expect(refundFlagsForMode('split', false)).toEqual({});
+    expect(refundFlagsForMode('reverse', true)).toEqual({});
+  });
+  it('a sent split share is reversed before the refund', () => {
+    expect(refundPrepAction({ mode: 'reverse', reversal_id: 'rv1', org_transfer_id: 'tr_org', amount_cents: 950, status: 'planned' }))
+      .toEqual({ action: 'reverse_then_refund', reversalId: 'rv1', transferId: 'tr_org', amountCents: 950, taken: false });
+    expect(refundPrepAction({ mode: 'reverse', reversal_id: 'rv1', org_transfer_id: 'tr_org', amount_cents: 950, status: 'taken' }))
+      .toMatchObject({ taken: true });
+    expect(refundPrepAction({ mode: 'reverse', reversal_id: 'rv1', org_transfer_id: 'nope', amount_cents: 950 }).action).toBe('retry');
+  });
+  it('refused when Exos can\'t take it back; waits while a transfer is in flight; retries on a read error', () => {
+    expect(refundPrepAction({ mode: 'refuse', error: 'Exos can take back only 0 cents' })).toEqual({ action: 'refuse', message: 'Exos can take back only 0 cents' });
+    expect(refundPrepAction({ mode: 'busy' }).action).toBe('retry');
+    expect(refundPrepAction(null).action).toBe('retry');
+    expect(refundPrepAction({ mode: 'standard' })).toEqual({ action: 'refund', mode: 'standard' });
+    expect(refundPrepAction({ mode: 'split' })).toEqual({ action: 'refund', mode: 'split' });
+  });
+  it('a retried reversal finds the one already made; one key per row', () => {
+    expect(findSplitReversal('rv1', [{ id: 'trr_a', metadata: { exos_split_reversal_id: 'rv2' } }, { id: 'trr_b', metadata: { exos_split_reversal_id: 'rv1' } }])).toBe('trr_b');
+    expect(findSplitReversal('rv1', [])).toBeNull();
+    expect(splitReversalKey('rv1')).toBe('exos-ctr:rv1');
   });
 });
 
