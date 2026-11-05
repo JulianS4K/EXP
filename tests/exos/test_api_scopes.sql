@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Partner API scopes (mig 20261027090000). Self-contained (a5 prefix), rolled back.
---   S1 vocabulary: 16 scopes, the same list as _shared/api/scopes.ts
+--   S1 vocabulary: 20 scopes (me:read / me:write since mig 20261105110000), the same list as _shared/api/scopes.ts
 --   S2 create with scopes: cleaned (deduped, vocabulary order); unknown and
 --      empty lists refused
 --   S3 the old (org, name) form still makes a `read` key

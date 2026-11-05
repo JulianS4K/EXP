@@ -165,7 +165,8 @@ for m in \
          20261105100000_exos_sim_decisions \
          20261105110000_exos_fan_api \
          20261105120000_exos_na_build \
-         20261105130000_exos_promoter_events; do
+         20261105130000_exos_promoter_events \
+         20261105150000_exos_wave3_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -371,7 +372,8 @@ for m in \
          20261105100000_exos_sim_decisions \
          20261105110000_exos_fan_api \
          20261105120000_exos_na_build \
-         20261105130000_exos_promoter_events; do
+         20261105130000_exos_promoter_events \
+         20261105150000_exos_wave3_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -459,3 +461,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fan_api.s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_na_build.sql"
 # Promoter-run events: org type, location modes, secret address reveal (mig 20261105130000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_promoter_events.sql"
+# Wave 3 integration (mig 20261105150000): every #85/#87/#88/#89 patch survives the replay; account tokens and X-Exos-Org; closed types sold out in public discovery
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wave3_integration.sql"

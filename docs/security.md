@@ -406,6 +406,11 @@ Nothing new is granted to anon. Points to review:
   token made in that org). OAuth tokens never switch (consent was for one org); an org API
   key naming another org is refused. The token's revocation still follows
   its home org (leaving the home org revokes it everywhere).
+  An account token (mig 20261105110000) has no org at all:
+  `exos_api_token_auth_org` returns nothing for it and exos-api answers 403
+  `account_no_org` when it names one; a token minted through
+  `POST /v1/me/personal-access-tokens` is always pinned, even from an opt-in
+  parent (`tests/exos/test_wave3_integration.sql` W2, W3).
 - **`exos-tixel-webhook`** is public (no JWT). The secret in `X-Secret` is
   compared in constant time against `EXOS_TIXEL_WEBHOOK_SECRETS` (an env
   var, 16+ characters a secret, one org each); unset = 404. It writes only

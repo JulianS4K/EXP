@@ -64,7 +64,8 @@ organization's role settings, mig `20261104180000`), exactly as a token made the
 403 `{"error": "token_pinned_to_org"}`. Opendate's
 `PUT /team_memberships/{id}/switch` changes its web app's current team; the dashboard's organization picker does that
 here. OAuth access tokens stay in the organization the user approved the app for, and an org API key is its
-organization: either one naming another organization gets 403 (`exos_api_token_auth_org`).
+organization: either one naming another organization gets 403 (`exos_api_token_auth_org`). An account token (below) has no
+organization at all: naming one gets 403 `{"error": "account_no_org"}`.
 
 ## The fan API and account tokens
 

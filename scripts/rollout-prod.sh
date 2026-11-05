@@ -68,6 +68,11 @@ MIGRATIONS=(
   20261104180000_exos_org_access    # exos-api / exos-mcp call exos_api_key_auth: apply before deploying them
   20261104190000_exos_commission_methods
   20261104200000_exos_small_ops
+  20261105100000_exos_sim_decisions
+  20261105110000_exos_fan_api       # exos-api's /v1/me, account tokens: apply before deploying exos-api
+  20261105120000_exos_na_build      # exos-api's X-Exos-Org calls exos_api_token_auth_org: apply before deploying exos-api
+  20261105130000_exos_promoter_events
+  20261105150000_exos_wave3_integration
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt
