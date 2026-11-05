@@ -66,9 +66,10 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
 4. **[building] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by
    quantity sold (early bird → GA → final), plus an optional door price. The all-in price and the feeds follow
    the current step. DICE equivalent: `PriceTier` (allocation, time, faceValue, price, doorSalesPrice).
-5. **[building] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
+5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
-   by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`.
+   by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
+   migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
 6. Later: a fee-change log after a sale (`Adjustment`), and a separate entry barcode for an add-on
    (`Extra.hasSeparateAccessBarcode`).
 

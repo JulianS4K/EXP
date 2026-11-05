@@ -5,6 +5,11 @@
 // Nothing here reads a row the storefront could not.
 //
 // Pure TypeScript, imported by vitest (src/lib/apiPublicDiscovery.test.ts).
+//
+// claude/exos-buyer-geo-genre (mig 20261106140000): ?genre= / ?genres= on the
+// events list, and GET /public/discovery/genres (action genres.list).
+
+import { genreFilter, GenreParamError } from './genres.ts';
 
 /** Requests per network (hashed IP) per minute on the public discovery routes. */
 export const PUBLIC_PER_IP_PER_MIN = 60;
@@ -48,7 +53,8 @@ export function venueRef(raw: string | undefined): { id: string } | { slug: stri
 
 /** A no-credential read route: the _exos_api_public action and its path target. */
 export interface PublicRead {
-  action: 'events.list' | 'event.get' | 'venues.list' | 'venue.get' | 'search' | 'series.list' | 'series.get';
+  action: 'events.list' | 'event.get' | 'venues.list' | 'venue.get' | 'search' | 'series.list' | 'series.get'
+    | 'genres.list';
   target?: 'id';
 }
 
@@ -61,6 +67,7 @@ export const PUBLIC_READS: Readonly<Record<string, PublicRead>> = {
   'public-search': { action: 'search' },
   'public-event-series-list': { action: 'series.list' },
   'public-event-series': { action: 'series.get', target: 'id' },
+  'public-discovery-genres': { action: 'genres.list' },
 };
 
 /** The no-credential write routes (signup forms, through the same SQL as exos-signup). */
@@ -74,7 +81,7 @@ export function publicReadArgs(routeId: string, q: URLSearchParams): Record<stri
     const s = cleanSearch(q.get('q') ?? q.get('query'));
     if (s.length >= 2) out.q = s;
   }
-  if (routeId === 'public-discovery-events' || routeId === 'public-event-series-list') {
+  if (routeId === 'public-discovery-events' || routeId === 'public-event-series-list' || routeId === 'public-discovery-genres') {
     const raw = q.get('venue_id') ?? q.get('venue') ?? q.get('organizer');
     if (raw !== null) {
       const v = venueRef(raw);
@@ -89,6 +96,14 @@ export function publicReadArgs(routeId: string, q: URLSearchParams): Record<stri
     const before = isoOf(q, 'starts_before');
     if (after) out.starts_after = after;
     if (before) out.starts_before = before;
+    let genres: string[] | null;
+    try {
+      genres = genreFilter(q);
+    } catch (e) {
+      if (e instanceof GenreParamError) throw new PublicParamError(e.message);
+      throw e;
+    }
+    if (genres) out.genres = genres;
   }
   return out;
 }

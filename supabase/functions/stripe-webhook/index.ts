@@ -62,6 +62,11 @@
 //                    exos_recurring_donation_sync; a full refund of a later
 //                    monthly charge -> exos_recurring_donation_refund.
 //
+// Buyer location (mig 20261106140000, _shared/buyerLocation.ts): a settled
+// paid order records the country, region, city and postal code of the
+// billing address (session customer_details.address, else the charge the
+// fee read below already fetches). Best effort; never a street, never an IP.
+//
 // Fee actuals (mig 20260929131000): after a settled session is fulfilled and
 // its payment recorded, Stripe's actual fee, the platform net, the transfer
 // and balance-transaction ids are read from the PaymentIntent's latest charge
@@ -101,6 +106,7 @@ import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
 import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
+import { locationFromStripeCharge, locationFromStripeSession, recordBuyerLocation } from "../_shared/buyerLocation.ts";
 
 // exos: commerce orders (exos-commerce). Stripe metadata.exos_kind values.
 const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership", "recurring_donation"]);
@@ -344,12 +350,27 @@ async function fulfillSettledSession(
     }
   }
 
+  // Buyer location (mig 20261106140000): country / region / city / postal
+  // code of the billing address in this payload; never a street, never an
+  // IP lookup. Best effort, never throws; the first location an order gets
+  // is kept, so a replay changes nothing. Free orders have none.
+  const located = (session.amount_total ?? 0) > 0 ? locationFromStripeSession(session) : null;
+  const logLoc = (msg: string, err?: unknown) => console.error(`stripe-webhook: ${msg}`, err ?? "");
+  if (located) await recordBuyerLocation(sb, session.id, located, logLoc);
+
   // What Stripe actually took (fee, platform net, transfer). Best effort and
   // never throws, so it can't fail fulfilment or cause a retry loop; skipped
-  // on a replay once recorded.
+  // on a replay once recorded. When the session had no address, the charge
+  // this read fetches gives the card's billing address or country instead
+  // (no extra Stripe call).
   if (pi && session.payment_status === "paid") {
     await recordFeeActuals(sb, stripe, session.id, pi, {
       log: (msg, err) => console.error(`stripe-webhook: ${msg}`, err ?? ""),
+      ...(located || (session.amount_total ?? 0) <= 0 ? {} : {
+        onCharge: async (charge) => {
+          await recordBuyerLocation(sb, session.id, locationFromStripeCharge(charge), logLoc);
+        },
+      }),
     });
   }
 }

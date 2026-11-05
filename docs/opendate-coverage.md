@@ -23,7 +23,7 @@ exists and is documented in `docs/api`.
 | planned | 0 | 0% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **137** of the 449 rows in the route table
+Exos routes beyond Opendate: **141** of the 453 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API

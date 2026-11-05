@@ -774,6 +774,13 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-event-location', method: 'GET', auth: K, path: '/events/:id/location', scope: 'events:read', paged: false },
   { id: 'set-event-location', method: 'PUT', auth: K, path: '/events/:id/location', scope: 'events:write', paged: false },
   { id: 'list-venue-matches', method: 'GET', auth: K, path: '/venue-matches', scope: 'events:read', paged: false },
+  // claude/exos-buyer-geo-genre (mig 20261106140000, exos-api/buyerGeoGenre.ts):
+  // where buyers are (DICE Order.ipCity / ipCountry, from the billing
+  // address, never an IP) and the genres in use (DICE genreTypes).
+  { id: 'get-event-buyer-locations', method: 'GET', auth: K, path: '/events/:id/buyer-locations', scope: 'orders:read', paged: false },
+  { id: 'get-buyer-locations', method: 'GET', auth: K, path: '/buyer-locations', scope: 'orders:read', paged: false },
+  { id: 'list-genres', method: 'GET', auth: K, path: '/genres', scope: 'events:read', paged: false },
+  { id: 'public-discovery-genres', method: 'GET', auth: A, path: '/public/discovery/genres', scope: null, paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */
