@@ -7,8 +7,14 @@
 #   bash scripts/rollout-prod.sh migrations      # step 1
 #   bash scripts/rollout-prod.sh functions       # step 2 (after step 1 is clean)
 #
-# DB_URL: Supabase → Project Settings → Database → Connection string → "Session pooler".
+# DB_URL: Supabase → the project's "Connect" button → Connection String → "Session pooler".
 # SUPABASE_ACCESS_TOKEN: supabase.com → Account → Access Tokens. Needs the supabase CLI.
+#
+# No DB_URL (e.g. a host that can reach api.supabase.com but not Postgres on 5432)?
+# `migrations` then runs over HTTPS through the Management API
+# (POST /v1/projects/<ref>/database/query) with SUPABASE_ACCESS_TOKEN alone: each
+# file and its history row are sent as ONE `BEGIN; … COMMIT;` request, so a
+# failing file commits nothing. Needs curl and jq.
 #
 # Why not `supabase db push`: prod's history records each migration under the time it
 # was applied, not its file timestamp, so db push would try to re-run ~200 Exos files.
@@ -87,28 +93,62 @@ MIGRATIONS=(
 VERIFY_JWT=(exos-checkout exos-refund exos-connect-onboard exos-pos exos-geocode)
 FIRST=(stripe-webhook exos-checkout exos-refund exos-reconcile-checkouts exos-reconcile-stripe)
 
-q() { psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c "$1"; }
+API="https://api.supabase.com/v1/projects/$REF/database/query"
+
+# Run SQL through the Management API; prints the error body and fails on an error.
+api_sql() {
+  local out code
+  out=$(jq -Rs '{query: .}' | curl -sS -X POST "$API" \
+          -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+          --data-binary @- -w $'\n%{http_code}')
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  [[ "$code" == 2* ]] || { echo "Management API error (HTTP $code): $out" >&2; return 1; }
+  printf '%s' "$out"
+}
+
+# One query, one column per row, like psql -At.
+q() {
+  if [ -n "${DB_URL:-}" ]; then psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c "$1"
+  else printf '%s' "$1" | api_sql | jq -r '.[] | [.[] | tostring] | join("|")'; fi
+}
 
 migrations() {
-  : "${DB_URL:?set DB_URL}"
+  if [ -z "${DB_URL:-}" ]; then
+    : "${SUPABASE_ACCESS_TOKEN:?set DB_URL, or SUPABASE_ACCESS_TOKEN for the Management API}"
+    command -v jq >/dev/null || { echo "install jq first"; exit 1; }
+    echo "no DB_URL: applying through the Management API ($API)"
+  fi
   echo "exos crons before:"; q "select jobname||' '||active from cron.job where jobname like 'exos%' order by 1"
   # The operator may have turned some crons on (2026-11-04: 14 of 16). Remember
   # which, so the check below only fails on a cron THIS rollout made active.
   local before_active
-  before_active=$(q "select coalesce(string_agg(quote_literal(jobname), ',' order by jobname), '''''') from cron.job where jobname like 'exos%' and active")
+  before_active=$(q "select coalesce(string_agg(quote_literal(jobname), ',' order by jobname), '''''') from cron.job where jobname like 'exos%' and active") \
+    || { echo "could not read cron.job: stopping"; exit 1; }
   for m in "${MIGRATIONS[@]}"; do
     f="$MIG/$m.sql"; [ -f "$f" ] || { echo "missing $f"; exit 1; }
-    if [ "$(q "select count(*) from supabase_migrations.schema_migrations where name in ('$m','${m#*_}')")" != 0 ]; then
-      echo "skip  $m (already recorded)"; continue
-    fi
+    # A failed lookup must stop the run, never read as "already recorded".
+    local seen used
+    seen=$(q "select count(*) from supabase_migrations.schema_migrations where name in ('$m','${m#*_}')") \
+      || { echo "could not read the migration history: stopping before $m"; exit 1; }
+    case "$seen" in
+      0) ;;
+      [1-9]*) echo "skip  $m (already recorded)"; continue ;;
+      *) echo "unexpected history answer for $m: '$seen': stopping"; exit 1 ;;
+    esac
     v="${m%%_*}"
-    if [ "$(q "select count(*) from supabase_migrations.schema_migrations where version = '$v'")" != 0 ]; then
-      echo "version $v already used by another migration: stopping"; exit 1
-    fi
+    used=$(q "select count(*) from supabase_migrations.schema_migrations where version = '$v'") \
+      || { echo "could not read the migration history: stopping before $m"; exit 1; }
+    [ "$used" = 0 ] || { echo "version $v already used by another migration (or unreadable: '$used'): stopping"; exit 1; }
     echo "apply $m"
-    # -1: the file and its history row commit together, or neither does.
-    psql "$DB_URL" -X -q -1 -v ON_ERROR_STOP=1 -f "$f" \
-      -c "insert into supabase_migrations.schema_migrations(version, name) values ('$v', '$m')"
+    # The file and its history row commit together, or neither does.
+    if [ -n "${DB_URL:-}" ]; then
+      psql "$DB_URL" -X -q -1 -v ON_ERROR_STOP=1 -f "$f" \
+        -c "insert into supabase_migrations.schema_migrations(version, name) values ('$v', '$m')"
+    else
+      { printf 'BEGIN;\n'; cat "$f";
+        printf '\n;\ninsert into supabase_migrations.schema_migrations(version, name) values (%s, %s);\nCOMMIT;\n' "'$v'" "'$m'"
+      } | api_sql >/dev/null || { echo "FAILED on $m (nothing from it was committed)"; exit 1; }
+    fi
   done
   echo "exos crons after:"; q "select jobname||' '||active from cron.job where jobname like 'exos%' order by 1"
   # Every cron these migrations create starts inactive; any newly active one is a bug.
