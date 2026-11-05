@@ -167,7 +167,10 @@ BEGIN
        'exos_inbound_form_public', 'exos_inbound_submit',
        -- a guest order's proof of email / phone (mig 20261105100000): a 256-bit
        -- browser token from exos-checkout gates all three; 5 tries per code
-       'exos_order_proof_status', 'exos_order_proof_send', 'exos_order_proof_verify');
+       'exos_order_proof_status', 'exos_order_proof_send', 'exos_order_proof_verify',
+       -- public discovery (mig 20261105110000): published events, public ticket
+       -- types, organizers' public profiles and series; 60 a minute per network
+       'exos_api_public');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

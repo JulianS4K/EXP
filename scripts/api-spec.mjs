@@ -38,7 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-export const AUTH = ['api_key', 'shared_key', 'partner_key'];
+export const AUTH = ['api_key', 'shared_key', 'partner_key', 'public'];
 export const LOCATIONS = ['path', 'query', 'body', 'header'];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const FILE_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -305,7 +305,9 @@ function operation(e, category) {
     ? 'Authenticated with a listing-feed shared key.'
     : e.auth === 'partner_key'
       ? 'Authenticated with a distribution partner key.'
-      : e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
+      : e.auth === 'public'
+        ? 'No credential (rate limited per network).'
+        : e.scope ? `Requires the \`${e.scope}\` scope.` : 'Any valid API key.';
   const op = {
     operationId: e.id,
     summary: e.summary,

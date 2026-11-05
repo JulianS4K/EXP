@@ -162,7 +162,8 @@ for m in \
          20261104180000_exos_org_access \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
-         20261105100000_exos_sim_decisions; do
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -365,7 +366,8 @@ for m in \
          20261104180000_exos_org_access \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
-         20261105100000_exos_sim_decisions; do
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -447,3 +449,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_acces
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
 # Partner caps, invite approval, drawer recount (mig 20261104200000; race: race_sim_partner.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"
+# Fan API: /v1/me, account tokens, the org writes of the gap list (mig 20261105110000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fan_api.sql"

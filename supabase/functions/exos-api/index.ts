@@ -152,6 +152,11 @@ import {
   handleOrgAccess, ORG_ACCESS_CREATED, ORG_ACCESS_ROUTES, OrgAccessError, orgAccessDbError, venueApprovalAnswer,
 } from "./orgAccess.ts";
 import { stripStaffVenueFields } from "../_shared/api/orgAccess.ts";
+// claude/exos-fan-api (mig 20261105110000): /v1/me/…, the gap list's org writes, /v1/public/… discovery.
+import { handleMe, ME_ROUTE_IDS } from "./me.ts";
+import { GAP_ROUTES, handleGapWrites } from "./gapWrites.ts";
+import { publicApi, publicPreflight } from "./publicApi.ts";
+import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -246,6 +251,8 @@ interface Credential {
   userId: string | null;
   role: string | null;
   clientId: string | null;
+  /** An account token (exos_pat_… of a user with no organization, me:* only; mig 20261105110000). */
+  account: boolean;
 }
 
 interface Ctx {
@@ -261,6 +268,8 @@ interface Ctx {
   /** The body of a POST / PUT / PATCH ({} when empty, or for GET / DELETE). */
   body: Record<string, unknown>;
   idempotencyKey: string | null;
+  /** SHA-256 hex of the bearer token: /v1/me re-resolves it in SQL (exos_api_me). */
+  tokenHash: string;
 }
 
 const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -272,7 +281,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // /public/…: the listing feed (shared key) or the partner contract (partner
   // key), by the auth of the route that answers this path.
   if (isSharedKeyPath(path)) {
-    return publicAuthAt(path) === "partner_key" ? partnerApi(req, url, path) : listingFeed(req, url, path);
+    const pa = publicAuthAt(path);
+    // No credential (claude/exos-fan-api): public discovery and signup forms.
+    if (pa === "public") {
+      if (req.method === "OPTIONS") return publicPreflight();
+      const m = matchRoute(req.method, path);
+      if (!m || m.route.auth !== "public") {
+        return json({ error: "method not allowed" }, 405, { allow: allowedMethods(path).join(", "), "access-control-allow-origin": "*" });
+      }
+      return publicApi(req, url, m.route, m.params, service());
+    }
+    return pa === "partner_key" ? partnerApi(req, url, path) : listingFeed(req, url, path);
   }
   const method = req.method.toUpperCase() as ApiMethod;
   if (!API_METHODS.includes(method)) return json({ error: "method not allowed" }, 405, { allow: API_METHODS.join(", ") });
@@ -283,6 +302,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const sb = service();
   const resolved = await resolveCredential(sb, token);
+  const tokenHash = await sha256Hex(token);
   if (resolved === "membership") {
     return json({ error: "this token's user is no longer a member of the organization" }, 403);
   }
@@ -316,6 +336,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!match && allow.length) return json({ error: "method not allowed" }, 405, { allow: allow.join(", ") });
     return json({ error: "not found", hint: "see /developers for the API reference" }, 404);
   }
+  // /v1/me/… acts as a user: user tokens only; an account token (no
+  // organization) calls /v1/me/… only (claude/exos-fan-api).
+  const meNo = meRefusal(cred.kind, cred.account, match.route.id, match.route.scope);
+  if (meNo) return json({ error: meNo }, 403);
   if (match.route.scope && !hasScope(cred.scopes, match.route.scope)) {
     return json({ error: "insufficient scope", required_scope: match.route.scope }, 403, {
       "www-authenticate": `Bearer error="insufficient_scope", scope="${match.route.scope}"`,
@@ -324,7 +348,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Personal and OAuth tokens (#74) may call every GET and the platform routes.
   // Every other write records or checks an org API key id (exos_api_write,
   // booking, offers, listing keys), so it needs one.
-  if (!userTokenMayCall(cred.kind, method, match.route.id)) {
+  if (!ME_ROUTE_IDS.has(match.route.id) && !userTokenMayCall(cred.kind, method, match.route.id)) {
     return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
   }
 
@@ -342,6 +366,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           PLATFORM_ROUTES.has(match.route.id) || ORDER_ROUTES.has(match.route.id) ? "rails" : "flat")
         : {},
       idempotencyKey: method === "GET" ? null : idempotencyKey(req),
+      tokenHash,
     };
     const out = await handle(match.route, ctx);
     if (out instanceof Response) return out; // PDFs and CSV exports
@@ -365,6 +390,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
     if (e instanceof ApiError) return json({ error: e.message, ...e.extra }, e.status);
+    if (ME_ROUTE_IDS.has(match.route.id) || GAP_ROUTES.has(match.route.id)) {
+      if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status);
+      const g = gapSqlError(e);
+      if (g) return json({ error: g.message }, g.status);
+    }
     // Distribution partners, the team and tokens (#74) answer as on their branch.
     if (PLATFORM_ROUTES.has(match.route.id)) return errorResponse(e, "exos-api");
     if (e instanceof CoreError) return json({ error: e.message, ...e.extra }, e.status);
@@ -423,7 +453,7 @@ async function resolveCredential(
       orgId: k.org_id as string,
       cred: {
         kind, id: k.id as string, name: k.name as string | null, key_prefix: k.key_prefix as string,
-        scopes: (k.scopes ?? []) as string[], userId: null, role: null, clientId: null,
+        scopes: (k.scopes ?? []) as string[], userId: null, role: null, clientId: null, account: false,
       },
     };
   }
@@ -432,15 +462,26 @@ async function resolveCredential(
     console.error("exos-api: token lookup failed", error.message);
     return null;
   }
-  const t = data as Record<string, unknown> | null;
+  let t = data as Record<string, unknown> | null;
+  // An exos_pat_… that is no org's: an account token (a user, me:* only).
+  if (!t && kind === "pat") {
+    const { data: acct, error: aErr } = await sb.rpc("exos_api_account_token_auth", { p_hash: hash });
+    if (aErr) {
+      console.error("exos-api: account token lookup failed", aErr.message);
+      return null;
+    }
+    t = acct as Record<string, unknown> | null;
+  }
   if (!t) return null;
   if (t.error === "membership") return "membership";
+  const account = t.account === true;
   return {
-    orgId: String(t.org_id),
+    orgId: account ? "" : String(t.org_id),
     cred: {
       kind, id: String(t.credential_id), name: (t.name as string | null) ?? null,
       key_prefix: (t.key_prefix as string | null) ?? null, scopes: (t.scopes ?? []) as string[],
-      userId: String(t.user_id), role: String(t.role), clientId: (t.client_id as string | null) ?? null,
+      userId: String(t.user_id), role: account ? null : String(t.role), clientId: (t.client_id as string | null) ?? null,
+      account,
     },
   };
 }
@@ -451,6 +492,18 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
   // claude/exos-org-access (mig 20261104180000): role API permissions, venue requests, co-hosts, partner presale.
   if (ORG_ACCESS_ROUTES.has(route.id)) return await handleOrgAccess(route, c);
+  // claude/exos-fan-api (mig 20261105110000): the token's own user, and the gap list's org writes.
+  if (ME_ROUTE_IDS.has(route.id)) {
+    return await handleMe(route, {
+      sb, tokenHash: c.tokenHash, kind: c.cred.kind, params: c.params, q: c.q, page, body: c.body,
+    });
+  }
+  if (GAP_ROUTES.has(route.id)) {
+    return await handleGapWrites(route, {
+      sb, orgId, keyId: c.cred.id, credKind: c.cred.kind, params: c.params, q: c.q, body: c.body,
+      idempotencyKey: c.idempotencyKey,
+    });
+  }
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
@@ -476,13 +529,17 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   switch (route.id) {
     case "me": {
-      const { data: org } = await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
+      const { data: org } = c.cred.account ? { data: null }
+        : await sb.from("exos_orgs").select("id, name, slug").eq("id", orgId).maybeSingle();
       return {
         data: {
           org,
           // `key` keeps its first-release shape for API keys; user tokens fill it too.
           key: { id: c.cred.id, name: c.cred.name, key_prefix: c.cred.key_prefix, scopes: c.cred.scopes },
-          credential: { kind: c.cred.kind, user_id: c.cred.userId, role: c.cred.role, client_id: c.cred.clientId },
+          credential: {
+            kind: c.cred.kind, user_id: c.cred.userId, role: c.cred.role, client_id: c.cred.clientId,
+            ...(c.cred.account ? { account: true } : {}),
+          },
           effective_scopes: effectiveScopes(c.cred.scopes),
         },
       };
@@ -1364,7 +1421,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           ? "revoke an OAuth token at the authorization server's /revoke"
           : "API keys are revoked in Org settings");
       }
-      await rpc(sb, "_exos_pat_revoke_self", { p_id: c.cred.id });
+      await rpc(sb, c.cred.account ? "_exos_account_token_revoke_self" : "_exos_pat_revoke_self", { p_id: c.cred.id });
       return { data: { id: c.cred.id, revoked: true } };
     }
   }

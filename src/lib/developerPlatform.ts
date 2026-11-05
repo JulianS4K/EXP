@@ -128,6 +128,41 @@ export async function revokePersonalToken(id: string) {
   if (error) throw error;
 }
 
+// -- Account tokens (mig 20261105110000) ---------------------------------------------
+// A user's own token for the fan API (/v1/me/…): no organization, me:read /
+// me:write only. Same format as a personal access token, shown once.
+
+export interface AccountToken {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  expires_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export async function listAccountTokens(): Promise<AccountToken[]> {
+  const { data, error } = await supabase.from('exos_account_tokens')
+    .select('id, name, key_prefix, scopes, expires_at, last_used_at, created_at')
+    .is('revoked_at', null).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as AccountToken[];
+}
+
+export async function createAccountToken(name: string, scopes: string[], expiresDays: number | null) {
+  const { data, error } = await supabase.rpc('exos_create_account_token', {
+    p_name: name, p_scopes: scopes, p_expires_days: expiresDays,
+  });
+  if (error) throw error;
+  return data as { id: string; token: string; key_prefix: string; scopes: string[]; expires_at: string | null };
+}
+
+export async function revokeAccountToken(id: string) {
+  const { error } = await supabase.rpc('exos_revoke_account_token', { p_id: id });
+  if (error) throw error;
+}
+
 // -- OAuth apps ---------------------------------------------------------------------
 
 export interface OAuthApp {
