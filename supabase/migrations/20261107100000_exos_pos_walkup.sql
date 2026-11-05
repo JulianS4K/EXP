@@ -20,8 +20,10 @@
 --              _exos_pos_paid_out, _exos_api_pos_orders, _exos_api_pos_void
 --              (service role only)
 --           W: FUNCTION exos_pos_tg_line (marker /* exos: pos walkup door price */),
---              exos_pos_close_drawer (markers /* exos: pos paid-outs */ and
---              /* exos: pos paid-outs json */), exos_pos_settlement_summary
+--              exos_pos_close_drawer (markers /* exos: pos paid-outs */,
+--              /* exos: pos paid-outs json */, /* exos: pos drawer holder */),
+--              exos_pos_tg_payment and exos_gift_card_issue (marker
+--              /* exos: pos drawer holder */), exos_pos_settlement_summary
 --              (redefined in full; keeps the 20261029090000 exos_event_fee_bps
 --              line, marker /* exos: pos walkup settlement */)
 -- Pre-reqs: 20260929074000 (POS scaffold), 20261104120000 (drawer gift cards),
@@ -70,8 +72,16 @@
 --    Refund: owner / manager; after a scan only with p_override (recorded).
 --    A scanned ticket stays 'used' (the guest came in; like an online refund,
 --    which voids only the active tickets) and keeps its place.
--- 6. Cash paid-outs from a drawer: owner / manager or the drawer's holder,
---    with a reason, never more than the drawer holds. A drawer's expected cash
+--    Handing a sale's tickets over (the screen QR / paper print codes, email)
+--    follows the void rule too: the seller or an owner / manager. Email gives
+--    an Exos account the tickets only when its email is confirmed (else a
+--    claim link), and a ticket already handed over, claimed or scanned isn't
+--    sent again, except by an owner / manager (never a scanned one).
+-- 6. A drawer is its holder's: cash goes into it (a sale, a bar tender, a
+--    cash gift card), comes out of it (a paid-out, a void / refund) and it is
+--    closed only by the member who opened it, or by an owner / manager. Nothing
+--    picks another member's drawer by itself; an owner / manager names it.
+--    Cash paid-outs need a reason and never exceed what the drawer holds. A drawer's expected cash
 --    at close = float + cash taken (refunded sales included: the cash came in)
 --    + cash gift cards - paid-outs (voids and refunds included).
 -- 7. The Exos fee on walk-up ticket sales is ONE setting, still an OPEN
@@ -253,23 +263,43 @@ $$;
 REVOKE ALL ON FUNCTION public._exos_pos_drawer_cash(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_pos_drawer_cash(uuid) TO service_role;
 
--- The open drawer cash goes into / comes out of: the one named (open, at this
--- event), else the device's, else the actor's own. NULL = none.
-CREATE OR REPLACE FUNCTION public._exos_pos_open_drawer(p_event uuid, p_actor uuid, p_device uuid, p_drawer uuid)
+-- The open drawer at this event the actor may put cash into or take it out
+-- of. Named (p_drawer): open, at this event, and the actor's own unless they
+-- are an owner / manager (p_manager). Not named: only the actor's own (the
+-- device's drawer if they opened it, else their latest), never somebody
+-- else's, whoever asks. NULL = none.
+CREATE OR REPLACE FUNCTION public._exos_pos_open_drawer(p_event uuid, p_actor uuid, p_device uuid, p_drawer uuid, p_manager boolean)
 RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT CASE WHEN p_drawer IS NOT NULL THEN
-           (SELECT d.id FROM public.exos_pos_drawer_sessions d WHERE d.id = p_drawer AND d.event_id = p_event AND d.status = 'open')
+           (SELECT d.id FROM public.exos_pos_drawer_sessions d
+             WHERE d.id = p_drawer AND d.event_id = p_event AND d.status = 'open'
+               AND (d.opened_by = p_actor OR coalesce(p_manager, false)))
          ELSE coalesce(
            (SELECT d.id FROM public.exos_pos_drawer_sessions d
              WHERE p_device IS NOT NULL AND d.device_id = p_device AND d.event_id = p_event AND d.status = 'open'
+               AND d.opened_by = p_actor
              ORDER BY d.opened_at DESC LIMIT 1),
            (SELECT d.id FROM public.exos_pos_drawer_sessions d
              WHERE d.opened_by = p_actor AND d.event_id = p_event AND d.status = 'open'
              ORDER BY d.opened_at DESC LIMIT 1))
          END
 $$;
-REVOKE ALL ON FUNCTION public._exos_pos_open_drawer(uuid, uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_pos_open_drawer(uuid, uuid, uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_pos_open_drawer(uuid, uuid, uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_pos_open_drawer(uuid, uuid, uuid, uuid, boolean) TO service_role;
+
+-- Why a named drawer can't be used: '42501' someone else's, '55000' not open
+-- here (or unknown). The callers raise it; NULL when it can be used.
+CREATE OR REPLACE FUNCTION public._exos_pos_drawer_refusal(p_event uuid, p_actor uuid, p_drawer uuid, p_manager boolean)
+RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT CASE
+           WHEN public._exos_pos_open_drawer(p_event, p_actor, NULL, p_drawer, p_manager) IS NOT NULL THEN NULL
+           WHEN EXISTS (SELECT 1 FROM public.exos_pos_drawer_sessions d
+                         WHERE d.id = p_drawer AND d.event_id = p_event AND d.status = 'open') THEN '42501'
+           ELSE '55000'
+         END
+$$;
+REVOKE ALL ON FUNCTION public._exos_pos_drawer_refusal(uuid, uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_pos_drawer_refusal(uuid, uuid, uuid, boolean) TO service_role;
 
 -- An order as the door app and the API show it. Callers check who may see it.
 CREATE OR REPLACE FUNCTION public._exos_pos_order_json(p_order uuid, p_actor uuid DEFAULT NULL)
@@ -338,6 +368,45 @@ SELECT pg_temp.exos_patch_n('public.exos_pos_close_drawer(uuid,integer,jsonb,tex
   $o$'cash_taken_cents', v_cash, 'expected_cents', v_expected,$o$,
   $n$'cash_taken_cents', v_cash, 'expected_cents', v_expected,
                             /* exos: pos paid-outs json */ 'paid_out_cents', d.open_float_cents + v_cash - v_expected,$n$, 1);
+
+-- The other paths that change a drawer follow the same rule: a bar / merch
+-- cash tender (exos_pos_tg_payment), a cash gift card sold into it
+-- (exos_gift_card_issue), closing it (exos_pos_close_drawer). The service
+-- role (no auth.uid()) is unchanged.
+SELECT pg_temp.exos_patch_n('public.exos_pos_tg_payment()',
+  '/* exos: pos drawer holder */',
+  $o$    RAISE EXCEPTION 'exos_pos_payments: drawer is not open at this event' USING ERRCODE = '22023';
+  END IF;$o$,
+  $n$    RAISE EXCEPTION 'exos_pos_payments: drawer is not open at this event' USING ERRCODE = '22023';
+  END IF;
+  /* exos: pos drawer holder */ -- mig 20261107100000
+  IF NEW.drawer_session_id IS NOT NULL AND auth.uid() IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.exos_pos_drawer_sessions d WHERE d.id = NEW.drawer_session_id AND d.opened_by = auth.uid())
+     AND coalesce(public._exos_pos_actor_role(o.event_id, auth.uid(), public.exos_is_admin()), '') NOT IN ('owner', 'manager') THEN
+    RAISE EXCEPTION 'exos_pos_payments: that drawer is someone else''s' USING ERRCODE = '42501';
+  END IF;$n$, 1);
+SELECT pg_temp.exos_patch_n('public.exos_gift_card_issue(uuid,integer,text,uuid,text,text,text,text,text,text,text,uuid)',
+  '/* exos: pos drawer holder */',
+  $o$    RAISE EXCEPTION 'that drawer isn''t open for this organization' USING ERRCODE = '22023';
+  END IF;$o$,
+  $n$    RAISE EXCEPTION 'that drawer isn''t open for this organization' USING ERRCODE = '22023';
+  END IF;
+  /* exos: pos drawer holder */ -- mig 20261107100000
+  IF p_drawer_id IS NOT NULL AND NOT v_mgr AND NOT EXISTS (
+       SELECT 1 FROM public.exos_pos_drawer_sessions d WHERE d.id = p_drawer_id AND d.opened_by = auth.uid()) THEN
+    RAISE EXCEPTION 'that drawer is someone else''s: sell into your own, or ask a manager' USING ERRCODE = '42501';
+  END IF;$n$, 1);
+SELECT pg_temp.exos_patch_n('public.exos_pos_close_drawer(uuid,integer,jsonb,text)',
+  '/* exos: pos drawer holder */',
+  $o$    RAISE EXCEPTION 'exos_pos_close_drawer: not authorized' USING ERRCODE = '42501';
+  END IF;$o$,
+  $n$    RAISE EXCEPTION 'exos_pos_close_drawer: not authorized' USING ERRCODE = '42501';
+  END IF;
+  /* exos: pos drawer holder */ -- mig 20261107100000
+  IF d.opened_by IS DISTINCT FROM auth.uid()
+     AND coalesce(public._exos_pos_actor_role(d.event_id, auth.uid(), public.exos_is_admin()), '') NOT IN ('owner', 'manager') THEN
+    RAISE EXCEPTION 'exos_pos_close_drawer: only the member who opened the drawer, an owner or a manager can close it' USING ERRCODE = '42501';
+  END IF;$n$, 1);
 
 -- ===========================================================================
 -- 6. Begin / complete / cancel (service role; the wrappers below check roles).
@@ -484,7 +553,10 @@ GRANT EXECUTE ON FUNCTION public._exos_pos_walkup_begin(uuid, text, uuid, uuid, 
 -- Email the order's undelivered tickets: the box-office mail path
 -- (exos_issue_ticket_to_email). An Exos account gets them directly; anyone
 -- else gets a claim link (a pending transfer from the seller).
-CREATE OR REPLACE FUNCTION public._exos_pos_deliver_email(p_order uuid, p_actor uuid, p_email text)
+-- p_manager (an owner / manager): tickets already handed over or claimed are
+-- sent again (their pending claim link is cancelled); a scanned ticket never.
+-- Anyone else: only tickets still with the seller. The callers check who may.
+CREATE OR REPLACE FUNCTION public._exos_pos_deliver_email(p_order uuid, p_actor uuid, p_email text, p_manager boolean)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   o      public.exos_pos_orders%ROWTYPE;
@@ -507,14 +579,23 @@ BEGIN
   SELECT coalesce(l.ticket_ids, '{}') INTO v_all FROM public.exos_pos_order_lines l
    WHERE l.order_id = p_order AND l.category = 'ticket' ORDER BY l.created_at LIMIT 1;
   -- Still with the seller: active, not in a transfer, never handed to anyone.
+  -- An owner / manager: every active ticket (a scanned one is 'used').
   SELECT array_agg(t.id ORDER BY t.created_at, t.id) INTO v_ids FROM public.exos_tickets t
-   WHERE t.id = ANY (coalesce(v_all, '{}')) AND t.status = 'active' AND t.pending_transfer_id IS NULL
-     AND t.owner_id IS NOT DISTINCT FROM o.rung_by;
+   WHERE t.id = ANY (coalesce(v_all, '{}')) AND t.status = 'active'
+     AND (coalesce(p_manager, false)
+          OR (t.pending_transfer_id IS NULL AND t.owner_id IS NOT DISTINCT FROM o.rung_by AND t.check_in_at IS NULL));
   v_n := coalesce(cardinality(v_ids), 0);
   IF v_n = 0 THEN
-    RAISE EXCEPTION 'these tickets were already handed over or can''t be sent' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned: an owner or manager can resend them'
+      USING ERRCODE = '55000', HINT = 'handed-over';
   END IF;
-  SELECT id INTO v_rcpt FROM auth.users WHERE lower(email) = v_email LIMIT 1;
+  IF coalesce(p_manager, false) THEN
+    UPDATE public.exos_transfers SET status = 'cancelled' WHERE ticket_id = ANY (v_ids) AND status = 'pending';
+    UPDATE public.exos_tickets SET pending_transfer_id = NULL WHERE id = ANY (v_ids) AND pending_transfer_id IS NOT NULL;
+  END IF;
+  -- An account only when its email is confirmed: anyone can sign up with an
+  -- address they don't own; they get a claim link like everyone else.
+  SELECT id INTO v_rcpt FROM auth.users WHERE lower(email) = v_email AND email_confirmed_at IS NOT NULL LIMIT 1;
   SELECT lower(email) INTO v_sender_email FROM auth.users WHERE id = o.rung_by;
   IF v_rcpt IS NOT NULL THEN
     UPDATE public.exos_tickets SET owner_id = v_rcpt, buyer_id = v_rcpt, buyer_email = v_email
@@ -524,7 +605,8 @@ BEGIN
       INSERT INTO public.exos_transfers
       SELECT * FROM jsonb_populate_record(NULL::public.exos_transfers, jsonb_build_object(
         'id', gen_random_uuid(), 'ticket_id', v_id, 'org_id', ev.org_id,
-        'sender_id', o.rung_by, 'sender_email', v_sender_email, 'receiver_email', v_email,
+        'sender_id', (SELECT owner_id FROM public.exos_tickets WHERE id = v_id),
+        'sender_email', v_sender_email, 'receiver_email', v_email,
         'receiver_name', o.buyer_name,
         'status', 'pending', 'event_id', ev.id, 'event_title', ev.name,
         'event_image', ev.image_url, 'tier_name', (SELECT tier_name FROM public.exos_tickets WHERE id = v_id),
@@ -554,8 +636,8 @@ BEGIN
   END IF;
   RETURN v_n;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_pos_deliver_email(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_pos_deliver_email(uuid, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_pos_deliver_email(uuid, uuid, text, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_pos_deliver_email(uuid, uuid, text, boolean) TO service_role;
 
 -- Take the tenders and mint. p_payment: 'cash' (into p_drawer, which the
 -- caller resolved) or 'comp' (the whole order is comped). A card tender is
@@ -660,7 +742,7 @@ BEGIN
   UPDATE public.exos_pos_orders SET hold_expires_at = NULL WHERE id = o.id;
 
   IF o.buyer_email IS NOT NULL THEN
-    PERFORM public._exos_pos_deliver_email(o.id, p_actor, o.buyer_email);
+    PERFORM public._exos_pos_deliver_email(o.id, p_actor, o.buyer_email, false);
   END IF;
   RETURN public._exos_pos_order_json(o.id, p_actor);
 END $$;
@@ -751,8 +833,11 @@ BEGIN
   -- The drawer the cash goes into (complete refuses cash without one; a free
   -- ticket at a $0 door price needs none).
   IF v_comp < coalesce(p_quantity, 0) THEN
-    v_drawer := public._exos_pos_open_drawer(p_event_id, p_actor, p_device_id, p_drawer_id);
+    v_drawer := public._exos_pos_open_drawer(p_event_id, p_actor, p_device_id, p_drawer_id, v_role IN ('owner', 'manager'));
     IF v_drawer IS NULL AND p_drawer_id IS NOT NULL THEN
+      IF public._exos_pos_drawer_refusal(p_event_id, p_actor, p_drawer_id, v_role IN ('owner', 'manager')) = '42501' THEN
+        RAISE EXCEPTION 'that drawer is someone else''s: open your own, or ask a manager' USING ERRCODE = '42501', HINT = 'not-your-drawer';
+      END IF;
       RAISE EXCEPTION 'that drawer isn''t open at this event' USING ERRCODE = '55000', HINT = 'no-drawer';
     END IF;
   END IF;
@@ -861,15 +946,35 @@ BEGIN
     END IF;
   END IF;
 
+  -- The cash comes out of a drawer the actor may use (the _exos_pos_paid_out
+  -- rule): their own, or any open one at this event for an owner / manager.
+  -- Named: that one. Not named: the drawer the cash went into when they may
+  -- use it, else their own. Never somebody else's by default.
   IF v_cash > 0 THEN
-    SELECT p.drawer_session_id INTO v_drawer FROM public.exos_pos_payments p
-      JOIN public.exos_pos_drawer_sessions d ON d.id = p.drawer_session_id AND d.status = 'open'
-     WHERE p.order_id = o.id AND p.method = 'cash' AND p.status = 'succeeded' LIMIT 1;
-    v_drawer := coalesce(v_drawer, public._exos_pos_open_drawer(o.event_id, p_actor, NULL, p_drawer));
+    IF p_drawer IS NOT NULL THEN
+      v_drawer := public._exos_pos_open_drawer(o.event_id, p_actor, NULL, p_drawer, v_role IN ('owner', 'manager'));
+      IF v_drawer IS NULL THEN
+        IF public._exos_pos_drawer_refusal(o.event_id, p_actor, p_drawer, v_role IN ('owner', 'manager')) = '42501' THEN
+          RAISE EXCEPTION 'that drawer is someone else''s: hand the cash back from your own, or ask a manager'
+            USING ERRCODE = '42501', HINT = 'not-your-drawer';
+        END IF;
+        RAISE EXCEPTION 'that drawer isn''t open at this event' USING ERRCODE = '55000', HINT = 'no-drawer';
+      END IF;
+    ELSE
+      SELECT p.drawer_session_id INTO v_drawer FROM public.exos_pos_payments p
+        JOIN public.exos_pos_drawer_sessions d ON d.id = p.drawer_session_id AND d.status = 'open' AND d.event_id = o.event_id
+                                              AND (d.opened_by = p_actor OR v_role IN ('owner', 'manager'))
+       WHERE p.order_id = o.id AND p.method = 'cash' AND p.status = 'succeeded' LIMIT 1;
+      v_drawer := coalesce(v_drawer, public._exos_pos_open_drawer(o.event_id, p_actor, NULL, NULL, v_role IN ('owner', 'manager')));
+    END IF;
     IF v_drawer IS NULL THEN
-      RAISE EXCEPTION 'open a cash drawer to hand the cash back' USING ERRCODE = '55000', HINT = 'no-drawer';
+      RAISE EXCEPTION 'open your cash drawer to hand the cash back (or ask a manager)' USING ERRCODE = '55000', HINT = 'no-drawer';
     END IF;
     PERFORM 1 FROM public.exos_pos_drawer_sessions WHERE id = v_drawer FOR UPDATE;
+    -- Re-checked under the lock: closed meanwhile, it can't pay out.
+    IF NOT EXISTS (SELECT 1 FROM public.exos_pos_drawer_sessions WHERE id = v_drawer AND status = 'open') THEN
+      RAISE EXCEPTION 'the drawer was just closed' USING ERRCODE = '55000', HINT = 'no-drawer';
+    END IF;
     IF public._exos_pos_drawer_cash(v_drawer) < v_cash THEN
       RAISE EXCEPTION 'the drawer only has % cents: hand the cash back from another drawer', public._exos_pos_drawer_cash(v_drawer)
         USING ERRCODE = '23514', HINT = 'drawer-short';
@@ -1021,19 +1126,34 @@ GRANT EXECUTE ON FUNCTION public.exos_pos_paid_out(uuid, integer, text, uuid) TO
 -- The QR (screen) or paper for a walk-up's tickets: one-time print codes
 -- (docs/wallet.md "Printed tickets"), so they scan like any printed ticket.
 -- Door staff of the event, for a paid POS order's own tickets only.
+-- The seller or an owner / manager (the void rule). The seller: only tickets
+-- still with them (not emailed, claimed or scanned), so paper can't be made
+-- for a ticket the buyer already holds in the app.
 CREATE OR REPLACE FUNCTION public.exos_pos_order_codes(p_order_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE o public.exos_pos_orders%ROWTYPE; v_ids uuid[];
+DECLARE o public.exos_pos_orders%ROWTYPE; v_ids uuid[]; v_role text;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501'; END IF;
   SELECT * INTO o FROM public.exos_pos_orders WHERE id = p_order_id;
-  IF o.id IS NULL OR public._exos_pos_actor_role(o.event_id, auth.uid(), public.exos_is_admin()) IS NULL THEN
+  v_role := CASE WHEN o.id IS NULL THEN NULL ELSE public._exos_pos_actor_role(o.event_id, auth.uid(), public.exos_is_admin()) END;
+  IF v_role IS NULL THEN
     RAISE EXCEPTION 'order not found' USING ERRCODE = 'P0002';
+  END IF;
+  IF NOT (o.rung_by = auth.uid() OR v_role IN ('owner', 'manager')) THEN
+    RAISE EXCEPTION 'only the seller, an owner or a manager can hand over this sale''s tickets' USING ERRCODE = '42501';
   END IF;
   IF o.status <> 'paid' THEN
     RAISE EXCEPTION 'this sale is %', CASE WHEN o.status = 'open' THEN 'pending' ELSE o.status END USING ERRCODE = '55000';
   END IF;
   SELECT array_agg(x) INTO v_ids FROM public.exos_pos_order_lines l, unnest(coalesce(l.ticket_ids, '{}')) x WHERE l.order_id = o.id;
+  IF v_ids IS NOT NULL AND v_role NOT IN ('owner', 'manager') THEN
+    SELECT array_agg(t.id) INTO v_ids FROM public.exos_tickets t
+     WHERE t.id = ANY (v_ids) AND t.status = 'active' AND t.pending_transfer_id IS NULL
+       AND t.owner_id IS NOT DISTINCT FROM o.rung_by AND t.check_in_at IS NULL;
+    IF v_ids IS NULL THEN
+      RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned' USING ERRCODE = '55000', HINT = 'handed-over';
+    END IF;
+  END IF;
   IF v_ids IS NULL THEN
     RAISE EXCEPTION 'this sale has no tickets' USING ERRCODE = '55000';
   END IF;
@@ -1042,14 +1162,19 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_pos_order_codes(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_pos_order_codes(uuid) TO authenticated, service_role;
 
+-- The seller or an owner / manager (the void rule).
 CREATE OR REPLACE FUNCTION public.exos_pos_order_email(p_order_id uuid, p_email text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE o public.exos_pos_orders%ROWTYPE; v_n int;
+DECLARE o public.exos_pos_orders%ROWTYPE; v_n int; v_role text;
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501'; END IF;
   SELECT * INTO o FROM public.exos_pos_orders WHERE id = p_order_id FOR UPDATE;
-  IF o.id IS NULL OR public._exos_pos_actor_role(o.event_id, auth.uid(), public.exos_is_admin()) IS NULL THEN
+  v_role := CASE WHEN o.id IS NULL THEN NULL ELSE public._exos_pos_actor_role(o.event_id, auth.uid(), public.exos_is_admin()) END;
+  IF v_role IS NULL THEN
     RAISE EXCEPTION 'order not found' USING ERRCODE = 'P0002';
+  END IF;
+  IF NOT (o.rung_by = auth.uid() OR v_role IN ('owner', 'manager')) THEN
+    RAISE EXCEPTION 'only the seller, an owner or a manager can send this sale''s tickets' USING ERRCODE = '42501';
   END IF;
   IF NOT public.exos_rate_hit('pos:mail:' || auth.uid()::text, 10) THEN
     RAISE EXCEPTION 'too many emails a minute' USING ERRCODE = '54000';
@@ -1057,7 +1182,7 @@ BEGIN
   IF o.status <> 'paid' THEN
     RAISE EXCEPTION 'this sale is %', CASE WHEN o.status = 'open' THEN 'pending' ELSE o.status END USING ERRCODE = '55000';
   END IF;
-  v_n := public._exos_pos_deliver_email(o.id, auth.uid(), p_email);
+  v_n := public._exos_pos_deliver_email(o.id, auth.uid(), p_email, v_role IN ('owner', 'manager'));
   RETURN public._exos_pos_order_json(o.id, auth.uid()) || jsonb_build_object('emailed', v_n);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_pos_order_email(uuid, text) FROM PUBLIC, anon;
@@ -1065,7 +1190,8 @@ GRANT EXECUTE ON FUNCTION public.exos_pos_order_email(uuid, text) TO authenticat
 
 -- What the Sell tab needs: the ticket types at the door price with what's
 -- left, the questions (optional at the door, hidden ones too), the open
--- drawers, and whether this member may comp.
+-- drawers this member may use (their own; every one for an owner / manager),
+-- and whether they may comp.
 CREATE OR REPLACE FUNCTION public.exos_pos_walkup_catalog(p_event_id uuid)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v_role text; v_uid uuid := auth.uid(); ev public.exos_events%ROWTYPE;
@@ -1102,7 +1228,9 @@ BEGIN
     'drawers', (SELECT coalesce(jsonb_agg(jsonb_build_object(
                   'id', d.id, 'device_id', d.device_id, 'mine', d.opened_by = v_uid, 'opened_at', d.opened_at,
                   'open_float_cents', d.open_float_cents, 'cash_cents', public._exos_pos_drawer_cash(d.id)) ORDER BY d.opened_at), '[]'::jsonb)
-                  FROM public.exos_pos_drawer_sessions d WHERE d.event_id = p_event_id AND d.status = 'open'));
+                  FROM public.exos_pos_drawer_sessions d
+                 WHERE d.event_id = p_event_id AND d.status = 'open'
+                   AND (d.opened_by = v_uid OR v_role IN ('owner', 'manager'))));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_pos_walkup_catalog(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_pos_walkup_catalog(uuid) TO authenticated, service_role;
@@ -1121,7 +1249,8 @@ BEGIN
     SELECT o.created_at, public._exos_pos_order_json(o.id, v_uid) || jsonb_build_object(
              'can_void', o.status = 'paid' AND o.created_at >= now() - interval '12 hours'
                          AND (o.rung_by = v_uid OR v_role IN ('owner', 'manager')),
-             'can_refund', o.status = 'paid' AND v_role IN ('owner', 'manager')) AS j
+             'can_refund', o.status = 'paid' AND v_role IN ('owner', 'manager'),
+             'can_hand_over', o.status = 'paid' AND (o.rung_by = v_uid OR v_role IN ('owner', 'manager'))) AS j
       FROM public.exos_pos_orders o
      WHERE o.event_id = p_event_id
      ORDER BY o.created_at DESC

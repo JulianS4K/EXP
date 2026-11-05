@@ -67,6 +67,8 @@ export interface WalkupOrder {
   created_at: string;
   can_void?: boolean;
   can_refund?: boolean;
+  /** The seller or an owner / manager: show / print / email its tickets. */
+  can_hand_over?: boolean;
   replay?: boolean;
   cash_returned_cents?: number;
 }
@@ -90,6 +92,8 @@ const FRIENDLY: Record<string, string> = {
   override: 'A ticket was scanned: refunding needs the override.',
   expired: 'The places were given back: start the sale again.',
   'drawer-short': "The drawer doesn't have that much cash.",
+  'not-your-drawer': "That drawer is someone else's: use your own, or ask a manager.",
+  'handed-over': 'These tickets were already handed over, claimed or scanned: an owner or manager can resend them.',
 };
 
 /** A refusal as the door shows it. */

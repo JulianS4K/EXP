@@ -811,7 +811,7 @@ const walkupOrder = () => ({
   id: WALKUP_ORDER, event_id: EV, status: 'paid', payment_method: 'cash', currency: 'usd', total_cents: 2500, tax_cents: 0,
   tenders: { cash: 2500, comp: 0, card: 0 }, tier_id: WALKUP_TIER, tier_name: 'Door GA', quantity: 1, comp_quantity: 0,
   ticket_ids: [WALKUP_TICKET], tickets_scanned: 0, buyer_name: null, buyer_email: null, rung_by_me: true,
-  created_at: new Date().toISOString(), can_void: true, can_refund: true, replay: false,
+  created_at: new Date().toISOString(), can_void: true, can_refund: true, can_hand_over: true, replay: false,
 });
 const walkupPos = (b) => {
   switch (b.action) {

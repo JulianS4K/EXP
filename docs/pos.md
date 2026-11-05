@@ -120,8 +120,8 @@ The database, not the register, is the source of truth for anything to do with m
 | Comp a walk-up ticket | owner, manager (the box-office comp rule; counts against the comp budget) |
 | Void a sale (within 12 hours, before any of its tickets is scanned) | the member who sold it, owner, manager |
 | Refund a sale (after a scan: with an override, recorded) | owner, manager |
-| Pay cash out of a drawer | owner, manager, the member who opened the drawer |
-| Show / print a sale's tickets (print codes), email them | door staff for the event |
+| Pay cash out of a drawer; take cash into it (a sale, a bar tender, a cash gift card); hand a void's cash back from it; close it | the member who opened the drawer; an owner or manager naming it. Nothing picks another member's drawer by itself |
+| Show / print a sale's tickets (print codes), email them | the member who sold it (tickets still with them), owner, manager (also resend tickets already handed over or claimed; never a scanned one) |
 | Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
@@ -163,8 +163,9 @@ client's **order key** (a UUID per sale, `exos_pos_orders.client_ref`): a double
 sale; the key used for another sale (or by another member, event or org) is refused without saying
 anything about that sale. Rate limit: 30 sales a minute per device (or per member without one).
 
-**Tenders.** Cash needs an open drawer at the event (the one picked, else the device's, else the
-member's own). A comp covers whole tickets and needs an owner or manager, like the box-office comp,
+**Tenders.** Cash needs an open drawer at the event that the member opened (theirs on this device,
+else their latest). An owner or manager may name any open drawer at the event; nobody else's drawer is
+ever picked by default. A comp covers whole tickets and needs an owner or manager, like the box-office comp,
 and counts against the org's comp budget. A sale can mix them (two tickets, one comped). A **card**
 tender is refused: "Card at the door isn't connected yet". No card data is accepted: `exos-pos`
 refuses a body with a card-looking field before it looks at anything else.
@@ -176,10 +177,18 @@ the step has already sold out), hands the cash back out of an open drawer as a *
 manager) does the same later; after a scan it needs their **override**, which is recorded, and a
 scanned ticket stays `used` and keeps its place (the guest came in), as an online refund does. A
 pending sale is cancelled instead. Nothing can be reversed after the event's final settlement. The
-drawer must hold the cash it hands back.
+cash comes back out of a drawer the member may use (the one it went into if it's theirs, else their
+own; an owner or manager may name any open drawer at the event), and the drawer must hold it.
+
+**Handing over.** Only the member who sold it, an owner or a manager can show, print or email a sale's
+tickets (another scanner at the same door can't redirect them). The seller can do it only while the
+tickets are still with them: once emailed, claimed or scanned they aren't sent again; an owner or
+manager can resend (the old claim link is cancelled), never a scanned ticket. Email gives an Exos
+account the tickets directly only when its email is confirmed; otherwise it's a claim link.
 
 **Paid-outs.** `exos_pos_paid_out(drawer, amount, reason, key)`: owner, manager or the member who
-opened the drawer; a reason; never more than the drawer holds; once per key. A drawer's expected cash
+opened the drawer (the same holder rule now applies to bar cash tenders, cash gift cards sold into a
+drawer and closing a drawer); a reason; never more than the drawer holds; once per key. A drawer's expected cash
 at close is float + cash taken (refunded sales too: that cash came in) + cash gift cards - paid-outs
 (voids and refunds included), which is `reconcileDrawer` with `paidOutCents`.
 

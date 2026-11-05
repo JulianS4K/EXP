@@ -170,6 +170,8 @@ INSERT INTO public.exos_pos_drawer_sessions (id, org_id, event_id, status) VALUE
   ('c6000000-0000-0000-0000-0000000000f1', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-0000000000e1', 'open'),
   ('c6000000-0000-0000-0000-0000000000f2', 'c6000000-0000-0000-0000-000000000001', 'c6000000-0000-0000-0000-0000000000e1', 'open');
 UPDATE public.exos_pos_drawer_sessions SET status = 'closed', closed_at = now() WHERE id = 'c6000000-0000-0000-0000-0000000000f2';
+-- The scanner's own drawer (mig 20261107100000: cash goes only into a drawer its member opened, or a manager's pick).
+UPDATE public.exos_pos_drawer_sessions SET opened_by = 'c6000000-0000-0000-0000-0000000000a3' WHERE id = 'c6000000-0000-0000-0000-0000000000f1';
 DO $$ BEGIN
   ASSERT (SELECT status FROM public.exos_pos_drawer_sessions WHERE id = 'c6000000-0000-0000-0000-0000000000f2') = 'closed', 'G3b fixture: drawer closed';
 END $$;
