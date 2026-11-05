@@ -267,7 +267,7 @@ describe('moving a sale along (advanceCard)', () => {
       payment_intent: 'pi_A', reason: 'requested_by_customer', reverse_transfer: true, refund_application_fee: true,
       metadata: { exos_pos_order: ORDER, exos_auto: 'fulfillment_failed' },
     }, { idempotencyKey: `exos_pos_autorefund_${ORDER}` }]);
-    expect(d.calls[1]).toEqual({ fn: '_exos_pos_card_refund_record', args: { p_order: ORDER, p_refund_ref: 're_Fake1', p_status: 'succeeded', p_error: null } });
+    expect(d.calls[1]).toEqual({ fn: '_exos_pos_card_refund_record', args: { p_order: ORDER, p_pi: 'pi_A', p_refund_ref: 're_Fake1', p_status: 'succeeded', p_error: null } });
   });
   it('declined: cancel the PaymentIntent first, then the sale, with the decline code', async () => {
     const pi: IntentLike = { id: 'pi_A', status: 'requires_payment_method', last_payment_error: { code: 'card_declined', decline_code: 'Do_Not_Honor' } };
@@ -315,7 +315,7 @@ describe('card refund of a sale (refundCardSale)', () => {
       payment_intent: 'pi_A', amount: 5000, reason: 'requested_by_customer', reverse_transfer: true, refund_application_fee: true,
       metadata: { exos_pos_order: ORDER },
     }, { idempotencyKey: `exos_pos_refund_${ORDER}` }]);
-    expect(d.calls[0]).toEqual({ fn: '_exos_pos_card_refund_record', args: { p_order: ORDER, p_refund_ref: 're_Fake1', p_status: 'succeeded', p_error: null } });
+    expect(d.calls[0]).toEqual({ fn: '_exos_pos_card_refund_record', args: { p_order: ORDER, p_pi: 'pi_A', p_refund_ref: 're_Fake1', p_status: 'succeeded', p_error: null } });
   });
   it('EXOS_REFUND_KEEP_PLATFORM_FEE keeps the application fee', async () => {
     const s = fakeStripe();
@@ -354,6 +354,25 @@ describe('the webhook fallback (handlePosIntentEvent)', () => {
     expect(s.calls).toEqual([]);
     expect(d.calls).toEqual([]);
   });
+  it('a connected account\'s event is never a door sale: ignored without a Stripe or database call', async () => {
+    const s = fakeStripe();
+    const d = fakeDb();
+    for (const type of ['payment_intent.succeeded', 'payment_intent.amount_capturable_updated', 'payment_intent.payment_failed', 'payment_intent.canceled']) {
+      const r = await handlePosIntentEvent(d.db, s.stripe, {
+        id: 'evt_C', type, account: 'acct_Org1',
+        data: { object: { id: 'pi_C', status: 'succeeded', amount: 5000, amount_received: 5000, metadata: { exos_pos_order: ORDER } } },
+      });
+      expect(r).toEqual({ handled: false, ignored: 'connected-account event' });
+    }
+    expect(s.calls).toEqual([]);
+    expect(d.calls).toEqual([]);
+  });
+  it('a PaymentIntent not recorded for the order its metadata names: a 200 no-op', async () => {
+    const pi: IntentLike = { id: 'pi_Other', status: 'succeeded', amount: 5000, amount_received: 5000, metadata: { exos_pos_order: ORDER } };
+    const d = fakeDb({ _exos_pos_card_complete: new CardDbError({ code: 'P0002', message: 'no such card payment' }) });
+    const r = await handlePosIntentEvent(d.db, fakeStripe().stripe, ev('payment_intent.succeeded', pi));
+    expect(r).toEqual({ handled: true, ignored: 'payment intent not recorded for the order' });
+  });
   it('the door app died after the tap: authorized -> captured -> completed by the webhook', async () => {
     const pi: IntentLike = { id: 'pi_W', status: 'requires_capture', amount: 5000, metadata: { exos_pos_order: ORDER } };
     const s = fakeStripe({ pi_W: { ...pi } });
@@ -384,7 +403,7 @@ describe('the webhook fallback (handlePosIntentEvent)', () => {
   it('an order the database doesn\'t know is done with; a database outage is retried', async () => {
     const pi: IntentLike = { id: 'pi_W', status: 'canceled', metadata: { exos_pos_order: ORDER } };
     const gone = fakeDb({ _exos_pos_card_fail: new CardDbError({ code: 'P0002', message: 'no card payment' }) });
-    expect(await handlePosIntentEvent(gone.db, fakeStripe().stripe, ev('payment_intent.canceled', pi))).toEqual({ handled: true });
+    expect(await handlePosIntentEvent(gone.db, fakeStripe().stripe, ev('payment_intent.canceled', pi))).toMatchObject({ handled: true });
     const down = fakeDb({ _exos_pos_card_fail: new CardDbError({ code: '08006', message: 'connection failure' }) });
     await expect(handlePosIntentEvent(down.db, fakeStripe().stripe, ev('payment_intent.canceled', pi))).rejects.toBeInstanceOf(CardDbError);
   });

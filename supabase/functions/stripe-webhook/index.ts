@@ -530,17 +530,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const sessionId = await sessionIdForPaymentIntent(sb, pi);
         // exos: a card refund at the door (mig 20261107130000): the refund's
         // state on its reversal ledger row (or the card row of a capture that
-        // couldn't be fulfilled). Not a checkout session.
-        const posOrder = sessionId ? null : posOrderOf(obj as { metadata?: Record<string, string> | null });
+        // couldn't be fulfilled). Not a checkout session. Door PaymentIntents
+        // are the platform's (a connected account's event never reaches here:
+        // see the event.account gate above, repeated for clarity). The metadata
+        // only names a candidate order: the SQL changes nothing unless this
+        // PaymentIntent is the one recorded for it, and the refund id matches
+        // a stored one. Unmatched: logged, 200, no retry.
+        const posOrder = sessionId || event.account ? null : posOrderOf(obj as { metadata?: Record<string, string> | null });
         if (posOrder) {
           const refunds = obj.object === "refund" ? [obj as Stripe.Refund] : ((obj as Stripe.Charge).refunds?.data ?? []);
           for (const rf of refunds) {
-            const { error } = await sb.rpc("_exos_pos_card_refund_record", {
-              p_order: posOrder, p_refund_ref: rf.id, p_status: ledgerRefundStatus(rf.status), p_error: rf.failure_reason ?? null,
+            const rfPi = typeof rf.payment_intent === "string" ? rf.payment_intent : rf.payment_intent?.id ?? pi;
+            if (rfPi !== pi) {
+              console.error(`stripe-webhook: door card refund ${rf.id} isn't on ${pi}; ignored`);
+              continue;
+            }
+            const { data: rec, error } = await sb.rpc("_exos_pos_card_refund_record", {
+              p_order: posOrder, p_pi: pi, p_refund_ref: rf.id, p_status: ledgerRefundStatus(rf.status), p_error: rf.failure_reason ?? null,
             });
             if (error) {
               console.error(`stripe-webhook: door card refund record failed for ${posOrder}`, error);
               return new Response("refund handling error", { status: 500 });
+            }
+            if ((rec as { recorded?: boolean } | null)?.recorded !== true) {
+              console.error(`stripe-webhook: door card refund ${rf.id} on ${pi} doesn't match order ${posOrder}'s record; ignored`);
             }
           }
           break;
@@ -720,8 +733,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       case "payment_intent.succeeded":
       case "payment_intent.payment_failed":
       case "payment_intent.canceled": {
+        // Door PaymentIntents are the platform's: a connected account's event is never one.
+        if (event.account) break;
         try {
-          await handlePosIntentEvent(posCardDb(sb), terminalStripe(stripe), event);
+          const r = await handlePosIntentEvent(posCardDb(sb), terminalStripe(stripe), event);
+          if (r.ignored) console.error(`stripe-webhook: door card ${event.type} ${(event.data.object as { id?: string }).id} ignored: ${r.ignored}`);
         } catch (e) {
           console.error(`stripe-webhook: door card ${event.type} failed for ${(event.data.object as { id?: string }).id}`, e);
           return new Response("pos card handling error", { status: 500 });

@@ -732,6 +732,8 @@ GRANT EXECUTE ON FUNCTION public._exos_pos_card_complete(uuid, text, integer, te
 
 -- Declined or cancelled: the sale is cancelled (places back). Never after
 -- money was taken (succeeded / refund_*): then it's ignored. Idempotent.
+-- p_pi must be the order's recorded PaymentIntent (NULL only while none is
+-- attached): anything else is ignored.
 CREATE OR REPLACE FUNCTION public._exos_pos_card_fail(p_order uuid, p_pi text, p_status text, p_code text, p_via text, p_reason text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE o public.exos_pos_orders%ROWTYPE; c public.exos_pos_card_payments%ROWTYPE;
@@ -744,7 +746,8 @@ BEGIN
   IF c.id IS NULL THEN
     RAISE EXCEPTION 'no card payment for this order' USING ERRCODE = 'P0002';
   END IF;
-  IF (p_pi IS NOT NULL AND c.payment_intent_id IS DISTINCT FROM p_pi)
+  -- Bound to the recorded PaymentIntent: NULL only while none is attached.
+  IF p_pi IS DISTINCT FROM c.payment_intent_id
      OR c.status IN ('succeeded', 'refund_pending', 'refunded')
      OR o.status IN ('paid', 'refunded')
      OR EXISTS (SELECT 1 FROM public.exos_pos_payments p WHERE p.order_id = o.id AND p.status = 'succeeded') THEN
@@ -800,32 +803,44 @@ GRANT EXECUTE ON FUNCTION public._exos_pos_card_reverse(uuid, uuid, text, text, 
 
 -- Stripe's answer to a card refund: on the reversal ledger row (a void /
 -- refund) or, for a capture that couldn't be fulfilled, on the card row.
--- Idempotent; a later webhook moves a pending refund to its final state.
-CREATE OR REPLACE FUNCTION public._exos_pos_card_refund_record(p_order uuid, p_refund_ref text, p_status text, p_error text)
+-- Bound to what Exos recorded: nothing changes unless p_pi is the order's
+-- PaymentIntent (exos_pos_card_payments.payment_intent_id, and the
+-- reversal's card_payment_intent), and, once a refund id is stored, p_refund_ref
+-- is that id. An unmatched answer is a no-op ({ recorded: false }), never an
+-- error. Idempotent; a later webhook moves a pending refund to its final state.
+DROP FUNCTION IF EXISTS public._exos_pos_card_refund_record(uuid, text, text, text);
+CREATE OR REPLACE FUNCTION public._exos_pos_card_refund_record(p_order uuid, p_pi text, p_refund_ref text, p_status text, p_error text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   v_status text := CASE WHEN p_status IN ('pending', 'succeeded', 'failed', 'canceled') THEN p_status ELSE 'pending' END;
   v_ref    text := CASE WHEN coalesce(p_refund_ref, '') ~ '^re_[A-Za-z0-9]{1,250}$' THEN p_refund_ref END;
-  v_n      int;
+  v_n      int := 0;
 BEGIN
+  IF p_order IS NULL OR coalesce(p_pi, '') !~ '^pi_[A-Za-z0-9]{1,250}$'
+     OR NOT EXISTS (SELECT 1 FROM public.exos_pos_card_payments c WHERE c.order_id = p_order AND c.payment_intent_id = p_pi) THEN
+    RETURN jsonb_build_object('order_id', p_order, 'recorded', false, 'reason', 'payment_intent');
+  END IF;
   UPDATE public.exos_pos_reversals
-     SET card_refund_ref = coalesce(v_ref, card_refund_ref),
+     SET card_refund_ref = coalesce(card_refund_ref, v_ref),
          card_refund_status = CASE WHEN card_refund_status = 'succeeded' THEN 'succeeded' ELSE v_status END,
          card_refund_error = CASE WHEN v_status IN ('failed', 'canceled') THEN left(coalesce(p_error, v_status), 300) END
-   WHERE order_id = p_order AND card_payment_intent IS NOT NULL;
+   WHERE order_id = p_order AND card_payment_intent = p_pi
+     AND (card_refund_ref IS NULL OR card_refund_ref = v_ref);
   GET DIAGNOSTICS v_n = ROW_COUNT;
-  IF v_n = 0 THEN
+  IF v_n = 0 AND NOT EXISTS (SELECT 1 FROM public.exos_pos_reversals WHERE order_id = p_order AND card_payment_intent IS NOT NULL) THEN
     UPDATE public.exos_pos_card_payments
-       SET refund_ref = coalesce(v_ref, refund_ref),
+       SET refund_ref = coalesce(refund_ref, v_ref),
            status = CASE WHEN v_status = 'succeeded' THEN 'refunded' ELSE status END,
            note = CASE WHEN v_status IN ('failed', 'canceled') THEN left('refund ' || v_status || ': ' || coalesce(p_error, ''), 300) ELSE note END
-     WHERE order_id = p_order AND status IN ('refund_pending', 'refunded');
+     WHERE order_id = p_order AND payment_intent_id = p_pi AND status IN ('refund_pending', 'refunded')
+       AND (refund_ref IS NULL OR refund_ref = v_ref);
     GET DIAGNOSTICS v_n = ROW_COUNT;
   END IF;
-  RETURN jsonb_build_object('order_id', p_order, 'recorded', v_n > 0, 'status', v_status);
+  RETURN jsonb_build_object('order_id', p_order, 'recorded', v_n > 0, 'status', v_status,
+                            'reason', CASE WHEN v_n = 0 THEN 'refund_ref' END);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_pos_card_refund_record(uuid, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_pos_card_refund_record(uuid, text, text, text) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_pos_card_refund_record(uuid, text, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_pos_card_refund_record(uuid, text, text, text, text) TO service_role;
 
 -- ROLLBACK (manual): DROP the functions created above and the tables
 -- exos_pos_card_payments / exos_pos_terminal_readers / exos_pos_terminal_locations;

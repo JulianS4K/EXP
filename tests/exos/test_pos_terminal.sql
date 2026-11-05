@@ -18,6 +18,10 @@
 --   T10 a card tender can't come from anywhere else (cash path, direct complete, RLS)
 --   T11 cross-org isolation (cores, RLS, the readers RPC)
 --   T12 settlement counts the card tender and its Exos fee
+--   T13 a refund answer is bound to the recorded PaymentIntent and refund id:
+--       the right order with another PaymentIntent, or another refund id,
+--       changes nothing; the matching answer records; a fail / complete with
+--       another PaymentIntent is ignored
 -- Self-contained (BEGIN / ROLLBACK). Org …01: owner a1, manager a2, scanner a3
 -- (assigned to e1), finance a4, scanner a6 (assigned to e2). Org …02: owner b9
 -- (connected too). Org …03: owner c9, no payment setup.
@@ -119,7 +123,7 @@ BEGIN
       'public._exos_pos_card_attach(uuid,text,integer,text,integer,integer,integer,integer)',
       'public._exos_pos_card_lookup(uuid,uuid,text,boolean)', 'public._exos_pos_card_capture_prepare(uuid,text)',
       'public._exos_pos_card_complete(uuid,text,integer,text,text)', 'public._exos_pos_card_fail(uuid,text,text,text,text,text)',
-      'public._exos_pos_card_reverse(uuid,uuid,text,text,boolean,uuid)', 'public._exos_pos_card_refund_record(uuid,text,text,text)'] LOOP
+      'public._exos_pos_card_reverse(uuid,uuid,text,text,boolean,uuid)', 'public._exos_pos_card_refund_record(uuid,text,text,text,text)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE')
        AND has_function_privilege('service_role', f, 'EXECUTE'), 'T1: service role only: ' || f;
     ASSERT (SELECT prosecdef AND proconfig::text LIKE '%search_path=public, pg_temp%' FROM pg_proc WHERE oid = f::regprocedure),
@@ -336,10 +340,10 @@ BEGIN
   r := public._exos_pos_card_reverse(pg_temp.u('a3'), v_o, 'void', 'wrong night', false, NULL);
   ASSERT (r ->> 'replay')::boolean AND r -> 'card_refund' ->> 'status' = 'pending', 'T7: replay';
   -- Stripe's answer, then the webhook's later one.
-  PERFORM public._exos_pos_card_refund_record(v_o, 're_T7void', 'pending', NULL);
-  PERFORM public._exos_pos_card_refund_record(v_o, 're_T7void', 'succeeded', NULL);
+  PERFORM public._exos_pos_card_refund_record(v_o, 'pi_T3door', 're_T7void', 'pending', NULL);
+  PERFORM public._exos_pos_card_refund_record(v_o, 'pi_T3door', 're_T7void', 'succeeded', NULL);
   ASSERT (SELECT card_refund_ref = 're_T7void' AND card_refund_status = 'succeeded' FROM public.exos_pos_reversals WHERE order_id = v_o), 'T7: refunded';
-  PERFORM public._exos_pos_card_refund_record(v_o, 're_T7void', 'pending', NULL);
+  PERFORM public._exos_pos_card_refund_record(v_o, 'pi_T3door', 're_T7void', 'pending', NULL);
   ASSERT (SELECT card_refund_status FROM public.exos_pos_reversals WHERE order_id = v_o) = 'succeeded', 'T7: a late pending doesn''t undo it';
   -- After a scan: a refund needs the manager's override.
   v_o2 := pg_temp.v('t5')::uuid;
@@ -351,7 +355,7 @@ BEGIN
   r := public._exos_pos_card_reverse(pg_temp.u('a2'), v_o2, 'refund', 'guest left early', true, NULL);
   ASSERT r ->> 'status' = 'refunded' AND (r ->> 'override')::boolean AND (r ->> 'tickets_kept')::int = 1
      AND (r -> 'card_refund' ->> 'amount_cents')::int = 2500, 'T7: refund with the override ' || r::text;
-  PERFORM public._exos_pos_card_refund_record(v_o2, NULL, 'failed', 'charge_already_refunded');
+  PERFORM public._exos_pos_card_refund_record(v_o2, 'pi_T5hook', NULL, 'failed', 'charge_already_refunded');
   ASSERT (SELECT card_refund_status = 'failed' AND card_refund_error = 'charge_already_refunded' FROM public.exos_pos_reversals WHERE order_id = v_o2),
     'T7: a failed refund is on the ledger for the operator';
   RAISE NOTICE 'OK T7 void / refund of a card sale: walk-up rules, ledger row with the card part, refund state; cash RPC / API refuse it';
@@ -376,7 +380,7 @@ BEGIN
   ASSERT public.exos_effective_available(pg_temp.u('d1')) = v_avail, 'T8: places back';
   -- The second delivery asks for the same refund (Stripe's key makes it one).
   ASSERT (public._exos_pos_card_complete(v_o, 'pi_T8late', 2500, 'webhook', 'evt_T8b') ->> 'refund_needed')::boolean, 'T8: still pending';
-  PERFORM public._exos_pos_card_refund_record(v_o, 're_T8auto', 'succeeded', NULL);
+  PERFORM public._exos_pos_card_refund_record(v_o, 'pi_T8late', 're_T8auto', 'succeeded', NULL);
   ASSERT (SELECT status = 'refunded' AND refund_ref = 're_T8auto' FROM public.exos_pos_card_payments WHERE order_id = v_o), 'T8: refunded';
   ASSERT NOT (public._exos_pos_card_complete(v_o, 'pi_T8late', 2500, 'webhook', 'evt_T8c') ->> 'refund_needed')::boolean, 'T8: done';
   -- An amount that doesn't match the sale is refunded too.
@@ -549,6 +553,58 @@ BEGIN
   ASSERT (s2 ->> 'exos_fee_cents')::int = ((s2 ->> 'fee_base_cents')::int * v_bps + 5000) / 10000, 'T12: the Exos fee on card tickets';
   ASSERT (s2 ->> 'orders')::int = (s1 ->> 'orders')::int + 1, 'T12: one more paid order';
   RAISE NOTICE 'OK T12 settlement counts the card tender and its Exos fee';
+END $$;
+
+-- ── T13 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r jsonb; v_o uuid; v_u uuid;
+BEGIN
+  -- A completed card sale, voided: the reversal waits for its refund.
+  v_o := (pg_temp.begin('a3', 'd1', 1, '50') ->> 'id')::uuid;
+  PERFORM pg_temp.charge('a3', v_o, 'pi_T13sale');
+  PERFORM public._exos_pos_card_capture_prepare(v_o, 'pi_T13sale');
+  PERFORM public._exos_pos_card_complete(v_o, 'pi_T13sale', 2500, 'door', NULL);
+  PERFORM public._exos_pos_card_reverse(pg_temp.u('a3'), v_o, 'void', 'binding test', false, NULL);
+  -- The right order id (the metadata) with another PaymentIntent: nothing changes.
+  r := public._exos_pos_card_refund_record(v_o, 'pi_T13other', 're_T13evil', 'succeeded', NULL);
+  ASSERT NOT (r ->> 'recorded')::boolean, 'T13: another PaymentIntent is not recorded ' || r::text;
+  ASSERT (SELECT card_refund_status = 'pending' AND card_refund_ref IS NULL FROM public.exos_pos_reversals WHERE order_id = v_o),
+    'T13: the reversal is untouched';
+  ASSERT NOT (public._exos_pos_card_refund_record(v_o, NULL, 're_T13evil', 'succeeded', NULL) ->> 'recorded')::boolean,
+    'T13: no PaymentIntent, no change';
+  -- The PaymentIntent of ANOTHER order (T3's) with this order's id: nothing.
+  ASSERT NOT (public._exos_pos_card_refund_record(v_o, 'pi_T3door', 're_T13evil', 'failed', 'x') ->> 'recorded')::boolean,
+    'T13: another order''s PaymentIntent';
+  ASSERT (SELECT card_refund_status FROM public.exos_pos_reversals WHERE order_id = v_o) = 'pending', 'T13: still pending';
+  -- The matching answer records, and binds the refund id.
+  ASSERT (public._exos_pos_card_refund_record(v_o, 'pi_T13sale', 're_T13good', 'pending', NULL) ->> 'recorded')::boolean, 'T13: matching';
+  -- A different refund id on the right PaymentIntent: nothing changes.
+  ASSERT NOT (public._exos_pos_card_refund_record(v_o, 'pi_T13sale', 're_T13other', 'failed', 'x') ->> 'recorded')::boolean,
+    'T13: another refund id';
+  ASSERT (SELECT card_refund_ref = 're_T13good' AND card_refund_status = 'pending' AND card_refund_error IS NULL
+            FROM public.exos_pos_reversals WHERE order_id = v_o), 'T13: the bound refund is untouched';
+  ASSERT (public._exos_pos_card_refund_record(v_o, 'pi_T13sale', 're_T13good', 'succeeded', NULL) ->> 'recorded')::boolean, 'T13: settles';
+  ASSERT (SELECT card_refund_status FROM public.exos_pos_reversals WHERE order_id = v_o) = 'succeeded', 'T13: succeeded';
+  -- The unfulfilled-capture path (the card row) is bound the same way (T8's order).
+  v_u := (SELECT order_id FROM public.exos_pos_card_payments WHERE payment_intent_id = 'pi_T8amount');
+  ASSERT NOT (public._exos_pos_card_refund_record(v_u, 'pi_T8late', 're_T13x', 'succeeded', NULL) ->> 'recorded')::boolean,
+    'T13: card row, another PaymentIntent';
+  ASSERT (SELECT status = 'refund_pending' AND refund_ref IS NULL FROM public.exos_pos_card_payments WHERE order_id = v_u), 'T13: untouched';
+  ASSERT (public._exos_pos_card_refund_record(v_u, 'pi_T8amount', 're_T13auto', 'succeeded', NULL) ->> 'recorded')::boolean, 'T13: card row matching';
+  ASSERT NOT (public._exos_pos_card_refund_record(v_u, 'pi_T8amount', 're_T13y', 'failed', 'x') ->> 'recorded')::boolean,
+    'T13: card row, another refund id';
+  ASSERT (SELECT status = 'refunded' AND refund_ref = 're_T13auto' FROM public.exos_pos_card_payments WHERE order_id = v_u), 'T13: card row refunded';
+  -- fail / complete with a PaymentIntent that isn't the order's: ignored / not found.
+  v_o := (pg_temp.begin('a3', 'd1', 1, '51') ->> 'id')::uuid;
+  PERFORM pg_temp.charge('a3', v_o, 'pi_T13pend');
+  ASSERT (public._exos_pos_card_fail(v_o, 'pi_T13other', 'declined', NULL, 'webhook', NULL) ->> 'ignored')::boolean, 'T13: fail, another PI';
+  ASSERT (public._exos_pos_card_fail(v_o, NULL, 'canceled', NULL, 'webhook', NULL) ->> 'ignored')::boolean, 'T13: fail, no PI once one is recorded';
+  ASSERT (SELECT status FROM public.exos_pos_orders WHERE id = v_o) = 'open', 'T13: still pending';
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_card_complete(%L, %L, 2500, %L, NULL)', v_o, 'pi_T13other', 'webhook')) = 'P0002',
+    'T13: complete, another PI';
+  ASSERT public._exos_pos_card_capture_prepare(v_o, 'pi_T13other') ->> 'action' = 'ignore', 'T13: capture, another PI';
+  PERFORM public._exos_pos_card_fail(v_o, 'pi_T13pend', 'canceled', NULL, 'door', NULL);
+  RAISE NOTICE 'OK T13 refund answers bound to the recorded PaymentIntent and refund id; fail / complete with another PI ignored';
 END $$;
 
 ROLLBACK;
