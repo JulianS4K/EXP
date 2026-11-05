@@ -588,6 +588,14 @@ signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent
 - ⬜ **Tap to Pay on iPhone for on-site sales** (operator ask 2026-11-05): `docs/pos.md` "Card at the door (Tap to Pay
   / Terminal)" has the plan (server: connection tokens, Terminal locations, `card_present` PaymentIntents through
   Connect; client: a native wrapper with the Terminal SDK, smart readers server-driven from the web).
+- 🟡 **Card at the door, Stripe Terminal** (`claude/exos-pos-terminal`, `20261107130000_exos_pos_terminal`, authored,
+  not applied; `docs/pos.md` "Card at the door"): off until `EXOS_POS_CARD=on`. Smart readers (S700 / WisePOS E)
+  from the web Sell tab: a pending walk-up, a `card_present` PaymentIntent (destination charge + application fee as
+  online, manual capture), capture only while the places are held, the sale completed with the PaymentIntent as
+  `terminal_ref`; declines / cancels give the places back; `stripe-webhook` completes or releases a sale whose app
+  died; void / refund refunds the card with a reversal ledger row. Locations and readers per org (owner / manager),
+  connection tokens for door staff. **Next:** the native wrapper for Tap to Pay (server side ready, mode `sdk`);
+  operator: Terminal on the platform account, readers, the `payment_intent.*` webhook events.
 
 ## Net-equal marketplace pricing 2026-09-29
 
