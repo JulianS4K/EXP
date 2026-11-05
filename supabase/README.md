@@ -39,6 +39,19 @@ project** and still needs explicit operator permission.
    touch `exos_*` objects. They're already applied and stay there as
    history, so replaying this directory alone doesn't reproduce prod
    exactly (see Caveats).
+4. **A text patch must match prod's function body, not the harness's.**
+   Many migrations patch a function in place by search-and-replace on
+   `pg_get_functiondef` (`pg_temp.exos_patch_n`), which raises when the search
+   text isn't found. Because of rule 3, prod's body can differ from the one
+   `tests/exos` builds. Example: prod runs the hardened `exos_claim_transfer`
+   from `20260924200848`, which the harness doesn't replay. So
+   `20261104100000`'s lock patches found nothing to match and stopped the
+   2026-11-05 prod rollout. Before shipping a patch, read the target with
+   `select pg_get_functiondef('public.<fn>(<args>)'::regprocedure)` on prod
+   (read-only) and check that the search text appears the expected number of
+   times. When prod may already contain the change, guard the patch the way
+   `20261104100000` does: skip it when the end state is already present. Don't
+   loosen the match count to make it pass.
 
 When the DB split happens (plan step 4 below), the remaining step is data:
 a new project, a data copy, and repointing the functions and the SPA.
