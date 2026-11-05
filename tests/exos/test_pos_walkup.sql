@@ -462,7 +462,7 @@ BEGIN
                     AND html LIKE '%/claim/%'), 'W13: claim mail';
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', r ->> 'id', 'b0c7-other@x.com')) = '55000',
     'W13: already handed over';
-  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', r ->> 'id')) = '55000', 'W13: the seller: no paper beside a claim link';
+  ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: no paper beside a claim link';
   PERFORM pg_temp.act(pg_temp.u('a2'));
   ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: a manager: skipped, in transfer';
   RAISE NOTICE 'OK W13 the screen QR / paper is a print code that scans once; email to an account or a claim link';
@@ -622,6 +622,9 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_63, 'b0c7-scanner3@x.com')) = '55000',
     'W18: a manager can''t take a claimed ticket';
   ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = v_t) = pg_temp.u('a5'), 'W18: still the buyer''s';
+  -- Nor print it: a live paper code would lock the buyer's app code out.
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_63)) = '55000', 'W18: no codes for a claimed ticket';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_ticket_print_codes WHERE ticket_id = v_t AND status = 'active'), 'W18: no paper made';
   -- Delivered straight to a confirmed account (W13's sale): the same.
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', (SELECT o.id FROM public.exos_pos_orders o
            WHERE o.client_ref = pg_temp.k('60')), 'b0c7-scanner3@x.com')) = '55000', 'W18: a delivered ticket stays delivered';
@@ -638,6 +641,7 @@ BEGIN
   -- A scanned ticket is never sent again, by anyone.
   UPDATE public.exos_tickets SET status = 'used', check_in_at = now() WHERE order_ref = 'pos:' || v_62;
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_62, 'b0c7-fan@x.com')) = '55000', 'W18: scanned';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '55000', 'W18: no codes for a scanned ticket, even a manager';
   -- Checked in but still active (a test scan): not either.
   v_64 := (pg_temp.sell('a3', 'd5', 1, '64') ->> 'id')::uuid;
   UPDATE public.exos_tickets SET check_in_at = now() WHERE order_ref = 'pos:' || v_64;
@@ -646,6 +650,10 @@ BEGIN
     'W18: a checked-in ticket isn''t sent, even by a manager';
   PERFORM pg_temp.act(pg_temp.u('a3'));
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '55000', 'W18: no paper for a scanned ticket';
+  -- The seller still gets codes for an undelivered ticket.
+  v_65 := (pg_temp.sell('a3', 'd5', 1, '66') ->> 'id')::uuid;
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  ASSERT jsonb_array_length(public.exos_pos_order_codes(v_65) -> 'tickets') = 1, 'W18: the seller, an undelivered ticket';
   RAISE NOTICE 'OK W18 only the seller or an owner / manager hands tickets over; unconfirmed email = claim link; never a claimed or scanned ticket; a manager resends the seller''s unclaimed link';
 END $$;
 

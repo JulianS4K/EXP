@@ -121,7 +121,7 @@ The database, not the register, is the source of truth for anything to do with m
 | Void a sale (within 12 hours, before any of its tickets is scanned) | the member who sold it, owner, manager |
 | Refund a sale (after a scan: with an override, recorded) | owner, manager |
 | Pay cash out of a drawer; take cash into it (a sale, a bar tender, a cash gift card); hand a void's cash back from it; close it | the member who opened the drawer; an owner or manager naming it. Nothing picks another member's drawer by itself |
-| Show / print a sale's tickets (print codes), email them | the member who sold it, owner, manager; email only tickets the seller still holds (never a claimed or scanned one); an owner / manager may also resend one in the seller's unclaimed claim link |
+| Show / print a sale's tickets (print codes), email them | the member who sold it, owner, manager; only tickets the seller still holds (active, never checked in, owned by the seller), never a claimed or scanned one; an owner / manager may also resend one in the seller's unclaimed claim link. A buyer's ticket is printed only through `exos_ticket_print` |
 | Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
@@ -181,7 +181,10 @@ cash comes back out of a drawer the member may use (the one it went into if it's
 own; an owner or manager may name any open drawer at the event), and the drawer must hold it.
 
 **Handing over.** Only the member who sold it, an owner or a manager can show, print or email a sale's
-tickets (another scanner at the same door can't redirect them). Email only ever sends tickets the
+tickets (another scanner at the same door can't redirect them). Codes for the screen QR or paper are
+made only for tickets the seller still holds, for everyone: a live paper code makes the holder's app
+code read "printed", so printing a buyer's ticket would take it over (a buyer's ticket is printed only
+through `exos_ticket_print`). Email only ever sends tickets the
 seller still holds (active, never checked in, owned by the seller): a ticket a buyer has claimed is
 theirs and changes only through the normal transfer and refund flows, and a scanned ticket is never
 sent. The seller sends tickets not yet in a claim link; an owner or manager can also resend one sitting
