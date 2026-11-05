@@ -146,8 +146,14 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
     }
 
     // -- Ticket types, add-ons, promo codes --------------------------------------------
-    case "get-ticket-type":
-      return { data: await ownChild(c, "exos_ticket_tiers", TIER_COLS, p.id, p.tier, "ticket type") };
+    case "get-ticket-type": {
+      const t = await ownChild(c, "exos_ticket_tiers", TIER_COLS, p.id, p.tier, "ticket type");
+      // exos: price steps (mig 20261106130000) — the price it sells at now and
+      // its step (exos_tier_current_price); `price` stays the opening price.
+      const { data: cp, error: cpErr } = await sb.rpc("exos_tier_current_price", { p_tier_id: t.id });
+      if (cpErr && !["PGRST202", "42883"].includes(String(cpErr.code))) throw cpErr;
+      return { data: cpErr ? t : { ...t, current_price: cp } };
+    }
     case "create-ticket-type":
       return new Answer(201, {
         data: await write(c, "ticket_type.create", uuidOr404(p.id, "event"), { ticket_type: unwrap(c.body, "ticket_type") }),

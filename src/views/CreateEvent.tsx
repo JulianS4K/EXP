@@ -1635,8 +1635,8 @@ export default function CreateEvent() {
               After you publish, open Edit event → Vouchers to make codes that unlock a hidden ticket type, pin a price, or let someone buy when sold out.
             </p>
             <p className="type text-xs text-white/50 mt-2 leading-relaxed">
-              Also after you create: add-ons and merch (Edit event), and price steps by date such as early bird
-              (the event report → Settings → Scheduled pricing).
+              Also after you create: add-ons and merch (Edit event), price steps such as early bird for the first 100
+              or until a date, and shared limits across ticket types (Edit event → Price steps, Shared limits).
             </p>
           </div>
         {/* Rarely-needed settings stay folded so the form reads as name →

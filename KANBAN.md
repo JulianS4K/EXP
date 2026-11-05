@@ -63,11 +63,14 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
    References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
    `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
-3. **[building] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
+3. **[built: claude/exos-capacity-pricing] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
    across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
-4. **[building] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by
+   Built on the existing `exos_quotas` (no second pool table); left: partner reservations across several types lock pools per type, not in one global order.
+4. **[built: claude/exos-capacity-pricing] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by
    quantity sold (early bird → GA → final), plus an optional door price. The all-in price and the feeds follow
    the current step. DICE equivalent: `PriceTier` (allocation, time, faceValue, price, doorSalesPrice).
+   Left: POS walk-up sales (501 today) must call the door channel, and partner reservations don't lock a step yet.
+   API writes (steps, pools, door price) need an owner / manager key, enforced in SQL.
 5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
    by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the

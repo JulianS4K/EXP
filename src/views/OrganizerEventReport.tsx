@@ -31,7 +31,7 @@ import RemindersPanel from '../components/RemindersPanel';
 import EventAnalyticsPanel from '../components/EventAnalyticsPanel';
 import ReleasePolicyPanel from '../components/ReleasePolicyPanel';
 import CompIssuancePanel from '../components/CompIssuancePanel';
-import TierPricingPanel from '../components/TierPricingPanel';
+import PriceStepsEditor from '../components/PriceStepsEditor';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
@@ -591,11 +591,17 @@ export default function OrganizerEventReport() {
         )}
 
         {tab === 'settings' && (<>
-        {/* Scheduled pricing — time-based price steps per tier (owner/manager). */}
-        <TierPricingPanel
-          event={event}
-          canManage={canAct}
-        />
+        {/* Price steps per tier: by number sold and / or date, plus a door
+            price (owner/manager; mig 20261106130000). Replaces the time-only
+            schedule editor: the schedule is now the steps' time-only form. */}
+        {canAct && (
+          <PriceStepsEditor
+            tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+            timezone={event.timezone}
+            currency={event.currency}
+            canManage={canAct}
+          />
+        )}
 
         {/* Self-serve RSVP release policy (owner/manager) — holders of free
             tickets can give the seat back; the waitlist auto-offers it. */}

@@ -291,11 +291,15 @@ const EVENT_FIELDS = "name, primary_performer_name, status, starts_at, occurs_at
 async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
   const counts = { mode: "dry-run", allocations: 0, create: 0, update: 0, unchanged: 0, failed: 0, delist: 0, released: 0 };
 
-  // Live and to-be-listed allocations of published events.
-  const { data, error } = await sb
+  // Live and to-be-listed allocations of published events. exos: price steps
+  // (mig 20261106130000): current_price is the type's price now, from
+  // exos_tier_current_price (the computed field exos_current_price), so a
+  // step that ends on a count is priced right; before the migration the
+  // field is missing and the schedule rule applies as before.
+  const read = (tierCols: string) => sb
     .from("exos_distribution_listings")
     .select("id, event_id, status, requested_qty, list_qty, unit_price, external_listing_id, internal_seats, listed_snapshot, planned_listing, exos_pool_state, " +
-      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(name, price, section_label, price_schedule, market_split)`)
+      `exos_events!inner(${EVENT_FIELDS}), exos_ticket_tiers(${tierCols})`)
     .eq("channel", channel)
     .not("tier_id", "is", null)
     // Holding seats, or allowed to (a pool at 0 while Exos has none free).
@@ -303,6 +307,11 @@ async function syncChannel(sb: SupabaseClient, channel: MarketChannel) {
     .in("status", ["pending", "planned", "failed", "listing", "listed"])
     .eq("exos_events.status", "published")
     .limit(200);
+  const TIER_COLS = "name, price, section_label, price_schedule, market_split";
+  let { data, error } = await read(`${TIER_COLS}, current_price:exos_current_price`);
+  if (error && ["42703", "42883", "PGRST100", "PGRST200", "PGRST204"].includes(String(error.code))) {
+    ({ data, error } = await read(TIER_COLS));
+  }
   if (error) throw new Error(`read ${channel} allocations: ${error.message}`);
   const rows = (data ?? []) as unknown as AllocationRow[];
   counts.allocations = rows.length;

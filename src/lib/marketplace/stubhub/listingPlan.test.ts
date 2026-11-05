@@ -67,6 +67,21 @@ describe('planStubHubListing', () => {
     expect(blank.listings[0].request.body).toMatchObject({ ticket_price: { amount: 40 } });
   });
 
+  it('prices from the current price step when the reader has it (mig 20261106130000)', () => {
+    // Early bird ($40, the type's opening price) sold out by count: GA $55 now, no schedule form.
+    const p = planStubHubListing({
+      ...A, unit_price: null, tier: { name: 'GA', price: 40, price_schedule: [], current_price: '55' },
+      event: { ...A.event!, purchase_limits: null }, stubhubEventId: '1',
+    });
+    expect(p.listings[0].request.body).toMatchObject({ ticket_price: { amount: 55 } });
+    // Without it (an older database): the schedule rule, as before.
+    const old = planStubHubListing({
+      ...A, unit_price: null, tier: { name: 'GA', price: 40, current_price: null },
+      event: { ...A.event!, purchase_limits: null }, stubhubEventId: '1',
+    });
+    expect(old.listings[0].request.body).toMatchObject({ ticket_price: { amount: 40 } });
+  });
+
   it('refuses what it cannot list', () => {
     expect(() => planStubHubListing({ ...A, tier: null })).toThrow(/ticket type/);
     expect(() => planStubHubListing({ ...A, requested_qty: 0, stubhubEventId: '1' })).toThrow(/nothing allocated to StubHub/);

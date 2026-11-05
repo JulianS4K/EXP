@@ -73,8 +73,11 @@ paid events can't be sold.**
   version and the max capacity then. **Withdraw** takes it off at once: listings come down, their
   seats come back to your checkout. If the max capacity later drops to 150 or less the opt-in ends
   by itself, and you opt in again if it goes back over. Until then marketplaces you tick wait.
-- **Shared capacity (quotas):** one pool several tiers draw from, e.g. a 300-person room split
-  into GA and VIP. *There's no screen for this yet; support sets it up in SQL.*
+- **Shared limits:** one limit several ticket types draw from, e.g. a 500-person room selling GA,
+  VIP and Student while VIP keeps its own 50 (Edit event → Shared limits). A type sells while every
+  limit it is in has room; 0 stops sales, there is no unlimited. See `docs/price-steps.md`.
+- **Price steps:** a type's price moves on its own, e.g. early bird $20 for the first 100 or until
+  Dec 1, then $25, then $30, plus a door price (Edit event → Price steps). See `docs/price-steps.md`.
 
 **Store page** (the "Store page" section of create and edit). Everything in it is optional and
 shows on your event page:
@@ -832,7 +835,6 @@ them anyway).
 
 ## Not built yet (tracked in `KANBAN.md`)
 
-- A screen for managing quotas.
 - A map on the storefront page. Event pages already have directions, and a map when the key is set.
 - SEO landing pages.
 - Marketplace distribution (see the roadmap and the read-only rule).

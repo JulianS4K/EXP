@@ -167,6 +167,7 @@ import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
 import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffice.ts";
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
+import { CAPACITY_CREATED, CAPACITY_ROUTES, CapacityError, handleCapacity } from "./capacity.ts";
 // claude/exos-checkout-questions (mig 20261106110000): checkout questions and answers.
 import {
   attachAnswers, attachAnswersPage, canReadOrderAnswers, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers,
@@ -420,13 +421,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Answer) return json(out.body, out.status);
     if (out instanceof Created) return json(out.body, 201);
-    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) ? 201 : 200);
+    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) || CAPACITY_CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
     // A venue another org runs (mig 20261104180000): from any route.
     const approval = venueApprovalAnswer(e);
     if (approval) return json(approval, 403);
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
+    if (e instanceof CapacityError) return json({ error: e.message }, e.status);
     if (isQuestionsError(e)) return json({ error: e.message }, e.status);
     if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
@@ -586,6 +588,14 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
   if (LOCATION_ROUTES.has(route.id)) {
     return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
+  }
+  // claude/exos-capacity-pricing (migs 20261106120000 / 20261106130000): shared
+  // capacity pools and price steps.
+  if (CAPACITY_ROUTES.has(route.id)) {
+    return await handleCapacity(route, {
+      sb, orgId, cred: { kind: c.cred.kind, id: c.cred.id, userId: c.cred.userId, role: c.cred.role },
+      params: c.params, body: c.body,
+    });
   }
   // claude/exos-checkout-questions (mig 20261106110000): questions and answers.
   if (QUESTION_ROUTES.has(route.id)) {
