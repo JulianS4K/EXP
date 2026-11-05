@@ -6,6 +6,13 @@
 //   POST /exos-wallet/pass     { ticket_id, kind: "google" } -> { save_url }
 //   POST /exos-wallet/reissue  { ticket_id }                  -> new door code,
 //        the old one stops working (e.g. a screenshot of the pass got around)
+//   POST /exos-wallet/season-pass { pass_id, kind: "apple" }  -> .pkpass of a
+//        season pass / flex pack; kind "google" -> { save_url }. The holder's
+//        own active pass only (exos_wallet_season_pass, mig 20261102100000);
+//        a card, not a door code (_shared/wallet/seasonPass.ts)
+// Link holder (no account; the ticket's signed live link, mig 20261031130000):
+//   POST /exos-wallet/link-pass { ticket_id, link_key, kind } -> as /pass; the
+//        pass is the ticket owner's, checked in SQL by exos_ticket_link_wallet_issue
 // Apple PassKit web service (webServiceURL = <function URL>/apple): register /
 //   unregister a device, list updated serials, fetch the latest pass, log.
 //   Authorization: "ApplePass <authenticationToken>", checked against the
@@ -44,6 +51,7 @@ import {
 import type { WalletPayload } from "../_shared/wallet/payload.ts";
 import { createPkcs7Signer, type PassSigner } from "../_shared/wallet/pkcs7.ts";
 import { httpDate, notModified, routeWallet } from "../_shared/wallet/routes.ts";
+import { buildSeasonPassAppleJson, type SeasonPassPayload, seasonPassSaveUrl } from "../_shared/wallet/seasonPass.ts";
 
 const FN = "exos-wallet";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -174,7 +182,7 @@ async function pkpassResponse(p: WalletPayload, a: AppleSetup, token: string, ex
 
 // ── Owner: get a pass ────────────────────────────────────────────────────
 
-async function issue(req: Request): Promise<Response> {
+async function issue(req: Request, byLink = false): Promise<Response> {
   // deno-lint-ignore no-explicit-any
   let body: any;
   try {
@@ -191,17 +199,26 @@ async function issue(req: Request): Promise<Response> {
   const g = kind === "google" ? await google() : null;
   if (!a && !g) return notConfigured();
 
-  const sbUser = userClient(req);
-  const { data: { user } } = await sbUser.auth.getUser();
-  if (!user) return json({ error: "unauthorized" }, 401);
-
   const token = a ? newAuthToken() : null;
-  const { data: issued, error } = await sbUser.rpc("exos_wallet_issue_pass", {
+  const args = {
     p_ticket_id: ticketId,
     p_kind: kind,
     p_token_hash: token ? await hashAuthToken(token) : null,
     p_pass_type: a ? a.identity.passTypeIdentifier : null,
-  });
+  };
+  let res;
+  if (byLink) {
+    // The 256-bit link key stands in for the owner's session (SQL checks it).
+    const linkKey = typeof body?.link_key === "string" ? body.link_key : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(linkKey)) return json({ error: "link_key required" }, 400);
+    res = await service().rpc("exos_ticket_link_wallet_issue", { ...args, p_key: linkKey });
+  } else {
+    const sbUser = userClient(req);
+    const { data: { user } } = await sbUser.auth.getUser();
+    if (!user) return json({ error: "unauthorized" }, 401);
+    res = await sbUser.rpc("exos_wallet_issue_pass", args);
+  }
+  const { data: issued, error } = res;
   if (error) {
     if (error.code === "42501") return json({ error: "not your ticket" }, 403);
     await reportError(FN, error, { phase: "issue" });
@@ -245,6 +262,54 @@ async function reissue(req: Request): Promise<Response> {
     return json({ error: "could not reissue" }, 500);
   }
   return json(data, data?.ok ? 200 : 409);
+}
+
+// ── Holder: a season-pass / flex-pack card ───────────────────────────────
+
+async function seasonPass(req: Request): Promise<Response> {
+  // deno-lint-ignore no-explicit-any
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid JSON" }, 400);
+  }
+  const passId = typeof body?.pass_id === "string" ? body.pass_id : "";
+  const kind = body?.kind;
+  if (!UUID_RE.test(passId)) return json({ error: "pass_id required" }, 400);
+  if (kind !== "apple" && kind !== "google") return json({ error: "kind must be apple or google" }, 400);
+  const a = kind === "apple" ? await apple() : null;
+  const g = kind === "google" ? await google() : null;
+  if (!a && !g) return notConfigured();
+
+  const sbUser = userClient(req);
+  const { data: { user } } = await sbUser.auth.getUser();
+  if (!user) return json({ error: "unauthorized" }, 401);
+  const { data, error } = await sbUser.rpc("exos_wallet_season_pass", { p_pass_id: passId });
+  if (error) {
+    await reportError(FN, error, { phase: "season-pass" });
+    return json({ error: "could not issue the pass" }, 500);
+  }
+  if (!data?.ok) return json({ error: data?.reason ?? "wallet_pass_unavailable" }, 404);
+  const p = data.payload as SeasonPassPayload;
+  try {
+    if (a) {
+      const { bytes } = await buildPkpass(buildSeasonPassAppleJson(p, a.identity), a.signer);
+      return new Response(bytes as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": PKPASS_MIME,
+          "Content-Disposition": `attachment; filename="exos-${p.serial}.pkpass"`,
+          "Cache-Control": "no-store",
+          ...CORS,
+        },
+      });
+    }
+    return json({ save_url: await seasonPassSaveUrl(p, g!.issuerId, g!.signer, g!.origins), serial: p.serial });
+  } catch (e) {
+    await reportError(FN, e, { phase: `season-pass-${kind}` });
+    return json({ error: "could not build the pass" }, 502);
+  }
 }
 
 function userClient(req: Request): SupabaseClient {
@@ -334,8 +399,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return new Response(null, { status: 204, headers: CORS });
       case "issue":
         return await issue(req);
+      case "link-pass":
+        return await issue(req, true);
       case "reissue":
         return await reissue(req);
+      case "season-pass":
+        return await seasonPass(req);
       case "push":
         return await push(req);
       case "not-found":

@@ -6,6 +6,11 @@
 // is set up (a once-per-session probe; 503 = not configured). Styling follows
 // the official badges loosely: black, rounded, "Add to … Wallet" text. No
 // external badge images (CSP).
+//
+// Inside an in-app browser (Instagram, Facebook, ...): a .pkpass never reaches
+// Apple Wallet from there, so iOS gets the "open in Safari" escape instead of
+// the button; Google's save link needs the Google account the app's browser
+// doesn't have, so Android opens it in the real browser (an intent: link).
 
 import { useEffect, useMemo, useState } from 'react';
 import { Wallet } from 'lucide-react';
@@ -27,6 +32,8 @@ import {
   probeWallet,
   WalletUnavailableError,
 } from '../lib/walletApi';
+import { androidOpenInBrowserUrl, currentInAppState, IN_APP_LABEL } from '../lib/inAppBrowser';
+import { EscapeHatch } from './InAppBrowserBanner';
 
 interface WalletTicket {
   id: string;
@@ -85,7 +92,18 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
   const { toast } = useToast();
   const [busy, setBusy] = useState<WalletKind | null>(null);
   const { platform, kinds, markUnavailable } = useAvailableWallets(walletEligible(ticket, user?.uid));
+  const [inApp] = useState(currentInAppState);
   if (kinds.length === 0) return null;
+  if (inApp.kind && platform === 'ios' && kinds.includes('apple')) {
+    return (
+      <EscapeHatch
+        state={inApp}
+        reasons={[]}
+        lead={`Apple Wallet can't add tickets from inside ${IN_APP_LABEL[inApp.kind]}. Open this page in Safari, sign in with the same email, then tap Add to Apple Wallet.`}
+        className={`type text-[11px] text-white/70 border border-white/10 p-3 ${className}`}
+      />
+    );
+  }
 
   const add = async (kind: WalletKind) => {
     setBusy(kind);
@@ -106,7 +124,9 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
         }
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } else {
-        window.location.assign(await fetchGoogleSaveUrl(ticket.id));
+        const saveUrl = await fetchGoogleSaveUrl(ticket.id);
+        // In an Android in-app browser, hand the save link to the real browser.
+        window.location.assign((inApp.kind && platform === 'android' ? androidOpenInBrowserUrl(saveUrl) : null) ?? saveUrl);
       }
     } catch (err) {
       if (err instanceof WalletUnavailableError) {

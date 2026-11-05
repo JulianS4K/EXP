@@ -5,6 +5,7 @@
 
 import { supabase } from '../supabase';
 import { isMissingRpc } from './net';
+import { isEventbriteAuthorizeUrl } from '../eventbriteConnect';
 import { parseInventoryStatus, type EbInventoryStatus, type EbTicketClassChoice } from './eventbriteInventoryModel';
 
 export interface EventbriteLink {
@@ -22,12 +23,19 @@ export interface EventbriteLink {
   rowErrors: number;
 }
 
+export type EventbriteAuthMethod = 'oauth' | 'private_token';
+
 export interface EventbriteStatus {
   canManage: boolean;
   connected: boolean;
   accountName: string | null;
+  /** How the org's account was connected (mig 20261029140000); null on older installs. */
+  authMethod: EventbriteAuthMethod | null;
   link: EventbriteLink | null;
 }
+
+const authMethodOf = (v: unknown): EventbriteAuthMethod | null =>
+  v === 'oauth' || v === 'private_token' ? v : null;
 
 export interface EventbriteEventChoice { id: string; name: string; start: string | null; status: string | null }
 
@@ -47,6 +55,7 @@ export function parseEventbriteStatus(raw: any): EventbriteStatus {
     canManage: raw?.can_manage === true,
     connected: raw?.connected === true,
     accountName: typeof raw?.account_name === 'string' ? raw.account_name : null,
+    authMethod: authMethodOf(raw?.auth_method),
     link: l && typeof l === 'object' && typeof l.eb_event_id === 'string'
       ? {
         ebEventId: l.eb_event_id,
@@ -171,3 +180,119 @@ export const mapEbTicketClass = (eventId: string, ticketClassId: string, ticketC
 
 export const setEbWrites = (orgId: string, on: boolean) =>
   call<{ writes_enabled: boolean; live: boolean }>('/writes', { method: 'POST', body: { org: orgId, on } });
+
+// ---- Connect Eventbrite (OAuth; exos-eventbrite-oauth, mig 20261029140000) ----
+
+export interface EventbriteHistoryRow {
+  action: 'connect' | 'disconnect';
+  authMethod: EventbriteAuthMethod | null;
+  accountName: string | null;
+  at: string;
+  byYou: boolean;
+}
+
+export interface EventbriteOrgStatus {
+  canManage: boolean;
+  connected: boolean;
+  accountName: string | null;
+  authMethod: EventbriteAuthMethod | null;
+  connectedAt: string | null;
+  linkedEvents: number;
+  history: EventbriteHistoryRow[];
+}
+
+export function parseEventbriteOrgStatus(raw: any): EventbriteOrgStatus {
+  const hist: any[] = Array.isArray(raw?.history) ? raw.history : [];
+  return {
+    canManage: raw?.can_manage === true,
+    connected: raw?.connected === true,
+    accountName: typeof raw?.account_name === 'string' ? raw.account_name : null,
+    authMethod: authMethodOf(raw?.auth_method),
+    connectedAt: typeof raw?.connected_at === 'string' ? raw.connected_at : null,
+    linkedEvents: Number(raw?.linked_events) || 0,
+    history: hist
+      .filter((h) => (h?.action === 'connect' || h?.action === 'disconnect') && typeof h?.at === 'string')
+      .map((h) => ({
+        action: h.action,
+        authMethod: authMethodOf(h.auth_method),
+        accountName: typeof h.account_name === 'string' ? h.account_name : null,
+        at: h.at,
+        byYou: h.by_you === true,
+      })),
+  };
+}
+
+/** The org's Eventbrite connection (Integrations). null when the migration isn't deployed. */
+export async function fetchEventbriteOrgStatus(orgId: string): Promise<EventbriteOrgStatus | null> {
+  const { data, error } = await supabase.rpc('exos_eventbrite_org_status', { p_org_id: orgId });
+  if (error) {
+    if (isMissingRpc(error)) return null;
+    throw error;
+  }
+  return parseEventbriteOrgStatus(data);
+}
+
+function oauthBase(): string {
+  const url = (env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
+  return url ? `${url}/functions/v1/exos-eventbrite-oauth` : '';
+}
+
+/** An error carrying the server's reason code (eventbriteErrorMessage). */
+function oauthError(status: number, body: any): Error {
+  const reason = status === 503 ? 'not_configured' : status === 403 ? 'forbidden' : status === 401 ? 'auth'
+    : status === 429 ? 'rate' : typeof body?.reason === 'string' ? body.reason : 'unknown';
+  return Object.assign(new Error(typeof body?.error === 'string' ? body.error : `http ${status}`), { reason });
+}
+
+let oauthConfig: Promise<boolean> | null = null;
+
+/** Whether this server connects Eventbrite by OAuth (otherwise: the private-token form). Cached per page load. */
+export function eventbriteOAuthAvailable(): Promise<boolean> {
+  const base = oauthBase();
+  if (!base) return Promise.resolve(false);
+  oauthConfig ??= fetch(`${base}/config`)
+    .then(async (res) => res.ok && (await res.json().catch(() => null))?.oauth === true)
+    .catch(() => false);
+  return oauthConfig;
+}
+
+async function oauthHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const jwt = data.session?.access_token;
+  if (!jwt) throw Object.assign(new Error('Sign in first.'), { reason: 'auth' });
+  const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
+  return { ...(anon ? { apikey: anon } : {}), Authorization: `Bearer ${jwt}` };
+}
+
+/** Eventbrite's authorize URL for this org (owner / manager). eventId: the door page to come back to. */
+export async function startEventbriteConnect(orgId: string, eventId?: string | null): Promise<string> {
+  const base = oauthBase();
+  if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
+  const q = new URLSearchParams({ org: orgId });
+  if (eventId) q.set('event', eventId);
+  const res = await fetch(`${base}/start?${q.toString()}`, { headers: await oauthHeaders() });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !isEventbriteAuthorizeUrl(body?.url)) throw oauthError(res.status, body);
+  return body.url;
+}
+
+/**
+ * Finish after Eventbrite sent the browser back and the user clicked Confirm
+ * (components/OAuthFinish.tsx). `finish` is the token from the URL fragment;
+ * it goes nowhere else.
+ */
+export async function finishEventbriteConnect(state: string, finish: string): Promise<{ accountName: string | null; eventId: string | null }> {
+  const base = oauthBase();
+  if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
+  const res = await fetch(`${base}/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await oauthHeaders()) },
+    body: JSON.stringify({ state, finish }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.connected !== true) throw oauthError(res.status, body);
+  return {
+    accountName: typeof body.account_name === 'string' ? body.account_name : null,
+    eventId: typeof body.event_id === 'string' ? body.event_id : null,
+  };
+}

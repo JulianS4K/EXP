@@ -98,6 +98,9 @@ export interface Organization {
   // pages behind the consent gate (lib/consent.ts + lib/pixels.ts).
   // Venue site sections for the storefront (mig 20261016130000).
   site?: import('./lib/site').Site | null;
+  // organizer | promoter | collective (mig 20261105130000): a label and UI
+  // defaults only. Undefined until the column exists.
+  orgType?: import('./lib/eventLocation').OrgType;
   marketing?: {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
     /** Public pixel ids (formats: lib/pixelIds.ts). x* are X event ids (tw-<pixel>-<event>). */
@@ -126,6 +129,9 @@ export interface OrgMembership {
   // Soft-disable without revoking the doc. A disabled membership is
   // ignored by the rule helper but kept for audit history.
   disabled?: boolean;
+  // 'pending_approval': joined through an invite, waiting for an owner or
+  // manager to approve (disabled meanwhile; mig 20261104200000).
+  status?: 'pending_approval';
 }
 
 /**
@@ -292,6 +298,9 @@ export interface Event {
     // Exclusive tax rate the buyer pays on top of `price` (0 when the price
     // already includes tax). From exos_public_tiers; drives all-in display.
     exclusiveTaxPercent?: number;
+    // Organizer fee rules passed on to the buyer (mig 20261027100000), inside
+    // the all-in price; picked from exos_public_fee_rules ([] = none).
+    passedOnFees?: import('./lib/fees').UnitFee[];
     // Accessible ticket type (mig 20260926090000) + its short note, e.g.
     // "Wheelchair space + 1 companion seat".
     accessible?: boolean;
@@ -342,7 +351,7 @@ export interface Event {
   accessibility?: import('./lib/accessibility').EventAccessibility;
   // Who may check people in by name at the door (mig 20260929130000):
   // 'staff' (default), 'managers' or 'off'. Undefined until the column exists.
-  doorNameCheckin?: import('./lib/door/decide').NameCheckinMode;
+  doorNameCheckin?: import('./lib/door/nameCheckinMode').NameCheckinMode;
   // Store page content (mig 20260929120000). All undefined until the columns
   // exist on the database this build talks to.
   summary?: string;
@@ -361,8 +370,17 @@ export interface Event {
   noindex?: boolean;
   // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
   // organizer's own shop on another platform, linked from the buy button.
-  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma';
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh' | 'dice';
+  // Location mode (mig 20261105130000, docs/promoter-events.md); undefined
+  // until the column exists. A secret_location event's address is never here.
+  locationMode?: import('./lib/eventLocation').LocationMode;
+  locationRevealAt?: string | null;
+  tbaAllowSales?: boolean | null;
   externalTicketUrl?: string;
+  // Link-out (mig 20261029170500): listed by Exos, sold only on the
+  // organizer's own checkout. The source's status and display-only prices
+  // (exos_public_link_outs); undefined for every other event.
+  linkOut?: import('./lib/linkOut').PublicLinkOut;
   purchaseLimits?: {
     maxPerOrder?: number;
     maxPerAccount?: number;

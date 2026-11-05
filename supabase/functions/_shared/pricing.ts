@@ -1,8 +1,10 @@
 // Server-side scheduled tier price, used by exos-checkout to charge what the
 // storefront shows. Mirrors EXP src/lib/pricing.ts effectiveTierPrice exactly;
-// EXP's src/lib/pricingParity.test.ts compares the two. No imports, so both
-// Deno and vitest can load it.
-//
+// EXP's src/lib/pricingParity.test.ts compares the two. Imports only its
+// sibling fees.ts, so both Deno and vitest can load it.
+
+import { type UnitFee, unitFeeTotals } from "./fees.ts";
+
 // Base price, overridden by the latest schedule step whose startsAt has passed
 // (inclusive); malformed steps are ignored.
 export function effectiveTierPrice(basePrice: number, schedule: unknown, now: Date = new Date()): number {
@@ -21,13 +23,17 @@ export function effectiveTierPrice(basePrice: number, schedule: unknown, now: Da
   return price;
 }
 
-// All-in unit price in cents: the price plus its EXCLUSIVE tax, per unit, so
-// the charge is exactly (displayed all-in price x quantity). exclusiveTaxPercent
-// is 0 when the price already includes tax. Mirrors EXP src/lib/pricing.ts allInPrice.
-export function allInCents(unitCents: number, exclusiveTaxPercent: number): number {
+// All-in unit price in cents: the price plus its passed-on fees (organizer fee
+// rules, mig 20261027100000, _shared/fees.ts) plus its EXCLUSIVE tax on the
+// price and the taxable fees, per unit, so the charge is exactly (displayed
+// all-in price x quantity). exclusiveTaxPercent is 0 when the price already
+// includes tax. Without fees it is the price + tax, as before. Mirrors EXP
+// src/lib/pricing.ts allInPrice.
+export function allInCents(unitCents: number, exclusiveTaxPercent: number, fees?: readonly UnitFee[] | null): number {
   const rate = Number(exclusiveTaxPercent) || 0;
-  if (rate <= 0) return unitCents;
-  return unitCents + Math.round((unitCents * rate) / 100);
+  const f = unitFeeTotals(unitCents, fees);
+  if (rate <= 0) return unitCents + f.total;
+  return unitCents + f.total + Math.round(((unitCents + f.taxable) * rate) / 100);
 }
 
 // A voucher's per-ticket price (mig 20260928060000): a pinned price, a percent

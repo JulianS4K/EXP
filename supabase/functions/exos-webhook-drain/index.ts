@@ -27,6 +27,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { urlIsBlocked } from "../_shared/ssrf.ts";
+import { signWebhook } from "../_shared/webhookSign.ts";
 
 const MAX_ATTEMPTS = 8;
 const BATCH = 20;
@@ -89,7 +90,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const body = JSON.stringify(row.payload);
     const ts = Math.floor(Date.now() / 1000).toString();
-    const sig = await hmacHex(row.secret, `${ts}.${body}`);
+    const sig = await signWebhook(row.secret, ts, body);
     let ok = false, code: number | null = null, errText: string | null = null;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -102,7 +103,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           "x-exos-event": String(row.event_type),
           "x-exos-delivery": String(row.id),
           "x-exos-timestamp": ts,
-          "x-exos-signature": `sha256=${sig}`,
+          "x-exos-signature": sig,
         },
         body,
         signal: ctrl.signal,
@@ -142,13 +143,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   return json({ processed: claimed.length, delivered, failed, dead, skipped, released });
 });
 
-async function hmacHex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

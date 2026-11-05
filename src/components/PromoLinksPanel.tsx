@@ -1,6 +1,9 @@
 // Event report → Marketing → Promo links (mig 20261016110000): one URL per
 // channel with a redemption limit, an optional deal and an expiry; visits and
 // redemptions per link. Owner / manager create; finance sees.
+// "Make a link per channel" (spec §7 item 7) lists one code-free tracking link
+// per channel (lib/trackingLinks.ts): no limit, no sign-in, and the sale is
+// credited to that channel in the Channels report (mig 20261029120000).
 
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, Link2 } from 'lucide-react';
@@ -8,6 +11,8 @@ import { useToast } from '../context/ToastContext';
 import {
   CHANNELS, cleanCode, createPromoLink, dealText, listPromoLinks, promoUrl, redemptionText, type PromoLink,
 } from '../lib/promoLinks';
+import { trackingLinks } from '../lib/trackingLinks';
+import { publicUrl } from '../lib/utils';
 
 const LBL = 'block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1';
 const FLD = 'w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60';
@@ -25,6 +30,8 @@ export default function PromoLinksPanel({ eventId, currency, canCreate, canView 
   const [value, setValue] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [perChannel, setPerChannel] = useState(false);
+  const [campaign, setCampaign] = useState('');
 
   const load = useCallback(() => {
     if (!canView) return;
@@ -48,6 +55,7 @@ export default function PromoLinksPanel({ eventId, currency, canCreate, canView 
       () => toast({ kind: 'success', message: 'Link copied.' }),
       () => toast({ kind: 'error', message: 'Copy failed. Select and copy manually.' }),
     );
+  const channelLinks = perChannel ? trackingLinks(publicUrl(`event/${eventId}`), campaign) : [];
 
   const create = async () => {
     if (err) return;
@@ -77,6 +85,40 @@ export default function PromoLinksPanel({ eventId, currency, canCreate, canView 
         One link per place you post it. It opens the event with the code applied and stops working after the limit
         (tickets) or the expiry. Sales show up under Sales by source with the link's channel.
       </p>
+
+      <div className="mb-5">
+        <button type="button" onClick={() => setPerChannel((v) => !v)} aria-expanded={perChannel}
+          className="px-3 py-2 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-600">
+          {perChannel ? 'Hide channel links' : 'Make a link per channel'}
+        </button>
+        {perChannel && (
+          <div className="mt-3 border border-slate-200 rounded-xl p-4">
+            <p className="text-[11px] text-slate-500 mb-3">
+              One tracking link per channel: no code, no limit, works for guests. Post each one in its own place and the
+              Channels report (Overview) shows what each one sold. For a deal or a limit, make a promo link below.
+            </p>
+            <label className="block mb-3"><span className={LBL}>Campaign (optional)</span>
+              <input className={FLD} value={campaign} maxLength={64} onChange={(e) => setCampaign(e.target.value)} placeholder="fall-push" /></label>
+            <ul className="space-y-2">
+              {channelLinks.map((l) => (
+                <li key={l.key} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                  <span className="w-32 shrink-0 text-xs font-bold text-slate-700">{l.label}</span>
+                  <input readOnly value={l.url} aria-label={`${l.label} tracking link`} onClick={(e) => (e.target as HTMLInputElement).select()}
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-700 font-mono" />
+                  <button type="button" onClick={() => void copy(l.url)}
+                    className="px-3 py-2 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-600 inline-flex items-center gap-1">
+                    <Copy className="w-3 h-3" aria-hidden="true" /> Copy
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button type="button" onClick={() => void copy(channelLinks.map((l) => `${l.label}: ${l.url}`).join('\n'))}
+              className="mt-3 px-3 py-2 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest text-slate-600">
+              Copy all
+            </button>
+          </div>
+        )}
+      </div>
 
       {canCreate && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">

@@ -1,6 +1,17 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-11-04)
+## Prod state vs this repo (updated 2026-11-05)
+
+- **2026-11-05 rollout (from branch `ccr-3d973f5c-eulhen`, ahead of main):** `scripts/rollout-prod.sh` applied all
+  53 migrations in its list (`20261027100000_exos_fee_rules` through `20261106140000_exos_buyer_geo_genre`) and
+  deployed all 41 edge functions with the Supabase CLI (3.0.0 via npx, Management API, no `DB_URL`; the
+  FIRST group `stripe-webhook`, `exos-checkout`, `exos-refund`, `exos-reconcile-checkouts`,
+  `exos-reconcile-stripe` went first). `scripts/verify-prod.sh db`: PASS 119, WARN 9 (settings rows absent, so
+  the defaults apply), FAIL 0. Crons: the same 14 are active as before; the 12 new ones were all created inactive
+  (28 `exos%` jobs now). Not run yet: `verify-prod.sh http` (needs `SUPABASE_URL` + `SUPABASE_ANON_KEY`).
+  The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
+  migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
+  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.
 
 - **DB:** every migration on main is applied to prod, through `20261019120000_exos_door_roster_wallet_delta`
   (checked against `schema_migrations`, 2026-11-04). Also applied, ahead of main: `20261021174000` /
@@ -47,6 +58,37 @@
 9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table (still there on
    2026-11-04).
 
+## DICE gaps 2026-11-05 (from DICE's partner Ticket Holders API; operator: add and build)
+
+DICE's partner API (`partners-endpoint.dice.fm/graphql`) is read-only GraphQL, gated to partners: events,
+tickets + holders, extras, orders, returns, transfers, genres. Exos already covers that surface and adds writes,
+webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, in build order:
+
+1. **[built: claude/exos-dice-import] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
+   dashboard. Exos then reads their events, ticket holders and fans into `/migrated-attendees`, like the
+   Eventbrite import. It is read-only toward DICE (GraphQL queries only). Only fans with `optInPartners` go onto
+   marketing lists. Also adds `docs/dice-coverage.md`, mapping each DICE type and field to Exos.
+   Left: never run against a real DICE token (mocks only); deploy `exos-dice-import`, set `EXOS_DICE_IMPORT=on`, then turn on the inactive hourly cron.
+2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
+   ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
+   ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
+   References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
+   `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
+3. **[built: claude/exos-capacity-pricing] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
+   across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
+   Built on the existing `exos_quotas` (no second pool table); left: partner reservations across several types lock pools per type, not in one global order.
+4. **[built: claude/exos-capacity-pricing] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by
+   quantity sold (early bird → GA → final), plus an optional door price. The all-in price and the feeds follow
+   the current step. DICE equivalent: `PriceTier` (allocation, time, faceValue, price, doorSalesPrice).
+   Left: POS walk-up sales (501 today) must call the door channel, and partner reservations don't lock a step yet.
+   API writes (steps, pools, door price) need an owner / manager key, enforced in SQL.
+5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
+   city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
+   by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
+   migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
+6. Later: a fee-change log after a sale (`Adjustment`), and a separate entry barcode for an add-on
+   (`Extra.hasSeparateAccessBarcode`).
+
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 
 How fans find events (social and word of mouth create demand; search, feeds and marketplaces capture it), and
@@ -67,6 +109,12 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
 - S4K feed (cron live per prod state; open: id mapping, then payments + payouts).
 - Marketplace adapters (`exos-distribute`): written, held undeployed until each partner's write scope is signed off.
 - Eventbrite capacity writes (`EXOS_EVENTBRITE_WRITES`), Luma (off), wallet passes (no Apple / Google certificates).
+- Discovery listings (2026-10-29, mig `20261029130000`, not applied): per-event, per-channel status on the Promote page;
+  Google / calendar / ad-catalog status computed from each feed's rule; a manual submission queue for DoNYC, Time Out NY,
+  CitySpark, RA, Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, worked at `/admin/listings`
+  (`docs/organizer-guide.md` "Discovery listings"). Edmtrain's API is read-only and Meetup's `createEvent` would be a new
+  third-party write (Pro + OAuth), so both are manual until the operator decides. Free-tier events (capacity <= 150)
+  get at most 5 manual channels; operator minutes per submission are logged and totalled per event / org (pilot).
 
 **Not built**
 - Neighborhood pages ("this week in Bushwick", Phase 1 item 7c) and follower lists + "new event" email (Phase 1 CRM).
@@ -75,8 +123,8 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
   include small ones (Posh, Shotgun, Tixr, Humanitix).
 - StubHub Open Distribution: not in `docs/`. StubHub's free, non-exclusive connection for primary ticketers lists
   tickets as new from the organizer; the adapters above use seller APIs, so listings read as resale.
-- TikTok event links (partner deal), RA / DICE / Posh / Partiful listings (manual only), native app (Stories
-  hand-off), Instagram / Facebook Shops, Google feed uploader.
+- TikTok event links (partner deal), DICE / Posh / Partiful listings (RA is in the discovery queue above), native app
+  (Stories hand-off), Instagram / Facebook Shops, Google feed uploader. Meetup / Edmtrain API submission (see above).
 
 **Doc drift**
 - `docs/marketplace/s4k-feed.md` says "built, not applied or deployed"; prod state says applied and running.
@@ -99,15 +147,17 @@ Partner applications (business, no code):
 - [ ] Apple Pass Type ID certificate + Google Wallet issuer account.
 
 Build:
-- [ ] S4K feed id mapping, then one live S4K-route sale on a 250+ event: listed, sold, claimed, scanned, paid out.
+- [ ] S4K feed id mapping, then one live S4K-route sale on an event over 150 (opted in to resale): listed, sold, claimed, scanned, paid out.
 - [ ] Neighborhood pages (7c) and follower lists + "new event" email.
 - [ ] Bandsintown feed in their partner format once the spec arrives (read-only rule: they pull, we never write).
 - [ ] Fix the doc drift above.
 
 Go to market:
-- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if 250+).
+- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if over 150 and opted in).
 - [ ] Submit every Exos event to NYC listings: Hidden City, GUNK, Queer on the Street, coolstuff.nyc, Eddie's List,
       RA (if it takes outside ticket links).
+      DoNYC, Time Out, CitySpark and RA now go through the discovery queue (`/admin/listings`); the rest aren't in the
+      channel catalog yet (add them to `_shared/discovery/channels.ts` + the migration seed once their pages are checked).
 - [ ] Offer the free Door app to organizers who sell elsewhere (Hidden City, H0L0 introductions, Crud0).
 - [ ] Decide on the 18 paused partner-outreach drafts in Gmail.
 - [ ] Public-sector RFPs as a parallel track (readiness list: "Public-sector RFP readiness" below;
@@ -686,8 +736,29 @@ that:
     (an Android intent link; on iOS, copy the link).
   - Checkout was already a same-tab redirect.
 
-  **Still to do:** test on real devices (per iOS and Instagram release), and use `og:` data for
-  richer previews.
+  **Built (2026-11-05, mig `20261105140000`, not applied):**
+  - Detection covers Threads, Snapchat, X, LinkedIn and Messenger on Android ("Orca") too, plus
+    generic Android / iOS webviews (capability probes: home-screen app, storage, Apple Pay). The UA
+    rules are shared with `exos-checkout` (`_shared/inAppBrowser.ts`).
+  - Works with storage blocked: the checkout link's cart rides on the event URL (`?cart=`), the PayPal
+    cart in the page fragment (`#cart=`), the guest return page names the inbox from `?to=` (masked).
+  - Escape hatch everywhere it's needed: Android `intent:`, iOS `x-safari-https:` plus each app's menu
+    steps and a copy link that falls back to `execCommand`. It opens a checkout link with the cart and
+    attribution, tagged `iab_from=<app>`. On the guest checkout sheet (card works here, Apple / Google
+    Pay need the browser), on Apple Wallet (a .pkpass can't reach Wallet from a webview; Google's save
+    link goes out by `intent:`), and on the PayPal page.
+  - PayPal uses its redirect flow (no popups) in webviews; back from Stripe re-enables Buy (bfcache).
+  - Measurement: `exos_checkout_sessions.in_app_browser` (backfilled from `user_agent`), escapes in
+    `attribution.iab_from`, and "Where buyers checked out" (conversion in-app vs browser) on the event
+    report's Marketing tab (`exos_event_in_app_report`).
+  - Link previews: `og:type` is `website` (Open Graph has no `event`), absolute `og:image` with alt
+    text, and crawlers on other pages get the site card with absolute URLs. People in TikTok's and
+    Pinterest's in-app browsers are no longer treated as crawlers.
+  - Lighter event page: the sign-in modal, the door's caches, the integrations catalog and the door
+    scan logic left the first download; seat map, time slots, quiz and share sheet load on use.
+
+  **Still to do:** test on real devices (per iOS and Instagram release); check that `x-safari-https:`
+  opens Safari from Instagram's current iOS app; deploy `exos-checkout` with the migration.
 - **Interactive maps, phase 1** ✅ (`docs/maps.md`):
   - `exos-geocode` is the server-side Geocoding proxy (organizers only, key stays server-side);
     `exos-geocode-refresh` is its daily cron.
@@ -1365,7 +1436,7 @@ indie-cap + secondary-market positioning.
 
 ## Post-launch (operator, 2026-09-26)
 
-- `[ ]` **Group buy: split with friends (Venmo, restaurant-style).** Tabled until after launch.
+- `[x]` **Group buy: split with friends (Venmo, restaurant-style).** Built 2026-10-30 (mig 20261031220000, `/split/:sessionId`). A friend needs an email (the transfer mails the claim link); the text goes from the host's phone (`sms:` link).
   - The host buys every ticket in one normal checkout: no holds, no Stripe changes, no inventory risk.
   - After purchase, a "Split with friends" screen: add friends by name or phone, even or custom amounts.
   - Each friend gets one text: their ticket (existing transfer claim link, so it's in their own account)

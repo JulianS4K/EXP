@@ -9,6 +9,9 @@
 --      NULL; an error return consumes the state
 --   G4 consume: only the starting user, once, before expiry, with a code,
 --      while still owner / manager; clears the stored code
+--   G6 finish token (mig 20261029140000): the attacker who started a sign-in
+--      can't finish a victim's (no token, wrong token); the victim's browser
+--      can't finish without the starter's JWT; reused / expired refused
 --   G5 token store: Vault secret named exos_ad:<org>:google_ads (the same
 --      name exos_set_ad_credential uses), ids / enabled / test code kept,
 --      update in place on reconnect, listed as has_secret, handed to the
@@ -58,8 +61,8 @@ BEGIN
     ASSERT NOT has_table_privilege(r, 'public.exos_oauth_states', 'SELECT,INSERT,UPDATE,DELETE'), 'G1: ' || r || ' touches states';
     FOREACH f IN ARRAY ARRAY[
       'public.exos_oauth_state_begin(text,uuid,uuid,text,integer)',
-      'public.exos_oauth_state_return(text,text)',
-      'public.exos_oauth_state_consume(text,uuid)',
+      'public.exos_oauth_state_return(text,text,text)',
+      'public.exos_oauth_state_consume(text,uuid,text)',
       'public.exos_set_google_ads_token(uuid,uuid,text)',
       'public._exos_oauth_can_connect(uuid,uuid)'] LOOP
       ASSERT NOT has_function_privilege(r, f, 'EXECUTE'), 'G1: ' || r || ' runs ' || f;
@@ -128,28 +131,28 @@ END $$;
 DO $$
 DECLARE v uuid;
 BEGIN
-  v := public.exos_oauth_state_return(pg_temp.h('owner'), '4/0AcodeFromGoogle');
+  v := public.exos_oauth_state_return(pg_temp.h('owner'), '4/0AcodeFromGoogle', pg_temp.h('f-' || pg_temp.h('owner')));
   ASSERT v = 'af000000-0000-0000-0000-000000000001', 'G3: return gave no org';
   ASSERT (SELECT code FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('owner')) = '4/0AcodeFromGoogle', 'G3: code not parked';
   -- A second return (replayed redirect) doesn't overwrite the code.
-  ASSERT public.exos_oauth_state_return(pg_temp.h('owner'), '4/0Aattacker-code') IS NULL, 'G3: second return accepted';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('owner'), '4/0Aattacker-code', pg_temp.h('f-' || pg_temp.h('owner'))) IS NULL, 'G3: second return accepted';
   ASSERT (SELECT code FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('owner')) = '4/0AcodeFromGoogle', 'G3: code overwritten';
-  ASSERT public.exos_oauth_state_return(pg_temp.h('unknown'), '4/0Acode12345') IS NULL, 'G3: unknown state';
-  ASSERT public.exos_oauth_state_return('bad', '4/0Acode12345') IS NULL, 'G3: malformed hash';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('unknown'), '4/0Acode12345', pg_temp.h('f-' || pg_temp.h('unknown'))) IS NULL, 'G3: unknown state';
+  ASSERT public.exos_oauth_state_return('bad', '4/0Acode12345', pg_temp.h('f-' || 'bad')) IS NULL, 'G3: malformed hash';
   -- Expired.
   PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
                                         'af000000-0000-0000-0000-0000000000a3', pg_temp.h('late'));
   UPDATE public.exos_oauth_states SET expires_at = now() - interval '1 second' WHERE state_hash = pg_temp.h('late');
-  ASSERT public.exos_oauth_state_return(pg_temp.h('late'), '4/0Acode12345') IS NULL, 'G3: expired state accepted';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('late'), '4/0Acode12345', pg_temp.h('f-' || pg_temp.h('late'))) IS NULL, 'G3: expired state accepted';
   -- An error return (declined) consumes the state and still names the org.
   PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
                                         'af000000-0000-0000-0000-0000000000a3', pg_temp.h('declined'));
-  ASSERT public.exos_oauth_state_return(pg_temp.h('declined'), NULL) = 'af000000-0000-0000-0000-000000000001', 'G3: declined gave no org';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('declined'), NULL, pg_temp.h('f-' || pg_temp.h('declined'))) = 'af000000-0000-0000-0000-000000000001', 'G3: declined gave no org';
   ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('declined')), 'G3: declined not consumed';
   -- A value with spaces is not a code: treated as an error return.
   PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
                                         'af000000-0000-0000-0000-0000000000a3', pg_temp.h('junk'));
-  PERFORM public.exos_oauth_state_return(pg_temp.h('junk'), 'not a code');
+  PERFORM public.exos_oauth_state_return(pg_temp.h('junk'), 'not a code', pg_temp.h('f-' || pg_temp.h('junk')));
   ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('junk')), 'G3: junk code parked';
   RAISE NOTICE 'OK  G3 return parks the code once; bad states give NULL';
 END $$;
@@ -159,24 +162,24 @@ DO $$
 DECLARE r record; n int;
 BEGIN
   -- Someone else (even a manager of the same org) can't use the owner's state.
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a3');
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a3', pg_temp.h('nope')) WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'G4: another user consumed';
   ASSERT (SELECT consumed_at IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('owner')), 'G4: another user burned the state';
-  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a0');
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('f-' || pg_temp.h('owner')));
   ASSERT r.org_id = 'af000000-0000-0000-0000-000000000001' AND r.code = '4/0AcodeFromGoogle', 'G4: owner consume';
   ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('owner')), 'G4: code kept after consume';
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a0');
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('owner'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('f-' || pg_temp.h('owner'))) WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'G4: consumed twice';
   -- No code yet (Google never returned): refused, and the state is burned.
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('manager'), 'af000000-0000-0000-0000-0000000000a3');
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('manager'), 'af000000-0000-0000-0000-0000000000a3', pg_temp.h('f-' || pg_temp.h('manager'))) WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'G4: consumed without a code';
-  ASSERT public.exos_oauth_state_return(pg_temp.h('manager'), '4/0Acode12345') IS NULL, 'G4: burned state took a code';
+  ASSERT public.exos_oauth_state_return(pg_temp.h('manager'), '4/0Acode12345', pg_temp.h('f-' || pg_temp.h('manager'))) IS NULL, 'G4: burned state took a code';
   -- Expired between return and finish.
   PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
                                         'af000000-0000-0000-0000-0000000000a3', pg_temp.h('slow'));
-  PERFORM public.exos_oauth_state_return(pg_temp.h('slow'), '4/0Acode12345');
+  PERFORM public.exos_oauth_state_return(pg_temp.h('slow'), '4/0Acode12345', pg_temp.h('f-' || pg_temp.h('slow')));
   UPDATE public.exos_oauth_states SET expires_at = now() - interval '1 second' WHERE state_hash = pg_temp.h('slow');
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('slow'), 'af000000-0000-0000-0000-0000000000a3');
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('slow'), 'af000000-0000-0000-0000-0000000000a3', pg_temp.h('f-' || pg_temp.h('slow'))) WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'G4: expired consume';
   ASSERT (SELECT code IS NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('slow')), 'G4: expired code kept';
 END $$;
@@ -187,10 +190,10 @@ DECLARE n int;
 BEGIN
   PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
                                         'af000000-0000-0000-0000-0000000000a3', pg_temp.h('demoted'));
-  PERFORM public.exos_oauth_state_return(pg_temp.h('demoted'), '4/0Acode12345');
+  PERFORM public.exos_oauth_state_return(pg_temp.h('demoted'), '4/0Acode12345', pg_temp.h('f-' || pg_temp.h('demoted')));
   UPDATE public.exos_org_memberships SET role = 'finance'
    WHERE org_id = 'af000000-0000-0000-0000-000000000001' AND user_id = 'af000000-0000-0000-0000-0000000000a3';
-  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('demoted'), 'af000000-0000-0000-0000-0000000000a3');
+  SELECT count(*) INTO n FROM public.exos_oauth_state_consume(pg_temp.h('demoted'), 'af000000-0000-0000-0000-0000000000a3', pg_temp.h('f-' || pg_temp.h('demoted'))) WHERE org_id IS NOT NULL;
   ASSERT n = 0, 'G4: demoted user consumed';
   UPDATE public.exos_org_memberships SET role = 'manager'
    WHERE org_id = 'af000000-0000-0000-0000-000000000001' AND user_id = 'af000000-0000-0000-0000-0000000000a3';
@@ -265,5 +268,84 @@ BEGIN
   RAISE NOTICE 'OK  G5 token store: Vault exos_ad:<org>:google_ads, settings kept, claim hands it over';
 END $$;
 RESET ROLE;
+
+-- G6 -------------------------------------------------------------------------
+-- The finish token (mig 20261029140000). The attacker (a0, owner of AF Org)
+-- starts a sign-in, sends Google's consent link to a victim (c0, another
+-- Exos account), the victim consents and /callback parks the victim's code
+-- with the hash of a fresh finish token that only the victim's browser got.
+DO $$
+DECLARE r record; n int;
+BEGIN
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('attack'));
+  ASSERT public.exos_oauth_state_return(pg_temp.h('attack'), '4/0AvictimCode', pg_temp.h('victim-browser-token'))
+         = 'af000000-0000-0000-0000-000000000001', 'G6: callback';
+  ASSERT (SELECT finish_hash = pg_temp.h('victim-browser-token') FROM public.exos_oauth_states
+           WHERE state_hash = pg_temp.h('attack')), 'G6: finish hash not parked';
+  -- The attacker finishes with their own JWT: no token, a guessed token.
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('attack'), 'af000000-0000-0000-0000-0000000000a0', NULL);
+  ASSERT r.org_id IS NULL AND r.code IS NULL AND r.refused = 'token', 'G6: attacker without the token: ' || r::text;
+  -- ... and the state is burned: the real token no longer works either.
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('attack'), 'af000000-0000-0000-0000-0000000000a0',
+                                                       pg_temp.h('victim-browser-token'));
+  ASSERT r.org_id IS NULL AND r.refused = 'expired', 'G6: burned state finished: ' || r::text;
+  ASSERT (SELECT consumed_at IS NOT NULL AND code IS NULL AND finish_hash IS NULL FROM public.exos_oauth_states
+           WHERE state_hash = pg_temp.h('attack')), 'G6: code or finish hash kept';
+
+  -- Again, with a guessed token.
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('attack2'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('attack2'), '4/0AvictimCode', pg_temp.h('victim-token-2'));
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('attack2'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('guess'));
+  ASSERT r.org_id IS NULL AND r.refused = 'token', 'G6: wrong token: ' || r::text;
+  ASSERT pg_temp.sqlstate_of($q$SELECT * FROM public.exos_oauth_state_consume(pg_temp.h('attack2'),
+         'af000000-0000-0000-0000-0000000000a0', 'not-a-hash')$q$) = '', 'G6: malformed token errored';
+
+  -- The victim's browser has the token but not the attacker's JWT: refused
+  -- as another account's sign-in, and the state is burned.
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('attack3'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('attack3'), '4/0AvictimCode', pg_temp.h('victim-token-3'));
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('attack3'), 'af000000-0000-0000-0000-0000000000c0',
+                                                       pg_temp.h('victim-token-3'));
+  ASSERT r.org_id IS NULL AND r.refused = 'other_user', 'G6: victim JWT: ' || r::text;
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('attack3'), 'af000000-0000-0000-0000-0000000000a0',
+                                                       pg_temp.h('victim-token-3'));
+  ASSERT r.org_id IS NULL, 'G6: attacker finished after the victim tried (token leaked to the attacker)';
+
+  -- The honest case: the starter's own browser with its own token, once.
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('honest'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('honest'), '4/0AownCode123', pg_temp.h('own-token'));
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('honest'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('own-token'));
+  ASSERT r.org_id = 'af000000-0000-0000-0000-000000000001' AND r.code = '4/0AownCode123' AND r.refused IS NULL, 'G6: honest finish ' || r::text;
+  -- Reused token.
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('honest'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('own-token'));
+  ASSERT r.org_id IS NULL AND r.refused = 'expired', 'G6: reused token ' || r::text;
+
+  -- Expired: the token dies with the state.
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('stale'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('stale'), '4/0AownCode123', pg_temp.h('stale-token'));
+  UPDATE public.exos_oauth_states SET expires_at = now() - interval '1 second' WHERE state_hash = pg_temp.h('stale');
+  SELECT * INTO r FROM public.exos_oauth_state_consume(pg_temp.h('stale'), 'af000000-0000-0000-0000-0000000000a0', pg_temp.h('stale-token'));
+  ASSERT r.org_id IS NULL AND r.refused = 'expired', 'G6: expired token ' || r::text;
+
+  -- A callback without a finish hash parks no code (and burns the state).
+  PERFORM public.exos_oauth_state_begin('google_ads', 'af000000-0000-0000-0000-000000000001',
+                                        'af000000-0000-0000-0000-0000000000a0', pg_temp.h('nohash'));
+  PERFORM public.exos_oauth_state_return(pg_temp.h('nohash'), '4/0AownCode123', NULL);
+  ASSERT (SELECT code IS NULL AND consumed_at IS NOT NULL FROM public.exos_oauth_states WHERE state_hash = pg_temp.h('nohash')),
+         'G6: code parked without a finish hash';
+  -- The old two-argument functions are gone (a stale deploy fails closed).
+  ASSERT to_regprocedure('public.exos_oauth_state_consume(text,uuid)') IS NULL, 'G6: old consume still there';
+  ASSERT to_regprocedure('public.exos_oauth_state_return(text,text)') IS NULL, 'G6: old return still there';
+  -- An Eventbrite consume can't take a Google state, and vice versa (O3 too).
+  SELECT count(*) INTO n FROM public.exos_eventbrite_oauth_consume(pg_temp.h('honest'), 'af000000-0000-0000-0000-0000000000a0',
+                                                                    pg_temp.h('own-token')) WHERE org_id IS NOT NULL;
+  ASSERT n = 0, 'G6: Eventbrite consumed a Google state';
+  RAISE NOTICE 'OK  G6 finish token: attacker-initiated, victim-completed sign-ins are refused';
+END $$;
 
 ROLLBACK;

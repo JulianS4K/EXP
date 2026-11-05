@@ -8,9 +8,16 @@
 // Auth:
 //   none                          public tools: find events, get a ticket link.
 //   Authorization: Bearer <key>   an Exos organizer API key (same keys as
-//                                 exos-api): adds read-only tools for that org.
-//                                 A key that doesn't check out is refused (401),
+//                                 exos-api), a personal access token
+//                                 (exos_pat_…) or an OAuth access token
+//                                 (exos_oat_…, docs/developer-platform.md):
+//                                 adds read-only tools for that org, held to the
+//                                 same scopes exos-api applies (user tokens:
+//                                 narrowed to the user's live role).
+//                                 A key that doesn't check out is refused (401,
+//                                 with the protected-resource metadata URL),
 //                                 never silently downgraded.
+//   GET /.well-known/oauth-protected-resource  RFC 9728: where to get a token.
 // Everything is read-only; nothing is bought, held or changed.
 //
 // Limits: 60 calls a minute per network without a key, 120 per key
@@ -35,6 +42,8 @@ import {
 } from "../_shared/mcp/exosTools.ts";
 import { clientIp, hashIp } from "../_shared/guest.ts";
 import { redactError } from "../_shared/log.ts";
+import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
+import { bearerKind } from "../_shared/api/credentials.ts";
 
 const VERSION = "1.0.0";
 const MAX_BODY = 64 * 1024;
@@ -59,6 +68,9 @@ const CORS: Record<string, string> = {
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (req.method === "GET" && /\/\.well-known\/oauth-protected-resource$/.test(new URL(req.url).pathname)) {
+    return json(protectedResource(), 200);
+  }
   // No server-to-client stream: GET (and DELETE of a session) aren't offered.
   if (req.method !== "POST") return json({ error: "use POST (MCP Streamable HTTP, stateless)" }, 405, { Allow: "POST, OPTIONS" });
 
@@ -71,14 +83,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ctx: ToolContext = { orgId: null };
   const auth = req.headers.get("Authorization") ?? "";
   const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-  let bucket: { keyId?: string; net?: string };
-  if (key) {
-    const { data: row } = await sb.from("exos_api_keys").select("id, org_id")
-      .eq("key_hash", await sha256Hex(key)).is("revoked_at", null).maybeSingle();
+  let bucket: { keyId?: string; net?: string; token?: string };
+  const kind = key ? bearerKind(key) : null;
+  if (key && (kind === "pat" || kind === "oauth")) {
+    // A user token: the same check exos-api makes (live role, scopes narrowed to it).
+    const { data: t, error: tErr } = await sb.rpc("exos_api_token_auth", { p_hash: await sha256Hex(key), p_kind: kind });
+    if (tErr) {
+      console.error("exos-mcp: token lookup failed", tErr.message);
+      return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
+    }
+    if (!t) return json({ error: "invalid, expired or revoked token" }, 401, { "WWW-Authenticate": challenge() });
+    if ((t as { error?: string }).error === "membership") {
+      return json({ error: "this token's user is no longer a member of the organization" }, 403);
+    }
+    const tok = t as { org_id: string; scopes: string[]; credential_id: string };
+    ctx.orgId = tok.org_id;
+    ctx.scopes = tok.scopes ?? [];
+    bucket = { token: `${kind}:${tok.credential_id}` };
+  } else if (key) {
+    // Scopes as of now: narrowed to the key creator's role's set (mig 20261104180000).
+    const { data: row, error: kErr } = await sb.rpc("exos_api_key_auth", { p_hash: await sha256Hex(key) });
+    if (kErr) {
+      console.error("exos-mcp: key lookup failed", kErr.message);
+      return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
+    }
     if (!row) {
-      return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": 'Bearer realm="exos"' });
+      return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": challenge() });
     }
     ctx.orgId = row.org_id as string;
+    ctx.scopes = (row.scopes ?? []) as string[];
     bucket = { keyId: row.id as string };
   } else {
     const salt = Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -87,6 +120,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: allowed, error: rlErr } = bucket.keyId
     ? await sb.rpc("exos_api_rate_hit", { p_key_id: bucket.keyId, p_limit: KEY_PER_MINUTE })
+    : bucket.token
+    ? await sb.rpc("exos_rate_hit", { p_bucket: `mcp:${bucket.token}`, p_limit: KEY_PER_MINUTE })
     : await sb.rpc("exos_rate_hit", { p_bucket: `mcp:${bucket.net}`, p_limit: PUBLIC_PER_MINUTE });
   if (rlErr) {
     console.error("exos-mcp: rate limiter error (refusing)", rlErr.message);
@@ -143,7 +178,8 @@ function supabaseData(sb: SupabaseClient): ExosData {
       let { data, error } = await run(TIER_COLS + ", available");
       if (error?.code === "42703") ({ data, error } = await run(TIER_COLS));
       if (error) throw new Error(`tiers: ${error.message}`);
-      return (data ?? []) as unknown as PublicTier[];
+      // All-in like the storefront: the organizer's passed-on fees are in the price.
+      return await withPublicTierFees(sb, (data ?? []) as unknown as PublicTier[]);
     },
     async orgEvents(orgId: string, opts: { upcomingOnly: boolean; limit: number }): Promise<OrgEvent[]> {
       let query = sb.from("exos_events").select("id, name, status, starts_at, venue_name, tickets_sold, total_tickets")
@@ -178,6 +214,23 @@ function supabaseData(sb: SupabaseClient): ExosData {
           reason: o.attention_reason, event_name: o.exos_events?.name ?? null, updated_at: o.updated_at }));
     },
   };
+}
+
+/** This server's URL and its authorization server (RFC 9728). */
+function protectedResource() {
+  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  const issuer = Deno.env.get("EXOS_OAUTH_ISSUER") || `${base}/functions/v1/exos-oauth`;
+  return {
+    resource: `${base}/functions/v1/exos-mcp`,
+    authorization_servers: [issuer],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["events:read", "orders:read", "tickets:read"],
+  };
+}
+
+function challenge(): string {
+  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  return `Bearer realm="exos", resource_metadata="${base}/functions/v1/exos-mcp/.well-known/oauth-protected-resource"`;
 }
 
 /** Search words safe inside a PostgREST filter (no , ( ) " * \ and friends). */

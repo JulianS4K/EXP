@@ -1,0 +1,1231 @@
+{
+  "file": "rental-invoices",
+  "name": "Rental invoices",
+  "order": 66.5,
+  "description": "Invoices for renting a venue or room: for a hold, one held night, or a room on a date. Made from a rental invoice template (its lines, deposits, taxes and terms are copied, so later template edits don't change the invoice) or from scratch. Totals are computed by Exos: each line is quantity x cost (x attendance for per-head lines); the discount comes off the subtotal; each tax or fee is a rate of what is left. A draft can be edited and deleted. Issuing gives it the organization's next number (gapless: a number is never skipped or reused, and an issued invoice is never deleted); after that it is frozen and can only be marked paid or voided (a void invoice keeps its number). Money is in cents. Reads need `finance:read`, writes `finance:write`.",
+  "endpoints": [
+    {
+      "id": "list-rental-invoices",
+      "method": "GET",
+      "path": "/v1/rental-invoices",
+      "summary": "List rental invoices",
+      "description": "Newest first.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status (or all, the default).",
+          "enum": [
+            "draft",
+            "issued",
+            "paid",
+            "void",
+            "all"
+          ],
+          "example": "issued"
+        },
+        {
+          "name": "hold_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only invoices for this hold."
+        },
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only invoices for this show."
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "status": "issued",
+                "number": "R-00007",
+                "number_seq": 7,
+                "title": "Back room rental",
+                "currency": "USD",
+                "payee_name": "Lincoln Hall LLC",
+                "bill_to_name": "Party Host",
+                "bill_to_email": "host@example.com",
+                "notes": "",
+                "terms": "<p>Net 30.</p>",
+                "attendance_count": 80,
+                "discount_cents": 5000,
+                "items": [
+                  {
+                    "title": "Room hire",
+                    "description": "",
+                    "category": "",
+                    "quantity": 1,
+                    "cost_type": "fixed",
+                    "cost_cents": 50000,
+                    "position": 0
+                  },
+                  {
+                    "title": "Security",
+                    "description": "",
+                    "category": "",
+                    "quantity": 1,
+                    "cost_type": "per_head",
+                    "cost_cents": 150,
+                    "position": 1
+                  }
+                ],
+                "deposits": [
+                  {
+                    "deposit_type": "percent",
+                    "value": 50,
+                    "due_date_type": "relative",
+                    "relative_due_days": 14
+                  }
+                ],
+                "tax_fees": [
+                  {
+                    "name": "Sales tax",
+                    "rate_percent": 8.875,
+                    "category": ""
+                  }
+                ],
+                "subtotal_cents": 62000,
+                "tax_cents": 5059,
+                "total_cents": 62059,
+                "deposits_cents": 31030,
+                "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "room_id": null,
+                "rental_date": "2026-12-12",
+                "event_id": null,
+                "due_on": "2026-12-31",
+                "issued_at": "2026-11-02T15:04:05.000Z",
+                "paid_at": null,
+                "voided_at": null,
+                "void_reason": null,
+                "created_via": "api",
+                "created_at": "2026-11-02T15:04:05.000Z",
+                "updated_at": "2026-11-02T15:04:05.000Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-rental-invoice",
+      "method": "POST",
+      "path": "/v1/rental-invoices",
+      "summary": "Create a rental invoice (draft)",
+      "description": "From template_id (its lines and defaults, then your fields win) or from your fields alone.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "template_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A rental invoice template.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters; required unless template_id gives one."
+        },
+        {
+          "name": "bill_to_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Who is billed, at most 200 characters.",
+          "example": "Party Host"
+        },
+        {
+          "name": "bill_to_email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Their email.",
+          "example": "host@example.com"
+        },
+        {
+          "name": "hold_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The hold rented (GET /v1/holds)."
+        },
+        {
+          "name": "hold_position_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "One night of a hold; sets hold_id, venue_id, room_id and rental_date from it."
+        },
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The venue rented (venue_ownership_id is accepted too)."
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A room of that venue."
+        },
+        {
+          "name": "rental_date",
+          "location": "body",
+          "type": "string (YYYY-MM-DD)",
+          "required": false,
+          "description": "The rental date.",
+          "example": "2026-12-12"
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A show it belongs to (calendar_event_id is accepted too)."
+        },
+        {
+          "name": "due_on",
+          "location": "body",
+          "type": "string (YYYY-MM-DD)",
+          "required": false,
+          "description": "When it is due."
+        },
+        {
+          "name": "payee_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "attendance_count",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Expected heads, for per_head lines."
+        },
+        {
+          "name": "discount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Taken off the subtotal."
+        },
+        {
+          "name": "items",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "The lines (as on templates); replaces the list."
+        },
+        {
+          "name": "deposits",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "As on templates."
+        },
+        {
+          "name": "tax_fees",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "As on templates."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "draft",
+              "number": null,
+              "number_seq": null,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": null,
+              "paid_at": null,
+              "voided_at": null,
+              "void_reason": null,
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "hold_id is not one of this organization's holds"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The template is archived.",
+          "example": {
+            "error": "This template is archived"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "bill_to_name": "Party Host",
+        "bill_to_email": "host@example.com"
+      }
+    },
+    {
+      "id": "get-rental-invoice",
+      "method": "GET",
+      "path": "/v1/rental-invoices/:id",
+      "summary": "Get a rental invoice",
+      "description": "",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "issued",
+              "number": "R-00007",
+              "number_seq": 7,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": "2026-11-02T15:04:05.000Z",
+              "paid_at": null,
+              "voided_at": null,
+              "void_reason": null,
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-rental-invoice",
+      "method": "PATCH",
+      "path": "/v1/rental-invoices/:id",
+      "summary": "Update a draft rental invoice",
+      "description": "Totals are recomputed. An issued invoice answers 409.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters; required unless template_id gives one."
+        },
+        {
+          "name": "bill_to_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Who is billed, at most 200 characters.",
+          "example": "Party Host"
+        },
+        {
+          "name": "bill_to_email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Their email.",
+          "example": "host@example.com"
+        },
+        {
+          "name": "hold_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The hold rented (GET /v1/holds)."
+        },
+        {
+          "name": "hold_position_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "One night of a hold; sets hold_id, venue_id, room_id and rental_date from it."
+        },
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The venue rented (venue_ownership_id is accepted too)."
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A room of that venue."
+        },
+        {
+          "name": "rental_date",
+          "location": "body",
+          "type": "string (YYYY-MM-DD)",
+          "required": false,
+          "description": "The rental date.",
+          "example": "2026-12-12"
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A show it belongs to (calendar_event_id is accepted too)."
+        },
+        {
+          "name": "due_on",
+          "location": "body",
+          "type": "string (YYYY-MM-DD)",
+          "required": false,
+          "description": "When it is due."
+        },
+        {
+          "name": "payee_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Overrides the template's."
+        },
+        {
+          "name": "attendance_count",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Expected heads, for per_head lines."
+        },
+        {
+          "name": "discount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Taken off the subtotal."
+        },
+        {
+          "name": "items",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "The lines (as on templates); replaces the list."
+        },
+        {
+          "name": "deposits",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "As on templates."
+        },
+        {
+          "name": "tax_fees",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "As on templates."
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "draft",
+              "number": null,
+              "number_seq": null,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": "2026-11-02T15:04:05.000Z",
+              "paid_at": null,
+              "voided_at": null,
+              "void_reason": null,
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "The invoice is issued.",
+          "example": {
+            "error": "An issued invoice can't be edited; void it and make a new one"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-rental-invoice",
+      "method": "DELETE",
+      "path": "/v1/rental-invoices/:id",
+      "summary": "Delete a draft rental invoice",
+      "description": "Issued invoices are voided, never deleted.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "The invoice is issued.",
+          "example": {
+            "error": "An issued invoice can't be deleted; void it instead"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-rental-invoice",
+      "method": "POST",
+      "path": "/v1/rental-invoices/:id/issue",
+      "summary": "Issue a rental invoice",
+      "description": "Gives it the organization's next number and freezes it. Safe to retry: issuing an issued invoice answers it again with already_issued: true.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "due_on",
+          "location": "body",
+          "type": "string (YYYY-MM-DD)",
+          "required": false,
+          "description": "When it is due (else as saved).",
+          "example": "2026-12-31"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "issued",
+              "number": "R-00007",
+              "number_seq": 7,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": "2026-11-02T15:04:05.000Z",
+              "paid_at": null,
+              "voided_at": null,
+              "void_reason": null,
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "add at least one line before issuing"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pay-rental-invoice",
+      "method": "POST",
+      "path": "/v1/rental-invoices/:id/pay",
+      "summary": "Mark a rental invoice paid",
+      "description": "Records that it was paid (no money moves through Exos). Again is a no-op.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "paid",
+              "number": "R-00007",
+              "number_seq": 7,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": "2026-11-02T15:04:05.000Z",
+              "paid_at": "2026-11-02T15:04:05.000Z",
+              "voided_at": null,
+              "void_reason": null,
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "A draft, or a void invoice.",
+          "example": {
+            "error": "Issue the invoice first (a draft can simply be deleted)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "void-rental-invoice",
+      "method": "POST",
+      "path": "/v1/rental-invoices/:id/void",
+      "summary": "Void a rental invoice",
+      "description": "It keeps its number. Again is a no-op.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The invoice.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Why, at most 500 characters.",
+          "example": "Event moved"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "template_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "void",
+              "number": "R-00007",
+              "number_seq": 7,
+              "title": "Back room rental",
+              "currency": "USD",
+              "payee_name": "Lincoln Hall LLC",
+              "bill_to_name": "Party Host",
+              "bill_to_email": "host@example.com",
+              "notes": "",
+              "terms": "<p>Net 30.</p>",
+              "attendance_count": 80,
+              "discount_cents": 5000,
+              "items": [
+                {
+                  "title": "Room hire",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "fixed",
+                  "cost_cents": 50000,
+                  "position": 0
+                },
+                {
+                  "title": "Security",
+                  "description": "",
+                  "category": "",
+                  "quantity": 1,
+                  "cost_type": "per_head",
+                  "cost_cents": 150,
+                  "position": 1
+                }
+              ],
+              "deposits": [
+                {
+                  "deposit_type": "percent",
+                  "value": 50,
+                  "due_date_type": "relative",
+                  "relative_due_days": 14
+                }
+              ],
+              "tax_fees": [
+                {
+                  "name": "Sales tax",
+                  "rate_percent": 8.875,
+                  "category": ""
+                }
+              ],
+              "subtotal_cents": 62000,
+              "tax_cents": 5059,
+              "total_cents": 62059,
+              "deposits_cents": 31030,
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold_position_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "rental_date": "2026-12-12",
+              "event_id": null,
+              "due_on": "2026-12-31",
+              "issued_at": "2026-11-02T15:04:05.000Z",
+              "paid_at": null,
+              "voided_at": "2026-11-02T15:04:05.000Z",
+              "void_reason": "Event moved",
+              "created_via": "api",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "A draft.",
+          "example": {
+            "error": "Issue the invoice first (a draft can simply be deleted)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

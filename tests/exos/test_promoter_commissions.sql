@@ -25,8 +25,8 @@ INSERT INTO public.exos_events(id,org_id,name,status,starts_at,currency) VALUES
   ('0c0c0000-0000-0000-0000-0000000000e1','0c0c0000-0000-0000-0000-000000000001','PC Night One','published',now()+interval '7 days','usd'),
   ('0c0c0000-0000-0000-0000-0000000000e2','0c0c0000-0000-0000-0000-000000000001','PC Night Two','published',now()+interval '14 days','usd');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
-  ('0c0c0000-0000-0000-0000-0000000000d1','0c0c0000-0000-0000-0000-0000000000e1','GA',20,0,0),
-  ('0c0c0000-0000-0000-0000-0000000000d2','0c0c0000-0000-0000-0000-0000000000e2','GA',30,0,0);
+  ('0c0c0000-0000-0000-0000-0000000000d1','0c0c0000-0000-0000-0000-0000000000e1','GA',20,100,0),
+  ('0c0c0000-0000-0000-0000-0000000000d2','0c0c0000-0000-0000-0000-0000000000e2','GA',30,100,0);
 
 -- Promoters + terms (owner).
 SELECT set_config('app.uid','0c0c0000-0000-0000-0000-0000000000a1',false);

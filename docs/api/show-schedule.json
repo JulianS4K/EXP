@@ -1,0 +1,1475 @@
+{
+  "file": "show-schedule",
+  "name": "Show schedule, notes and contacts",
+  "order": 62,
+  "description": "Per event: the day-of schedule (load in, soundcheck, doors, sets, curfew ...), staff notes and contacts. Notes and contacts are staff-only: door staff and the public never see them. Reads need `booking:read`, writes `booking:write`. The schedule also answers at /v1/events/:id/show_activities and /v1/confirms/:id/show_activities, and the contacts list at /v1/calendar_event_contacts.",
+  "endpoints": [
+    {
+      "id": "list-show-activities",
+      "method": "GET",
+      "path": "/v1/events/:id/show-activities",
+      "summary": "List the show schedule",
+      "description": "The event's rows by time.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "1f6018d2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "kind": "load_in",
+                "name": "Load in",
+                "starts_at": "2026-11-14T20:00:00+00:00",
+                "ends_at": null,
+                "notes": "",
+                "is_set": true,
+                "show_in_advance": true,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              },
+              {
+                "id": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "kind": "doors",
+                "name": "Doors",
+                "starts_at": "2026-11-15T01:00:00+00:00",
+                "ends_at": null,
+                "notes": "",
+                "is_set": true,
+                "show_in_advance": true,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-show-activity",
+      "method": "POST",
+      "path": "/v1/events/:id/show-activities",
+      "summary": "Add a schedule row",
+      "description": "Adds a row (at most 60 per event). A doors row sets the event's doors_at.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "What the row is (default other). An event has at most one doors row, and it is the same fact as the event's doors_at: saving it sets doors_at, deleting it clears doors_at, and changing doors_at elsewhere moves it.",
+          "enum": [
+            "announce",
+            "load_in",
+            "soundcheck",
+            "doors",
+            "set",
+            "changeover",
+            "curfew",
+            "load_out",
+            "other"
+          ],
+          "example": "doors"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 80 characters (default the kind's name).",
+          "example": "Doors"
+        },
+        {
+          "name": "starts_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": true,
+          "description": "When (also `start_time`). A doors row may not be after the event's start.",
+          "example": "2026-11-14T19:00:00-06:00"
+        },
+        {
+          "name": "ends_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "Optional end, not before starts_at."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 500 characters.",
+          "example": ""
+        },
+        {
+          "name": "is_set",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "false marks the time as pencilled, not decided (also `set`; default true).",
+          "example": true
+        },
+        {
+          "name": "show_in_advance",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Show the row on the advance / day sheet (default true).",
+          "example": true
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "doors",
+              "name": "Doors",
+              "starts_at": "2026-11-15T01:00:00+00:00",
+              "ends_at": null,
+              "notes": "",
+              "is_set": true,
+              "show_in_advance": true,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "exos_show_activities: doors must not be after the event start"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The event already has a doors row: update that one.",
+          "example": {
+            "error": "That conflicts with an existing record (e.g. a permalink in use or a second doors row)."
+          }
+        }
+      ],
+      "request_example": {
+        "kind": "doors",
+        "starts_at": "2026-11-14T19:00:00-06:00"
+      }
+    },
+    {
+      "id": "get-show-activity",
+      "method": "GET",
+      "path": "/v1/events/:id/show-activities/:aid",
+      "summary": "Get a schedule row",
+      "description": "One row.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "aid",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The show activity's id. One of another organization answers 404.",
+          "example": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "doors",
+              "name": "Doors",
+              "starts_at": "2026-11-15T01:00:00+00:00",
+              "ends_at": null,
+              "notes": "",
+              "is_set": true,
+              "show_in_advance": true,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such show activity in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "show activity not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-show-activity",
+      "method": "PATCH",
+      "path": "/v1/events/:id/show-activities/:aid",
+      "summary": "Update a schedule row",
+      "description": "Changes the fields sent. Moving the doors row moves doors_at.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "aid",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The show activity's id. One of another organization answers 404.",
+          "example": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "What the row is (default other). An event has at most one doors row, and it is the same fact as the event's doors_at: saving it sets doors_at, deleting it clears doors_at, and changing doors_at elsewhere moves it.",
+          "enum": [
+            "announce",
+            "load_in",
+            "soundcheck",
+            "doors",
+            "set",
+            "changeover",
+            "curfew",
+            "load_out",
+            "other"
+          ],
+          "example": "doors"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 80 characters (default the kind's name).",
+          "example": "Doors"
+        },
+        {
+          "name": "starts_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When (also `start_time`). A doors row may not be after the event's start.",
+          "example": "2026-11-14T19:00:00-06:00"
+        },
+        {
+          "name": "ends_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "Optional end, not before starts_at."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 500 characters.",
+          "example": ""
+        },
+        {
+          "name": "is_set",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "false marks the time as pencilled, not decided (also `set`; default true).",
+          "example": true
+        },
+        {
+          "name": "show_in_advance",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Show the row on the advance / day sheet (default true).",
+          "example": true
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "kind": "doors",
+              "name": "Doors",
+              "starts_at": "2026-11-15T00:30:00+00:00",
+              "ends_at": null,
+              "notes": "",
+              "is_set": true,
+              "show_in_advance": true,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Nothing to update."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such show activity in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "show activity not found"
+          }
+        }
+      ],
+      "request_example": {
+        "starts_at": "2026-11-14T18:30:00-06:00"
+      }
+    },
+    {
+      "id": "delete-show-activity",
+      "method": "DELETE",
+      "path": "/v1/events/:id/show-activities/:aid",
+      "summary": "Delete a schedule row",
+      "description": "Deletes a row. Deleting the doors row clears doors_at.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "aid",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The show activity's id. One of another organization answers 404.",
+          "example": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "1f6018d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such show activity in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "show activity not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-notes",
+      "method": "GET",
+      "path": "/v1/events/:id/notes",
+      "summary": "List an event's notes",
+      "description": "Staff notes, oldest first.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "body": "Settle in the office after the show.",
+                "author_id": null,
+                "author_name": "API",
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-event-note",
+      "method": "POST",
+      "path": "/v1/events/:id/notes",
+      "summary": "Add a note",
+      "description": "Adds a staff note (at most 500 per event).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "body",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Up to 5000 characters.",
+          "example": "Settle in the office after the show."
+        },
+        {
+          "name": "author_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Shown as the author (default API).",
+          "example": "Box office"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "body": "Settle in the office after the show.",
+              "author_id": null,
+              "author_name": "API",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "body is required."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ],
+      "request_example": {
+        "body": "Settle in the office after the show."
+      }
+    },
+    {
+      "id": "list-notes",
+      "method": "GET",
+      "path": "/v1/notes",
+      "summary": "List notes",
+      "description": "Every staff note of the organization, newest first.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "body": "Settle in the office after the show.",
+                "author_id": null,
+                "author_name": "API",
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "event_id must be a UUID."
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-note",
+      "method": "GET",
+      "path": "/v1/notes/:id",
+      "summary": "Get a note",
+      "description": "One note.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The note's id. One of another organization answers 404.",
+          "example": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "body": "Settle in the office after the show.",
+              "author_id": null,
+              "author_name": "API",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such note in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "note not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-note",
+      "method": "PATCH",
+      "path": "/v1/notes/:id",
+      "summary": "Update a note",
+      "description": "Changes the text or author name; who wrote it doesn't change.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The note's id. One of another organization answers 404.",
+          "example": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "body",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 5000 characters.",
+          "example": "Settle in the office after the show."
+        },
+        {
+          "name": "author_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Shown as the author (default API).",
+          "example": "Box office"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "body": "Settle at the bar.",
+              "author_id": null,
+              "author_name": "API",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Nothing to update."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such note in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "note not found"
+          }
+        }
+      ],
+      "request_example": {
+        "body": "Settle at the bar."
+      }
+    },
+    {
+      "id": "delete-note",
+      "method": "DELETE",
+      "path": "/v1/notes/:id",
+      "summary": "Delete a note",
+      "description": "Deletes a note.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The note's id. One of another organization answers 404.",
+          "example": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0a7029e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such note in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "note not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-contacts",
+      "method": "GET",
+      "path": "/v1/events/:id/contacts",
+      "summary": "List an event's contacts",
+      "description": "The show's contacts by role, then name.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "role": "agent",
+                "title": "Responsible agent",
+                "name": "Ana Agent",
+                "email": "ana@agency.example",
+                "phone": "555-0101",
+                "company": "Agency",
+                "notes": "",
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-event-contact",
+      "method": "POST",
+      "path": "/v1/events/:id/contacts",
+      "summary": "Add a contact",
+      "description": "Adds a contact (at most 100 per event).",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. One of another organization answers 404.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Up to 100 characters.",
+          "example": "Ana Agent"
+        },
+        {
+          "name": "role",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default other.",
+          "enum": [
+            "promoter",
+            "agent",
+            "production",
+            "settlement",
+            "other"
+          ],
+          "example": "agent"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Free text, e.g. Tour manager (up to 80).",
+          "example": "Responsible agent"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An email address.",
+          "example": "ana@agency.example"
+        },
+        {
+          "name": "phone",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 40 characters.",
+          "example": "555-0101"
+        },
+        {
+          "name": "company",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Agency"
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 500 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "role": "agent",
+              "title": "Responsible agent",
+              "name": "Ana Agent",
+              "email": "ana@agency.example",
+              "phone": "555-0101",
+              "company": "Agency",
+              "notes": "",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "role must be one of promoter, agent, production, settlement, other."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ],
+      "request_example": {
+        "role": "agent",
+        "name": "Ana Agent",
+        "email": "ana@agency.example",
+        "company": "Agency"
+      }
+    },
+    {
+      "id": "list-contacts",
+      "method": "GET",
+      "path": "/v1/event-contacts",
+      "summary": "List contacts",
+      "description": "Every event contact of the organization, newest first. Also at /v1/calendar_event_contacts.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's.",
+          "example": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "role": "agent",
+                "title": "Responsible agent",
+                "name": "Ana Agent",
+                "email": "ana@agency.example",
+                "phone": "555-0101",
+                "company": "Agency",
+                "notes": "",
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "event_id must be a UUID."
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-contact",
+      "method": "GET",
+      "path": "/v1/event-contacts/:id",
+      "summary": "Get a contact",
+      "description": "One contact. Also at /v1/calendar_event_contacts/:id.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The contact's id. One of another organization answers 404.",
+          "example": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "role": "agent",
+              "title": "Responsible agent",
+              "name": "Ana Agent",
+              "email": "ana@agency.example",
+              "phone": "555-0101",
+              "company": "Agency",
+              "notes": "",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such contact in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "contact not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-contact",
+      "method": "PATCH",
+      "path": "/v1/event-contacts/:id",
+      "summary": "Update a contact",
+      "description": "Changes the fields sent.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The contact's id. One of another organization answers 404.",
+          "example": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Ana Agent"
+        },
+        {
+          "name": "role",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Default other.",
+          "enum": [
+            "promoter",
+            "agent",
+            "production",
+            "settlement",
+            "other"
+          ],
+          "example": "agent"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Free text, e.g. Tour manager (up to 80).",
+          "example": "Responsible agent"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An email address.",
+          "example": "ana@agency.example"
+        },
+        {
+          "name": "phone",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 40 characters.",
+          "example": "555-0101"
+        },
+        {
+          "name": "company",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Agency"
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 500 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "role": "agent",
+              "title": "Responsible agent",
+              "name": "Ana Agent",
+              "email": "ana@agency.example",
+              "phone": "555-0199",
+              "company": "Agency",
+              "notes": "",
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Nothing to update."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such contact in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "contact not found"
+          }
+        }
+      ],
+      "request_example": {
+        "phone": "555-0199"
+      }
+    },
+    {
+      "id": "delete-contact",
+      "method": "DELETE",
+      "path": "/v1/event-contacts/:id",
+      "summary": "Delete a contact",
+      "description": "Deletes a contact.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The contact's id. One of another organization answers 404.",
+          "example": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "0b803af1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such contact in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "contact not found"
+          }
+        }
+      ]
+    }
+  ]
+}

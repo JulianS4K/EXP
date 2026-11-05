@@ -9,6 +9,11 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    # Runtime (render.yaml NODE_VERSION) and CI run Node 22, so @types/node
+    # stays on 22.x; take its minors and patches, not new majors.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

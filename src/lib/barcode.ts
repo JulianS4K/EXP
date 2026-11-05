@@ -53,7 +53,10 @@
 //     the first win — the second loses the race and is refused, with both
 //     attempts visible in the audit log.
 
-import { doorCodeMac, doorDay, doorDayKey, verifyWalletWithKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
+import {
+  doorCodeMac, doorDay, doorDayKey, verifyPrintWithKeys, verifyWalletWithKeys, type DoorKeys,
+} from '../../supabase/functions/_shared/doorKeys.ts';
+import { printCodeTicketId } from '../../supabase/functions/_shared/print/tickets.ts';
 import { verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
 
 const BUCKET_MS = 30_000;
@@ -147,7 +150,9 @@ export interface VerifyResult {
     | 'signature-mismatch'
     | 'legacy-no-secret'
     /** The door holds no key for this code's day (or no wallet keys): not checked. */
-    | 'no-key';
+    | 'no-key'
+    /** The ticket is printed (mig 20261105120000): only its paper admits it. */
+    | 'printed';
   legacy: boolean;
   ticketId?: string;
   ownerId?: string;
@@ -165,12 +170,34 @@ export interface VerifyResult {
  * "secret" segment for legacy barcodes because there's no integrity
  * guarantee on it — a fresh implementation would have used HMAC.
  */
+/** A reader that lower-cases ("t-…", "w-…", "p-…"): the prefix in upper case,
+ *  as the server reads it (exos_check_in_ticket compares it case-insensitively).
+ *  The rest of the code is case-sensitive and left alone. */
+export function normalizeCodePrefix(payload: string): string {
+  return typeof payload === 'string' && /^[twp]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
+}
+
 export async function verifyBarcode(
-  payload: string,
+  rawPayload: string,
   /** The door's keys for the ticket, or (holder-side tools, tests) its secret. */
   keys: DoorKeys | string | null,
   options: { now?: number } = {},
 ): Promise<VerifyResult> {
+  const payload = normalizeCodePrefix(rawPayload);
+  // A printed ticket's one-time code (P-…, docs/wallet.md "Printed tickets"):
+  // the door holds its hash. Holder-side tools (a secret) can't check one.
+  if (typeof payload === 'string' && payload.startsWith('P-')) {
+    const ticketId = printCodeTicketId(payload);
+    if (!ticketId) return { ok: false, reason: 'malformed', legacy: false };
+    if (typeof keys === 'string' || !keys?.p) return { ok: false, reason: 'no-key', legacy: false, ticketId };
+    return (await verifyPrintWithKeys(payload, keys)).ok
+      ? { ok: true, legacy: false, ticketId }
+      : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId };
+  }
+  // A printed ticket admits on its paper only: its app and wallet codes are refused.
+  if (keys && typeof keys !== 'string' && keys.p && typeof payload === 'string' && /^[TW]-/.test(payload)) {
+    return { ok: false, reason: 'printed', legacy: false, ticketId: extractTicketIdFromAny(payload) ?? undefined };
+  }
   // Wallet pass codes (W-…, Apple static / Google TOTP; docs/wallet.md). The
   // signature is checked here; the server also requires the pass to be live
   // at that epoch (a voided / reissued pass is refused there).
@@ -253,7 +280,8 @@ export async function verifyBarcode(
  */
 export function extractTicketIdFromAny(payload: string): string | null {
   if (!payload || typeof payload !== 'string') return null;
-  const trimmed = payload.startsWith('T-') || payload.startsWith('W-') ? payload.slice(2) : payload;
+  const p = normalizeCodePrefix(payload);
+  const trimmed = p.startsWith('T-') || p.startsWith('W-') || p.startsWith('P-') ? p.slice(2) : p;
   const id = trimmed.split(':')[0];
   return id || null;
 }

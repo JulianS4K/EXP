@@ -49,13 +49,20 @@ $PSQL -f "$DIR/prereq_distribution.sql"
 $PSQL -f "$DIR/prereq_rpc_hardening.sql"
 # Supabase Vault stub (ad-conversion tokens, mig 20260930100000).
 $PSQL -f "$DIR/prereq_vault.sql"
-for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_request \
-         20260926191000_exos_channel_event_links 20260926192000_exos_marketplace_orders \
-         20260926193000_exos_channel_allocations 20260926194000_exos_listing_plan_account_flags \
+for m in \
+         20260523190000_exos_distribution \
+         20260926190000_exos_stubhub_event_request \
+         20260926191000_exos_channel_event_links \
+         20260926192000_exos_marketplace_orders \
+         20260926193000_exos_channel_allocations \
+         20260926194000_exos_listing_plan_account_flags \
          20260927010000_exos_claim_any_account \
-         20260927020000_exos_seatgeek_channel_label 20260927030000_exos_marketplace_sync \
-         20260927040000_exos_gametime_channel 20260927050000_exos_marketplace_standard \
-         20260928010000_exos_marketplace_pools 20260928020000_exos_gotickets_channel \
+         20260927020000_exos_seatgeek_channel_label \
+         20260927030000_exos_marketplace_sync \
+         20260927040000_exos_gametime_channel \
+         20260927050000_exos_marketplace_standard \
+         20260928010000_exos_marketplace_pools \
+         20260928020000_exos_gotickets_channel \
          20260928030000_exos_vivid_channel \
          20260928040000_exos_marketplace_scarcity \
          20260928050000_exos_guest_checkout \
@@ -111,12 +118,70 @@ for m in 20260523190000_exos_distribution 20260926190000_exos_stubhub_event_requ
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261027080000_exos_public_tier_available_grant \
+         20261027090000_exos_api_scopes \
+         20261027100000_exos_fee_rules \
+         20261029090000_exos_free_tier_resale_consent \
+         20261029100000_exos_last_call \
+         20261029120000_exos_weekly_channel_report \
+         20261029130000_exos_discovery_publishing \
+         20261029140000_exos_eventbrite_oauth \
+         20261029150000_exos_posh_webhooks \
+         20261029160000_exos_fixed_block \
+         20261029170500_exos_event_import \
+         20261030100000_exos_booking \
+         20261030110000_exos_artists_feed \
+         20261030120000_exos_sales_counts \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships \
+         20261030140000_exos_seating \
+         20261030150000_exos_series_timed_entry \
+         20261031100000_exos_offers \
+         20261031100500_exos_settlements \
+         20261031110000_exos_core_api \
+         20261031120000_exos_fans \
+         20261031130000_exos_partner_sales \
+         20261031130500_exos_developer_platform \
+         20261031210000_exos_matched_seats \
+         20261031220000_exos_payments_paypal_cashapp_split \
+         20261031230000_exos_group_chat \
+         20261101000000_exos_integration \
+         20261102100000_exos_membership_writes \
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras \
+         20261102130000_exos_templates_inbound \
+         20261102140000_exos_order_edits_recs \
+         20261102150000_exos_promoter_wedge \
+         20261102160000_exos_gaps_integration \
+         20261104100000_exos_sim_buyer_fixes \
+         20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
+         20261104130000_exos_sim_partner_fixes \
+         20261104150000_exos_posh_link_channel \
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops \
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build \
+         20261105130000_exos_promoter_events \
+         20261105140000_exos_ig_checkout \
+         20261105150000_exos_wave3_integration \
+         20261105160000_exos_token_lineage \
+         20261106100000_exos_dice_import \
+         20261106110000_exos_checkout_questions \
+         20261106120000_exos_shared_capacity \
+         20261106130000_exos_price_steps \
+         20261106140000_exos_buyer_geo_genre; do
   $PSQL -f "$MIG/$m.sql"
 done
-# The 250-capacity resale rule (mig 20261014140000) postdates the marketplace
-# fixtures (small events): off for them; test_resale_min_capacity.sql turns it on.
-$PSQL -c "INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_min_capacity', '0') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+# The resale rules (migs 20261014140000, 20261029090000: over the free tier
+# and opted in) and last call (mig 20261029100000) postdate the marketplace
+# fixtures (small events, no opt-in, a few seats): off for them.
+# test_resale_min_capacity.sql, test_free_tier_resale.sql, test_last_call.sql
+# and test_fixed_block.sql put the rules back for themselves.
+$PSQL -c "INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_capacity', '-1'), ('resale_consent_required', 'false'), ('last_call_threshold', '0') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_exos_platform.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_p0.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fulfill_all_or_nothing.sql"
@@ -169,25 +234,49 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_pa
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_calendar_feeds.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_scaffold.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
+# Buyer mistake simulations (mig 20261104100000; races: race_sim_buyer.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_buyer.sql"
+# Organizer mistake simulations (mig 20261104110000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_organizer.sql"
+# Mistake simulations (door staff and scanner phones; mig 20261104120000).
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_door.sql"
 # Replay: every pending migration again, in order, must be a no-op.
-for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout_attribution \
-  20260924230000_exos_event_geo 20260924233000_exos_promoters 20260924234500_exos_fan_referrals \
-  20260925000000_exos_voucher_unlocked_tier 20260925001000_exos_event_series_codes_fix \
-  20260925003000_exos_trial_run_fixes 20260925010000_exos_trial_run_fixes_2 \
-  20260925012000_exos_presale_vouchers 20260925013000_exos_scanner_no_buyer_email \
-  20260925020000_exos_webhook_claim 20260925021000_exos_p1_db_hardening \
-  20260926000000_exos_advisor_cleanup \
-  20260926010000_exos_waitlist_signin_account_deletion \
-  20260926020000_exos_promoter_commissions 20260926030000_exos_referral_rewards \
-  20260926040000_exos_organizer_refunds 20260926050000_exos_tables_guest_lists \
-  20260926060000_exos_abandoned_checkout 20260926070000_exos_price_disclosure \
-  20260926080000_exos_refund_tables_fix 20260926090000_exos_accessible_tickets \
-  20260926190000_exos_stubhub_event_request 20260926191000_exos_channel_event_links \
-  20260926192000_exos_marketplace_orders 20260926193000_exos_channel_allocations \
-  20260926194000_exos_listing_plan_account_flags 20260927010000_exos_claim_any_account \
-         20260927020000_exos_seatgeek_channel_label 20260927030000_exos_marketplace_sync \
-         20260927040000_exos_gametime_channel 20260927050000_exos_marketplace_standard \
-         20260928010000_exos_marketplace_pools 20260928020000_exos_gotickets_channel \
+for m in \
+         20260924215000_exos_fulfill_all_or_nothing \
+         20260924223000_exos_checkout_attribution \
+         20260924230000_exos_event_geo \
+         20260924233000_exos_promoters \
+         20260924234500_exos_fan_referrals \
+         20260925000000_exos_voucher_unlocked_tier \
+         20260925001000_exos_event_series_codes_fix \
+         20260925003000_exos_trial_run_fixes \
+         20260925010000_exos_trial_run_fixes_2 \
+         20260925012000_exos_presale_vouchers \
+         20260925013000_exos_scanner_no_buyer_email \
+         20260925020000_exos_webhook_claim \
+         20260925021000_exos_p1_db_hardening \
+         20260926000000_exos_advisor_cleanup \
+         20260926010000_exos_waitlist_signin_account_deletion \
+         20260926020000_exos_promoter_commissions \
+         20260926030000_exos_referral_rewards \
+         20260926040000_exos_organizer_refunds \
+         20260926050000_exos_tables_guest_lists \
+         20260926060000_exos_abandoned_checkout \
+         20260926070000_exos_price_disclosure \
+         20260926080000_exos_refund_tables_fix \
+         20260926090000_exos_accessible_tickets \
+         20260926190000_exos_stubhub_event_request \
+         20260926191000_exos_channel_event_links \
+         20260926192000_exos_marketplace_orders \
+         20260926193000_exos_channel_allocations \
+         20260926194000_exos_listing_plan_account_flags \
+         20260927010000_exos_claim_any_account \
+         20260927020000_exos_seatgeek_channel_label \
+         20260927030000_exos_marketplace_sync \
+         20260927040000_exos_gametime_channel \
+         20260927050000_exos_marketplace_standard \
+         20260928010000_exos_marketplace_pools \
+         20260928020000_exos_gotickets_channel \
          20260928030000_exos_vivid_channel \
          20260928040000_exos_marketplace_scarcity \
          20260928050000_exos_guest_checkout \
@@ -243,7 +332,62 @@ for m in 20260924215000_exos_fulfill_all_or_nothing 20260924223000_exos_checkout
          20261019090000_exos_channel_mirrors \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
-         20261019120000_exos_door_roster_wallet_delta; do
+         20261019120000_exos_door_roster_wallet_delta \
+         20261027080000_exos_public_tier_available_grant \
+         20261027090000_exos_api_scopes \
+         20261027100000_exos_fee_rules \
+         20261029090000_exos_free_tier_resale_consent \
+         20261029100000_exos_last_call \
+         20261029120000_exos_weekly_channel_report \
+         20261029130000_exos_discovery_publishing \
+         20261029140000_exos_eventbrite_oauth \
+         20261029150000_exos_posh_webhooks \
+         20261029160000_exos_fixed_block \
+         20261029170500_exos_event_import \
+         20261030100000_exos_booking \
+         20261030110000_exos_artists_feed \
+         20261030120000_exos_sales_counts \
+         20261030130000_exos_gift_cards_giving \
+         20261030130500_exos_passes_memberships \
+         20261030140000_exos_seating \
+         20261030150000_exos_series_timed_entry \
+         20261031100000_exos_offers \
+         20261031100500_exos_settlements \
+         20261031110000_exos_core_api \
+         20261031120000_exos_fans \
+         20261031130000_exos_partner_sales \
+         20261031130500_exos_developer_platform \
+         20261031210000_exos_matched_seats \
+         20261031220000_exos_payments_paypal_cashapp_split \
+         20261031230000_exos_group_chat \
+         20261101000000_exos_integration \
+         20261102100000_exos_membership_writes \
+         20261102110000_exos_giving_writes \
+         20261102120000_exos_finance_extras \
+         20261102130000_exos_templates_inbound \
+         20261102140000_exos_order_edits_recs \
+         20261102150000_exos_promoter_wedge \
+         20261102160000_exos_gaps_integration \
+         20261104100000_exos_sim_buyer_fixes \
+         20261104110000_exos_sim_organizer_fixes \
+         20261104120000_exos_sim_door_fixes \
+         20261104130000_exos_sim_partner_fixes \
+         20261104150000_exos_posh_link_channel \
+         20261104180000_exos_org_access \
+         20261104190000_exos_commission_methods \
+         20261104200000_exos_small_ops \
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build \
+         20261105130000_exos_promoter_events \
+         20261105140000_exos_ig_checkout \
+         20261105150000_exos_wave3_integration \
+         20261105160000_exos_token_lineage \
+         20261106100000_exos_dice_import \
+         20261106110000_exos_checkout_questions \
+         20261106120000_exos_shared_capacity \
+         20261106130000_exos_price_steps \
+         20261106140000_exos_buyer_geo_genre; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -279,3 +423,71 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_white_lab
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_mirrors.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_door_day_keys.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_online_event_followups.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_scopes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fee_rules.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_public_tier_available.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_free_tier_resale.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_last_call.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discovery_publishing.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_webhooks.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fixed_block.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_weekly_channel_report.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_eventbrite_oauth.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_import.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_sales_counts.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_seating.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_booking.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_series_timed_entry.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_artists_feed.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gift_cards_giving.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_passes_memberships.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_offers_settlements.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_core_api.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fans.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_sales.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_developer_platform.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_matched_seats.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_paypal_payments.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_chat.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_integration.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_membership_writes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_giving_writes.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_finance_extras.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_templates_inbound.sql"
+# claude/exos-gap-orders
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_order_edits_recs.sql"
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_promoter_wedge.sql"
+# gaps integration (mig 20261102160000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_gaps_integration.sql"
+# Mistake simulations: partner API + partner sales (mig 20261104130000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_partner.sql"
+# Posh third-party link discovery channel (mig 20261104150000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_posh_link_channel.sql"
+# Org API permissions, venue requests, partner presale (mig 20261104180000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_access.sql"
+# claude/exos-commission-methods: four ways to fund promoter commissions (mig 20261104190000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
+# Partner caps, invite approval, drawer recount (mig 20261104200000; race: race_sim_partner.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"
+# Fan API: /v1/me, account tokens, the org writes of the gap list (mig 20261105110000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fan_api.sql"
+# claude/exos-na-build: printed tickets, box-office memberships, team switch, staff shifts, Tixel, retag (mig 20261105120000; race: race_print_codes.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_na_build.sql"
+# Promoter-run events: org type, location modes, secret address reveal (mig 20261105130000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_promoter_events.sql"
+# Instagram / Facebook in-app browser checkout: where checkouts start, the report (mig 20261105140000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ig_checkout.sql"
+# Wave 3 integration (mig 20261105150000): every #85/#87/#88/#89 patch survives the replay; account tokens and X-Exos-Org; closed types sold out in public discovery
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wave3_integration.sql"
+# Token lineage (mig 20261105160000): API-minted tokens record their parent, die with it, always expire, can't mint
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_token_lineage.sql"
+# claude/exos-dice-import: import from DICE (mig 20261106100000): token never readable, idempotent re-import, returns block admission, consent only with optInPartners, cross-org
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_import.sql"
+# claude/exos-checkout-questions: checkout questions, answers per order / ticket, the door, RSVP, API cores, TS/SQL parity (mig 20261106110000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_checkout_questions.sql"
+# claude/exos-capacity-pricing: shared capacity (DICE TicketPool, mig 20261106120000; race: race_shared_capacity.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_shared_capacity.sql"
+# claude/exos-capacity-pricing: price steps (DICE PriceTier, mig 20261106130000; race: race_price_steps.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_price_steps.sql"
+# Buyer location + genre filter (mig 20261106140000): order locations (RLS, report sums, account deletion), genres in the organizer and public discovery APIs
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_geo_genre.sql"

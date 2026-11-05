@@ -5,6 +5,7 @@
 // (mig 20260926010000); the notify/summary paths are org-staff-gated server-side.
 
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 
 export interface WaitlistJoinResult {
   id: string;
@@ -29,6 +30,7 @@ export async function joinWaitlist(input: {
   quantity?: number;
   meta?: Record<string, unknown> | null;
 }): Promise<WaitlistJoinResult> {
+  assertNotEmailName(input.name);
   const { data, error } = await supabase.rpc('exos_join_waitlist', {
     p_event_id: input.eventId,
     p_email: input.email,

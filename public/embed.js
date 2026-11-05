@@ -4,6 +4,8 @@
  *   <div data-exos-event="EVENT_ID"></div>              ticket box (checkout in the frame)
  *   <div data-exos-org="ORG_SLUG"></div>                 upcoming events (data-exos-layout="calendar"
  *                                                        groups them by month)
+ *   <div data-exos-signup="FORM_ID"></div>              a signup form (email list, double opt-in;
+ *                                                        texts when the form offers them)
  *   <a data-exos-button="EVENT_ID" data-exos-label="Get tickets" data-exos-color="#ff3366"></a>
  *                                                        a plain link to the event page (no frame)
  *   <script src="https://<exos host>/bridge/embed.js" async></script>
@@ -54,8 +56,10 @@
     if (div.getAttribute('data-exos-mounted')) return;
     var id = div.getAttribute('data-exos-event') || '';
     var slug = div.getAttribute('data-exos-org') || '';
+    var form = div.getAttribute('data-exos-signup') || '';
     var path;
-    if (ID_RE.test(id)) path = '/embed/event/' + encodeURIComponent(id);
+    if (ID_RE.test(form)) { path = '/embed/signup/' + encodeURIComponent(form); id = ''; }
+    else if (ID_RE.test(id)) path = '/embed/event/' + encodeURIComponent(id);
     else if (SLUG_RE.test(slug)) path = '/embed/org/' + encodeURIComponent(slug);
     else return;
     div.setAttribute('data-exos-mounted', '1');
@@ -63,8 +67,8 @@
     if (!id && div.getAttribute('data-exos-layout') === 'calendar') q.push('layout=calendar');
     var f = d.createElement('iframe');
     f.src = base + path + '?' + q.join('&');
-    f.title = div.getAttribute('data-exos-title') || 'Tickets';
-    f.setAttribute('allow', 'payment');
+    f.title = div.getAttribute('data-exos-title') || (form ? 'Sign up' : 'Tickets');
+    if (!form) f.setAttribute('allow', 'payment');
     f.setAttribute('loading', 'lazy');
     f.style.width = '100%';
     f.style.maxWidth = '480px';
@@ -72,8 +76,9 @@
     f.style.display = 'block';
     f.style.height = '420px';
     div.appendChild(f);
-    // An org list's frame can move on to any of its events' checkout.
-    frames.push({ div: div, iframe: f, eventId: id || null });
+    // An org list's frame can move on to any of its events' checkout. A
+    // signup form's frame only ever resizes.
+    frames.push({ div: div, iframe: f, eventId: id || null, signup: !!form });
   }
 
   // A plain buy button: a link to the event page (opens a new tab), no frame.
@@ -98,7 +103,7 @@
   }
 
   function scan() {
-    var divs = d.querySelectorAll('[data-exos-event], [data-exos-org]');
+    var divs = d.querySelectorAll('[data-exos-event], [data-exos-org], [data-exos-signup]');
     for (var i = 0; i < divs.length; i++) mount(divs[i]);
     var btns = d.querySelectorAll('[data-exos-button]');
     for (var j = 0; j < btns.length; j++) button(btns[j]);
@@ -117,7 +122,7 @@
       var h = m.height;
       if (typeof h !== 'number' || !isFinite(h) || h < 0 || h > 20000) return;
       entry.iframe.style.height = Math.ceil(h) + 'px';
-    } else if (m.type === 'exos:checkout-complete') {
+    } else if (m.type === 'exos:checkout-complete' && !entry.signup) {
       if (entry.eventId ? m.eventId !== entry.eventId : !ID_RE.test(m.eventId || '')) return;
       var detail = { eventId: m.eventId };
       if (typeof m.sessionId === 'string' && /^cs_[A-Za-z0-9_]{1,255}$/.test(m.sessionId)) detail.sessionId = m.sessionId;

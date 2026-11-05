@@ -202,21 +202,26 @@ page, so Exos runs a Google sign-in ("Connect Google Ads") and keeps the **refre
    `{ url }`: Google's consent page with `access_type=offline`, `prompt=consent` (so Google always
    returns a refresh token), the scope above and `redirect_uri` = `GOOGLE_OAUTH_REDIRECT_URI`.
 2. Google sends the browser to `…/exos-oauth-google/callback?code&state`. The code is parked on
-   the state row (first return only) and the browser goes back to
-   `<EXOS_APP_URL>/orgs/<org>/settings?google_ads=finish&google_ads_state=<state>`. A refusal or an
-   unknown / used / expired state comes back as `?google_ads=error&reason=…`.
-3. The settings page posts the state to `…/exos-oauth-google/finish` with the user's JWT. The state
-   is consumed only for the **same user** who started it, once, before it expires, while they're
-   still owner / manager. The function exchanges the code at `https://oauth2.googleapis.com/token`,
+   the state row (first return only) with the SHA-256 of a fresh 256-bit **finish token**, and the
+   browser goes back to
+   `<EXOS_APP_URL>/orgs/<org>/settings?google_ads=finish&google_ads_state=<state>#google_ads_finish=<token>`
+   (the token in the URL fragment, which browsers never send to a server). A refusal or an unknown /
+   used / expired state comes back as `?google_ads=error&reason=…`.
+3. The settings page takes both out of the address bar, shows which organization Google Ads will be
+   connected to, and only when the user clicks **Confirm** posts `{state, finish}` to
+   `…/exos-oauth-google/finish` with the user's JWT. It needs the finish token **and** the **same
+   user** who started it, once, before it expires, while they're still owner / manager. The function exchanges the code at `https://oauth2.googleapis.com/token`,
    checks the Data Manager scope was granted (Google lets users untick scopes) and that a refresh
    token came back, and stores it in Vault as the org's `google_ads` secret
    (`exos_set_google_ads_token`, name `exos_ad:<org>:google_ads`, the same one
    `exos_set_ad_credential` uses). The ids, the on/off switch and the test code are kept. The page
    shows "Google Ads connected" and the row shows **Connected**.
 
-Step 3 is why the callback doesn't finish on its own: a consent link started by someone else and
-completed in a victim's browser would otherwise attach the victim's Google account to the other
-person's org. The state and the code are never logged; the code is kept at most 10 minutes and
+Steps 2 and 3 stop account linking (mig 20261029140000): whoever starts a sign-in knows the state,
+so without the finish token they could send the consent link to a victim and finish the victim's
+sign-in with their own JWT, attaching the victim's Google account to their org. The starter never
+sees the finish token, and the victim's browser, which has it, doesn't have the starter's JWT; either
+attempt is refused and the page says nothing was connected. The state and the code are never logged; the code is kept at most 10 minutes and
 cleared when used.
 
 Then the organizer fills in the customer id and conversion action, turns Google Ads on and saves,

@@ -16,12 +16,13 @@
 
 import { Timestamp } from './timestamp';
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import { getCurrentAppUser } from './auth';
 import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
-import { estimateOffset, setClockOffset } from './serverClock';
+import { estimateOffset, restoreClockOffset, saveClockOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
-import { fetchAllPages } from './door/roster';
+import { fetchAllPages } from './pagedRead';
 import { parseListState, type ListState } from './door/lists';
 import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
 
@@ -677,10 +678,19 @@ export async function undoCheckIn(ticketId: string, eventId: string, reason: str
 }
 
 let clockSync: Promise<void> | null = null;
+const clockStore = (): Storage | null => {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+};
 /** Measure this device's clock against the server once per page load
  *  (exos_server_time), so the rotating code and the door's check use the
  *  server's 30-second window. Best-effort: on failure the device clock stands. */
 export function syncServerClock(): Promise<void> {
+  // Offline after a reload: the offset this device measured earlier (a day at most).
+  restoreClockOffset(clockStore());
   if (!clockSync) {
     clockSync = (async () => {
       try {
@@ -688,7 +698,9 @@ export function syncServerClock(): Promise<void> {
         const { data, error } = await supabase.rpc('exos_server_time');
         const t1 = Date.now();
         if (error || !data) throw error ?? new Error('no server time');
-        setClockOffset(estimateOffset(t0, new Date(data as string).getTime(), t1));
+        const est = estimateOffset(t0, new Date(data as string).getTime(), t1);
+        setClockOffset(est);
+        if (est != null) saveClockOffset(clockStore(), est, t1);
       } catch {
         clockSync = null; // try again next time
       }
@@ -835,6 +847,7 @@ export async function mintTickets(input: {
  * not in transfer, ≤80 chars (mig 20260911060000). Returns the stored name.
  */
 export async function setTicketAttendee(ticketId: string, name: string): Promise<string | null> {
+  assertNotEmailName(name);
   const { data, error } = await supabase.rpc('exos_set_ticket_attendee', {
     p_ticket_id: ticketId,
     p_name: name,

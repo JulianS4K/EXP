@@ -21,12 +21,27 @@ PAN, expiry, CVC, cardholder name or track data, and `test_pos_scaffold.sql` P1 
 | Cash drawers: opening float, denomination counts, expected vs counted | Accounting exports (QuickBooks and similar) |
 | Settlement per event: tickets + bar + merch, cash vs card, the Exos fee, promoter and artist splits | Payouts over Stripe Connect (these come after the terminal is wired) |
 
+## Staff shifts (clock in / out)
+
+Mig `20261105120000` (`exos_staff_shifts`). Staff clock in on the phone they're signed in on (the door app's
+device), not on a shared kiosk: `exos_staff_clock_in(org, event?, device?, note?)` and `exos_staff_clock_out(org,
+note?)`. Any active member may clock in; one open shift per member per organization; the event and device, when
+given, must be the organization's (a device that is pending or active). The role at clock-in is kept on the shift.
+Owners and managers close a shift somebody forgot (`exos_staff_shift_close(shift, clock_out_at, reason)`: between
+the clock-in and now, with a reason kept on the row) and read the hours report (`exos_staff_shift_report(org, from?,
+to?)`, shifts that started in the window, at most 92 days, default the last 7, with each member's minutes; an open
+shift counts up to now). RLS: members read their own shifts, owners and managers all. Tips and pay stay out of
+scope. API (`docs/api/box-office.json`): `POST /v1/staff-shifts/clock-in` and `/clock-out` with the member's own
+personal or OAuth token (`checkin:write`; an org API key is not a person), `GET /v1/staff-shifts` (`events:read`,
+an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own token) map here.
+
 ## What's built vs later
 
 | Piece | Status | Where |
 |---|---|---|
 | Data model, RLS, grants | ✅ authored, not applied | `supabase/migrations/20260929074000_exos_pos_scaffold.sql` |
 | 86 an item, open / close a tab, close a drawer | ✅ SQL functions | `exos_pos_set_86`, `exos_pos_open_tab`, `exos_pos_close_tab`, `exos_pos_close_drawer` |
+| Recount a closed drawer (owner / manager, a reason, 7 days, 3 times; the replaced count kept in `exos_pos_drawer_recounts`) and the drawer report on the event report | ✅ SQL function + UI | `exos_pos_recount_drawer` (mig 20261104200000), `components/PosDrawersPanel` |
 | Settlement summary and records | ✅ SQL functions | `exos_pos_settlement_summary`, `exos_pos_record_settlement` |
 | Line and cart totals with tax, tips, tabs, split tenders, drawer math, settlement report, promoter and artist hooks | ✅ pure TS | `supabase/functions/_shared/pos/`, re-exported from `src/lib/pos` |
 | `PaymentTerminal` interface, `FakeTerminal`, `NotWiredTerminal` | ✅ | `_shared/pos/terminal.ts` |
@@ -98,6 +113,7 @@ The database, not the register, is the source of truth for anything to do with m
 | Ring orders, bar and merch lines, cash and comp tenders; open drawers; open and close tabs | door staff for the event: `exos_pos_can_ring` = `exos_can_door_event` (owner, manager, or a scanner who is org-wide or assigned to the event in `exos_event_staff`) |
 | 86 an item | owner, manager; door staff for an event-scoped item |
 | Ticket lines and card tenders | **service role only** (the walk-up mint path and the terminal integration) |
+| Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
 | Anyone outside the org | nothing (`test_pos_scaffold.sql` P3 and P9b check this) |

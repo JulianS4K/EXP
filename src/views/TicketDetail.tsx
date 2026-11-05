@@ -1,3 +1,4 @@
+import TicketLocation from '../components/TicketLocation';
 import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -28,7 +29,10 @@ import OrganizerUpdates from '../components/OrganizerUpdates';
 import RescheduleNotice from '../components/RescheduleNotice';
 import ReferralProgress from '../components/ReferralProgress';
 import TicketOnlineAccess from '../components/TicketOnlineAccess';
+import TicketMatchedGroup from '../components/TicketMatchedGroup';
 import { useT } from '../context/LanguageContext';
+import TicketSeats from '../components/seating/TicketSeats';
+import TicketPrintedNotice from '../components/TicketPrintedNotice';
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -305,6 +309,7 @@ export default function TicketDetail() {
                     <div>
                       <p className="disp text-lg tracking-wide leading-none">PASS {currentIndex + 1} OF {tickets.length}</p>
                       <p className="type text-[11px] uppercase tracking-[0.2em] mt-1 opacity-60">{currentTicket.tierName}</p>
+                      <TicketSeats ticketIds={[currentTicket.id]} className="mt-1 text-black/80" />
                     </div>
                     <span className="w-2 h-2 bg-black rounded-full animate-pulse"></span>
                  </div>
@@ -314,6 +319,8 @@ export default function TicketDetail() {
 
               <div className="-mt-12 px-8 md:px-10 relative z-20">
                  <div className="bg-white p-8 md:p-10 flex flex-col items-center justify-center group mb-8 relative">
+                    {/* Printed (mig 20261105120000): the door takes the paper only. */}
+                    <TicketPrintedNotice ticketId={currentTicket.id} />
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
                         barcode ? (
@@ -512,6 +519,17 @@ export default function TicketDetail() {
                  {(currentTicket.status === 'active' || currentTicket.status === 'used')
                    && !(currentTicket as any).pendingTransferId && (
                    <TicketOnlineAccess eventId={event.id} format={event.format} whatToBring={event.whatToBring} />
+                 )}
+
+                 {/* A secret / TBA location (mig 20261105130000): the address once revealed. */}
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used') && (
+                   <TicketLocation eventId={event.id} mode={event.locationMode} timezone={event.timezone} />
+                 )}
+
+                 {/* Matched seats (mig 20261031210000): the holder's group, revealed before the event. */}
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used')
+                   && !(currentTicket as any).pendingTransferId && (
+                   <TicketMatchedGroup ticketId={currentTicket.id} />
                  )}
 
                  <ReferralProgress eventId={event.id} eventTitle={event.title} currency={event.currency} promoterId={currentTicket?.promoterId || undefined} />

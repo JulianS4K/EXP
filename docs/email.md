@@ -44,9 +44,10 @@ transactional, **M** follow-up (opt-out). Render: **SQL** (html row) or **TS** (
 | Template | Trigger | Kind | Dedupe | Render |
 |---|---|---|---|---|
 | `ticket-issued` | Paid order fulfilled into a wallet (`exos_fulfill_checkout`), comps (`exos_issue_comp_batch`) | T | once per session (fulfilment is idempotent) | SQL; a paid order appends the receipt (`exos_receipt_html`): amount, tax, line items, "all-in, no fees added", tickets link |
-| `transfer-initiated` | Guest order with no account yet (claim link per ticket + receipt), ticket transfer, email comp, marketplace order, resend of marketplace claim links | T | per call (resend: once per 10 min) | SQL |
+| `rsvp-code` (order proof) | A guest order waiting for proof of the email (mig 20261105100000): the 6-digit code and a "confirm it here" link (`/my-tickets?confirm=<order>&proof_code=`) that works only in the browser that paid; resent from the confirm step | T | per send: 5 per order, 60 s apart | SQL (`_exos_proof_mail_code`) |
+| `transfer-initiated` | Guest order once its email is proven (or the organizer sent it to a corrected email): a claim link per ticket. Ticket transfer, email comp, marketplace order, resend of marketplace claim links | T | per call (resend: once per 10 min) | SQL |
 | `transfer-claimed`, `transfer-sent` | Transfer claimed / sent (sender's copy) | T | per transfer | SQL |
-| `order-failed` | Paid but the seats were gone at fulfilment; refund starts | T | per session | SQL |
+| `order-failed` | Paid but the seats were gone at fulfilment; refund starts. Also a monthly gift's card declined (mig 20261105100000): "update your card" (`/give/<org>/<campaign>?update_card=<id>` opens Stripe's billing portal for the donor), once per failure streak | T | per session; the gift: per streak (`failed_payments` 0 → 1) | SQL |
 | `event-reminder` | Cron `exos_send_event_reminders`: T-24h and T-2h; staff "send reminder now" (6h cooldown) | T | stamps on the event row | SQL; tickets link. A ticket parked on the org owner for a pending claim doesn't remind the owner |
 | `event-updated` | Organizer clicks "notify attendees" (`exos_notify_event_holders`) | T | none: an explicit action | TS: current time, doors, venue, event link |
 | `event-rescheduled` | `exos_reschedule_event` (mig 20260929150000; also the Edit event save when the date change qualifies) | T | per reschedule + address | TS: old and new date / time and doors in the event's zone, the organizer's note. When refunds are offered: a link per ticket the address may act on, until the deadline: **Get a refund** (tickets they paid for through Exos, amount incl. tax) or **Release my ticket** (free / comp they hold), `/refund?t=<64-hex token>`, one token per ticket + reschedule. Marketplace tickets: "refunds go through the marketplace". A holder someone else paid for: "only they can ask". Not offered: "nothing you need to do" |
@@ -54,6 +55,7 @@ transactional, **M** follow-up (opt-out). Render: **SQL** (html row) or **TS** (
 | `refund-issued` | A refund row reaches `succeeded` (`exos_order_refunds` trigger; Stripe webhook, organizer refunds, auto-refunds) | T | per refund row | TS: amount, progress for a partial refund, order reference |
 | `waitlist-open` | Waitlist offer (code + hours to use it) | T | per offer | SQL |
 | `event-announcement` | Organizer announcement to holders | T | per announcement | SQL |
+| `signup-confirm` | A signup-form submission (`_exos_signup_submit`, mig 20261031120000; docs/fans.md) | T | per submission (`signup-confirm:<submission id>`); 3 submissions a day per address and org | TS: org name, form title, the confirm link `/signup/confirm?t=<64-hex token>` (only its hash is stored, 7 days). Sent even when the address is already on the list, so the form never tells anyone who is subscribed. No account needed |
 | `checkout-abandoned` | Cron `exos_send_checkout_reminders`: checkout expired 1-24h ago, seats left | M | per buyer + event, forever | SQL |
 | `post-event` | Cron `exos_send_mail_followups`: event ended 12h-3d ago | M | per event + holder | TS: thanks, "follow <org>" (unless following), up to 3 next events |
 
@@ -74,6 +76,7 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `event-published` | Event status → `published` (trigger); first date of a series only | O | T | per event + person | TS |
 | `inventory-low` | Cron: a tier on a published, upcoming event has ≤ 10% (min 1) left | O | T | per tier + capacity + person | TS |
 | `inventory-sold-out` | Cron: a tier has none left | O | T | per tier + capacity + person (raising capacity re-arms it) | TS |
+| `fixed-block-released` | A fixed block handed back to its platform (mig 20261029160000): the release cron `exos_release_fixed_blocks` or **Release now** | O | T | per event + person | TS: per ticket type the count to put back on that platform (and sold of the block), how many were still pending, a link to the event dashboard. Counts only |
 | `marketplace-attention` | A marketplace order needs a person | O | T | per order + reason | SQL |
 | `payout-sent`, `payout-pending` | `exos_queue_payout_mail(org, amount_cents, currency, period, status, reference)`, for the payout ledger to call | O + finance | T | per org + status + reference (or period) + person | TS |
 | `fee-free-ending` | Cron: 14 days and 1 day before `exos_org_billing.fee_free_until` | O + finance | T | per org + end date + stage + person | TS |
@@ -84,7 +87,8 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 | `org-connect-stripe` | Cron: day 7-14, only while Stripe can't take payments (`exos_org_secrets.payments.chargesEnabled`) | owner | M | per org | TS |
 | `org-sales-digest` | Cron: yesterday (UTC), only orgs that sold something | O | M | per org + day + person | TS: per-event tickets and gross, totals per currency |
 | `org-weekly-summary` | Cron: last Monday-Sunday (UTC); orgs with sales that week or an event in the next 14 days | O | M | per org + week + person | TS: sales, check-ins, next two weeks' events with sold / capacity |
-| `org-invite`, `invite-accepted` | Member invites | invitee / inviter | T | per invite | SQL |
+| `org-channel-report` | Cron `exos_send_channel_reports` (mig 20261029120000): last Monday-Sunday (UTC); orgs with the report on (default) and an event that started in the last 7 days or starts in the next 60 | O | M | per org + ISO week (`exos_channel_reports` PK) and per person; also claims that week's `org-weekly-summary` key for each person it mails | TS (`_shared/channelReport.ts`, shared with the SPA's Channels card): per event, each channel's tickets this week and to date with gross, channel fees, Exos fee and net, "not reported" where a platform doesn't send them; comps and imported lists apart; totals per currency. Optional text to the owner's number (org's own Twilio / Telnyx, `{{app_url}}` filled by `exos-sms-drain`) |
+| `org-invite`, `invite-accepted` | Member invites (`invite-accepted` says "Approve or reject" with a Members link when the org approves new members, mig 20261104200000) | invitee / inviter | T | per invite | SQL |
 
 Onboarding stops when done: the day-3 nudge is skipped once the org has an event, the day-7 nudge once Stripe is
 connected. Windows are bounded, so the first run after deploy doesn't mail orgs about their distant past.
@@ -105,6 +109,20 @@ select cron.schedule('exos_send_mail_followups', '23 * * * *',
 
 The other mail crons already exist: `exos-mail-drain-2min` (the sender), `exos_send_event_reminders` (every
 15 min) and `exos_send_checkout_reminders` (hourly at :17).
+
+**Weekly channel report** (`org-channel-report`, mig `20261029120000`). The migration creates the job
+`exos_send_channel_reports` (Mondays 00:07 UTC, ahead of the follow-ups at :23 so it replaces that week's summary)
+**inactive** when pg_cron is present, and leaves an existing job alone. To turn it on:
+
+```sql
+select cron.alter_job((select jobid from cron.job where jobname = 'exos_send_channel_reports'), active := true);
+-- or, where the job doesn't exist yet:
+select cron.schedule('exos_send_channel_reports', '7 0 * * 1',
+  $cron$SELECT public.exos_send_channel_reports();$cron$);
+```
+
+It's once per org and ISO week however often it runs (`exos_channel_reports`). Texts also need `exos-sms-drain`
+deployed with `EXOS_APP_URL`, and stay a dry run until `EXOS_SMS_LIVE=on`.
 
 ## Going live (operator)
 

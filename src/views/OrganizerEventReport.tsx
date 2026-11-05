@@ -21,6 +21,8 @@ import { useToast } from '../context/ToastContext';
 import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
 import DoorSummaryPanel from '../components/DoorSummaryPanel';
+import MoneySoFarPanel from '../components/MoneySoFarPanel';
+import PhoneRsvpPanel from '../components/PhoneRsvpPanel';
 import DoorImport from '../components/DoorImport';
 import EventbriteSync from '../components/EventbriteSync';
 import WaitlistPanel from '../components/WaitlistPanel';
@@ -29,29 +31,44 @@ import RemindersPanel from '../components/RemindersPanel';
 import EventAnalyticsPanel from '../components/EventAnalyticsPanel';
 import ReleasePolicyPanel from '../components/ReleasePolicyPanel';
 import CompIssuancePanel from '../components/CompIssuancePanel';
-import TierPricingPanel from '../components/TierPricingPanel';
+import PriceStepsEditor from '../components/PriceStepsEditor';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
+import BuyerLocationsPanel from '../components/BuyerLocationsPanel';
+import InAppReportPanel from '../components/InAppReportPanel';
+import ChannelSalesPanel from '../components/ChannelSalesPanel';
+import SalesCountsPanel from '../components/SalesCountsPanel';
 import { canSeeMoney } from '../lib/settlement';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
+import MatchedSeatsPanel from '../components/MatchedSeatsPanel';
 import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import AttendeeLookup from '../components/AttendeeLookup';
+// Checkout questions (mig 20261106110000).
+import QuestionAnswersPanel from '../components/QuestionAnswersPanel';
 import SmsPanel from '../components/SmsPanel';
 import PromoLinksPanel from '../components/PromoLinksPanel';
+// Series + timed entry (mig 20261030150000).
+import TimedEntryPanel from '../components/TimedEntryPanel';
+import SlotReport from '../components/SlotReport';
 import RefundAsksPanel from '../components/RefundAsksPanel';
+import LastCallBadge from '../components/LastCallBadge';
+import FixedBlockSummary from '../components/FixedBlockSummary';
+import ShowFinancePanel from '../components/finance/ShowFinancePanel';
+import PosDrawersPanel from '../components/PosDrawersPanel';
 import { formatCurrency } from '../lib/utils';
 import { Timestamp } from '../lib/timestamp';
 
-type ReportTab = 'overview' | 'attendees' | 'door' | 'marketing' | 'settings';
+type ReportTab = 'overview' | 'settlement' | 'attendees' | 'door' | 'marketing' | 'settings';
 const REPORT_TABS: { key: ReportTab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  { key: 'settlement', label: 'Settlement & P&L' },
   { key: 'attendees', label: 'Attendees & refunds' },
   { key: 'door', label: 'Tables & guest lists' },
   { key: 'marketing', label: 'Marketing' },
@@ -80,6 +97,8 @@ export default function OrganizerEventReport() {
   const [releasingId, setReleasingId] = useState<string | null>(null);
   // Bumped after any mutation on this page so the analytics document refetches.
   const [analyticsKey, setAnalyticsKey] = useState(0);
+  // Tickets sold on other platforms (mig 20261030120000); never added to totalSold.
+  const [soldElsewhere, setSoldElsewhere] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,10 +281,24 @@ export default function OrganizerEventReport() {
               the numbers ✦
             </span>
           </span>
+          {/* Series (mig 20261030150000): manage this event's series, or start one. */}
+          {canAct && (
+            <p className="mt-2 text-xs">
+              {event.seriesId
+                ? <button type="button" className="font-bold text-[#026cdf]" onClick={() => navigate(`/dashboard/series/${event.seriesId}`)}>Manage this series</button>
+                : <button type="button" className="font-bold text-[#026cdf]" onClick={() => navigate(`/dashboard/event/${event.id}/recurring`)}>Make it recurring</button>}
+            </p>
+          )}
         </div>
 
+        {/* Near sell-out only the primary sells (mig 20261029100000). */}
+        <LastCallBadge eventId={event.id} />
+        {/* A fixed block for another platform (mig 20261029160000). */}
+        <FixedBlockSummary eventId={event.id} />
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />} />
+          <Stat label="Tickets Sold" value={String(totalSold)} icon={<Users size={16} />}
+            note={soldElsewhere > 0 ? `+${soldElsewhere} sold elsewhere` : undefined} />
           <Stat
             label="Ticket sales"
             value={formatCurrency(totalRevenue, currency)}
@@ -301,9 +334,31 @@ export default function OrganizerEventReport() {
         {tab === 'overview' && (<>
         {/* Money: settlement summary + per-order CSV (owner / manager / finance;
             hidden before the money views exist). Read-only. */}
+        {/* End-of-night money (online, door, fees, promoters owed); mig 20261102150000. */}
+        <MoneySoFarPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* POS cash drawers and their recounts (mig 20261104200000). */}
+        <PosDrawersPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)} canAct={canAct} />
+        {/* Phone-number RSVP for free ticket types (mig 20261102150000). */}
+        {canAct && (
+          <PhoneRsvpPanel eventId={event.id} canManage={canAct}
+            freeTiers={(event.ticketTiers ?? []).filter((t) => Number(t.price) === 0).map((t) => ({ id: t.id, name: t.name }))} />
+        )}
+        {/* Sold elsewhere: manual counts + platform CSV imports (owner / manager /
+            finance; hidden before mig 20261030120000). Beside our numbers, never in them. */}
+        <SalesCountsPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)}
+          onTotal={setSoldElsewhere} />
         {/* Chargebacks on this event's orders (same roles; hidden before mig 20261001101000). */}
         <DisputesPanel eventId={event.id} currency={event.currency || 'USD'} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Every ticket by channel, week + to date, fees as reported; the same
+            numbers as the Monday report (mig 20261029120000). */}
+        <ChannelSalesPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
+
+        {/* Timed entry: settings + the per-slot report (mig 20261030150000). */}
+        <TimedEntryPanel eventId={event.id} tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+          timezone={event.timezone} canManage={canAct} />
+        <SlotReport eventId={event.id} tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+          currency={currency} canManage={canAct} />
 
         {/* Sales over time — full history. Pre-event activity. */}
         <div className="mb-8">
@@ -342,6 +397,9 @@ export default function OrganizerEventReport() {
 
         {/* Access needs guests shared (mig 20260926090000). */}
         <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
+
+        {/* Answers to the checkout questions, with a CSV (owner / manager / finance). */}
+        <QuestionAnswersPanel eventId={eventId!} eventTitle={event.title} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Attendees + per-ticket refund/void controls. Lists every
             ticket including voided ones (greyed out, with reason).
@@ -466,6 +524,8 @@ export default function OrganizerEventReport() {
         {tab === 'door' && (<>
         {/* Nightlife: table labels for sold tables, and guest lists. */}
         <TableAssignmentsPanel event={event} canManage={canAct} />
+        {/* Matched seats: buyers grouped into tables / crews (mig 20261031210000). */}
+        <MatchedSeatsPanel event={event} canManage={canAct} />
         <GuestListPanel event={event} canManage={canAct} />
         {/* Exos Door: attendees sold on another platform (mig 20261013090000). */}
         {canAct && (
@@ -485,6 +545,9 @@ export default function OrganizerEventReport() {
         {/* Sales by source: UTM, promoter code and ad platform (click ids) per
             paid order, with a CSV (owner / manager / finance; hidden if unreadable). */}
         <SourcesPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Where buyers are: country / city of the billing address, per event or org-wide (mig 20261106140000). */}
+        <BuyerLocationsPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
+        <InAppReportPanel eventId={event.id} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Texts to fans who opted in, from the org's own number (mig 20261016120000). */}
         {event.orgId && (
@@ -520,12 +583,25 @@ export default function OrganizerEventReport() {
         <WaitlistPanel eventId={eventId!} />
         </>)}
 
+        {tab === 'settlement' && (
+          // Offers' settlement, finance items, P&L and ticket-count emails
+          // (owner / manager / finance; docs/offers-settlements.md).
+          <ShowFinancePanel eventId={eventId!} orgId={event.orgId} orgName={activeOrg?.name ?? ''}
+            canView={canSeeMoney(activeRole, isAdmin)} canManage={canAct} />
+        )}
+
         {tab === 'settings' && (<>
-        {/* Scheduled pricing — time-based price steps per tier (owner/manager). */}
-        <TierPricingPanel
-          event={event}
-          canManage={canAct}
-        />
+        {/* Price steps per tier: by number sold and / or date, plus a door
+            price (owner/manager; mig 20261106130000). Replaces the time-only
+            schedule editor: the schedule is now the steps' time-only form. */}
+        {canAct && (
+          <PriceStepsEditor
+            tiers={(event.ticketTiers ?? []).map((t) => ({ id: t.id, name: t.name }))}
+            timezone={event.timezone}
+            currency={event.currency}
+            canManage={canAct}
+          />
+        )}
 
         {/* Self-serve RSVP release policy (owner/manager) — holders of free
             tickets can give the seat back; the waitlist auto-offers it. */}
@@ -550,7 +626,7 @@ export default function OrganizerEventReport() {
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
+function Stat({ label, value, icon, note }: { label: string; value: string; icon: ReactNode; note?: string }) {
   return (
     <div className="bg-white p-5 rounded border border-slate-200 shadow-sm">
       <div className="flex justify-between items-start mb-3">
@@ -558,6 +634,7 @@ function Stat({ label, value, icon }: { label: string; value: string; icon: Reac
         <span className="text-slate-400">{icon}</span>
       </div>
       <p className="disp text-4xl text-slate-900 tracking-tight" style={{ transform: 'skewX(-3deg)' }}>{value}</p>
+      {note && <p className="text-[11px] font-bold text-slate-500 mt-2">{note}</p>}
     </div>
   );
 }

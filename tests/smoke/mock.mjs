@@ -43,6 +43,10 @@ export const tables = {
 };
 
 export const rpcs = {
+  // Checkout questions (mig 20261106110000): none unless a test adds some.
+  exos_public_event_questions: () => ({ questions: [], party_sizes: {} }),
+  exos_list_event_questions: () => [],
+  exos_event_question_answers: () => [],
   exos_public_promoter: (b) => b.p_code === 'dj-kay' && b.p_org_slug === 'bk-nights'
     ? { promoter: { name: 'DJ Kay', code: 'dj-kay', socials: { instagram: 'dj.kay' } }, org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' } } : null,
   exos_promoter_kit: (b) => b.p_token === TOKEN ? {
@@ -85,12 +89,14 @@ export const ownerTables = {
 // forgiving mock. Tables not listed here aren't checked.
 const cols = (s) => s.split(/\s+/).filter(Boolean);
 export const schema = {
+  // View, 20261106130000 (price steps).
+  exos_public_price_steps: cols('tier_id event_id price_step door_price_cents'),
   // 20260523170000 + addons, vouchers, tax, attribution, webhook claim, guest, checkout records.
   exos_checkout_sessions: cols(`session_id event_id tier_id org_id buyer_uid buyer_email quantity amount_cents currency status
     ticket_ids payment_intent failure_reason created_at fulfilled_at addons voucher_id tax_cents promoter_id attribution
     reconcile_attempts reconcile_checked_at reconcile_next_at reconcile_done_at reconcile_note dispute_id dispute_status
     disputed_at dispute_closed_at guest ad_ids consent_marketing client_ip_hash user_agent application_fee_cents
-    exos_fee_cents card_fee_est_cents fee_bps fee_free`),
+    exos_fee_cents card_fee_est_cents fee_bps fee_free in_app_browser`),
   // View, 20260929131000.
   exos_order_money: cols(`session_id org_id event_id status currency created_at fulfilled_at gross_cents tax_cents
     application_fee_cents exos_fee_cents card_fee_est_cents card_fee_actual_cents fee_bps fee_free organizer_net_cents

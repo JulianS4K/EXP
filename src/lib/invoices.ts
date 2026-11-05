@@ -4,9 +4,10 @@
 // with (tax lines per rate, totals, money and number formatting). The reads
 // live in ./invoicesApi.ts.
 //
-// Every checkout price is all-in (tax included, no fees added), so a line's
-// total already contains its tax; the tax lines say how much of the total
-// was tax, per rate.
+// Every checkout price is all-in (tax and the organizer's passed-on fees
+// included, nothing added at checkout), so a line's total already contains
+// its tax and fees; the tax lines say how much of the total was tax, per rate,
+// and allInNote what the prices include.
 
 import { formatCents } from './refunds';
 
@@ -21,6 +22,15 @@ export interface InvoiceLine {
   tax_included: boolean | null;
   tax_name: string | null;
   tax_rate: number | string | null;
+  /** The organizer's passed-on fees inside this line (fee rules, mig 20261027100000). */
+  fee_cents?: number | null;
+}
+
+/** A passed-on fee the order's all-in prices include (fee rules). */
+export interface IncludedFee {
+  name: string;
+  recipient: string | null;
+  amount_cents: number;
 }
 
 export interface CreditNoteSummary {
@@ -59,6 +69,8 @@ export interface InvoiceDocument {
   order: { session_id: string | null; paid_at: string | null; quantity: number | null };
   lines: InvoiceLine[];
   credit_notes: CreditNoteSummary[];
+  /** Passed-on fees inside the prices (mig 20261027100000); absent on an older database. */
+  fees?: IncludedFee[];
   viewer: 'buyer' | 'org';
   /** Present on exos_credit_note_document. */
   credit_note?: CreditNoteSummary;
@@ -233,4 +245,18 @@ export function invoicesBySession(rows: EventInvoiceRow[]): Map<string, EventInv
   const m = new Map<string, EventInvoiceRow>();
   for (const r of rows) if (r.session_id) m.set(r.session_id, r);
   return m;
+}
+
+/**
+ * The all-in note under the totals: what the prices include. E.g. "Prices are
+ * all-in: they include $6.00 facility fee and tax; nothing was added at
+ * checkout." Empty for a free order.
+ */
+export function allInNote(doc: Pick<InvoiceDocument, 'invoice' | 'fees'>): string {
+  if (!(doc.invoice.total_cents > 0)) return '';
+  const fees = (doc.fees ?? []).filter((f) => f && Number(f.amount_cents) > 0);
+  const tax = Number(doc.invoice.tax_cents) > 0;
+  if (!fees.length) return 'Prices are all-in: tax is included and no fees were added at checkout.';
+  const list = fees.map((f) => `${formatMoney(Number(f.amount_cents), doc.invoice.currency)} ${String(f.name).toLowerCase()}`).join(', ');
+  return `Prices are all-in: they include ${list}${tax ? ' and tax' : ''}; nothing was added at checkout.`;
 }

@@ -48,6 +48,7 @@ export default function Footer() {
               <li><Link to="/privacy" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Privacy Policy</Link></li>
               <li><Link to="/terms" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Terms of Service</Link></li>
               <li><Link to="/status" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">System Status</Link></li>
+              <li><Link to="/developers" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Developers</Link></li>
             </ul>
           </div>
         </div>

@@ -18,6 +18,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildGeocodeUrl, parseGeocodeResponse, venueQuery, type GeocodeResult } from "../_shared/geocode.ts";
+import { isPrivateMode, parseLocationMode } from "../_shared/eventLocation.ts";
 
 const EDIT_ROLES = ["owner", "manager", "content"];
 const FRESH_MS = 25 * 24 * 3600 * 1000;
@@ -40,12 +41,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (typeof p.event_id !== "string" || !/^[0-9a-f-]{36}$/i.test(p.event_id)) {
     return json({ error: "event_id required" }, 400);
   }
-  const { data: ev } = await sb.from("exos_events")
-    .select("id, org_id, venue_name, venue_location, venue_address")
+  // location_mode (mig 20261105130000); a database without it reads as venue_record.
+  const cols = "id, org_id, venue_name, venue_location, venue_address";
+  let { data: ev, error: evErr } = await sb.from("exos_events").select(`${cols}, location_mode`)
     .eq("id", p.event_id).maybeSingle();
+  if (evErr?.code === "42703") ({ data: ev } = await sb.from("exos_events").select(cols).eq("id", p.event_id).maybeSingle());
   if (!ev) return json({ error: "event not found" }, 404);
   const { data: allowed } = await sbUser.rpc("exos_has_org_role", { p_org_id: ev.org_id, p_roles: EDIT_ROLES });
   if (allowed !== true) return json({ error: "forbidden" }, 403);
+  // A secret location or a TBA event has nothing public to pin (the database
+  // refuses to store one anyway): no lookup, no cost.
+  if (isPrivateMode(parseLocationMode((ev as { location_mode?: unknown }).location_mode))) {
+    return json({ status: "zero_results", reason: "the location isn't public" });
+  }
 
   const query = venueQuery(ev.venue_name ?? ev.venue_location, ev.venue_address, ev.venue_location);
   if (!query) return json({ status: "zero_results", reason: "no mappable venue" });

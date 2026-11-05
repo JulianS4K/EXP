@@ -13,6 +13,9 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { createOrganization, isValidOrgSlug, slugify } from '../lib/orgs';
+import { OrgTypeChoice } from '../components/OrgTypePicker';
+import { setOrgType } from '../lib/eventLocationApi';
+import type { OrgType } from '../lib/eventLocation';
 
 const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5';
 const INP =
@@ -28,6 +31,8 @@ export default function CreateOrg() {
   const [slug, setSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Organizer / promoter / collective (mig 20261105130000): saved right after the org exists.
+  const [orgType, setOrgTypeChoice] = useState<OrgType>('organizer');
 
   // Auto-derive slug from name unless the user has typed something
   // custom in the slug field.
@@ -77,6 +82,14 @@ export default function CreateOrg() {
         slug,
         ownerUid: user.uid,
       });
+      if (orgType !== 'organizer') {
+        try {
+          await setOrgType(orgId, orgType);
+        } catch (typeErr) {
+          console.error('org type not saved:', typeErr);
+          toast({ kind: 'error', message: 'Created, but the kind of organization did not save. Set it in Org settings.' });
+        }
+      }
       await refresh();
       setActiveOrg(orgId);
       toast({ kind: 'success', message: `Created ${name}.` });
@@ -189,6 +202,11 @@ export default function CreateOrg() {
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="mt-6">
+            <p className={LBL}>What kind of organization?</p>
+            <OrgTypeChoice value={orgType} onChange={setOrgTypeChoice} />
           </div>
 
           <div className="flex items-center gap-3 mt-6">
