@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Migration 20261106100000 — Exos: import from DICE (KANBAN "DICE gaps" 1)
 -- ============================================================================
--- Touches:  C: TABLE exos_dice_connections (owner / manager read, never the
+-- Touches:  C: TABLE exos_dice_connect_attempts (service role only),
+--              exos_dice_connections (owner / manager read, never the
 --              token: no secret_id / lease_id column grant), exos_dice_import_runs,
 --              exos_dice_id_map, exos_dice_orders (owner / manager read);
 --              every write goes through the definer functions below
@@ -9,9 +10,10 @@
 --              'dice', rebuilt from their current lists), exos_event_imports
 --              (platform gains 'dice'), exos_fans (source gains 'dice')
 --           C: FUNCTION (service role: exos-dice-import, exos-api)
---              exos_dice_connect, exos_dice_disconnect, exos_dice_token,
+--              exos_dice_connect_begin, exos_dice_connect, exos_dice_disconnect,
 --              exos_dice_sync_claim, exos_dice_apply, exos_dice_sync_finish,
---              exos_dice_log_dry_run, _exos_dice_status_json, _exos_dice_runs,
+--              exos_dice_dry_run_begin, exos_dice_dry_run_finish,
+--              _exos_dice_status_json, _exos_dice_runs,
 --              _exos_dice_run_json,
 --              and the helpers _exos_dice_id, _exos_dice_ref, _exos_dice_ts,
 --              _exos_dice_counts_merge, _exos_dice_list, _exos_dice_fan_upsert,
@@ -91,6 +93,16 @@
 --
 -- Nothing is written to DICE. Disconnect deletes the token; what was
 -- imported stays.
+--
+-- ROLE AND LIMIT FIRST, DICE SECOND. Every path that sends a request to
+-- DICE passes a database check first: /connect calls exos_dice_connect_begin
+-- (owner / manager, 10 attempts an hour per org and per user) before testing
+-- the pasted token; a sync calls exos_dice_sync_claim (owner / manager, the
+-- lease, once a minute, no preview running); a dry run calls
+-- exos_dice_dry_run_begin (owner / manager, no sync or other preview running,
+-- 5 a minute, its row reserved under the connection row's lock). So the
+-- server is no token oracle, and no limit is checked after the reads it is
+-- meant to stop.
 --
 -- Re-run safe (IF NOT EXISTS, CREATE OR REPLACE, guarded policies and
 -- constraints, union CHECK rebuilds). Prod apply needs operator OK.
@@ -886,21 +898,57 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_dice_disconnect(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_dice_disconnect(uuid, uuid) TO service_role;
 
--- The token and cursors for a dry run (owner / manager). NULL row when not connected.
-CREATE OR REPLACE FUNCTION public.exos_dice_token(p_org_id uuid, p_user_id uuid)
-RETURNS TABLE (token text, cursors jsonb)
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+-- Before ANY request goes to DICE with a pasted token (exos-dice-import
+-- /connect checks it with `viewer { id name }`): the caller must be owner /
+-- manager of the org, and within 10 connect attempts an hour for the org and
+-- 10 for the user (across orgs). Otherwise the server would tell anyone signed
+-- in whether a DICE token is valid. Each allowed attempt is recorded,
+-- whatever DICE then answers. Advisory locks on the org and the user make the
+-- count race-safe.
+CREATE TABLE IF NOT EXISTS public.exos_dice_connect_attempts (
+  id      bigserial PRIMARY KEY,
+  org_id  uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_dice_connect_attempts_org_idx ON public.exos_dice_connect_attempts (org_id, at DESC);
+CREATE INDEX IF NOT EXISTS exos_dice_connect_attempts_user_idx ON public.exos_dice_connect_attempts (user_id, at DESC);
+ALTER TABLE public.exos_dice_connect_attempts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.exos_dice_connect_attempts FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.exos_dice_connect_attempts TO service_role;
+REVOKE ALL ON SEQUENCE public.exos_dice_connect_attempts_id_seq FROM PUBLIC, anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.exos_dice_connect_attempts_id_seq TO service_role;
+COMMENT ON TABLE public.exos_dice_connect_attempts IS
+  'DICE import: connect attempts (who, which org, when; never a token), for the 10-an-hour limits checked before Exos calls DICE. Service role only. mig 20261106100000.';
+
+CREATE OR REPLACE FUNCTION public.exos_dice_connect_begin(p_org_id uuid, p_user_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v_org int; v_user int;
 BEGIN
   IF coalesce(public._exos_eb_role(p_org_id, p_user_id), '') NOT IN ('owner', 'manager') THEN
-    RAISE EXCEPTION 'exos_dice_token: owner or manager only' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'exos_dice_connect_begin: owner or manager only' USING ERRCODE = '42501';
   END IF;
-  RETURN QUERY
-  SELECT d.decrypted_secret::text, c.cursors FROM public.exos_dice_connections c
-    JOIN vault.decrypted_secrets d ON d.id = c.secret_id
-   WHERE c.org_id = p_org_id AND c.status <> 'disconnected';
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_dice_connect:' || p_org_id::text, 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_dice_connect_user:' || p_user_id::text, 0));
+  SELECT count(*) INTO v_org FROM public.exos_dice_connect_attempts
+   WHERE org_id = p_org_id AND at > now() - interval '1 hour';
+  SELECT count(*) INTO v_user FROM public.exos_dice_connect_attempts
+   WHERE user_id = p_user_id AND at > now() - interval '1 hour';
+  IF v_org >= 10 OR v_user >= 10 THEN
+    RAISE EXCEPTION 'exos_dice_connect_begin: too many connect attempts; try again in an hour' USING ERRCODE = '54000';
+  END IF;
+  INSERT INTO public.exos_dice_connect_attempts (org_id, user_id) VALUES (p_org_id, p_user_id);
+  DELETE FROM public.exos_dice_connect_attempts WHERE at < now() - interval '1 day';
+  RETURN jsonb_build_object('ok', true, 'attempts_left', 9 - greatest(v_org, v_user));
 END $$;
-REVOKE ALL ON FUNCTION public.exos_dice_token(uuid, uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_dice_token(uuid, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_dice_connect_begin(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_dice_connect_begin(uuid, uuid) TO service_role;
+
+-- An earlier draft handed a dry run the token without reserving anything
+-- (exos_dice_token); the dry run now reserves its slot first
+-- (exos_dice_dry_run_begin, below).
+DROP FUNCTION IF EXISTS public.exos_dice_token(uuid, uuid);
 
 -- ---------------------------------------------------------------------------
 -- 8. A sync run: claim (lease + run row + token), apply pages, finish.
@@ -939,6 +987,10 @@ BEGIN
     IF c.last_sync_at IS NOT NULL AND c.last_sync_at > now() - interval '1 minute' THEN
       RAISE EXCEPTION 'exos_dice_sync_claim: synced less than a minute ago' USING ERRCODE = '55000';
     END IF;
+    IF EXISTS (SELECT 1 FROM public.exos_dice_import_runs r WHERE r.org_id = p_org_id AND r.dry_run
+                AND r.status = 'running' AND r.started_at > now() - interval '2 minutes') THEN
+      RAISE EXCEPTION 'exos_dice_sync_claim: a preview is running' USING ERRCODE = '55000';
+    END IF;
   ELSIF p_trigger <> 'cron' THEN
     RAISE EXCEPTION 'exos_dice_sync_claim: name the organization' USING ERRCODE = '22023';
   END IF;
@@ -951,7 +1003,9 @@ BEGIN
                      AND (x.full_sync_done_at IS NULL OR x.last_sync_at IS NULL OR x.last_sync_at < now() - interval '6 hours'
                           OR (x.cursors::text LIKE '%"after": "%'))
                      -- after an error, wait an hour (a bad token stays bad: status 'error' isn't picked)
-                     AND (x.last_error IS NULL OR x.last_sync_at < now() - interval '1 hour') END
+                     AND (x.last_error IS NULL OR x.last_sync_at < now() - interval '1 hour')
+                     AND NOT EXISTS (SELECT 1 FROM public.exos_dice_import_runs r WHERE r.org_id = x.org_id AND r.dry_run
+                                      AND r.status = 'running' AND r.started_at > now() - interval '2 minutes') END
      ORDER BY x.last_sync_at NULLS FIRST, x.org_id
      LIMIT CASE WHEN p_org_id IS NOT NULL THEN 1 ELSE greatest(1, least(coalesce(p_limit, 5), 20)) END
      FOR UPDATE OF x SKIP LOCKED
@@ -1096,35 +1150,75 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_dice_sync_finish(uuid, uuid, text, text, jsonb, boolean) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_dice_sync_finish(uuid, uuid, text, text, jsonb, boolean) TO service_role;
 
--- A dry run's report, logged (owner / manager; at most 5 a minute per org).
--- Nothing else is written: no cursor, no event, no fan.
-CREATE OR REPLACE FUNCTION public.exos_dice_log_dry_run(
-  p_org_id uuid, p_user_id uuid, p_trigger text, p_status text, p_counts jsonb, p_error text DEFAULT NULL
-) RETURNS uuid
+-- A dry run RESERVES its slot before anything is read from DICE: owner /
+-- manager; connected; no sync holding the lease; no other dry run of the org
+-- running (one started in the last 2 minutes; an older one belongs to a dead
+-- function and is closed here); at most 5 started a minute per org. All
+-- checked under the connection row's lock, so two at once can't both pass.
+-- Answers the reserved run's id, the token and the cursors (service role
+-- only). Nothing else is written: no cursor, no event, no fan.
+CREATE OR REPLACE FUNCTION public.exos_dice_dry_run_begin(p_org_id uuid, p_user_id uuid, p_trigger text)
+RETURNS TABLE (run_id uuid, token text, cursors jsonb)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE v_id uuid;
+#variable_conflict use_column
+DECLARE c public.exos_dice_connections%ROWTYPE; v_tok text; v_run uuid;
 BEGIN
   IF coalesce(public._exos_eb_role(p_org_id, p_user_id), '') NOT IN ('owner', 'manager') THEN
-    RAISE EXCEPTION 'exos_dice_log_dry_run: owner or manager only' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: owner or manager only' USING ERRCODE = '42501';
   END IF;
-  IF p_trigger IS NULL OR p_trigger NOT IN ('dashboard', 'api') OR p_status IS NULL OR p_status NOT IN ('ok', 'partial', 'error') THEN
-    RAISE EXCEPTION 'exos_dice_log_dry_run: bad trigger or status' USING ERRCODE = '22023';
+  IF p_trigger IS NULL OR p_trigger NOT IN ('dashboard', 'api') THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: bad trigger' USING ERRCODE = '22023';
   END IF;
-  IF (SELECT count(*) FROM public.exos_dice_import_runs
-       WHERE org_id = p_org_id AND dry_run AND started_at > now() - interval '1 minute') >= 5 THEN
-    RAISE EXCEPTION 'exos_dice_log_dry_run: too many previews; wait a minute' USING ERRCODE = '54000';
+  SELECT * INTO c FROM public.exos_dice_connections x WHERE x.org_id = p_org_id FOR UPDATE;
+  IF c.org_id IS NULL OR c.status = 'disconnected' THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: connect DICE first' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO public.exos_dice_import_runs (org_id, kind, trigger, dry_run, status, started_by, finished_at, counts, error)
-  VALUES (p_org_id,
-          CASE WHEN (SELECT full_sync_done_at FROM public.exos_dice_connections WHERE org_id = p_org_id) IS NULL THEN 'full' ELSE 'incremental' END,
-          p_trigger, true, p_status, p_user_id, now(),
-          CASE WHEN jsonb_typeof(p_counts) = 'object' AND pg_column_size(p_counts) <= 16384 THEN p_counts ELSE '{}' END,
-          left(nullif(btrim(coalesce(p_error, '')), ''), 300))
-  RETURNING id INTO v_id;
-  RETURN v_id;
+  IF c.lease_until IS NOT NULL AND c.lease_until > now() THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: a DICE sync is running' USING ERRCODE = '55000';
+  END IF;
+  UPDATE public.exos_dice_import_runs r SET status = 'error', error = 'interrupted', finished_at = now()
+   WHERE r.org_id = p_org_id AND r.dry_run AND r.status = 'running' AND r.started_at <= now() - interval '2 minutes';
+  IF EXISTS (SELECT 1 FROM public.exos_dice_import_runs r WHERE r.org_id = p_org_id AND r.dry_run AND r.status = 'running') THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: a preview is already running' USING ERRCODE = '55000';
+  END IF;
+  IF (SELECT count(*) FROM public.exos_dice_import_runs r
+       WHERE r.org_id = p_org_id AND r.dry_run AND r.started_at > now() - interval '1 minute') >= 5 THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: too many previews; wait a minute' USING ERRCODE = '54000';
+  END IF;
+  SELECT d.decrypted_secret INTO v_tok FROM vault.decrypted_secrets d WHERE d.id = c.secret_id;
+  IF v_tok IS NULL THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_begin: the DICE token is missing; connect again' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO public.exos_dice_import_runs (org_id, kind, trigger, dry_run, status, started_by)
+  VALUES (p_org_id, CASE WHEN c.full_sync_done_at IS NULL THEN 'full' ELSE 'incremental' END, p_trigger, true, 'running', p_user_id)
+  RETURNING id INTO v_run;
+  run_id := v_run; token := v_tok; cursors := c.cursors;
+  RETURN NEXT;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_dice_log_dry_run(uuid, uuid, text, text, jsonb, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_dice_log_dry_run(uuid, uuid, text, text, jsonb, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_dice_dry_run_begin(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_dice_dry_run_begin(uuid, uuid, text) TO service_role;
+
+-- The dry run's report, on the row its begin reserved (a running dry run only).
+CREATE OR REPLACE FUNCTION public.exos_dice_dry_run_finish(
+  p_org_id uuid, p_run_id uuid, p_status text, p_counts jsonb, p_error text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF p_status IS NULL OR p_status NOT IN ('ok', 'partial', 'error') THEN
+    RAISE EXCEPTION 'exos_dice_dry_run_finish: bad status' USING ERRCODE = '22023';
+  END IF;
+  UPDATE public.exos_dice_import_runs
+     SET status = p_status, finished_at = now(),
+         counts = CASE WHEN jsonb_typeof(p_counts) = 'object' AND pg_column_size(p_counts) <= 16384 THEN p_counts ELSE '{}' END,
+         error = left(nullif(btrim(coalesce(p_error, '')), ''), 300)
+   WHERE id = p_run_id AND org_id = p_org_id AND dry_run AND status = 'running';
+  RETURN jsonb_build_object('ok', FOUND);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_dice_dry_run_finish(uuid, uuid, text, jsonb, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_dice_dry_run_finish(uuid, uuid, text, jsonb, text) TO service_role;
+
+-- Replaced by the begin / finish pair above, which reserves before reading.
+DROP FUNCTION IF EXISTS public.exos_dice_log_dry_run(uuid, uuid, text, text, jsonb, text);
 
 -- ---------------------------------------------------------------------------
 -- 9. Reading the state: the dashboard (authenticated, owner / manager) and

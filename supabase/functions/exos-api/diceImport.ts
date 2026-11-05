@@ -10,13 +10,16 @@
 // Connecting (pasting the MIO token) stays in the dashboard: a partner key
 // never carries the DICE token. The sync runs as the key's creator, who must
 // be an owner or manager now (_exos_api_key_actor); the SQL checks it again.
-// Behind EXOS_DICE_IMPORT=on like the edge function: 503 otherwise.
+// Behind EXOS_DICE_IMPORT=on like the edge function: 503 otherwise. The key's
+// member, the role, the lease and the limits are all checked in the database
+// (_exos_api_key_actor, then exos_dice_sync_claim / exos_dice_dry_run_begin)
+// before anything is sent to DICE (_shared/dice/run.ts).
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ApiRoute } from "../_shared/api/routes.ts";
 import { type Page, pageEnvelope } from "../_shared/api/paging.ts";
 import type { DiceOptions } from "../_shared/dice/client.ts";
-import { dryRunOrg, syncOrg } from "../_shared/dice/run.ts";
+import { type DiceDb, dryRunOrg, syncOrg } from "../_shared/dice/run.ts";
 import { DICE_DISABLED_MESSAGE, diceImportEnabled, diceSyncBodyProblem } from "../_shared/dice/sync.ts";
 
 /** The route ids this module answers. */
@@ -70,8 +73,8 @@ export async function handleDice(route: ApiRoute, c: DiceCtx): Promise<unknown> 
       if (typeof user !== "string") throw new DiceApiError(403, "only an owner or manager can sync DICE");
       const dice = c.dice ?? { fetch };
       const out = c.body.dry_run === true
-        ? await dryRunOrg(c.sb, dice, c.orgId, user, "api")
-        : await syncOrg(c.sb, dice, c.orgId, user, "api");
+        ? await dryRunOrg(c.sb as unknown as DiceDb, dice, c.orgId, user, "api")
+        : await syncOrg(c.sb as unknown as DiceDb, dice, c.orgId, user, "api");
       const { status, ok, error, reason, ...rest } = out;
       if (!ok) throw new DiceApiError(status, error ?? "the sync failed", { reason, ...rest });
       return { data: rest };

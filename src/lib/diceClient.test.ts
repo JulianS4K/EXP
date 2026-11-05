@@ -16,6 +16,7 @@ import {
 import {
   diceImportEnabled, diceSyncBodyProblem, runKind, runSync, type SyncStore,
 } from '../../supabase/functions/_shared/dice/sync.ts';
+import { connectOrg, dryRunOrg, syncOrg, type DiceDb } from '../../supabase/functions/_shared/dice/run.ts';
 
 // ---- Fakes ----------------------------------------------------------------
 
@@ -518,5 +519,105 @@ describe('the switch and the API body', () => {
     expect(diceSyncBodyProblem({ dry_run: true })).toBeNull();
     expect(diceSyncBodyProblem({ dry_run: 'yes' })).toMatch(/true or false/);
     expect(diceSyncBodyProblem({ token: 'x' })).toMatch(/unknown field token/);
+  });
+});
+
+// ---- Role and limit first, DICE second (_shared/dice/run.ts) ---------------
+
+describe('the database gates every DICE request', () => {
+  type Log = string[];
+  const fakeDb = (answers: Record<string, { data?: unknown; error?: { code: string; message?: string } }>, log: Log): DiceDb => ({
+    async rpc(fn) {
+      log.push(`rpc:${fn}`);
+      const a = answers[fn] ?? { data: null };
+      return { data: a.data ?? null, error: a.error ?? null };
+    },
+  });
+  const spyFetch = (log: Log) => {
+    const { fetch, calls } = fakeFetch([(c) => {
+      log.push('fetch');
+      const name = c.body.query.match(/viewer \{ (\w+)\(/)?.[1];
+      return name ? conn(name, [], null, false, 0) : { body: { data: { viewer: { id: 'v1', name: 'Night Owl' } } } };
+    }]);
+    return { fetch, calls };
+  };
+  const TOKEN = 'tok_dice_0123456789abcdef';
+  const refusals = [
+    { code: '42501', status: 403, reason: 'forbidden' },
+    { code: '54000', status: 429, reason: 'rate_limited' },
+    { code: '55000', status: 409, reason: 'busy' },
+    { code: '22023', status: 409, reason: 'not_connected' },
+  ];
+
+  it('connect: a refused role or limit never reaches DICE', async () => {
+    for (const r of refusals.slice(0, 2)) {
+      const log: Log = [];
+      const { fetch, calls } = spyFetch(log);
+      const out = await connectOrg(fakeDb({ exos_dice_connect_begin: { error: { code: r.code } } }, log), { fetch, sleep: noSleep }, 'org', 'user', TOKEN);
+      expect(out).toMatchObject({ ok: false, status: r.status, reason: r.reason });
+      expect(calls).toHaveLength(0);
+      expect(log).toEqual(['rpc:exos_dice_connect_begin']);
+    }
+  });
+  it('connect: a token of the wrong shape reaches neither the database nor DICE', async () => {
+    const log: Log = [];
+    const { fetch, calls } = spyFetch(log);
+    const out = await connectOrg(fakeDb({}, log), { fetch, sleep: noSleep }, 'org', 'user', 'short');
+    expect(out).toMatchObject({ ok: false, status: 400, reason: 'bad_token' });
+    expect(calls).toHaveLength(0);
+    expect(log).toEqual([]);
+  });
+  it('connect: allowed, the gate comes first, then DICE, then the store', async () => {
+    const log: Log = [];
+    const { fetch, calls } = spyFetch(log);
+    const out = await connectOrg(fakeDb({ exos_dice_connect: { data: { connected: true, account_name: 'Night Owl' } } }, log),
+      { fetch, sleep: noSleep }, 'org', 'user', TOKEN);
+    expect(out).toMatchObject({ ok: true, status: 200, connected: true, account_name: 'Night Owl' });
+    expect(log).toEqual(['rpc:exos_dice_connect_begin', 'fetch', 'rpc:exos_dice_connect']);
+    expect(calls[0].body.query).toBe(VIEWER_QUERY);
+  });
+  it('sync: a refused claim never reaches DICE', async () => {
+    for (const r of refusals) {
+      const log: Log = [];
+      const { fetch, calls } = spyFetch(log);
+      const out = await syncOrg(fakeDb({ exos_dice_sync_claim: { error: { code: r.code } } }, log), { fetch, sleep: noSleep }, 'org', 'user', 'api');
+      expect(out).toMatchObject({ ok: false, status: r.status, reason: r.reason });
+      expect(calls).toHaveLength(0);
+    }
+  });
+  it('dry run: a refused reservation never reaches DICE', async () => {
+    for (const r of refusals) {
+      const log: Log = [];
+      const { fetch, calls } = spyFetch(log);
+      const out = await dryRunOrg(fakeDb({ exos_dice_dry_run_begin: { error: { code: r.code } } }, log), { fetch, sleep: noSleep }, 'org', 'user', 'dashboard');
+      expect(out).toMatchObject({ ok: false, status: r.status, reason: r.reason });
+      expect(calls).toHaveLength(0);
+      expect(log).toEqual(['rpc:exos_dice_dry_run_begin']);
+    }
+  });
+  it('dry run: reserved before the first read, reported on that row after the last', async () => {
+    const log: Log = [];
+    const { fetch } = spyFetch(log);
+    const out = await dryRunOrg(fakeDb({
+      exos_dice_dry_run_begin: { data: [{ run_id: 'run-1', token: TOKEN, cursors: {} }] },
+      exos_dice_dry_run_finish: { data: { ok: true } },
+    }, log), { fetch, sleep: noSleep }, 'org', 'user', 'dashboard');
+    expect(out).toMatchObject({ ok: true, dry_run: true, run_id: 'run-1' });
+    expect(log[0]).toBe('rpc:exos_dice_dry_run_begin');
+    expect(log.at(-1)).toBe('rpc:exos_dice_dry_run_finish');
+    expect(log.filter((x) => x === 'fetch').length).toBeGreaterThan(0);
+    expect(log.slice(1, -1).every((x) => x === 'fetch')).toBe(true);
+  });
+  it('sync: claimed first, then DICE, then finish', async () => {
+    const log: Log = [];
+    const { fetch } = spyFetch(log);
+    const out = await syncOrg(fakeDb({
+      exos_dice_sync_claim: { data: [{ org_id: 'org', token: TOKEN, cursors: {}, lease_id: 'l1', run_id: 'r1', kind: 'full' }] },
+      exos_dice_apply: { data: { read: 0 } },
+    }, log), { fetch, sleep: noSleep }, 'org', 'user', 'dashboard');
+    expect(out).toMatchObject({ ok: true, run_id: 'r1' });
+    expect(log[0]).toBe('rpc:exos_dice_sync_claim');
+    expect(log[1]).toBe('fetch');
+    expect(log.at(-1)).toBe('rpc:exos_dice_sync_finish');
   });
 });

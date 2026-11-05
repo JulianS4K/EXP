@@ -221,7 +221,7 @@
       "method": "POST",
       "path": "/v1/dice-import/sync",
       "summary": "Sync from DICE now",
-      "description": "Runs one sync and answers when it is done (up to about 100 seconds): the full first read until it has completed once, incremental after. A run reads at most 40 pages of 50 per entity and 5,000 rows in all; `result` `partial` means the next run (another call, the dashboard or the hourly schedule) continues where this one stopped. `dry_run: true` reads the same way (at most 4 pages per entity) and writes nothing but its log row: `preview` says how many upcoming and past events, ticket types, tickets, orders, returns and transfers it read and how many distinct fans, of whom how many would get marketing consent. Runs as the member who created the key, who must be an owner or manager; needs an organization API key. One sync at a time per organization, at most one a minute; five dry runs a minute.",
+      "description": "Runs one sync and answers when it is done (up to about 100 seconds): the full first read until it has completed once, incremental after. A run reads at most 40 pages of 50 per entity and 5,000 rows in all; `result` `partial` means the next run (another call, the dashboard or the hourly schedule) continues where this one stopped. `dry_run: true` reads the same way (at most 4 pages per entity) and writes nothing but its log row: `preview` says how many upcoming and past events, ticket types, tickets, orders, returns and transfers it read and how many distinct fans, of whom how many would get marketing consent. Runs as the member who created the key, who must be an owner or manager; needs an organization API key. Every check (the key's member, the role, a running sync or preview, the limits) happens before Exos sends anything to DICE. One sync at a time per organization and at most one a minute; one dry run at a time, none while a sync runs, five a minute.",
       "auth": "api_key",
       "scope": "org:admin",
       "parameters": [
@@ -333,7 +333,7 @@
         },
         {
           "status": 409,
-          "description": "DICE isn't connected, a sync is running, or the last one finished less than a minute ago.",
+          "description": "DICE isn't connected, a sync or a preview is running, or the last sync finished less than a minute ago. Nothing was read from DICE.",
           "example": {
             "error": "a DICE sync is already running",
             "reason": "busy"
@@ -341,7 +341,7 @@
         },
         {
           "status": 429,
-          "description": "More than five dry runs in a minute.",
+          "description": "More than five dry runs in a minute. Nothing was read from DICE.",
           "example": {
             "error": "Too many previews. Wait a minute.",
             "reason": "rate_limited"

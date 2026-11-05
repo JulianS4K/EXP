@@ -13,13 +13,16 @@
 // Routes (under /functions/v1/exos-dice-import), JSON in and out:
 //   POST /status     {org}               owner / manager: the connection, what
 //        was imported, the last runs (exos_dice_org_status, as the user).
-//   POST /connect    {org, token}        owner / manager: checks the token
-//        with `viewer { id name }`, then stores it in Vault.
+//   POST /connect    {org, token}        owner / manager, at most 10 attempts
+//        an hour per org and per user (checked BEFORE DICE is contacted, so
+//        the server is no token oracle); then the token is checked with
+//        `viewer { id name }` and stored in Vault.
 //   POST /disconnect {org}               owner / manager: deletes the token;
 //        what was imported stays.
 //   POST /sync       {org, dry_run?}     owner / manager: a full first run,
 //        then incremental. dry_run: the same reads, counts only, nothing
-//        written but the run's log row.
+//        written but the run's log row. Either way the database checks the
+//        role, the lease and the limits before anything is read from DICE.
 //   POST /cron                           X-Cron-Secret. Syncs the orgs that
 //        are due (exos_dice_sync_claim) within a time budget. Scheduled by
 //        the migration as exos-dice-import-sync-hourly, INACTIVE.
@@ -37,9 +40,9 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { readCapped } from "../_shared/api/body.ts";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
-import { diceErrorMessage, isDiceTokenShaped, readViewer, type DiceOptions } from "../_shared/dice/client.ts";
+import type { DiceOptions } from "../_shared/dice/client.ts";
 import {
-  DICE_DISABLED_MESSAGE, diceImportEnabled, dryRunOrg, RUN_BUDGET_MS, syncClaimed, syncOrg,
+  connectOrg, DICE_DISABLED_MESSAGE, type DiceDb, diceImportEnabled, dryRunOrg, RUN_BUDGET_MS, syncClaimed, syncOrg,
 } from "../_shared/dice/run.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
@@ -62,6 +65,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const db = sb as unknown as DiceDb;
 
   if (route === "cron") {
     const authErr = requireCronSecret(req);
@@ -96,17 +100,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (route === "connect") {
+      // Role and the attempt limit first (exos_dice_connect_begin); DICE only after.
       const token = typeof body.token === "string" ? body.token.trim() : "";
-      if (!isDiceTokenShaped(token)) {
-        return json({ error: "That doesn't look like a DICE API token. Copy it again from MIO.", reason: "bad_token" }, 400, cors);
-      }
-      const v = await readViewer(dice, token);
-      if (!v.ok || !v.data) return json({ error: diceErrorMessage(v), reason: "dice" }, v.status === 401 ? 400 : 502, cors);
-      const r = await sb.rpc("exos_dice_connect", {
-        p_org_id: org, p_user_id: user, p_token: token, p_account_id: v.data.id, p_account_name: v.data.name,
-      });
-      if (r.error) return rpcError(r.error, cors);
-      return json({ ok: true, ...(r.data as object) }, 200, cors);
+      const { status, ...rest } = await connectOrg(db, dice, org, user, token);
+      return json(rest, status, cors);
     }
 
     if (route === "disconnect") {
@@ -117,8 +114,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (route === "sync") {
       const out = body.dry_run === true
-        ? await dryRunOrg(sb, dice, org, user, "dashboard")
-        : await syncOrg(sb, dice, org, user, "dashboard");
+        ? await dryRunOrg(db, dice, org, user, "dashboard")
+        : await syncOrg(db, dice, org, user, "dashboard");
       const { status, ...rest } = out;
       return json(rest, status, cors);
     }
@@ -142,7 +139,7 @@ async function runCron(sb: SupabaseClient): Promise<Record<string, unknown>> {
   for (const row of rows) {
     // Each claimed org gets an equal share of what is left.
     const share = Math.max(5_000, Math.floor((deadline - Date.now()) / Math.max(1, rows.length - results.length)));
-    const r = await syncClaimed(sb, dice, row as never, Math.min(deadline, Date.now() + share));
+    const r = await syncClaimed(sb as unknown as DiceDb, dice, row as never, Math.min(deadline, Date.now() + share));
     results.push({ org: row.org_id, ok: r.ok, result: r.result ?? null, reason: r.reason ?? null });
   }
   return { ok: true, synced: rows.length, results };

@@ -20,8 +20,11 @@ numbered item in KANBAN.md "DICE gaps 2026-11-05"), **n/a** (not applicable, wit
 1. An owner or manager pastes the MIO token in Org settings → Integrations → Import from DICE. Exos
    checks it with `viewer { id name }` and stores it in Vault (`exos_dice:<org>`), exactly as the
    Eventbrite token is stored. No client role can read it back: `exos_dice_connections` has no client
-   grant on `secret_id`, and only the service role can call `exos_dice_token` / `exos_dice_sync_claim`.
-2. **Preview** is a dry run: the same reads, counts only, nothing written but the run's log row.
+   grant on `secret_id`, and only the service role can call `exos_dice_sync_claim` / `exos_dice_dry_run_begin`.
+   Before the pasted token is sent to DICE at all, the database checks the caller is an owner or manager
+   and within 10 connect attempts an hour (per org and per user), so Exos can't be used to test tokens.
+2. **Preview** is a dry run: the same reads, counts only, nothing written but the run's log row, which
+   is reserved before the first read (one preview at a time, none while a sync runs, 5 a minute).
 3. **Import** runs `events`, then `tickets`, `orders`, `returns` and `transfers`, 50 per page, at most
    40 pages per entity and 5,000 rows per run; a run that hits a cap resumes from DICE's `endCursor`
    next time. After the first full pass every sync is incremental: `events` by `updatedAt`, `orders` by

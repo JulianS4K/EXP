@@ -24,8 +24,15 @@
 --      recent one, reconnecting another account starts over
 --   D11 cross-org isolation
 --   D12 disconnect: the token goes, the imported data stays
---   D13 dry runs are logged and rate limited
+--   D13 dry runs reserve a logged slot and are rate limited
 --   D14 grants and RLS
+--   D15 role first: a non-member, a scanner and finance are refused by every
+--       gate before any token is used (connect, sync, dry run)
+--   D16 the connect limit (10 an hour per org and per user), checked first
+--   D17 the dry-run slot is reserved before the read; a second one at the same
+--       time is refused (and a dead one older than 2 minutes is closed)
+--   D18 a dry run is refused while a sync holds the lease (and a sync while a
+--       preview runs)
 -- Self-contained (d1ce prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -153,7 +160,7 @@ BEGIN
     ASSERT NOT has_table_privilege('authenticated', 'public.exos_dice_connections', f), 'D2: no client ' || f;
   END LOOP;
   ASSERT NOT has_schema_privilege('authenticated', 'vault', 'USAGE') AND NOT has_schema_privilege('anon', 'vault', 'USAGE'), 'D2: Vault closed';
-  FOREACH f IN ARRAY ARRAY['public.exos_dice_token(uuid, uuid)', 'public.exos_dice_sync_claim(uuid, uuid, text, integer)',
+  FOREACH f IN ARRAY ARRAY['public.exos_dice_dry_run_begin(uuid, uuid, text)', 'public.exos_dice_sync_claim(uuid, uuid, text, integer)',
                            'public.exos_dice_connect(uuid, uuid, text, text, text)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE')
        AND has_function_privilege('service_role', f, 'EXECUTE'), 'D2: service role only ' || f;
@@ -168,7 +175,8 @@ BEGIN
   ASSERT pg_temp.refused($q$SELECT secret_id FROM public.exos_dice_connections$q$, 'permission denied'), 'D2: owner can''t select secret_id';
   ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_connections$q$, 'permission denied'), 'D2: nor *';
   ASSERT pg_temp.refused($q$SELECT * FROM vault.decrypted_secrets$q$, 'permission denied'), 'D2: nor Vault';
-  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_token(pg_temp.org(), pg_temp.u('a0'))$q$, 'permission denied'), 'D2: nor the token function';
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'dashboard')$q$, 'permission denied'), 'D2: nor the token-returning dry run';
+  ASSERT to_regprocedure('public.exos_dice_token(uuid, uuid)') IS NULL, 'D2: the old token function is gone';
   ASSERT (SELECT status FROM public.exos_dice_connections WHERE org_id = pg_temp.org()) = 'connected', 'D2: the owner reads the state';
   r := public.exos_dice_org_status(pg_temp.org());
   ASSERT (r ->> 'connected')::boolean AND (r ->> 'can_manage')::boolean AND position('tok_dice' IN r::text) = 0, 'D2: the card ' || r::text;
@@ -510,22 +518,30 @@ BEGIN
   ASSERT r ->> 'reason' = 'lease-lost', 'D12: a running sync stops writing';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_dice_import_runs WHERE org_id = pg_temp.org2() AND status = 'running'), 'D12: its run closed';
   ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_sync_claim(pg_temp.org2(), pg_temp.u('a4'), 'dashboard')$q$, 'connect DICE first'), 'D12: no sync';
-  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_dice_token(pg_temp.org2(), pg_temp.u('a4'))), 'D12: no token';
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org2(), pg_temp.u('a4'), 'dashboard')$q$, 'connect DICE first'), 'D12: no token for a preview';
   ASSERT (SELECT count(*) FROM public.exos_guest_list_entries WHERE org_id = pg_temp.org2()) = n AND pg_temp.dev(pg_temp.org2(), 'EVT1') IS NOT NULL, 'D12: imported data stays';
   RAISE NOTICE 'OK  D12 disconnect';
 END $$;
 
--- D13. Dry runs: logged, nothing else written, rate limited.
+-- D13. Dry runs: a reserved, logged run row; nothing else written; rate limited.
 DO $$
-DECLARE v uuid; n int; i int;
+DECLARE r record; n int; i int; v_fin jsonb;
 BEGIN
   SELECT count(*) INTO n FROM public.exos_dice_id_map;
-  ASSERT pg_temp.refused($q$SELECT public.exos_dice_log_dry_run(pg_temp.org(), pg_temp.u('a3'), 'dashboard', 'ok', '{}')$q$, 'owner or manager only'), 'D13: scanner refused';
-  v := public.exos_dice_log_dry_run(pg_temp.org(), pg_temp.u('a0'), 'dashboard', 'ok', '{"preview": {"events_upcoming": 3, "fans_marketing_consent": 2}}');
-  ASSERT (SELECT dry_run AND status = 'ok' AND finished_at IS NOT NULL AND counts #>> '{preview,events_upcoming}' = '3' FROM public.exos_dice_import_runs WHERE id = v), 'D13: logged';
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a3'), 'dashboard')$q$, 'owner or manager only'), 'D13: scanner refused';
+  SELECT * INTO r FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'dashboard');
+  ASSERT r.run_id IS NOT NULL AND r.token = 'tok_dice_0123456789abcdef' AND r.cursors IS NOT NULL, 'D13: slot, token, cursors';
+  v_fin := public.exos_dice_dry_run_finish(pg_temp.org(), r.run_id, 'ok', '{"preview": {"events_upcoming": 3, "fans_marketing_consent": 2}}');
+  ASSERT (v_fin ->> 'ok')::boolean, 'D13: finished';
+  ASSERT (SELECT dry_run AND status = 'ok' AND finished_at IS NOT NULL AND counts #>> '{preview,events_upcoming}' = '3' FROM public.exos_dice_import_runs WHERE id = r.run_id), 'D13: logged';
+  ASSERT NOT (public.exos_dice_dry_run_finish(pg_temp.org(), r.run_id, 'ok', '{}') ->> 'ok')::boolean, 'D13: finished once';
+  ASSERT NOT (public.exos_dice_dry_run_finish(pg_temp.org2(), r.run_id, 'ok', '{}') ->> 'ok')::boolean, 'D13: not another org''s run';
   ASSERT (SELECT count(*) FROM public.exos_dice_id_map) = n, 'D13: nothing imported';
-  FOR i IN 1..4 LOOP PERFORM public.exos_dice_log_dry_run(pg_temp.org(), pg_temp.u('a0'), 'api', 'ok', '{}'); END LOOP;
-  ASSERT pg_temp.refused($q$SELECT public.exos_dice_log_dry_run(pg_temp.org(), pg_temp.u('a0'), 'api', 'ok', '{}')$q$, 'too many previews'), 'D13: rate limit';
+  FOR i IN 1..4 LOOP
+    SELECT * INTO r FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'api');
+    PERFORM public.exos_dice_dry_run_finish(pg_temp.org(), r.run_id, 'ok', '{}');
+  END LOOP;
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'api')$q$, 'too many previews'), 'D13: rate limit, before any read';
   ASSERT (public._exos_dice_runs(pg_temp.org(), 3, 0) ->> 'total')::int >= 6 AND jsonb_array_length(public._exos_dice_runs(pg_temp.org(), 3, 0) -> 'rows') = 3, 'D13: the runs list pages';
   RAISE NOTICE 'OK  D13 dry runs';
 END $$;
@@ -536,10 +552,10 @@ DECLARE f text; t text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'public.exos_dice_connect(uuid, uuid, text, text, text)', 'public.exos_dice_disconnect(uuid, uuid)',
-    'public.exos_dice_token(uuid, uuid)', 'public.exos_dice_sync_claim(uuid, uuid, text, integer)',
+    'public.exos_dice_connect_begin(uuid, uuid)', 'public.exos_dice_sync_claim(uuid, uuid, text, integer)',
     'public.exos_dice_apply(uuid, uuid, text, jsonb, jsonb)',
     'public.exos_dice_sync_finish(uuid, uuid, text, text, jsonb, boolean)',
-    'public.exos_dice_log_dry_run(uuid, uuid, text, text, jsonb, text)',
+    'public.exos_dice_dry_run_begin(uuid, uuid, text)', 'public.exos_dice_dry_run_finish(uuid, uuid, text, jsonb, text)',
     'public._exos_dice_status_json(uuid)', 'public._exos_dice_runs(uuid, integer, integer)',
     'public._exos_dice_id(text)', 'public._exos_dice_ref(text)', 'public._exos_dice_ts(text)',
     'public._exos_dice_counts_merge(jsonb, jsonb)', 'public._exos_dice_list(uuid, uuid)',
@@ -551,7 +567,9 @@ BEGIN
   END LOOP;
   ASSERT has_function_privilege('authenticated', 'public.exos_dice_org_status(uuid)', 'EXECUTE')
      AND NOT has_function_privilege('anon', 'public.exos_dice_org_status(uuid)', 'EXECUTE'), 'D14: the card';
-  FOREACH t IN ARRAY ARRAY['public.exos_dice_connections', 'public.exos_dice_import_runs', 'public.exos_dice_id_map', 'public.exos_dice_orders'] LOOP
+  ASSERT NOT has_table_privilege('authenticated', 'public.exos_dice_connect_attempts', 'SELECT'), 'D14: attempts are service only';
+  FOREACH t IN ARRAY ARRAY['public.exos_dice_connections', 'public.exos_dice_import_runs', 'public.exos_dice_id_map', 'public.exos_dice_orders',
+                           'public.exos_dice_connect_attempts'] LOOP
     ASSERT (SELECT relrowsecurity FROM pg_class WHERE oid = t::regclass), 'D14: RLS on ' || t;
     ASSERT NOT has_table_privilege('anon', t, 'SELECT'), 'D14: anon ' || t;
     ASSERT NOT has_table_privilege('authenticated', t, 'INSERT') AND NOT has_table_privilege('authenticated', t, 'UPDATE')
@@ -566,6 +584,88 @@ BEGIN
     ASSERT f::boolean, 'D14: the cron is inactive';
   END IF;
   RAISE NOTICE 'OK  D14 grants and RLS';
+END $$;
+
+-- D15. Role first: every gate refuses a non-member, a scanner and finance
+-- before any token is read or any attempt or run is recorded.
+DO $$
+DECLARE u text; n_att int; n_run int;
+BEGIN
+  PERFORM pg_temp.act(NULL);
+  SELECT count(*) INTO n_att FROM public.exos_dice_connect_attempts;
+  SELECT count(*) INTO n_run FROM public.exos_dice_import_runs;
+  UPDATE public.exos_dice_connections SET last_sync_at = now() - interval '2 minutes' WHERE org_id = pg_temp.org();
+  FOREACH u IN ARRAY ARRAY['a3', 'a5', 'a4', 'ff'] LOOP   -- scanner, finance, another org's owner, nobody
+    ASSERT pg_temp.refused(format($q$SELECT public.exos_dice_connect_begin(pg_temp.org(), pg_temp.u(%L))$q$, u), 'owner or manager only'), 'D15: connect ' || u;
+    ASSERT pg_temp.refused(format($q$SELECT * FROM public.exos_dice_sync_claim(pg_temp.org(), pg_temp.u(%L), 'dashboard')$q$, u), 'owner or manager only'), 'D15: sync ' || u;
+    ASSERT pg_temp.refused(format($q$SELECT * FROM public.exos_dice_sync_claim(pg_temp.org(), pg_temp.u(%L), 'api')$q$, u), 'owner or manager only'), 'D15: api sync ' || u;
+    ASSERT pg_temp.refused(format($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u(%L), 'dashboard')$q$, u), 'owner or manager only'), 'D15: dry run ' || u;
+    ASSERT pg_temp.refused(format($q$SELECT public.exos_dice_connect(pg_temp.org(), pg_temp.u(%L), 'tok_dice_0123456789abcdef', 'viewer-2', 'x')$q$, u), 'owner or manager only'), 'D15: store ' || u;
+  END LOOP;
+  ASSERT (SELECT count(*) FROM public.exos_dice_connect_attempts) = n_att, 'D15: no attempt recorded';
+  ASSERT (SELECT count(*) FROM public.exos_dice_import_runs) = n_run, 'D15: no run reserved';
+  ASSERT (SELECT lease_id IS NULL FROM public.exos_dice_connections WHERE org_id = pg_temp.org()), 'D15: no lease taken';
+  RAISE NOTICE 'OK  D15 the role is checked before any token use';
+END $$;
+
+-- D16. The connect limit: 10 attempts an hour per org and per user, checked first.
+DO $$
+DECLARE i int; r jsonb;
+BEGIN
+  DELETE FROM public.exos_dice_connect_attempts;
+  FOR i IN 1..10 LOOP r := public.exos_dice_connect_begin(pg_temp.org(), pg_temp.u('a0')); END LOOP;
+  ASSERT (r ->> 'attempts_left')::int = 0, 'D16: counted ' || r::text;
+  ASSERT pg_temp.refused($q$SELECT public.exos_dice_connect_begin(pg_temp.org(), pg_temp.u('a0'))$q$, 'too many connect attempts'), 'D16: the 11th for the user';
+  ASSERT pg_temp.refused($q$SELECT public.exos_dice_connect_begin(pg_temp.org(), pg_temp.u('a1'))$q$, 'too many connect attempts'), 'D16: the org is at its limit for everyone';
+  ASSERT (SELECT count(*) FROM public.exos_dice_connect_attempts WHERE org_id = pg_temp.org()) = 10, 'D16: refusals are not recorded';
+  -- Per user, across orgs: the manager of org 1 also manages org 2.
+  INSERT INTO public.exos_org_memberships(org_id, user_id, role) VALUES (pg_temp.org2(), pg_temp.u('a1'), 'manager');
+  INSERT INTO public.exos_dice_connect_attempts (org_id, user_id) SELECT pg_temp.org(), pg_temp.u('a1') FROM generate_series(1, 10);
+  ASSERT (SELECT count(*) FROM public.exos_dice_connect_attempts WHERE org_id = pg_temp.org2()) = 0, 'D16: org 2 is fresh';
+  ASSERT pg_temp.refused($q$SELECT public.exos_dice_connect_begin(pg_temp.org2(), pg_temp.u('a1'))$q$, 'too many connect attempts'), 'D16: the user is at the limit in any org';
+  r := public.exos_dice_connect_begin(pg_temp.org2(), pg_temp.u('a4'));
+  ASSERT (r ->> 'ok')::boolean, 'D16: org 2''s owner still may';
+  -- An hour later the window has passed.
+  UPDATE public.exos_dice_connect_attempts SET at = now() - interval '61 minutes';
+  r := public.exos_dice_connect_begin(pg_temp.org(), pg_temp.u('a0'));
+  ASSERT (r ->> 'attempts_left')::int = 9, 'D16: a fresh hour ' || r::text;
+  RAISE NOTICE 'OK  D16 the connect limit';
+END $$;
+
+-- D17. The dry-run slot is reserved before the read; a second one at the same time is refused.
+DO $$
+DECLARE r record; v_run uuid;
+BEGIN
+  UPDATE public.exos_dice_import_runs SET started_at = now() - interval '10 minutes' WHERE org_id = pg_temp.org() AND dry_run;  -- out of D13's minute
+  SELECT * INTO r FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'dashboard');
+  -- What exists when the edge function starts reading: the running row, reserved.
+  ASSERT (SELECT status = 'running' AND dry_run AND started_by = pg_temp.u('a0') FROM public.exos_dice_import_runs WHERE id = r.run_id), 'D17: reserved first';
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a1'), 'api')$q$, 'already running'), 'D17: a second preview is refused';
+  UPDATE public.exos_dice_connections SET last_sync_at = now() - interval '2 minutes' WHERE org_id = pg_temp.org();
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_sync_claim(pg_temp.org(), pg_temp.u('a0'), 'dashboard')$q$, 'a preview is running'), 'D17: and a sync';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_dice_sync_claim(NULL, NULL, 'cron') c WHERE c.org_id = pg_temp.org()), 'D17: and the cron';
+  PERFORM public.exos_dice_dry_run_finish(pg_temp.org(), r.run_id, 'ok', '{}');
+  -- A preview whose function died (still 'running' after 2 minutes) doesn't block: it is closed.
+  INSERT INTO public.exos_dice_import_runs (org_id, kind, trigger, dry_run, status, started_at)
+  VALUES (pg_temp.org(), 'full', 'dashboard', true, 'running', now() - interval '3 minutes') RETURNING id INTO v_run;
+  SELECT * INTO r FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a0'), 'dashboard');
+  ASSERT (SELECT status = 'error' AND error = 'interrupted' FROM public.exos_dice_import_runs WHERE id = v_run), 'D17: the dead one closed';
+  PERFORM public.exos_dice_dry_run_finish(pg_temp.org(), r.run_id, 'ok', '{}');
+  RAISE NOTICE 'OK  D17 the dry-run slot is reserved before reading';
+END $$;
+
+-- D18. A dry run is refused while a sync holds the lease.
+DO $$
+DECLARE v_lease uuid; r jsonb;
+BEGIN
+  UPDATE public.exos_dice_import_runs SET started_at = now() - interval '10 minutes' WHERE org_id = pg_temp.org() AND dry_run;
+  v_lease := pg_temp.claim(pg_temp.org(), pg_temp.u('a0'));
+  ASSERT v_lease IS NOT NULL, 'D18: a sync holds the lease';
+  ASSERT pg_temp.refused($q$SELECT * FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a1'), 'dashboard')$q$, 'a DICE sync is running'), 'D18: preview refused';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_dice_import_runs WHERE org_id = pg_temp.org() AND dry_run AND status = 'running'), 'D18: nothing reserved';
+  r := public.exos_dice_sync_finish(pg_temp.org(), v_lease, 'ok');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_dice_dry_run_begin(pg_temp.org(), pg_temp.u('a1'), 'dashboard')), 'D18: allowed once the lease is released';
+  RAISE NOTICE 'OK  D18 no preview while a sync runs';
 END $$;
 
 \echo 'test_dice_import: all passed'
