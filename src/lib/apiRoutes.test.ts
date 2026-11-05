@@ -70,8 +70,9 @@ describe('matchRoute', () => {
     // /public is the listing feed (shared key) and the partner contract (partner
     // key), and nothing else; publicAuthAt tells them apart for exos-api.
     for (const r of ROUTES) expect(isSharedKeyPath(r.path), r.id).toBe(r.auth !== 'api_key');
-    // Money: only refunds:write refunds, and nothing else needs it.
-    expect(ROUTES.filter((r) => r.scope === 'refunds:write').map((r) => r.id)).toEqual(['create-refund']);
+    // Money: only refunds:write refunds, and nothing else needs it. A door
+    // sale's void hands the cash back, so it is a refund too (mig 20261107100000).
+    expect(ROUTES.filter((r) => r.scope === 'refunds:write').map((r) => r.id)).toEqual(['create-refund', 'void-event-pos-order']);
     // Aliases are unique across the table and point at their own route only.
     const aliasKeys = ROUTES.flatMap((r) => (r.aliases ?? []).map((a) => `${r.method} ${a}`));
     expect(new Set(aliasKeys).size).toBe(aliasKeys.length);
