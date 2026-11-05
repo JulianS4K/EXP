@@ -1,18 +1,25 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-10-19)
+## Prod state vs this repo (updated 2026-11-04)
 
-- **DB:** every Exos migration through `20261019090000_exos_channel_mirrors` is applied to prod (the operator
-  pasted the bundles, 2026-10-19; checked against `schema_migrations`). **Not applied:**
-  `20261019100000_exos_door_day_keys` and `20261019110000_exos_online_event_followups`. Apply the door keys one
-  **before** the app that signs with day keys ships, or new ticket codes are refused at the door.
+- **DB:** every migration on main is applied to prod, through `20261019120000_exos_door_roster_wallet_delta`
+  (checked against `schema_migrations`, 2026-11-04). Also applied, ahead of main: `20261021174000` /
+  `20261021174500` (crons paused, see below), `20261027080000_exos_public_tier_available_grant` (the #56 hotfix)
+  and `20261027090000_exos_api_scopes` (from #55). Nothing from the open build stack (#56–#80) is applied beyond
+  those two.
+- **Web:** `exos-web` redeployed from main `dc93b24` on 2026-11-04 (the live build was `0ae3e16` from 2026-10-13;
+  Render's auto-deploy hadn't fired since). `/bridge/` serves 200. The door app now signs with day keys, which prod
+  has.
 - **Edge functions:** all of `supabase/functions/` is deployed (2026-10-19, single-file bundles through MCP; a CLI
   deploy from the repo replaces them). `exos-checkout` and `exos-pos` keep JWT verification; the rest are
   `--no-verify-jwt` per `docs/self-hosting.md`. Expected errors: `exos-mail-drain` 500 (`RESEND_API_KEY` unset,
   mail is off) and `exos-wallet` 503 (wallets not configured).
-- **Crons live:** expire holds, checkout reminders, event reminders, mail follow-ups, reconcile checkouts (15 min),
-  webhook drain (3 min), mail drain (2 min), wallet push (5 min), Eventbrite sync, channel sync and integrations
-  sync (2 min), S4K feed and SMS drain (1 min), geocode refresh and payouts (daily, dry-run).
+- **Crons:** all 16 were paused on 2026-10-21 (`20261021174000` / `20261021174500`). On 2026-11-04 the operator
+  turned 14 back on: expire holds, checkout reminders, event reminders, mail follow-ups, reconcile checkouts
+  (15 min), webhook drain (3 min), Eventbrite sync, channel sync and integrations sync (2 min), S4K feed and SMS
+  drain (1 min), channel split (hourly), geocode refresh and payouts (daily, dry-run). Their first runs all
+  succeeded. **Still off:** `exos-mail-drain-2min` and `exos-wallet-push-5min`, which fail on every run until
+  `RESEND_API_KEY` and the wallet certificates are set; turn them on after that.
 - **Writes to other platforms are off:** channel mirrors and the Eventbrite count are dry runs until the org's
   switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`; Luma is off entirely (`EXOS_LUMA_ENABLED`,
   `VITE_EXOS_LUMA` unset). SMS is a dry run unless `EXOS_SMS_LIVE=on`.
@@ -21,20 +28,24 @@
 - **Hosting:** `exos-web` on Render serves `/bridge/` from main; Terminal-2 reverse-proxies to it when `EXOS_ORIGIN`
   is set. Terminal-2's own `static/bridge` fallback is EXP `198ef91` (Terminal-2 #1016, 2026-09-29).
 
-## Waiting on the operator (2026-10-19)
+## Waiting on the operator (2026-11-04)
 
-1. Apply `20261019100000` + `20261019110000` (door keys, online-event follow-ups), then merge their PR.
+1. ✅ Door keys and online-event follow-ups applied; the web app that uses them is deployed (2026-11-04).
+   Next: merge the build stack (#79 → #80), then apply its migrations and deploy its functions per #80's
+   "Before production" list. Turn on the mail-drain and wallet-push crons once their secrets exist.
 2. Stripe test mode (`docs/payments-go-live.md`): the test secret key is in; still to do: the two webhook
    endpoints and their `whsec_…` secrets, `EXOS_REDIRECT_ORIGINS`, and `VITE_STRIPE_PUBLISHABLE_KEY` (`pk_test_…`)
    on the `exos-web` build.
 3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
 4. Supabase Auth redirect allowlist: add `/bridge/**`.
-5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee?, commission base; the
+5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee? (the fee itself is settled:
+   3% net, card processing passed through, first 6 months free, free tier at 150 or less), commission base; the
    channels "something else" write scope; whether unsold S4K seats come back to Exos before doors.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
 7. Ship a new `/bridge` bundle to Terminal-2 (only matters while `EXOS_ORIGIN` is unset).
 8. At launch: set `EXOS_AI_DISCOVERY=on` on `exos-web`, decide the training-crawler policy (allow all today).
-9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table.
+9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table (still there on
+   2026-11-04).
 
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 
