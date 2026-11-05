@@ -71,26 +71,26 @@ check_one() {  # order
 
 echo "race 1: the door and the webhook complete the same sale (door first)"
 ORDER=$(pending c0a7ace0-0000-0000-0000-00000000aa01 pi_RacePtOne)
-( R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtOne door 2) COMMIT;" | head -1); echo "  door replay=$R" ) &
+( R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtOne door 2) COMMIT;" | sed -n 1p); echo "  door replay=$R" ) &
 sleep 0.5
-R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtOne webhook 0) COMMIT;" | head -1); echo "  webhook replay=$R"
+R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtOne webhook 0) COMMIT;" | sed -n 1p); echo "  webhook replay=$R"
 wait
 check_one "$ORDER"
 
 echo "race 2: the same, the webhook first"
 ORDER=$(pending c0a7ace0-0000-0000-0000-00000000aa02 pi_RacePtTwo)
-( R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtTwo webhook 2) COMMIT;" | head -1); echo "  webhook replay=$R" ) &
+( R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtTwo webhook 2) COMMIT;" | sed -n 1p); echo "  webhook replay=$R" ) &
 sleep 0.5
-R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtTwo door 0) COMMIT;" | head -1); echo "  door replay=$R"
+R=$($P -c "BEGIN; $(complete $ORDER pi_RacePtTwo door 0) COMMIT;" | sed -n 1p); echo "  door replay=$R"
 wait
 check_one "$ORDER"
 
 echo "race 3: a cancel at the door races a completion"
 ORDER=$(pending c0a7ace0-0000-0000-0000-00000000aa03 pi_RacePtThree)
 ( $P -c "BEGIN; SELECT public._exos_pos_card_fail('$ORDER','pi_RacePtThree','canceled',NULL,'door','cancel race') ->> 'ignored'; SELECT pg_sleep(2); COMMIT;" \
-    | head -1 | sed 's/^/  cancel ignored=/' ) &
+    | sed -n 1p | sed 's/^/  cancel ignored=/' ) &
 sleep 0.5
-R=$($P -c "BEGIN; SELECT public._exos_pos_card_complete('$ORDER','pi_RacePtThree',5000,'webhook',NULL) ->> 'refund_needed'; COMMIT;" | head -1)
+R=$($P -c "BEGIN; SELECT public._exos_pos_card_complete('$ORDER','pi_RacePtThree',5000,'webhook',NULL) ->> 'refund_needed'; COMMIT;" | sed -n 1p)
 echo "  completion refund_needed=$R"
 wait
 ST=$($P -c "SELECT status FROM exos_pos_orders WHERE id='$ORDER'")
