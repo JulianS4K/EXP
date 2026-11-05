@@ -74,7 +74,7 @@ comps still have no order row of their own (money audit #11).
 
 | Who | Sees |
 |---|---|
-| Buyer | **My Tickets → Receipts → Receipt** per order (`exos_my_invoices`). The page `/invoice/:id` and the credit notes linked from it (`/credit-note/:id`). A guest checkout's receipts show up once the buyer signs in with a confirmed account on the order's email |
+| Buyer | **My Tickets → Receipts → Receipt** per order (`exos_my_invoices`). The page `/invoice/:id` and the credit notes linked from it (`/credit-note/:id`). A guest checkout's receipts show up once the buyer signs in with a confirmed account on the order's email, and (since mig 20261105100000) only after that email was proven on the order (the confirm-your-email code, or the organizer's resend to a corrected address); a confirmed account at a mistyped address sees nothing |
 | Owner / manager / finance | Event report → Overview → **Money** → **Receipts** (one row per order with its invoice number, total and refunded amount, linking to the page). The **Orders CSV** has an `invoice_number` column. Settings → **Legal & invoices** |
 | Scanner, content, anyone else, anon | Nothing: the RPCs answer "not found" and RLS returns no rows |
 

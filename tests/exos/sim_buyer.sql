@@ -1114,4 +1114,54 @@ BEGIN
   RAISE NOTICE 'OK SIM-BUYER-34 monthly donation card fails: past_due, ledger right, one "update your card" mail per failure streak';
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- SIM-BUYER-13b The typo-owner's confirmed account (typo-owner@, b6) and the
+-- guest order's paper trail (mig 20261105100000). An order's email makes its
+-- owner the payer only once that email is proven: before, b6 sees no
+-- receipt, can't ask for a refund and gets no reschedule offer for the
+-- stranger's order (cs_simb_13, proven by phone, so the email never was);
+-- for an order proven to b6's email (cs_simb_13b) b6 sees all three.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE ids uuid[]; t13 uuid; t13b uuid; j jsonb; inv13 uuid; inv13b uuid;
+BEGIN
+  t13 := (SELECT ticket_ids[1] FROM public.exos_checkout_sessions WHERE session_id = 'cs_simb_13');
+  ids := pg_temp.gsess('cs_simb_13b', 'typo-owner@sim-b.test');   -- a second guest order with that email, still unproven
+  t13b := ids[1];
+  SELECT id INTO inv13 FROM public.exos_invoices WHERE session_id = 'cs_simb_13';
+  SELECT id INTO inv13b FROM public.exos_invoices WHERE session_id = 'cs_simb_13b';
+  ASSERT inv13 IS NOT NULL AND inv13b IS NOT NULL, 'SIM-BUYER-13b: both orders have a receipt';
+  PERFORM pg_temp.act(pg_temp.u('0000000000a0')::text);
+  PERFORM public.exos_reschedule_event(pg_temp.u('0000000000e1'), now() + interval '20 days', p_offer_refunds => true);
+
+  -- Unproven (13b pending, 13 proven by phone only): nothing for b6.
+  PERFORM pg_temp.act(pg_temp.u('0000000000b6')::text);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id IN ('cs_simb_13', 'cs_simb_13b')), 'SIM-BUYER-13b: no receipt in the list';
+  ASSERT pg_temp.err(format('SELECT public.exos_invoice_document(%L::uuid)', inv13b)) LIKE '%not found%', 'SIM-BUYER-13b: the receipt itself is not found';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id IN (t13, t13b)),
+         'SIM-BUYER-13b: no refund ask listed';
+  j := public.exos_ask_refund(ARRAY[t13b]);
+  ASSERT j->0->>'reason' = 'not-buyer', 'SIM-BUYER-13b: a refund ask is refused: ' || j::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_refund_asks WHERE session_id IN ('cs_simb_13', 'cs_simb_13b')), 'SIM-BUYER-13b: no ask recorded';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id IN (t13, t13b)), 'SIM-BUYER-13b: no reschedule offer';
+
+  -- 13b proven to b6's email (it was theirs after all): all three appear.
+  PERFORM pg_temp.act(NULL);
+  ASSERT (public.exos_order_proof_verify('cs_simb_13b', pg_temp.tok('cs_simb_13b'), (SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+             WHERE template = 'rsvp-code' AND html LIKE '%confirm=cs_simb_13b&amp;%' LIMIT 1)) ->> 'ok')::boolean,
+         'SIM-BUYER-13b: proven by the mailed code (that order''s mail)';
+  PERFORM pg_temp.act(pg_temp.u('0000000000b6')::text);
+  ASSERT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id = 'cs_simb_13b')
+     AND NOT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id = 'cs_simb_13'), 'SIM-BUYER-13b: the proven order''s receipt, only';
+  ASSERT public.exos_invoice_document(inv13b) IS NOT NULL, 'SIM-BUYER-13b: the receipt opens';
+  ASSERT (SELECT x.reason FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13b) IS DISTINCT FROM 'not-buyer'
+     AND EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13b), 'SIM-BUYER-13b: the refund ask is theirs';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13), 'SIM-BUYER-13b: not the phone-proven one';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id = t13b AND x.reason IS DISTINCT FROM 'not-buyer'),
+         'SIM-BUYER-13b: the reschedule offer is theirs';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id = t13), 'SIM-BUYER-13b: not for the phone-proven one';
+  PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK SIM-BUYER-13b a typo-owner''s account gets no receipt, refund ask or reschedule offer for an unproven guest order; once proven to their email, all three';
+END $$;
+
 ROLLBACK;

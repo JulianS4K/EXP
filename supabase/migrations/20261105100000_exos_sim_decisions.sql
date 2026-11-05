@@ -61,7 +61,9 @@
 --    signed-in buyer's own account gets them; a guest's by email: an
 --    account with that email, else the claim links are mailed; by phone:
 --    the claim links are on the page. The organizer can send an order to a
---    corrected email from the Orders page (exos_order_proof_resend).
+--    corrected email from the Orders page (exos_order_proof_resend). The
+--    order's email counts as the payer's (receipts, refund asks, reschedule
+--    offers) only once proven (_exos_guest_email_ok).
 --    Limits: 5 wrong codes lock the live code; 5 email and 3 SMS sends per
 --    order, 60 s apart per channel; 3 SMS per number per 10 minutes.
 -- 6. Waitlist (SIM-BUYER-26). A buyer who gets a ticket (any channel) while
@@ -87,7 +89,9 @@
 --              exos_apply_channel_split, exos_set_s4k_split, _exos_posh_count,
 --              exos_import_guests, _exos_guest_list_preview, _exos_guest_insert,
 --              exos_update_guest, exos_set_ticket_attendee, exos_ticket_update,
---              exos_order_update, exos_cancel_transfer,
+--              exos_order_update, exos_cancel_transfer, _exos_refund_ask_payer_ok,
+--              _exos_resched_actor_ok, exos_my_reschedule_offers, exos_my_invoices,
+--              exos_invoice_document, exos_my_refund_asks (guest email = payer only once proven),
 --              exos_join_waitlist, exos_claim_transfer(uuid), exos_api_write,
 --              _exos_record_forced_checkin (all patched in place, marker-checked)
 --           W: FUNCTION exos_event_max_capacity, exos_event_remaining,
@@ -1066,6 +1070,73 @@ REVOKE ALL ON FUNCTION public.exos_tg_session_proof_close() FROM PUBLIC, anon, a
 DROP TRIGGER IF EXISTS exos_checkout_sessions_proof_close ON public.exos_checkout_sessions;
 CREATE TRIGGER exos_checkout_sessions_proof_close AFTER UPDATE OF status ON public.exos_checkout_sessions
   FOR EACH ROW EXECUTE FUNCTION public.exos_tg_session_proof_close();
+
+-- A guest order's email makes its owner the payer (receipts, refund asks,
+-- reschedule offers) only once that email is proven. Before, a confirmed
+-- account at a mistyped address saw a stranger's receipt and could ask to
+-- refund their order. Orders from before proofs existed (no proof row) keep
+-- the plain email match; account matches (buyer_uid) are unchanged.
+CREATE OR REPLACE FUNCTION public._exos_guest_email_ok(p_session_id text, p_email text, p_order_email text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+  SELECT CASE
+    WHEN nullif(btrim(coalesce(p_email, '')), '') IS NULL THEN false
+    WHEN NOT EXISTS (SELECT 1 FROM public.exos_order_proofs p WHERE p.session_id = p_session_id)
+      THEN lower(btrim(coalesce(p_order_email, ''))) = lower(btrim(p_email))
+    -- Proven by the mailed code, or sent by the organizer to a corrected
+    -- address: that address. A phone proof proves no email.
+    ELSE EXISTS (SELECT 1 FROM public.exos_order_proofs p
+                  WHERE p.session_id = p_session_id AND p.status = 'proven'
+                    AND p.proven_via IN ('email_code', 'organizer') AND p.email = lower(btrim(p_email)))
+  END
+$$;
+REVOKE ALL ON FUNCTION public._exos_guest_email_ok(text,text,text) FROM PUBLIC, anon, authenticated;
+
+SELECT pg_temp.exos_patch_n('public._exos_refund_ask_payer_ok(jsonb,uuid)',
+  '/* exos: proven email payer */',
+  $o$  RETURN coalesce(v_email IS NOT NULL AND v_email = p_state->>'payer_email', false);$o$,
+  $n$  /* exos: proven email payer */ -- mig 20261105100000
+  RETURN coalesce(public._exos_guest_email_ok(p_state->>'session_id', v_email, p_state->>'payer_email'), false);$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public._exos_resched_actor_ok(jsonb,uuid)',
+  '/* exos: proven email payer */',
+  $o$        OR (p_state->>'payer_uid' IS NULL AND v_email IS NOT NULL AND v_email = p_state->>'payer_email');$o$,
+  $n$        OR (p_state->>'payer_uid' IS NULL /* exos: proven email payer */ AND public._exos_guest_email_ok(
+              (SELECT t.order_ref FROM public.exos_tickets t WHERE t.id = (p_state->>'ticket_id')::uuid), v_email, p_state->>'payer_email'));$n$, 1);
+SELECT pg_temp.exos_patch_n('public._exos_resched_actor_ok(jsonb,uuid)',
+  '/* exos: proven email holder */',
+  $o$        OR (coalesce((p_state->>'parked')::boolean, false) AND v_email IS NOT NULL AND v_email = p_state->>'holder_email');$o$,
+  $n$        OR (coalesce((p_state->>'parked')::boolean, false) AND v_email IS NOT NULL AND v_email = p_state->>'holder_email'
+            /* exos: proven email holder */ AND public._exos_guest_email_ok(
+              (SELECT t.order_ref FROM public.exos_tickets t WHERE t.id = (p_state->>'ticket_id')::uuid), v_email, v_email));$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_my_reschedule_offers()',
+  '/* exos: proven email payer */',
+  $o$                               OR (s.buyer_uid IS NULL AND v_email IS NOT NULL AND lower(s.buyer_email) = v_email))))$o$,
+  $n$                               OR (s.buyer_uid IS NULL /* exos: proven email payer */
+                                   AND public._exos_guest_email_ok(s.session_id, v_email, s.buyer_email)))))$n$, 1);
+SELECT pg_temp.exos_patch_n('public.exos_my_reschedule_offers()',
+  '/* exos: proven email holder */',
+  $o$                  OR (coalesce((st.j->>'parked')::boolean, false) AND v_email IS NOT NULL
+                      AND st.j->>'holder_email' = v_email), false)$o$,
+  $n$                  OR (coalesce((st.j->>'parked')::boolean, false) AND v_email IS NOT NULL
+                      AND st.j->>'holder_email' = v_email /* exos: proven email holder */
+                      AND public._exos_guest_email_ok((SELECT t.order_ref FROM public.exos_tickets t WHERE t.id = st.id), v_email, v_email)), false)$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_my_invoices()',
+  '/* exos: proven email payer */',
+  $o$          AND lower(coalesce(s.buyer_email, i.buyer_email)) = v_email)$o$,
+  $n$          /* exos: proven email payer */ AND public._exos_guest_email_ok(i.session_id, v_email, coalesce(s.buyer_email, i.buyer_email)))$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_invoice_document(uuid)',
+  '/* exos: proven email payer */',
+  $o$                AND lower(coalesce(s.buyer_email, inv.buyer_email)) = v_email);$o$,
+  $n$                /* exos: proven email payer */ AND public._exos_guest_email_ok(inv.session_id, v_email, coalesce(s.buyer_email, inv.buyer_email)));$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_my_refund_asks(uuid)',
+  '/* exos: proven email payer */',
+  $o$       AND (cs.buyer_uid = v_uid OR (v_email IS NOT NULL AND lower(btrim(coalesce(cs.buyer_email, ''))) = v_email))$o$,
+  $n$       AND (cs.buyer_uid = v_uid OR (v_email IS NOT NULL /* exos: proven email payer */
+                                      AND public._exos_guest_email_ok(cs.session_id, v_email, cs.buyer_email)))$n$, 1);
 
 -- ===========================================================================
 -- 6. Waitlist: a buyer is converted; their open offer moves on.
