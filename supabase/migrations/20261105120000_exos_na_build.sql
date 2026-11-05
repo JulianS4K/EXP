@@ -375,6 +375,25 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_ticket_print_void(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_ticket_print_void(uuid) TO authenticated, service_role;
 
+-- The ticket page: is this ticket printed? The holder (to explain why the
+-- phone's code is refused, and offer to void the paper) or an owner /
+-- manager; anyone else gets P0002 as for a missing ticket.
+CREATE OR REPLACE FUNCTION public.exos_ticket_print_state(p_ticket_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE t public.exos_tickets%ROWTYPE; v_at timestamptz;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501'; END IF;
+  SELECT * INTO t FROM public.exos_tickets WHERE id = p_ticket_id;
+  IF t.id IS NULL OR NOT (t.owner_id = auth.uid() OR public.exos_is_admin()
+                          OR public.exos_has_org_role(t.org_id, ARRAY['owner', 'manager'])) THEN
+    RAISE EXCEPTION 'ticket not found' USING ERRCODE = 'P0002';
+  END IF;
+  SELECT created_at INTO v_at FROM public.exos_ticket_print_codes WHERE ticket_id = t.id AND status = 'active';
+  RETURN jsonb_build_object('ticket_id', t.id, 'printed', v_at IS NOT NULL, 'printed_at', v_at);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_ticket_print_state(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_ticket_print_state(uuid) TO authenticated, service_role;
+
 -- exos-api: POST /v1/tickets/:id/print, POST /v1/orders/:id/print (and the
 -- /confirms/:eid/… spellings, p_event), DELETE /v1/tickets/:id/print
 -- (p_kind 'ticket_void'). The key needs tickets:write and a
@@ -910,11 +929,51 @@ GRANT EXECUTE ON FUNCTION public._exos_api_membership_box_office(uuid, uuid, tex
 -- ===========================================================================
 -- 3. Team switching: a personal access token in another org of its user
 -- ===========================================================================
+-- Opt-in per token, chosen when it is made: a token made for org A never
+-- starts working on org B later. Existing tokens are pinned (false).
+ALTER TABLE public.exos_personal_tokens ADD COLUMN IF NOT EXISTS multi_org boolean NOT NULL DEFAULT false;
+COMMENT ON COLUMN public.exos_personal_tokens.multi_org IS
+  'Set at creation only: the token may act in any org its user is an active member of (X-Exos-Org), at the role there. mig 20261105120000.';
+GRANT SELECT (multi_org) ON public.exos_personal_tokens TO authenticated;
+
+-- multi_org is fixed after the transaction that made the token.
+CREATE OR REPLACE FUNCTION public.exos_tg_pat_multi_org_fixed()
+RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF NEW.multi_org IS DISTINCT FROM OLD.multi_org AND OLD.created_at <> now() THEN
+    RAISE EXCEPTION 'multi_org is chosen when the token is created; make a new token' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_tg_pat_multi_org_fixed() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_personal_tokens_multi_org ON public.exos_personal_tokens;
+CREATE TRIGGER exos_personal_tokens_multi_org BEFORE UPDATE OF multi_org ON public.exos_personal_tokens
+  FOR EACH ROW EXECUTE FUNCTION public.exos_tg_pat_multi_org_fixed();
+
+-- Create a token, choosing multi_org (no default, so a 4-argument call is
+-- never ambiguous: it reaches the old function and makes a pinned token).
+CREATE OR REPLACE FUNCTION public.exos_create_personal_token(p_org_id uuid, p_name text, p_scopes text[],
+                                                             p_expires_days integer, p_multi_org boolean)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE v jsonb;
+BEGIN
+  v := public.exos_create_personal_token(p_org_id, p_name, p_scopes, p_expires_days);
+  IF coalesce(p_multi_org, false) THEN
+    -- Recorded on the row itself (the pat.created audit row names the token).
+    UPDATE public.exos_personal_tokens SET multi_org = true WHERE id = (v ->> 'id')::uuid;
+  END IF;
+  RETURN v || jsonb_build_object('multi_org', coalesce(p_multi_org, false));
+END $$;
+REVOKE ALL ON FUNCTION public.exos_create_personal_token(uuid, text, text[], integer, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_create_personal_token(uuid, text, text[], integer, boolean) TO authenticated;
+
 -- exos_api_token_auth's answer for the org the X-Exos-Org header names.
--- The same org: unchanged. Another org: a personal access token only, the
--- user an active member there, scopes narrowed to the role there (and the
--- org's role settings). { error: 'org_switch' } for an OAuth token,
--- { error: 'not_member' } when the user isn't a member there.
+-- The same org: unchanged. Another org: a personal access token made with
+-- multi_org, its user an active member there, scopes narrowed to the role
+-- there (and that org's role settings, mig 20261104180000).
+-- { error: 'org_switch' } for an OAuth token, { error: 'token_pinned_to_org' }
+-- for a pinned personal token, { error: 'not_member' } when the user isn't
+-- (or is no longer) a member there.
 CREATE OR REPLACE FUNCTION public.exos_api_token_auth_org(p_hash text, p_kind text, p_org uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v jsonb; v_role text; v_scopes text[];
@@ -925,6 +984,9 @@ BEGIN
   END IF;
   IF p_kind <> 'pat' THEN
     RETURN jsonb_build_object('error', 'org_switch');
+  END IF;
+  IF NOT coalesce((SELECT multi_org FROM public.exos_personal_tokens WHERE id = (v ->> 'credential_id')::uuid), false) THEN
+    RETURN jsonb_build_object('error', 'token_pinned_to_org');
   END IF;
   v_role := public._exos_member_role(p_org, (v ->> 'user_id')::uuid);
   IF v_role IS NULL THEN

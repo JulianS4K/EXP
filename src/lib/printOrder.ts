@@ -11,6 +11,15 @@ export interface PrintedOrder {
   skipped: Array<{ ticket_id: string; reason: string }>;
 }
 
+/** The holder's ticket page while the ticket is printed (its app and wallet codes are refused at the door). */
+export const PRINTED_TICKET_TEXT = 'This ticket was printed. Use the paper ticket, or void it to use your phone.';
+
+/** exos_ticket_print_state's answer, read defensively. */
+export function parsePrintState(v: unknown): { printed: boolean; printedAt: string | null } {
+  const o = v && typeof v === 'object' ? v as Record<string, unknown> : {};
+  return { printed: o.printed === true, printedAt: typeof o.printed_at === 'string' ? o.printed_at : null };
+}
+
 /** Owners and managers print (`staff`, orderPermissions().edit); only an order whose tickets were issued has any. */
 export function canPrintOrder(o: { status: string }, staff: boolean): boolean {
   return staff && (o.status === 'fulfilled' || o.status === 'partially_refunded');

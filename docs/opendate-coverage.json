@@ -108,8 +108,8 @@
    "method": "PUT",
    "path": "/api/v2/team_memberships/{id}/switch",
    "status": "equivalent",
-   "exos": "X-Exos-Org header on GET /v1/me and every /v1 route (personal access tokens); the dashboard org picker",
-   "reason": "A personal token acts in another org of its user at the role there (exos_api_token_auth_org); OAuth tokens and API keys stay in their org"
+   "exos": "X-Exos-Org header on GET /v1/me and every /v1 route (personal access tokens made multi-org); the dashboard org picker",
+   "reason": "Opt-in per token at creation: such a token acts in another org of its user at the live role there (exos_api_token_auth_org); pinned tokens get 403 token_pinned_to_org; OAuth tokens and API keys stay in their org"
   },
   {
    "category": "teams",

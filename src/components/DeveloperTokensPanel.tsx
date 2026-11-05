@@ -12,7 +12,7 @@ import { Copy, EyeOff, KeyRound, Trash2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useOrganization } from '../context/OrganizationContext';
 import {
-  createPersonalToken, disconnectApp, listPersonalTokens, myConnectedApps, revokePersonalToken, sqlMessage,
+  createPersonalToken, disconnectApp, MULTI_ORG_WARNING, listPersonalTokens, myConnectedApps, revokePersonalToken, sqlMessage,
   type Grant, type PersonalToken,
 } from '../lib/developerPlatform';
 import { ROLE_SCOPES, type OrgRole } from '../../supabase/functions/_shared/api/credentials.ts';
@@ -30,6 +30,8 @@ export default function DeveloperTokensPanel() {
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['events:read']);
   const [days, setDays] = useState<string>('90');
+  // X-Exos-Org (mig 20261105120000): off unless chosen, fixed once made.
+  const [multiOrg, setMultiOrg] = useState(false);
   const [fresh, setFresh] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -113,11 +115,18 @@ export default function DeveloperTokensPanel() {
               </label>
             ))}
           </div>
+          <label className="flex items-start gap-2 text-xs text-white/80">
+            <input type="checkbox" className="mt-0.5 accent-brand-primary" checked={multiOrg}
+              onChange={(e) => setMultiOrg(e.target.checked)} />
+            <span>Works across all my organizations</span>
+          </label>
+          {multiOrg && <p role="alert" className="text-[11px] text-amber-300/90 border border-amber-300/30 px-2 py-1.5">{MULTI_ORG_WARNING}</p>}
           <button type="button" className={BTN} disabled={busy || !orgId || scopes.length === 0}
             onClick={() => run(async () => {
-              const r = await createPersonalToken(orgId, name.trim() || 'Token', scopes, days ? Number(days) : null);
+              const r = await createPersonalToken(orgId, name.trim() || 'Token', scopes, days ? Number(days) : null, multiOrg);
               setFresh(r.token);
               setName('');
+              setMultiOrg(false);
             }, 'Token created')}>
             Create token
           </button>
@@ -129,7 +138,7 @@ export default function DeveloperTokensPanel() {
           {tokens.map((t) => (
             <li key={t.id} className="bg-white/5 border border-white/10 px-3 py-2 flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white">{t.name} <span className="text-white/40 text-xs">· {orgName(t.org_id)}</span></p>
+                <p className="text-sm text-white">{t.name} <span className="text-white/40 text-xs">· {orgName(t.org_id)}{t.multi_org ? ' · all my organizations' : ''}</span></p>
                 <p className="text-[11px] text-white/40">
                   <code>{t.key_prefix}…</code> · {t.scopes.join(', ')} ·{' '}
                   {t.expires_at ? `expires ${new Date(t.expires_at).toLocaleDateString()}` : 'no expiry'}

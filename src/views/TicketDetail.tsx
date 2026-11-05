@@ -31,6 +31,7 @@ import TicketOnlineAccess from '../components/TicketOnlineAccess';
 import TicketMatchedGroup from '../components/TicketMatchedGroup';
 import { useT } from '../context/LanguageContext';
 import TicketSeats from '../components/seating/TicketSeats';
+import TicketPrintedNotice from '../components/TicketPrintedNotice';
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -317,6 +318,8 @@ export default function TicketDetail() {
 
               <div className="-mt-12 px-8 md:px-10 relative z-20">
                  <div className="bg-white p-8 md:p-10 flex flex-col items-center justify-center group mb-8 relative">
+                    {/* Printed (mig 20261105120000): the door takes the paper only. */}
+                    <TicketPrintedNotice ticketId={currentTicket.id} />
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
                         barcode ? (

@@ -182,13 +182,17 @@ BEGIN
        AND has_function_privilege('service_role', f, 'EXECUTE'), 'NA1: internal ' || f;
   END LOOP;
   ASSERT NOT has_function_privilege('authenticated', 'public.exos_tg_print_ticket_changed()', 'EXECUTE'), 'NA1: trigger fn';
+  ASSERT NOT has_function_privilege('authenticated', 'public.exos_tg_pat_multi_org_fixed()', 'EXECUTE'), 'NA1: pat trigger fn';
+  ASSERT has_column_privilege('authenticated', 'public.exos_personal_tokens', 'multi_org', 'SELECT')
+     AND NOT has_column_privilege('authenticated', 'public.exos_personal_tokens', 'multi_org', 'UPDATE'), 'NA1: multi_org read-only';
   ASSERT NOT has_function_privilege('authenticated', 'public._exos_door_keys(uuid,uuid,text)', 'EXECUTE'), 'NA1: door keys';
   FOREACH f IN ARRAY ARRAY[
       'public.exos_ticket_print(uuid[])', 'public.exos_order_print(text)', 'public.exos_ticket_print_void(uuid)',
       'public.exos_membership_reserve(uuid,jsonb)', 'public.exos_membership_reservation_complete(uuid,text)',
       'public.exos_membership_reservation_cancel(uuid,text)', 'public.exos_membership_set_capacity(uuid,integer)',
       'public.exos_staff_clock_in(uuid,uuid,uuid,text)', 'public.exos_staff_clock_out(uuid,text)',
-      'public.exos_staff_shift_close(uuid,timestamptz,text)', 'public.exos_staff_shift_report(uuid,timestamptz,timestamptz)'] LOOP
+      'public.exos_staff_shift_close(uuid,timestamptz,text)', 'public.exos_staff_shift_report(uuid,timestamptz,timestamptz)',
+      'public.exos_ticket_print_state(uuid)', 'public.exos_create_personal_token(uuid,text,text[],integer,boolean)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND has_function_privilege('authenticated', f, 'EXECUTE'),
       'NA1: signed-in ' || f;
     ASSERT (SELECT prosecdef AND proconfig::text LIKE '%search_path=public, pg_temp%' FROM pg_proc WHERE oid = f::regprocedure),
@@ -289,6 +293,11 @@ BEGIN
   w := pg_temp.wcode('04');
   c := pg_temp.print('04');
   ASSERT pg_temp.reason(pg_temp.scan('04', pg_temp.tcode('04'))) = 'printed', 'NA4: app code beside the paper';
+  -- The ticket page knows (holder); a stranger doesn't.
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  ASSERT (public.exos_ticket_print_state(pg_temp.tk('04')) ->> 'printed')::boolean, 'NA4: holder sees printed';
+  PERFORM pg_temp.act(pg_temp.u('c3'));
+  ASSERT pg_temp.st(format('SELECT public.exos_ticket_print_state(%L)', pg_temp.tk('04'))) = 'P0002', 'NA4: stranger print state';
   ASSERT pg_temp.reason(pg_temp.scan('04', w)) = 'printed', 'NA4: wallet code beside the paper';
   ASSERT (SELECT status FROM public.exos_tickets WHERE id = pg_temp.tk('04')) = 'active', 'NA4: nothing used';
   -- The holder voids the paper: the phone works again, the paper doesn't.
@@ -303,6 +312,8 @@ BEGIN
   PERFORM pg_temp.act(pg_temp.u('a3'));
   ASSERT pg_temp.st(format('SELECT public.exos_ticket_print_void(%L)', pg_temp.tk('04'))) = 'P0002', 'NA4: scanner voids';
   ASSERT pg_temp.reason(pg_temp.scan('04', c)) = 'barcode-rejected', 'NA4: voided paper';
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  ASSERT NOT (public.exos_ticket_print_state(pg_temp.tk('04')) ->> 'printed')::boolean, 'NA4: no longer printed';
   ASSERT pg_temp.reason(pg_temp.scan('04', pg_temp.tcode('04'))) = 'checked-in', 'NA4: app code works again';
   -- Staff void: reason voided-by-staff.
   c := pg_temp.print('05');
@@ -567,27 +578,53 @@ END $$;
 
 -- ── NA10 ────────────────────────────────────────────────────────────────────
 DO $$
-DECLARE r jsonb; h text := repeat('ab', 32); ho text := repeat('cd', 32); v_app uuid; v_grant uuid;
+DECLARE r jsonb; h text := repeat('ab', 32); hm text; ho text := repeat('cd', 32); v_app uuid; v_grant uuid; v_tok text; v_id uuid;
 BEGIN
-  -- The manager's personal token, made in org 1.
+  -- An existing personal token of the manager, made in org 1: pinned.
   INSERT INTO public.exos_personal_tokens (user_id, org_id, name, key_prefix, key_hash, scopes)
   VALUES (pg_temp.u('a2'), pg_temp.org('01'), 'laptop', 'exos_pat_a9b', h, ARRAY['events:read','tickets:read','checkin:write','booking:write']);
   -- No header / the same org: unchanged.
   r := public.exos_api_token_auth_org(h, 'pat', pg_temp.org('01'));
   ASSERT r ->> 'org_id' = pg_temp.org('01')::text AND r ->> 'role' = 'manager' AND NOT (r ? 'home_org_id'), 'NA10: same org ' || r::text;
   ASSERT public.exos_api_token_auth_org(h, 'pat', NULL) ->> 'org_id' = pg_temp.org('01')::text, 'NA10: no header';
-  -- Org 2, where the manager is a scanner: the scanner's scopes.
-  r := public.exos_api_token_auth_org(h, 'pat', pg_temp.org('02'));
+  -- The header naming org 2 (where the manager is a scanner): pinned, refused.
+  ASSERT public.exos_api_token_auth_org(h, 'pat', pg_temp.org('02')) ->> 'error' = 'token_pinned_to_org', 'NA10: pinned token';
+  -- An opt-in token, chosen at creation (the 5-argument create).
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  r := public.exos_create_personal_token(pg_temp.org('01'), 'all orgs', ARRAY['events:read','tickets:read','checkin:write','booking:write'], 30, true);
+  ASSERT (r ->> 'multi_org')::boolean, 'NA10: created multi-org ' || r::text;
+  v_tok := r ->> 'token'; v_id := (r ->> 'id')::uuid; hm := public._exos_sha256(v_tok);
+  ASSERT (SELECT multi_org FROM public.exos_personal_tokens WHERE id = v_id), 'NA10: stored';
+  -- The 4-argument create still makes a pinned token; false is pinned too.
+  r := public.exos_create_personal_token(pg_temp.org('01'), 'old', ARRAY['events:read'], 30);
+  ASSERT NOT (SELECT multi_org FROM public.exos_personal_tokens WHERE id = (r ->> 'id')::uuid), 'NA10: 4-arg pinned';
+  ASSERT NOT (public.exos_create_personal_token(pg_temp.org('01'), 'no', ARRAY['events:read'], 30, false) ->> 'multi_org')::boolean,
+    'NA10: false pinned';
+  -- Set at creation only: once the creating transaction is over, it can't be flipped (not even by the service role).
+  UPDATE public.exos_personal_tokens SET created_at = now() - interval '1 minute' WHERE id = v_id OR key_hash = h;
+  ASSERT pg_temp.st(format('UPDATE public.exos_personal_tokens SET multi_org = false WHERE id = %L', v_id)) = '42501', 'NA10: fixed (off)';
+  ASSERT pg_temp.st(format('UPDATE public.exos_personal_tokens SET multi_org = true WHERE key_hash = %L', h)) = '42501', 'NA10: fixed (on)';
+  -- The opt-in token switches: the scanner's scopes there.
+  r := public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('02'));
   ASSERT r ->> 'org_id' = pg_temp.org('02')::text AND r ->> 'home_org_id' = pg_temp.org('01')::text AND r ->> 'role' = 'scanner',
     'NA10: switched ' || r::text;
   ASSERT NOT (r -> 'scopes' ? 'booking:write') AND NOT (r -> 'scopes' ? 'booking:read') AND r -> 'scopes' ? 'checkin:write'
      AND r -> 'scopes' ? 'tickets:read', 'NA10: held to the scanner role ' || (r -> 'scopes')::text;
-  -- Not a member there.
-  ASSERT public.exos_api_token_auth_org(h, 'pat', gen_random_uuid()) ->> 'error' = 'not_member', 'NA10: not a member';
-  -- Disabled there: not a member any more.
+  -- Org 2's role settings (mig 20261104180000) narrow it further.
+  INSERT INTO public.exos_org_role_scopes (org_id, role, scopes) VALUES (pg_temp.org('02'), 'scanner', ARRAY['events:read','checkin:write']);
+  r := public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('02'));
+  ASSERT NOT (r -> 'scopes' ? 'tickets:read') AND r -> 'scopes' ? 'checkin:write', 'NA10: org 2 role settings ' || (r -> 'scopes')::text;
+  -- Not a member there at all.
+  ASSERT public.exos_api_token_auth_org(hm, 'pat', gen_random_uuid()) ->> 'error' = 'not_member', 'NA10: not a member';
+  -- Disabled there, then removed there: it stops working there, still works at home.
   UPDATE public.exos_org_memberships SET disabled = true WHERE org_id = pg_temp.org('02') AND user_id = pg_temp.u('a2');
-  ASSERT public.exos_api_token_auth_org(h, 'pat', pg_temp.org('02')) ->> 'error' = 'not_member', 'NA10: disabled there';
+  ASSERT public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('02')) ->> 'error' = 'not_member', 'NA10: disabled there';
   UPDATE public.exos_org_memberships SET disabled = false WHERE org_id = pg_temp.org('02') AND user_id = pg_temp.u('a2');
+  ASSERT public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('02')) ->> 'role' = 'scanner', 'NA10: back';
+  DELETE FROM public.exos_org_memberships WHERE org_id = pg_temp.org('02') AND user_id = pg_temp.u('a2');
+  ASSERT public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('02')) ->> 'error' = 'not_member', 'NA10: role removed there';
+  ASSERT public.exos_api_token_auth_org(hm, 'pat', pg_temp.org('01')) ->> 'role' = 'manager', 'NA10: home org unaffected';
+  INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES (pg_temp.org('02'), pg_temp.u('a2'), 'scanner');
   -- An unknown token: NULL, as without the header.
   ASSERT public.exos_api_token_auth_org(repeat('ef', 32), 'pat', pg_temp.org('02')) IS NULL, 'NA10: unknown token';
   -- OAuth: pinned to the org the user approved.
@@ -600,7 +637,7 @@ BEGIN
   VALUES (ho, 'access', v_app, v_grant, gen_random_uuid(), pg_temp.u('a2'), pg_temp.org('01'), ARRAY['events:read'], now() + interval '1 hour');
   ASSERT public.exos_api_token_auth_org(ho, 'oauth', pg_temp.org('01')) ->> 'org_id' = pg_temp.org('01')::text, 'NA10: oauth home';
   ASSERT public.exos_api_token_auth_org(ho, 'oauth', pg_temp.org('02')) ->> 'error' = 'org_switch', 'NA10: oauth pinned';
-  RAISE NOTICE 'OK NA10 X-Exos-Org: a personal token acts in another org of its user at the role there; OAuth stays pinned';
+  RAISE NOTICE 'OK NA10 X-Exos-Org: pinned tokens refused; an opt-in token (set at creation) acts at the live role there; removal stops it; OAuth pinned';
 END $$;
 
 -- ── NA11 ────────────────────────────────────────────────────────────────────

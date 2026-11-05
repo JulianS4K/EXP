@@ -162,7 +162,9 @@ its own driver, so Exos sends no printer language (FGL). A print is never replay
 `Idempotency-Key`: a retry prints again and voids the paper the lost answer carried.
 `exos_api_writes` logs each print without the codes. Voiding: the holder (to go back to
 their phone) or an owner / manager, `exos_ticket_print_void(ticket)` or
-`DELETE /v1/tickets/:id/print`.
+`DELETE /v1/tickets/:id/print`. The holder's ticket page asks `exos_ticket_print_state(ticket)` and, while the
+ticket is printed, says "This ticket was printed. Use the paper ticket, or void it to use your phone." with a
+button that voids the paper (`src/components/TicketPrintedNotice.tsx`).
 
 The QR is drawn by `_shared/print/qr.ts` (byte mode, level M, versions 1-6), so no image
 service ever sees a door code; `src/lib/printTickets.test.ts` decodes its output with

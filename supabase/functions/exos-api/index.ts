@@ -10,9 +10,10 @@
 // The two user tokens act as their user: every request reads the user's LIVE
 // role (exos_api_token_auth, mig 20261031130500), narrows the token's scopes to
 // it, and refuses a user who is no longer an active member (403). Every
-// request is scoped to the credential's org; a personal access token may name
-// another org of its user with X-Exos-Org (exos_api_token_auth_org, mig
-// 20261105120000), held to the user's role there.
+// request is scoped to the credential's org; a personal access token made
+// with "works across all my organizations" (multi_org) may name another org
+// of its user with X-Exos-Org (exos_api_token_auth_org, mig 20261105120000),
+// held to the user's role there; a pinned one gets 403 token_pinned_to_org.
 // Box office (./boxOffice.ts, mig 20261105120000): printed tickets (one-time
 // print codes, JSON / HTML / PDF), membership reservations, staff shifts,
 // moving a tag assignment.
@@ -300,6 +301,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (resolved === "membership") {
     return json({ error: "this token's user is no longer a member of the organization" }, 403);
   }
+  if (resolved === "token_pinned_to_org") {
+    return json({
+      error: "token_pinned_to_org",
+      message: "this personal access token works only in the organization it was made for; make one with \"works across all my organizations\" to use X-Exos-Org",
+    }, 403);
+  }
   if (resolved === "not_member") {
     return json({ error: "this token's user is not a member of the organization X-Exos-Org names" }, 403);
   }
@@ -428,13 +435,14 @@ const FAN_ROUTES = new Set([
 /**
  * The credential behind a bearer string and its org, "membership" for a user
  * who left, else null. `switchOrg` (X-Exos-Org, mig 20261105120000): the org
- * a personal access token acts in instead of its own, when its user is an
- * active member there ("not_member" otherwise); an OAuth token or an API key
- * naming another org is "org_switch".
+ * a personal access token made with multi_org acts in instead of its own,
+ * when its user is an active member there ("not_member" otherwise); a pinned
+ * personal token naming another org is "token_pinned_to_org", an OAuth token
+ * or an API key "org_switch".
  */
 async function resolveCredential(
   sb: SupabaseClient, token: string, switchOrg: string | null = null,
-): Promise<{ cred: Credential; orgId: string } | "membership" | "not_member" | "org_switch" | null> {
+): Promise<{ cred: Credential; orgId: string } | "membership" | "not_member" | "org_switch" | "token_pinned_to_org" | null> {
   const kind = bearerKind(token);
   if (!kind) return null;
   const hash = await sha256Hex(token);
@@ -466,7 +474,7 @@ async function resolveCredential(
   const t = data as Record<string, unknown> | null;
   if (!t) return null;
   if (t.error === "membership") return "membership";
-  if (t.error === "not_member" || t.error === "org_switch") return t.error;
+  if (t.error === "not_member" || t.error === "org_switch" || t.error === "token_pinned_to_org") return t.error;
   return {
     orgId: String(t.org_id),
     cred: {

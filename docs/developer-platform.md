@@ -53,10 +53,15 @@ panel, or with the token itself: `DELETE /v1/personal-access-tokens/current`.
 
 ### Acting in another organization (`X-Exos-Org`)
 
-Mig `20261105120000`. A personal access token works in its own organization, and in any other organization its
-user is an active member of when the request names it: `X-Exos-Org: <organization id>`. Every such request is held
-to the user's role **there** (and that organization's role settings), exactly as a token made there would be;
-`GET /v1/me` then shows `credential.home_org_id`. Not a member there (or disabled): 403. Opendate's
+Mig `20261105120000`. Opt-in per token: when making a token, tick **Works across all my organizations**
+(`exos_create_personal_token(…, p_multi_org => true)`, column `multi_org`). It is chosen at creation and can't be
+changed afterwards (a trigger refuses it), so a token made for one organization never starts working on another;
+every token made before this, and every token made without the box, is pinned. An opt-in token works in its own
+organization, and in any other organization its user is an active member of when the request names it:
+`X-Exos-Org: <organization id>`. Every such request is held to the user's live role **there** (and that
+organization's role settings, mig `20261104180000`), exactly as a token made there would be; `GET /v1/me` then shows
+`credential.home_org_id`. Not a member there (removed or disabled): 403. A pinned token naming another organization:
+403 `{"error": "token_pinned_to_org"}`. Opendate's
 `PUT /team_memberships/{id}/switch` changes its web app's current team; the dashboard's organization picker does that
 here. OAuth access tokens stay in the organization the user approved the app for, and an org API key is its
 organization: either one naming another organization gets 403 (`exos_api_token_auth_org`).

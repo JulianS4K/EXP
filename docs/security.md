@@ -335,10 +335,12 @@ Nothing new is granted to anon. Points to review:
   replayed from an Idempotency-Key; print answers are `no-store`, the HTML
   page has no script and a `default-src 'none'` CSP. Races:
   `tests/exos/race_print_codes.sh`.
-- **`X-Exos-Org`** (`exos_api_token_auth_org`, service role): a personal
-  access token may act in another org only while its user is an active
-  member there, at the role there (the same narrowing as a token made in
-  that org). OAuth tokens never switch (consent was for one org); an org API
+- **`X-Exos-Org`** (`exos_api_token_auth_org`, service role): opt-in per
+  personal access token (`multi_org`, chosen at creation, fixed by trigger
+  `exos_personal_tokens_multi_org`; existing tokens are pinned and get 403
+  `token_pinned_to_org`). An opt-in token acts in another org only while its
+  user is an active member there, at the role there (the same narrowing as a
+  token made in that org). OAuth tokens never switch (consent was for one org); an org API
   key naming another org is refused. The token's revocation still follows
   its home org (leaving the home org revokes it everywhere).
 - **`exos-tixel-webhook`** is public (no JWT). The secret in `X-Secret` is
