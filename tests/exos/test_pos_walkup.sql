@@ -462,7 +462,7 @@ BEGIN
                     AND html LIKE '%/claim/%'), 'W13: claim mail';
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', r ->> 'id', 'b0c7-other@x.com')) = '55000',
     'W13: already handed over';
-  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', r ->> 'id')) = '55000', 'W13: the seller: no paper beside a claim link';
+  ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: no paper beside a claim link';
   PERFORM pg_temp.act(pg_temp.u('a2'));
   ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: a manager: skipped, in transfer';
   RAISE NOTICE 'OK W13 the screen QR / paper is a print code that scans once; email to an account or a claim link';
@@ -584,7 +584,7 @@ END $$;
 
 -- ── W18 ─────────────────────────────────────────────────────────────────────
 DO $$
-DECLARE r jsonb; v_62 uuid; v_63 uuid; v_tr uuid; v_t uuid;
+DECLARE r jsonb; v_62 uuid; v_63 uuid; v_64 uuid; v_65 uuid; v_tr uuid; v_tr2 uuid; v_t uuid;
 BEGIN
   -- The scanner's own sale (free door ticket: no drawer).
   v_62 := (pg_temp.sell('a3', 'd5', 1, '62') ->> 'id')::uuid;
@@ -608,18 +608,53 @@ BEGIN
     'W18: claim mail';
   -- Sent once: the seller can't send it again (to themselves, say).
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_63, 'b0c7-scanner@x.com')) = '55000', 'W18: no re-delivery';
-  -- An owner / manager can: the old claim link is cancelled.
+  -- An owner / manager can resend an unclaimed claim link: the old link is cancelled.
   PERFORM pg_temp.act(pg_temp.u('a2'));
-  r := public.exos_pos_order_email(v_63, 'b0c7-fan@x.com');
+  r := public.exos_pos_order_email(v_63, 'b0c7-walkin2@x.com');
   ASSERT (r ->> 'emailed')::int = 1, 'W18: manager resends ' || r::text;
-  ASSERT (SELECT status FROM public.exos_transfers WHERE id = v_tr) = 'cancelled'
-     AND (SELECT owner_id FROM public.exos_tickets WHERE id = v_t) = pg_temp.u('a5'), 'W18: resent to a confirmed account';
-  -- A scanned ticket is never sent again.
+  SELECT pending_transfer_id INTO v_tr2 FROM public.exos_tickets WHERE id = v_t;
+  ASSERT (SELECT status FROM public.exos_transfers WHERE id = v_tr) = 'cancelled' AND v_tr2 IS NOT NULL AND v_tr2 <> v_tr
+     AND (SELECT receiver_email || ':' || sender_id FROM public.exos_transfers WHERE id = v_tr2)
+         = 'b0c7-walkin2@x.com:' || pg_temp.u('a3'), 'W18: a new link, still from the seller';
+  -- Once claimed, the ticket is the buyer's: no resend moves it, not even by a manager.
+  UPDATE public.exos_transfers SET status = 'claimed' WHERE id = v_tr2;
+  UPDATE public.exos_tickets SET owner_id = pg_temp.u('a5'), buyer_id = pg_temp.u('a5'), pending_transfer_id = NULL WHERE id = v_t;
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_63, 'b0c7-scanner3@x.com')) = '55000',
+    'W18: a manager can''t take a claimed ticket';
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = v_t) = pg_temp.u('a5'), 'W18: still the buyer''s';
+  -- Nor print it: a live paper code would lock the buyer's app code out.
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_63)) = '55000', 'W18: no codes for a claimed ticket';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_ticket_print_codes WHERE ticket_id = v_t AND status = 'active'), 'W18: no paper made';
+  -- Delivered straight to a confirmed account (W13's sale): the same.
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', (SELECT o.id FROM public.exos_pos_orders o
+           WHERE o.client_ref = pg_temp.k('60')), 'b0c7-scanner3@x.com')) = '55000', 'W18: a delivered ticket stays delivered';
+  -- A ticket in a claim link someone else started (not the seller's) isn't touched.
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  v_65 := (pg_temp.sell('a3', 'd5', 1, '65') ->> 'id')::uuid;
+  UPDATE public.exos_tickets SET pending_transfer_id = v_tr2 WHERE order_ref = 'pos:' || v_65;
+  UPDATE public.exos_transfers SET status = 'pending', sender_id = pg_temp.u('a5') WHERE id = v_tr2;
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_65, 'b0c7-fan@x.com')) = '55000',
+    'W18: not another sender''s claim link';
+  ASSERT (SELECT status FROM public.exos_transfers WHERE id = v_tr2) = 'pending', 'W18: that link is left alone';
+  UPDATE public.exos_transfers SET status = 'claimed' WHERE id = v_tr2;
+  -- A scanned ticket is never sent again, by anyone.
   UPDATE public.exos_tickets SET status = 'used', check_in_at = now() WHERE order_ref = 'pos:' || v_62;
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_62, 'b0c7-fan@x.com')) = '55000', 'W18: scanned';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '55000', 'W18: no codes for a scanned ticket, even a manager';
+  -- Checked in but still active (a test scan): not either.
+  v_64 := (pg_temp.sell('a3', 'd5', 1, '64') ->> 'id')::uuid;
+  UPDATE public.exos_tickets SET check_in_at = now() WHERE order_ref = 'pos:' || v_64;
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_64, 'b0c7-fan@x.com')) = '55000',
+    'W18: a checked-in ticket isn''t sent, even by a manager';
   PERFORM pg_temp.act(pg_temp.u('a3'));
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '55000', 'W18: no paper for a scanned ticket';
-  RAISE NOTICE 'OK W18 only the seller or an owner / manager hands tickets over; unconfirmed email = claim link; no re-delivery';
+  -- The seller still gets codes for an undelivered ticket.
+  v_65 := (pg_temp.sell('a3', 'd5', 1, '66') ->> 'id')::uuid;
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  ASSERT jsonb_array_length(public.exos_pos_order_codes(v_65) -> 'tickets') = 1, 'W18: the seller, an undelivered ticket';
+  RAISE NOTICE 'OK W18 only the seller or an owner / manager hands tickets over; unconfirmed email = claim link; never a claimed or scanned ticket; a manager resends the seller''s unclaimed link';
 END $$;
 
 -- ── W19 ─────────────────────────────────────────────────────────────────────
