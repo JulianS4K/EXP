@@ -10,7 +10,7 @@
       "method": "POST",
       "path": "/v1/events",
       "summary": "Create an event",
-      "description": "Creates a draft event in the key's organization, optionally with its ticket types. Publishing is a separate step (POST /v1/events/:id/publish), which checks the publish blockers. Writable fields: name, description, slug, starts_at, doors_at, ends_at, timezone (IANA), currency, venue_name, venue_location, venue_address (object), category, genres, subgenres, image_url, total_tickets, purchase_limits (object), summary, description_md, faq, video_url, min_age, refund_policy, policy_notes, format (in_person / online / hybrid), what_to_bring, noindex, allow_holder_release, release_cutoff_hours, accessibility, door_name_checkin. Server-owned fields (status, org, tickets_sold, …) are refused with 400 rather than ignored. The answer includes the event's publish_blockers.",
+      "description": "Creates a draft event in the key's organization, optionally with its ticket types. Publishing is a separate step (POST /v1/events/:id/publish), which checks the publish blockers. Writable fields: name, description, slug, starts_at, doors_at, ends_at, timezone (IANA), currency, venue_name, venue_location, venue_address (object), category, genres, subgenres, image_url, total_tickets, purchase_limits (object), summary, description_md, faq, video_url, min_age, refund_policy, policy_notes, format (in_person / online / hybrid), what_to_bring, noindex, allow_holder_release, release_cutoff_hours, accessibility, door_name_checkin, and the location fields location_mode (venue_record / unlisted_venue / secret_location / tba), location_reveal_at, tba_allow_sales and secret_location (an object: the exact address of a secret_location event, never shown in event answers; see Event location). Server-owned fields (status, org, tickets_sold, …) are refused with 400 rather than ignored. The answer includes the event's publish_blockers.",
       "scope": "events:write",
       "parameters": [
         {
@@ -138,7 +138,7 @@
       "method": "PATCH",
       "path": "/v1/events/:id",
       "summary": "Update an event",
-      "description": "Changes the given fields and leaves the rest. Same writable fields as Create an event; status changes go through publish / unpublish. Changing the start of an event with tickets sold follows the dashboard's date-change rules.",
+      "description": "Changes the given fields and leaves the rest. Same writable fields as Create an event (including the location fields; PUT /v1/events/:id/location sets them in one call); status changes go through publish / unpublish. Changing the start of an event with tickets sold follows the dashboard's date-change rules.",
       "scope": "events:write",
       "parameters": [
         {

@@ -1,3 +1,4 @@
+import TicketLocation from '../components/TicketLocation';
 import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -518,6 +519,11 @@ export default function TicketDetail() {
                  {(currentTicket.status === 'active' || currentTicket.status === 'used')
                    && !(currentTicket as any).pendingTransferId && (
                    <TicketOnlineAccess eventId={event.id} format={event.format} whatToBring={event.whatToBring} />
+                 )}
+
+                 {/* A secret / TBA location (mig 20261105130000): the address once revealed. */}
+                 {(currentTicket.status === 'active' || currentTicket.status === 'used') && (
+                   <TicketLocation eventId={event.id} mode={event.locationMode} timezone={event.timezone} />
                  )}
 
                  {/* Matched seats (mig 20261031210000): the holder's group, revealed before the event. */}

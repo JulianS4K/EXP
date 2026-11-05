@@ -14,6 +14,7 @@ import { supabase } from './supabase';
 import { Organization, OrgMembership, OrgRole } from '../types';
 import { publicUrl } from './utils';
 import { parseSite } from './site';
+import { parseOrgType } from './eventLocation';
 
 // --- Slug helpers (pure) ---------------------------------------------------
 
@@ -58,6 +59,8 @@ function mapOrg(row: any, secrets?: any): Organization {
     theme: row.theme ?? undefined,
     marketing: row.marketing ?? undefined,
     site: parseSite(row.site),
+    // A label and UI defaults (mig 20261105130000); undefined until the column exists.
+    ...('org_type' in row ? { orgType: parseOrgType(row.org_type) } : {}),
     // payments/distribution live in exos_org_secrets (owner/finance RLS); absent
     // for non-privileged readers.
     payments: secrets?.payments ?? undefined,

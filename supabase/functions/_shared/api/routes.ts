@@ -767,6 +767,11 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'clock-in', method: 'POST', auth: K, path: '/staff-shifts/clock-in', scope: 'checkin:write', paged: false },
   { id: 'clock-out', method: 'POST', auth: K, path: '/staff-shifts/clock-out', scope: 'checkin:write', paged: false },
   { id: 'update-tagged-item', method: 'PUT', auth: K, path: '/tagged-items/:id', scope: 'events:write', paged: false },
+  // claude/exos-promoter-events (mig 20261105130000, docs/promoter-events.md):
+  // an event's location mode and the "this venue is on Exos" suggestion.
+  { id: 'get-event-location', method: 'GET', auth: K, path: '/events/:id/location', scope: 'events:read', paged: false },
+  { id: 'set-event-location', method: 'PUT', auth: K, path: '/events/:id/location', scope: 'events:write', paged: false },
+  { id: 'list-venue-matches', method: 'GET', auth: K, path: '/venue-matches', scope: 'events:read', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

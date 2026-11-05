@@ -10,6 +10,7 @@
 
 import PaymentMethodsPanel from '../components/PaymentMethodsPanel';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import OrgTypePanel from '../components/OrgTypePicker';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, Upload } from 'lucide-react';
@@ -744,6 +745,10 @@ export default function OrgSettings() {
             {/* S4K network (owner): S4K may list this org's events on the
                 marketplaces from the Exos feed (docs/marketplace/s4k-feed.md). */}
             <S4kNetworkCard orgId={org.id} initial={org.s4kNetwork === true} canEdit={activeRole === 'owner'} />
+            {/* Organizer / promoter / collective (mig 20261105130000): a label and defaults. */}
+            {org.orgType !== undefined && (
+              <OrgTypePanel orgId={org.id} initial={org.orgType} canEdit={isAdmin || activeRole === 'owner'} />
+            )}
 
             {/* Meta info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-xs text-slate-500 space-y-2">

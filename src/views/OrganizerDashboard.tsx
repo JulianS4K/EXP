@@ -13,6 +13,7 @@ import SalesChart from '../components/SalesChart';
 import ImportEventsPanel from '../components/ImportEventsPanel';
 import { canSeeMoney } from '../lib/settlement';
 import { soldElsewhereByEvent } from '../lib/salesCounts';
+import { orgTypeDefaults, parseOrgType } from '../lib/eventLocation';
 
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
@@ -143,7 +144,10 @@ export default function OrganizerDashboard() {
                 <Link to={`/orgs/${activeOrg.id}/flags`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                   <Flag className="w-4 h-4" /><span>Limit flags</span>
                 </Link>
-                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? '')) && (
+                {/* An org with no venue (promoter / collective, mig 20261105130000) doesn't
+                    need the venue calendar here; the page itself stays reachable. */}
+                {(isAdmin || ['owner', 'manager', 'content', 'finance'].includes(activeRole ?? ''))
+                  && !orgTypeDefaults(parseOrgType(activeOrg.orgType)).hideVenueManagement && (
                   <Link to={`/orgs/${activeOrg.id}/calendar`} className="bg-white text-slate-900 border border-slate-200 px-4 py-3 rounded flex items-center gap-2 font-bold hover:bg-slate-50 shadow-sm transition-all text-sm">
                     <Calendar className="w-4 h-4" /><span>Booking calendar</span>
                   </Link>
