@@ -61,19 +61,36 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- 1. Claim: lock the transfer, then the ticket.
 -- ---------------------------------------------------------------------------
-SELECT pg_temp.exos_patch_n('public.exos_claim_transfer(uuid)',
+-- Prod already runs a hardened exos_claim_transfer (mig 20260924200848, which
+-- the SQL harness doesn't replay): it locks the transfer and the ticket FOR
+-- UPDATE and refuses a voided ticket. There the two patches below have no text
+-- to match and nothing to add, so each runs only when its lock is missing
+-- (found on the 2026-11-05 prod rollout: "expected 1 match(es), found 0").
+DO $claim_locks$
+DECLARE v_def text := replace(pg_get_functiondef('public.exos_claim_transfer(uuid)'::regprocedure), chr(13), '');
+BEGIN
+  IF position('FROM public.exos_transfers WHERE id = p_transfer_id FOR UPDATE' in v_def) = 0 THEN
+PERFORM pg_temp.exos_patch_n('public.exos_claim_transfer(uuid)',
   '/* exos: claim locks the transfer */',
   $o$  SELECT * INTO tr FROM public.exos_transfers WHERE id = p_transfer_id;$o$,
   $n$  /* exos: claim locks the transfer */ -- mig 20261104100000: two claims, or a claim and
   -- the sender's cancel, serialize here; the loser sees the winner's status.
   SELECT * INTO tr FROM public.exos_transfers WHERE id = p_transfer_id FOR UPDATE;$n$, 1);
-
-SELECT pg_temp.exos_patch_n('public.exos_claim_transfer(uuid)',
+  ELSE
+    RAISE NOTICE 'exos_claim_transfer already locks the transfer; patch skipped';
+  END IF;
+  v_def := replace(pg_get_functiondef('public.exos_claim_transfer(uuid)'::regprocedure), chr(13), '');
+  IF position('WHERE id = tr.ticket_id FOR UPDATE' in v_def) = 0 THEN
+PERFORM pg_temp.exos_patch_n('public.exos_claim_transfer(uuid)',
   '/* exos: claim locks the ticket */',
   $o$  SELECT status INTO v_status FROM public.exos_tickets WHERE id = tr.ticket_id;$o$,
   $n$  /* exos: claim locks the ticket */ -- mig 20261104100000: a refund (or check-in)
   -- racing the claim commits first or waits; a voided ticket is never revived.
   SELECT status INTO v_status FROM public.exos_tickets WHERE id = tr.ticket_id FOR UPDATE;$n$, 1);
+  ELSE
+    RAISE NOTICE 'exos_claim_transfer already locks the ticket; patch skipped';
+  END IF;
+END $claim_locks$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Cancel: the same lock (full definition; see the header).
