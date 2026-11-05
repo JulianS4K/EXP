@@ -15,6 +15,12 @@
 # This script applies only the listed files, each in ONE transaction together with its
 # history row, skips any already recorded (by name), and stops at the first error.
 # 20261027090000_exos_api_scopes was applied on 2026-11-04 (version 20261104184729).
+#
+# After the rollout: run scripts/verify-prod.sh (read-only) with the same DB_URL
+# plus SUPABASE_URL and SUPABASE_ANON_KEY. It checks that every migration above is
+# recorded, their objects exist, anon grants and RLS, the exos crons, that each
+# edge function is deployed and boots, and the platform settings rows. Exit 0 = no FAIL.
+#   bash scripts/verify-prod.sh all      # or: db | http
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REF=hzrizjeaxlqcxfrtczpq
