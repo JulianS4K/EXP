@@ -17,8 +17,13 @@
 --   W15 checkout answers at the door attach to the tickets
 --   W16 partner API cores: list, void by an owner / manager key, other orgs
 --   W17 cross-org isolation through RLS and the RPCs
+--   W18 handing over: only the seller or an owner / manager; unconfirmed
+--       accounts get a claim link; no re-delivery (owner / manager can, never
+--       a scanned ticket)
+--   W19 drawers are their holder's: sell into, void out of, close, gift cards
 -- Self-contained (BEGIN / ROLLBACK). Org …01: owner a1, manager a2, scanner a3
--- (assigned to e1), scanner a6 (assigned to e2), finance a4; buyer a5 (no org).
+-- (assigned to e1), scanner a6 (assigned to e2), scanner a7 (org-wide), finance a4;
+-- buyer a5 (no org); a8 an account whose email isn't confirmed.
 -- Org …02: owner b9, event e9.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -63,6 +68,7 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
   (pg_temp.u('a1'), 'b0c7-owner@x.com', now()), (pg_temp.u('a2'), 'b0c7-manager@x.com', now()),
   (pg_temp.u('a3'), 'b0c7-scanner@x.com', now()), (pg_temp.u('a4'), 'b0c7-finance@x.com', now()),
   (pg_temp.u('a5'), 'b0c7-fan@x.com', now()), (pg_temp.u('a6'), 'b0c7-scanner2@x.com', now()),
+  (pg_temp.u('a7'), 'b0c7-scanner3@x.com', now()), (pg_temp.u('a8'), 'b0c7-unconfirmed@x.com', NULL),
   (pg_temp.u('b9'), 'b0c7-other@x.com', now());
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   (pg_temp.u('01'), 'Walkup Org', 'b0c7-org', pg_temp.u('a1')),
@@ -70,7 +76,8 @@ INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
 INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
   (pg_temp.u('01'), pg_temp.u('a1'), 'owner'), (pg_temp.u('01'), pg_temp.u('a2'), 'manager'),
   (pg_temp.u('01'), pg_temp.u('a3'), 'scanner'), (pg_temp.u('01'), pg_temp.u('a4'), 'finance'),
-  (pg_temp.u('01'), pg_temp.u('a6'), 'scanner'), (pg_temp.u('02'), pg_temp.u('b9'), 'owner');
+  (pg_temp.u('01'), pg_temp.u('a6'), 'scanner'), (pg_temp.u('01'), pg_temp.u('a7'), 'scanner'),
+  (pg_temp.u('02'), pg_temp.u('b9'), 'owner');
 INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, total_tickets, tickets_sold, currency, created_by) VALUES
   (pg_temp.u('e1'), pg_temp.u('01'), 'Walkup Night', 'b0c7-night', 'published', now() + interval '1 hour', 60, 0, 'usd', pg_temp.u('a1')),
   (pg_temp.u('e2'), pg_temp.u('01'), 'Walkup Other Night', 'b0c7-night2', 'published', now() + interval '1 day', 60, 0, 'usd', pg_temp.u('a1')),
@@ -121,8 +128,9 @@ BEGIN
       'public._exos_pos_walkup_complete(uuid,uuid,text,uuid,text)', 'public._exos_pos_walkup_cancel(uuid,uuid,text)',
       'public._exos_pos_walkup_sell(uuid,boolean,uuid,uuid,integer,uuid,integer,text,uuid,uuid,text,text,jsonb,text)',
       'public._exos_pos_reverse(uuid,boolean,uuid,uuid,uuid,text,text,boolean,uuid,uuid)',
-      'public._exos_pos_paid_out(uuid,boolean,uuid,integer,text,uuid)', 'public._exos_pos_deliver_email(uuid,uuid,text)',
-      'public._exos_pos_actor_role(uuid,uuid,boolean)', 'public._exos_pos_open_drawer(uuid,uuid,uuid,uuid)',
+      'public._exos_pos_paid_out(uuid,boolean,uuid,integer,text,uuid)', 'public._exos_pos_deliver_email(uuid,uuid,text,boolean)',
+      'public._exos_pos_actor_role(uuid,uuid,boolean)', 'public._exos_pos_open_drawer(uuid,uuid,uuid,uuid,boolean)',
+      'public._exos_pos_drawer_refusal(uuid,uuid,uuid,boolean)',
       'public._exos_pos_drawer_cash(uuid)', 'public._exos_pos_order_json(uuid,uuid)',
       'public._exos_api_pos_orders(uuid,uuid,integer,integer)', 'public._exos_api_pos_void(uuid,uuid,uuid,uuid,text,uuid)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE')
@@ -423,7 +431,10 @@ DO $$
 DECLARE r jsonb; p jsonb; c text; t uuid; tr uuid;
 BEGIN
   -- Screen QR / paper: a one-time print code that scans like any printed ticket.
+  -- (The scanner can't hand over the manager's sale: W18.)
   PERFORM pg_temp.act(pg_temp.u('a3'));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', pg_temp.v('o_comp'))) = '42501', 'W13: not the scanner''s sale';
+  PERFORM pg_temp.act(pg_temp.u('a2'));
   p := public.exos_pos_order_codes(pg_temp.v('o_comp')::uuid);
   c := p #>> '{tickets,0,print_code}';
   t := (p #>> '{tickets,0,ticket_id}')::uuid;
@@ -451,7 +462,9 @@ BEGIN
                     AND html LIKE '%/claim/%'), 'W13: claim mail';
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', r ->> 'id', 'b0c7-other@x.com')) = '55000',
     'W13: already handed over';
-  ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: no paper beside a claim link';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', r ->> 'id')) = '55000', 'W13: the seller: no paper beside a claim link';
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: a manager: skipped, in transfer';
   RAISE NOTICE 'OK W13 the screen QR / paper is a print code that scans once; email to an account or a claim link';
 END $$;
 
@@ -567,6 +580,87 @@ BEGIN
   ASSERT pg_temp.st($s$SELECT public.exos_pos_void_order('$s$ || pg_temp.v('o_split') || $s$', 'not mine')$s$) = 'P0002',
     'W17: another org voids nothing (not found)';
   RAISE NOTICE 'OK W17 cross-org isolation: RLS on the ledgers, RPCs answer not found / not authorized';
+END $$;
+
+-- ── W18 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r jsonb; v_62 uuid; v_63 uuid; v_tr uuid; v_t uuid;
+BEGIN
+  -- The scanner's own sale (free door ticket: no drawer).
+  v_62 := (pg_temp.sell('a3', 'd5', 1, '62') ->> 'id')::uuid;
+  -- Another scanner working the same door can't hand it over (no redirecting).
+  PERFORM pg_temp.act(pg_temp.u('a7'));
+  ASSERT public._exos_pos_actor_role(pg_temp.u('e1'), pg_temp.u('a7')) = 'scanner', 'W18: a7 works this door';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_62, 'b0c7-scanner3@x.com')) = '42501', 'W18: no email';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '42501', 'W18: no print / QR';
+  ASSERT NOT (SELECT (x ->> 'can_hand_over')::boolean FROM jsonb_array_elements(public.exos_pos_recent_sales(pg_temp.u('e1'), 50)) x
+               WHERE x ->> 'id' = v_62::text), 'W18: no hand-over button';
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE order_ref = 'pos:' || v_62) = pg_temp.u('a3'), 'W18: still the seller''s';
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  ASSERT jsonb_array_length(public.exos_pos_order_codes(v_62) -> 'tickets') = 1, 'W18: the seller shows the QR';
+
+  -- An account whose email isn't confirmed gets a claim link, not the ticket.
+  v_63 := (pg_temp.sell('a3', 'd5', 1, '63', 0, 'cash', NULL, 'b0c7-unconfirmed@x.com') ->> 'id')::uuid;
+  SELECT id, pending_transfer_id INTO v_t, v_tr FROM public.exos_tickets WHERE order_ref = 'pos:' || v_63;
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = v_t) = pg_temp.u('a3') AND v_tr IS NOT NULL
+     AND (SELECT receiver_email FROM public.exos_transfers WHERE id = v_tr) = 'b0c7-unconfirmed@x.com', 'W18: claim link, not ownership';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'b0c7-unconfirmed@x.com' AND template = 'transfer-initiated'),
+    'W18: claim mail';
+  -- Sent once: the seller can't send it again (to themselves, say).
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_63, 'b0c7-scanner@x.com')) = '55000', 'W18: no re-delivery';
+  -- An owner / manager can: the old claim link is cancelled.
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  r := public.exos_pos_order_email(v_63, 'b0c7-fan@x.com');
+  ASSERT (r ->> 'emailed')::int = 1, 'W18: manager resends ' || r::text;
+  ASSERT (SELECT status FROM public.exos_transfers WHERE id = v_tr) = 'cancelled'
+     AND (SELECT owner_id FROM public.exos_tickets WHERE id = v_t) = pg_temp.u('a5'), 'W18: resent to a confirmed account';
+  -- A scanned ticket is never sent again.
+  UPDATE public.exos_tickets SET status = 'used', check_in_at = now() WHERE order_ref = 'pos:' || v_62;
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_62, 'b0c7-fan@x.com')) = '55000', 'W18: scanned';
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_order_codes(%L)', v_62)) = '55000', 'W18: no paper for a scanned ticket';
+  RAISE NOTICE 'OK W18 only the seller or an owner / manager hands tickets over; unconfirmed email = claim link; no re-delivery';
+END $$;
+
+-- ── W19 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r jsonb; v_o uuid; v_82 int;
+BEGIN
+  -- The manager's drawer 82 is open (W10). The scanner can't sell into it ...
+  ASSERT pg_temp.sell_st('a3', 'd2', 1, '72', 0, 'cash', pg_temp.u('82')) = '42501', 'W19: not into another member''s drawer';
+  ASSERT pg_temp.sell_st('a3', 'd2', 1, '72') = '55000', 'W19: and nothing picks it for them';
+  -- ... sells into their own.
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  INSERT INTO public.exos_pos_drawer_sessions (id, event_id, open_float_cents) VALUES (pg_temp.u('84'), pg_temp.u('e1'), 1000);
+  r := pg_temp.sell('a3', 'd2', 1, '73');
+  v_o := (r ->> 'id')::uuid;
+  ASSERT (SELECT drawer_session_id FROM public.exos_pos_payments WHERE order_id = v_o) = pg_temp.u('84'), 'W19: own drawer';
+  -- Another scanner can't close it, nor pay out of it.
+  PERFORM pg_temp.act(pg_temp.u('a7'));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_close_drawer(%L, 0)', pg_temp.u('84'))) = '42501', 'W19: not their drawer to close';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_paid_out(%L, 100, %L)', pg_temp.u('84'), 'taking it')) = '42501', 'W19: nor to pay out';
+  ASSERT pg_temp.st(format($q$SELECT public.exos_gift_card_issue(%L, 1000, 'cash', NULL, 'usd', NULL, NULL, NULL, NULL, NULL, 'box_office', %L)$q$,
+                           pg_temp.u('01'), pg_temp.u('84'))) = '42501', 'W19: nor sell a gift card into it';
+  -- The scanner closes their drawer; a void then has no drawer of theirs to pay out of.
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  PERFORM public.exos_pos_close_drawer(pg_temp.u('84'), public._exos_pos_drawer_cash(pg_temp.u('84')));
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_void_order(%L, %L)', v_o, 'wrong type')) = '55000', 'W19: no own drawer open';
+  ASSERT pg_temp.st(format('SELECT public.exos_pos_void_order(%L, %L, %L)', v_o, 'wrong type', pg_temp.u('82'))) = '42501',
+    'W19: a void can''t pay out of another member''s drawer';
+  ASSERT (SELECT status FROM public.exos_pos_orders WHERE id = v_o) = 'paid', 'W19: nothing changed';
+  -- An owner / manager can name any open drawer at the event.
+  v_82 := public._exos_pos_drawer_cash(pg_temp.u('82'));
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  r := public.exos_pos_void_order(v_o, 'wrong type', pg_temp.u('82'));
+  ASSERT r ->> 'status' = 'void' AND (r ->> 'drawer_id')::uuid = pg_temp.u('82'), 'W19: manager voids from 82 ' || r::text;
+  ASSERT public._exos_pos_drawer_cash(pg_temp.u('82')) = v_82 - 3300
+     AND (SELECT drawer_session_id FROM public.exos_pos_paid_outs WHERE order_id = v_o) = pg_temp.u('82'), 'W19: paid out of 82';
+  -- The scanner's catalog lists only their own drawers; the manager's all.
+  PERFORM pg_temp.act(pg_temp.u('a7'));
+  ASSERT jsonb_array_length(public.exos_pos_walkup_catalog(pg_temp.u('e1')) -> 'drawers') = 0, 'W19: a7 has none';
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  ASSERT jsonb_array_length(public.exos_pos_walkup_catalog(pg_temp.u('e1')) -> 'drawers') = 1, 'W19: the manager sees 82';
+  RAISE NOTICE 'OK W19 a drawer is its holder''s: sell into, void / pay out of, close, gift cards; owners / managers name any';
 END $$;
 
 ROLLBACK;

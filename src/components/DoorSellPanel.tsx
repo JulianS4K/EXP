@@ -72,8 +72,8 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       const c = await getWalkupCatalog(eventId);
       setCat(c);
       setLoadErr(null);
-      setDrawerId((cur) => (cur && c.drawers.some((d) => d.id === cur) ? cur
-        : c.drawers.find((d) => d.mine)?.id ?? c.drawers[0]?.id ?? null));
+      // Only ever this member's own drawer by default; an owner / manager picks another one by hand.
+      setDrawerId((cur) => (cur && c.drawers.some((d) => d.id === cur) ? cur : c.drawers.find((d) => d.mine)?.id ?? null));
       setTierId((cur) => cur ?? c.tiers.find((t) => t.remaining === null || t.remaining > 0)?.tier_id ?? null);
       setSales(await getRecentSales(eventId, 15));
     } catch (e) {
@@ -439,7 +439,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                     {o.tickets_scanned > 0 ? ` · ${o.tickets_scanned} in` : ''}
                   </span>
                 </span>
-                {o.status === 'paid' && o.ticket_ids.length > 0 && (
+                {o.status === 'paid' && o.can_hand_over && o.ticket_ids.length > 0 && (
                   <button type="button" aria-label="Show the QR" disabled={busy} onClick={() => void showQr(o)}
                     className="w-12 h-12 rounded-xl border border-slate-300 flex items-center justify-center">
                     <QrCode className="w-5 h-5" />
@@ -462,10 +462,11 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
         <h2 id="drawer-h" className="text-sm font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
           <Wallet className="w-4 h-4" /> Cash drawer
         </h2>
-        {cat.drawers.length > 1 && (
+        {cat.drawers.some((d) => !d.mine || cat.drawers.length > 1) && (
           <label className="block text-sm">
             <span className="block font-bold mb-1">Drawer</span>
             <select value={drawerId ?? ''} onChange={(e) => setDrawerId(e.target.value || null)} className={INPUT}>
+              <option value="">{cat.drawers.some((d) => d.mine) ? 'Pick a drawer' : 'Open your own below, or pick one'}</option>
               {cat.drawers.map((d) => (
                 <option key={d.id} value={d.id}>{d.mine ? 'Mine' : 'Drawer'} · opened {new Date(d.opened_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</option>
               ))}
