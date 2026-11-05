@@ -1,0 +1,1061 @@
+{
+ "file": "box-office",
+ "name": "Box office: printed tickets, membership sales, staff shifts",
+ "order": 61,
+ "description": "Selling and admitting at the counter. **Printed tickets**: a paper ticket carries a one-time print code instead of a static barcode; it admits once, a reprint voids the last paper, and while it is live the ticket's app and wallet codes are refused (docs/wallet.md \"Printed tickets\"). **Membership reservations**: hold a capacity-limited membership for 10 minutes while the member pays at the counter, then complete or cancel it (docs/memberships.md). **Staff shifts**: staff clock in and out with their own token; owners and managers read the hours (docs/pos.md). Plus moving a tag assignment to another tag. Personal access tokens may also act in another organization of their user with the `X-Exos-Org` header (docs/developer-platform.md).",
+ "endpoints": [
+  {
+   "id": "print-ticket",
+   "method": "POST",
+   "path": "/v1/tickets/:id/print",
+   "summary": "Print a ticket",
+   "description": "Mints the ticket's one-time print code and answers it with what goes on the paper. Exos prints no static barcode: the code admits once (the door spends it with the ticket), voids the ticket's last paper, and while it is live the ticket's app and wallet codes are refused at the door. A transfer, refund or new secret voids it. The code is in this answer only (Exos keeps its SHA-256), so a retry prints again; an Idempotency-Key is not replayed here. `format=html` / `format=pdf` answer the page or PDF to print (Cache-Control: no-store); any ticket printer prints the PDF through its driver. Opendate's POST /confirms/:confirm_id/tickets/:barcode/print is an alias, the confirm id pinning the event. Needs a key created by an owner or manager. docs/wallet.md \"Printed tickets\".",
+   "auth": "api_key",
+   "scope": "tickets:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The ticket's id (or its app or print code).",
+     "example": "7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "format",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "json (default): the codes; html: a printable page; pdf: a PDF, one 4 x 8 in page per ticket.",
+     "example": "pdf",
+     "enum": [
+      "json",
+      "html",
+      "pdf"
+     ],
+     "default": "json"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Printed (format=json; html and pdf answer the document).",
+     "example": {
+      "data": [
+       {
+        "ticket_id": "7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "print_code": "P-7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b:k3Jx9_Qm2LtVw8Zr5NcA0b",
+        "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "event_name": "Late Show",
+        "starts_at": "2026-11-08T01:00:00+00:00",
+        "doors_at": "2026-11-08T00:30:00+00:00",
+        "timezone": "America/New_York",
+        "occurs_at_local": null,
+        "venue_name": "The Room",
+        "venue_location": "Brooklyn, NY",
+        "tier_name": "GA",
+        "attendee_name": "Sam Lee",
+        "seat_label": null,
+        "org_name": "Lincoln Hall",
+        "order_ref": "cs_test_a1b2",
+        "printed_at": "2026-11-05T20:14:03.201+00:00"
+       }
+      ],
+      "skipped": []
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such ticket in this organization (or not on the confirm in the path).",
+     "example": {
+      "error": "ticket not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "Used, voided, in transfer, or the event is cancelled.",
+     "example": {
+      "error": "this ticket can't be printed (used)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks tickets:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    },
+    {
+     "status": 429,
+     "description": "More than 60 prints a minute by one member.",
+     "example": {
+      "error": "too many prints a minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "void-ticket-print",
+   "method": "DELETE",
+   "path": "/v1/tickets/:id/print",
+   "summary": "Void a ticket's paper",
+   "description": "Voids the ticket's live print code, if it has one: the paper stops admitting and the app and wallet codes work again. `voided` is false when there was nothing to void. Needs a key created by an owner or manager.",
+   "auth": "api_key",
+   "scope": "tickets:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The ticket's id (or its app or print code).",
+     "example": "7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "ticket_id": "7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+       "voided": true
+      }
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such ticket in this organization.",
+     "example": {
+      "error": "ticket not found"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks tickets:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "print-order",
+   "method": "POST",
+   "path": "/v1/orders/:id/print",
+   "summary": "Print an order",
+   "description": "Prints every ticket of the order that can be printed now, as POST /v1/tickets/:id/print does for one; the others come back under `skipped` with why (used, voided, in-transfer, event-cancelled). Opendate's POST /confirms/:confirm_id/orders/:id/print is an alias. At most 50 tickets a call.",
+   "auth": "api_key",
+   "scope": "tickets:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order's id (its checkout session id).",
+     "example": "cs_test_a1b2"
+    },
+    {
+     "name": "format",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "json (default): the codes; html: a printable page; pdf: a PDF, one 4 x 8 in page per ticket.",
+     "example": "pdf",
+     "enum": [
+      "json",
+      "html",
+      "pdf"
+     ],
+     "default": "json"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Printed.",
+     "example": {
+      "data": [
+       {
+        "ticket_id": "7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "print_code": "P-7c1e5a20-3b4d-4e5f-8a9b-0c1d2e3f4a5b:k3Jx9_Qm2LtVw8Zr5NcA0b",
+        "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "event_name": "Late Show",
+        "starts_at": "2026-11-08T01:00:00+00:00",
+        "doors_at": "2026-11-08T00:30:00+00:00",
+        "timezone": "America/New_York",
+        "occurs_at_local": null,
+        "venue_name": "The Room",
+        "venue_location": "Brooklyn, NY",
+        "tier_name": "GA",
+        "attendee_name": "Sam Lee",
+        "seat_label": null,
+        "org_name": "Lincoln Hall",
+        "order_ref": "cs_test_a1b2",
+        "printed_at": "2026-11-05T20:14:03.201+00:00"
+       }
+      ],
+      "skipped": [
+       {
+        "ticket_id": "1f2e3d4c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "reason": "used"
+       }
+      ]
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such order in this organization.",
+     "example": {
+      "error": "order not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "The order has no tickets.",
+     "example": {
+      "error": "this order has no tickets"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks tickets:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-membership-capacity",
+   "method": "GET",
+   "path": "/v1/membership-products/:id/capacity",
+   "summary": "Read a membership's capacity",
+   "description": "The most memberships the product may have (`capacity`, null: no limit), the places taken (live or pending memberships plus open box-office reservations) and the places left.",
+   "auth": "api_key",
+   "scope": "commerce:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The membership product's id.",
+     "example": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "capacity": 200,
+       "used": 187,
+       "left": 13
+      }
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such product in this organization.",
+     "example": {
+      "error": "membership product not found"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks commerce:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "set-membership-capacity",
+   "method": "PUT",
+   "path": "/v1/membership-products/:id/capacity",
+   "summary": "Set a membership's capacity",
+   "description": "Sets (or, with null, removes) the limit. Below what is taken already is allowed: nobody loses a membership, new sales stop until places free up. Online checkout answers sold out when none is left. Needs a key created by an owner or manager.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The membership product's id.",
+     "example": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "capacity",
+     "location": "body",
+     "type": "integer | null",
+     "required": true,
+     "description": "1 to 1000000, or null for no limit.",
+     "example": 200
+    }
+   ],
+   "request_example": {
+    "capacity": 200
+   },
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "capacity": 200,
+       "used": 187,
+       "left": 13
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "Not a whole number from 1 to 1000000 or null.",
+     "example": {
+      "error": "capacity must be a whole number from 1 to 1000000, or null for no limit."
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such product in this organization.",
+     "example": {
+      "error": "membership product not found"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-membership-reservation",
+   "method": "POST",
+   "path": "/v1/membership-products/:id/reservations",
+   "summary": "Reserve a membership (box office)",
+   "description": "Holds one place on the product for 10 minutes while the member pays at the counter: cash, a check, or a card on your own terminal (`external`). Complete it once the money is in hand; cancel it to back out; if neither happens it expires and the place frees up. The product must be published and active. Opendate's POST /membership_products/:id/membership_reservations is an alias and its wrapped body (`membership_reservation[email]`) is read too; `use_card_reader` and `gift` are refused (no card reader, no gifts at the box office) rather than ignored, and `membership_product_price_id` is ignored (a product has one price). Needs a key created by an owner or manager. docs/memberships.md.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The membership product's id.",
+     "example": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "email",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The member's email (an account with it confirmed gets the membership at once).",
+     "example": "jane@example.com"
+    },
+    {
+     "name": "first_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 60 characters.",
+     "example": "Jane"
+    },
+    {
+     "name": "last_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 60 characters.",
+     "example": "Doe"
+    },
+    {
+     "name": "payment_method",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "How the counter takes the money.",
+     "example": "cash",
+     "enum": [
+      "cash",
+      "check",
+      "external"
+     ],
+     "default": "cash"
+    },
+    {
+     "name": "payment_reference",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "A check number or terminal reference, at most 255 characters.",
+     "example": "#1042"
+    },
+    {
+     "name": "device_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "The selling device, at most 255 characters.",
+     "example": "Box office 1"
+    }
+   ],
+   "request_example": {
+    "email": "jane@example.com",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "payment_method": "cash",
+    "device_name": "Box office 1"
+   },
+   "responses": [
+    {
+     "status": 201,
+     "description": "Reserved.",
+     "example": {
+      "data": {
+       "id": "5d2c8e10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "token": "mbr_ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+       "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "state": "reserved",
+       "email": "jane@example.com",
+       "first_name": "Jane",
+       "last_name": "Doe",
+       "payment_method": "cash",
+       "payment_reference": null,
+       "amount_cents": 6000,
+       "currency": "usd",
+       "device_name": "Box office 1",
+       "membership_id": null,
+       "expires_at": "2026-11-05T20:24:03.201+00:00",
+       "completed_at": null,
+       "cancelled_at": null,
+       "created_at": "2026-11-05T20:14:03.201+00:00"
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "A missing or bad field, a card reader or a gift.",
+     "example": {
+      "error": "payment_method must be cash, check or external."
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such product in this organization.",
+     "example": {
+      "error": "membership product not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "Sold out, not on sale, or the email already has the membership or an open reservation.",
+     "example": {
+      "error": "this membership is sold out"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel-membership-reservation",
+   "method": "DELETE",
+   "path": "/v1/membership-products/:id/reservations/:token",
+   "summary": "Cancel a membership reservation",
+   "description": "Backs out before the money is taken and frees the place. Cancelling again answers the same; an expired one answers `expired`. A completed reservation can't be cancelled: refund the membership instead. Opendate's DELETE …/membership_reservations/:token is an alias.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The membership product's id.",
+     "example": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "token",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The reservation's token.",
+     "example": "mbr_ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "5d2c8e10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "token": "mbr_ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+       "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "state": "cancelled",
+       "email": "jane@example.com",
+       "first_name": "Jane",
+       "last_name": "Doe",
+       "payment_method": "cash",
+       "payment_reference": null,
+       "amount_cents": 6000,
+       "currency": "usd",
+       "device_name": "Box office 1",
+       "membership_id": null,
+       "expires_at": "2026-11-05T20:24:03.201+00:00",
+       "completed_at": null,
+       "cancelled_at": "2026-11-05T20:16:40.002+00:00",
+       "created_at": "2026-11-05T20:14:03.201+00:00"
+      }
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such reservation on this product.",
+     "example": {
+      "error": "reservation not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "Already completed.",
+     "example": {
+      "error": "this reservation is completed; it can't be cancelled"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "complete-membership-reservation",
+   "method": "POST",
+   "path": "/v1/membership-products/:id/reservations/:token/complete",
+   "summary": "Complete a membership reservation",
+   "description": "The money is in hand: issues the membership (active now, one term of the product, source purchase) and sends membership.created. Completing again answers the same membership with `replay: true`. A cancelled or expired reservation is refused: reserve again. Opendate's POST …/membership_reservations/:token/complete is an alias.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The membership product's id.",
+     "example": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "token",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The reservation's token.",
+     "example": "mbr_ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "reservation": {
+        "id": "5d2c8e10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "token": "mbr_ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "state": "completed",
+        "email": "jane@example.com",
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "payment_method": "cash",
+        "payment_reference": null,
+        "amount_cents": 6000,
+        "currency": "usd",
+        "device_name": "Box office 1",
+        "membership_id": "c4d5e6f7-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "expires_at": "2026-11-05T20:24:03.201+00:00",
+        "completed_at": "2026-11-05T20:17:12.420+00:00",
+        "cancelled_at": null,
+        "created_at": "2026-11-05T20:14:03.201+00:00"
+       },
+       "membership": {
+        "id": "c4d5e6f7-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "product_id": "b0a1c2d3-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "holder_email": "jane@example.com",
+        "status": "active",
+        "billing": "once",
+        "source": "purchase",
+        "current_period_end": "2027-11-05T20:17:12.420+00:00"
+       }
+      }
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such reservation on this product.",
+     "example": {
+      "error": "reservation not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "Cancelled, expired, or the email got the membership another way meanwhile.",
+     "example": {
+      "error": "this reservation expired; reserve again"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key's creator is not an owner or manager of the organization now.",
+     "example": {
+      "error": "only a key created by an organization owner or manager can do this"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-staff-shifts",
+   "method": "GET",
+   "path": "/v1/staff-shifts",
+   "summary": "The hours report",
+   "description": "Staff shifts that started in the window (default the last 7 days, at most 92), newest first, and each member's shifts and minutes (an open shift counts up to now). An owner or manager only: the key's creator, or the token's user. docs/pos.md \"Staff shifts\".",
+   "auth": "api_key",
+   "scope": "events:read",
+   "parameters": [
+    {
+     "name": "from",
+     "location": "query",
+     "type": "string (ISO 8601)",
+     "required": false,
+     "description": "Start of the window (inclusive).",
+     "example": "2026-11-01"
+    },
+    {
+     "name": "to",
+     "location": "query",
+     "type": "string (ISO 8601)",
+     "required": false,
+     "description": "End of the window (exclusive); default now.",
+     "example": "2026-11-06"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "from": "2026-11-01T00:00:00+00:00",
+       "to": "2026-11-06T00:00:00+00:00",
+       "members": [
+        {
+         "user_id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "email": "door@example.com",
+         "shifts": 3,
+         "minutes": 914,
+         "open": true
+        }
+       ],
+       "shifts": [
+        {
+         "id": "9f0e1d2c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "user_id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "email": "door@example.com",
+         "role": "scanner",
+         "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "device_id": null,
+         "clock_in_at": "2026-11-05T18:00:00+00:00",
+         "clock_out_at": null,
+         "minutes": 134,
+         "open": true,
+         "clock_in_note": "front door",
+         "clock_out_note": null,
+         "closed_by": null,
+         "close_reason": null
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "A bad date, or a window over 92 days.",
+     "example": {
+      "error": "from must be before to, at most 92 days apart"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "Not an owner or manager.",
+     "example": {
+      "error": "only an owner or manager can read the hours report"
+     }
+    }
+   ]
+  },
+  {
+   "id": "clock-in",
+   "method": "POST",
+   "path": "/v1/staff-shifts/clock-in",
+   "summary": "Clock in",
+   "description": "Clocks the token's user in: a personal access token or OAuth token of a member (an organization API key is not a person, 403). Optionally against an event and a registered device of the organization. One open shift at a time per organization.",
+   "auth": "api_key",
+   "scope": "checkin:write",
+   "parameters": [
+    {
+     "name": "event_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": false,
+     "description": "The event the shift is for.",
+     "example": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "device_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": false,
+     "description": "A registered device of the organization (GET /v1/pos/devices), pending or active."
+    },
+    {
+     "name": "note",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 300 characters.",
+     "example": "front door"
+    }
+   ],
+   "request_example": {
+    "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+    "note": "front door"
+   },
+   "responses": [
+    {
+     "status": 201,
+     "description": "Clocked in.",
+     "example": {
+      "data": {
+       "id": "9f0e1d2c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "user_id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "email": "door@example.com",
+       "role": "scanner",
+       "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "device_id": null,
+       "clock_in_at": "2026-11-05T18:00:00+00:00",
+       "clock_out_at": null,
+       "minutes": 0,
+       "open": true,
+       "clock_in_note": "front door",
+       "clock_out_note": null,
+       "closed_by": null,
+       "close_reason": null
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key, or not a member.",
+     "example": {
+      "error": "clock in and out with your own personal access token or OAuth token: an organization API key is not a person."
+     }
+    },
+    {
+     "status": 404,
+     "description": "The event or device isn't the organization's.",
+     "example": {
+      "error": "event not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "Already clocked in.",
+     "example": {
+      "error": "already clocked in; clock out first"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks checkin:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "checkin:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "clock-out",
+   "method": "POST",
+   "path": "/v1/staff-shifts/clock-out",
+   "summary": "Clock out",
+   "description": "Closes the token's user's open shift in the organization. A user token only, as clock-in.",
+   "auth": "api_key",
+   "scope": "checkin:write",
+   "parameters": [
+    {
+     "name": "note",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 300 characters.",
+     "example": "done"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "Clocked out.",
+     "example": {
+      "data": {
+       "id": "9f0e1d2c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "user_id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "email": "door@example.com",
+       "role": "scanner",
+       "event_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "device_id": null,
+       "clock_in_at": "2026-11-05T18:00:00+00:00",
+       "clock_out_at": "2026-11-05T22:14:00+00:00",
+       "minutes": 254,
+       "open": false,
+       "clock_in_note": "front door",
+       "clock_out_note": "done",
+       "closed_by": null,
+       "close_reason": null
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key.",
+     "example": {
+      "error": "clock in and out with your own personal access token or OAuth token: an organization API key is not a person."
+     }
+    },
+    {
+     "status": 404,
+     "description": "Not clocked in.",
+     "example": {
+      "error": "not clocked in"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks checkin:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "checkin:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-tagged-item",
+   "method": "PUT",
+   "path": "/v1/tagged-items/:id",
+   "summary": "Move a tag assignment",
+   "description": "Moves the assignment to another tag: `tag_id`, or `tag_attributes[name]` (found, or made with the record's type as its scope). The tag must be the organization's and fit the record's type. A fan's assignment also needs fans:write. Opendate's tagged_item wrapper is read too.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The tagged item's id.",
+     "example": "3a4b5c6d-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "tag_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": false,
+     "description": "The tag to move to.",
+     "example": "8e9f0a1b-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "tag_attributes[name]",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "Or a tag name (at most 60 characters).",
+     "example": "Late show"
+    }
+   ],
+   "request_example": {
+    "tagged_item": {
+     "tag_id": "8e9f0a1b-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   },
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK (`changed` false when it already had that tag).",
+     "example": {
+      "data": {
+       "id": "3a4b5c6d-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "tag_id": "8e9f0a1b-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "taggable_type": "event",
+       "taggable_id": "e3a1b2c4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "created_at": "2026-10-02T12:00:00+00:00",
+       "changed": true
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "No tag given, or the tag is for another type.",
+     "example": {
+      "error": "that tag is for fans"
+     }
+    },
+    {
+     "status": 404,
+     "description": "No such tagged item or tag in this organization.",
+     "example": {
+      "error": "tagged item not found"
+     }
+    },
+    {
+     "status": 409,
+     "description": "The record already has that tag.",
+     "example": {
+      "error": "the record already has that tag"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The key lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ]
+  }
+ ]
+}

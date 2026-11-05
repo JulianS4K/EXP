@@ -21,7 +21,7 @@
    "path": "/oauth/token",
    "status": "not_applicable",
    "exos": "not built: no password grant",
-   "reason": "Apps never see a password: use the code flow or a personal access token"
+   "reason": "Apps never see a password (the password grant is deprecated in OAuth 2.1): use the code flow with PKCE or a personal access token"
   },
   {
    "category": "authorization",
@@ -107,9 +107,9 @@
    "category": "team_memberships",
    "method": "PUT",
    "path": "/api/v2/team_memberships/{id}/switch",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "A token is pinned to one organization, so there is nothing to switch"
+   "status": "equivalent",
+   "exos": "X-Exos-Org header on GET /v1/me and every /v1 route (personal access tokens); the dashboard org picker",
+   "reason": "A personal token acts in another org of its user at the role there (exos_api_token_auth_org); OAuth tokens and API keys stay in their org"
   },
   {
    "category": "teams",
@@ -203,17 +203,17 @@
    "category": "staffing_kiosk_devices",
    "method": "GET",
    "path": "/api/v2/staffing/kiosk_venues",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Staffing kiosks (clock in / out) are not an Exos product"
+   "status": "equivalent",
+   "exos": "GET /v1/venues; staff clock in on their own device (POST /v1/staff-shifts/clock-in)",
+   "reason": "No shared kiosk to set up per venue: each member clocks in on the phone they are signed in on; the venues are the org's"
   },
   {
    "category": "staffing_kiosk_devices",
    "method": "POST",
    "path": "/api/v2/staffing/kiosk_devices",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Staffing kiosks (clock in / out) are not an Exos product"
+   "status": "equivalent",
+   "exos": "POST /v1/staff-shifts/clock-in, POST /v1/staff-shifts/clock-out, GET /v1/staff-shifts",
+   "reason": "Clock in / out with the member's own token (no kiosk token to mint, nothing shared to lose); owners and managers read the hours"
   },
   {
    "category": "events",
@@ -292,8 +292,8 @@
    "method": "GET",
    "path": "/api/v2/confirms/{id}/toast_summary",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Toast POS integration; Exos has its own POS (GET /v1/pos/items)"
+   "exos": "not built: no Toast integration",
+   "reason": "Toast's API is open only to Toast partners, so a read-only import couldn't be built or tested; Exos's own POS records bar and merch sales (GET /v1/pos/items, the event settlement)"
   },
   {
    "category": "events",
@@ -316,16 +316,16 @@
    "method": "GET",
    "path": "/api/v2/events",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Opendate's industry events database (other promoters' shows); Exos has no such data set. GET /v1/events is the org's own"
+   "exos": "not built: no third-party show data",
+   "reason": "A licensed industry data set (SetlistFM, Pollstar, Bandsintown) Exos doesn't hold; Exos has only the shows its organizers create, and one org's API doesn't list other orgs' events (GET /v1/events is the org's own)"
   },
   {
    "category": "events_database",
    "method": "GET",
    "path": "/api/v2/events/{id}",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Opendate's industry events database; see GET /v1/events for the org's own"
+   "exos": "not built: no third-party show data",
+   "reason": "As GET /api/v2/events: licensed third-party records; GET /v1/events/:id for the org's own"
   },
   {
    "category": "holds",
@@ -436,8 +436,8 @@
    "method": "GET",
    "path": "/api/v2/venue_ownerships/{id}/app_downloaded",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Opendate-app install check; Exos has no venue app"
+   "exos": "not built: no app to install",
+   "reason": "The door, box office and POS run in the browser (an installable web app), so there is no install to check"
   },
   {
    "category": "venue_ownerships",
@@ -627,17 +627,17 @@
    "category": "tickets",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}/print",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Thermal printing (FGL) for Opendate's box-office printers; Exos tickets are mobile / PDF"
+   "status": "route",
+   "exos": "POST /v1/tickets/:id/print",
+   "reason": "A one-time print code (admits once, voids the last paper, refuses the app and wallet codes while live) as JSON, HTML or PDF; the /confirms/:confirm_id/… path is an alias"
   },
   {
    "category": "tickets",
    "method": "GET",
    "path": "/api/v2/confirms/{confirm_id}/tickets/{barcode}/fgl",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "FGL printer language; not used by Exos"
+   "exos": "not built: no printer language",
+   "reason": "FGL commands differ by Boca model, and a GET that minted a door code would be a read with a side effect; POST /v1/tickets/:id/print?format=pdf prints on any ticket printer through its driver"
   },
   {
    "category": "tickets",
@@ -683,17 +683,17 @@
    "category": "orders",
    "method": "POST",
    "path": "/api/v2/confirms/{confirm_id}/orders/{id}/print",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Thermal printing (FGL); not used by Exos"
+   "status": "route",
+   "exos": "POST /v1/orders/:id/print",
+   "reason": "Every printable ticket of the order gets a one-time print code (the rest come back as skipped); JSON, HTML or PDF"
   },
   {
    "category": "orders",
    "method": "GET",
    "path": "/api/v2/confirms/{confirm_id}/orders/{id}/fgl",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "FGL printer language; not used by Exos"
+   "exos": "not built: no printer language",
+   "reason": "As the ticket FGL: no per-model printer language and no code-minting GET; POST /v1/orders/:id/print?format=pdf"
   },
   {
    "category": "orders",
@@ -925,7 +925,7 @@
    "path": "/api/v2/fans/{id}/update_marketing_subscriptions",
    "status": "not_applicable",
    "exos": "deliberately not provided",
-   "reason": "Consent changes only by the fan (unsubscribe link, profile, SMS STOP)"
+   "reason": "Consent changes only by the fan (unsubscribe link, profile toggle, SMS STOP); a staff or partner write would be consent nobody gave"
   },
   {
    "category": "membership_scans",
@@ -963,25 +963,25 @@
    "category": "membership_reservations",
    "method": "POST",
    "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations",
-   "status": "not_applicable",
-   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
-   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/reservations",
+   "reason": "Holds one place of a capacity-limited membership for 10 minutes (cash, check or a card on your own terminal); Opendate path and body are aliases"
   },
   {
    "category": "membership_reservations",
    "method": "DELETE",
    "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations/{token}",
-   "status": "not_applicable",
-   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
-   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+   "status": "route",
+   "exos": "DELETE /v1/membership-products/:id/reservations/:token",
+   "reason": "Frees the place before payment; a completed one is refunded instead"
   },
   {
    "category": "membership_reservations",
    "method": "POST",
    "path": "/api/v2/membership_products/{membership_product_id}/membership_reservations/{token}/complete",
-   "status": "not_applicable",
-   "exos": "buy_membership (exos-commerce, Stripe Checkout)",
-   "reason": "Memberships aren't capacity-limited, so there is nothing to reserve"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/reservations/:token/complete",
+   "reason": "Issues the membership once the money is in hand; again answers the same membership"
   },
   {
    "category": "membership_products",
@@ -1260,8 +1260,8 @@
    "method": "POST",
    "path": "/api/v2/offer_imports/{id}/select_sheets",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Imports are CSV, mapped in the browser; no multi-sheet workbooks"
+   "exos": "not built: imports are CSV",
+   "reason": "Offer imports are CSV mapped in the browser; picking sheets of a workbook would add an XLSX (zip + XML) parser to the edge function for one step. Export the sheet as CSV"
   },
   {
    "category": "offer_imports",
@@ -1636,16 +1636,16 @@
    "method": "GET",
    "path": "/api/v2/v3_offer_blueprints",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Opendate's offer blueprints (PDF / workbook layouts) aren't built; templates are GET /v1/offer-templates"
+   "exos": "not built: no blueprints",
+   "reason": "Opendate's blueprints are its own PDF / workbook layouts for offers; Exos offers render from offer templates (GET /v1/offer-templates)"
   },
   {
    "category": "v3_offer_templates",
    "method": "GET",
    "path": "/api/v2/v3_offer_blueprints/{id}",
    "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Offer blueprints aren't built; see GET /v1/offer-templates/:id"
+   "exos": "not built: no blueprints",
+   "reason": "As GET /api/v2/v3_offer_blueprints; GET /v1/offer-templates/:id"
   },
   {
    "category": "tags",
@@ -1715,9 +1715,9 @@
    "category": "tagged_items",
    "method": "PUT",
    "path": "/api/v2/tagged_items/{id}",
-   "status": "not_applicable",
-   "exos": "not provided",
-   "reason": "An assignment has nothing to edit: delete and create"
+   "status": "route",
+   "exos": "PUT /v1/tagged-items/:id",
+   "reason": "Moves the assignment to another tag (by id or name), scope checked"
   },
   {
    "category": "tagged_items",
@@ -2091,9 +2091,9 @@
    "category": "public_tixel_waitlist_signups",
    "method": "POST",
    "path": "/api/v2/public/tixel/waitlist_signups",
-   "status": "not_applicable",
-   "exos": "n/a",
-   "reason": "Inbound Tixel webhook; Exos has no Tixel integration (its waitlist is exos_waitlist)"
+   "status": "equivalent",
+   "exos": "exos-tixel-webhook POST /",
+   "reason": "Tixel's fan-data webhook: WAITLIST signups into exos_waitlist for the org's event with that title; X-Secret checked against EXOS_TIXEL_WEBHOOK_SECRETS (env); consent untouched"
   },
   {
    "category": "public_refund_requests",
