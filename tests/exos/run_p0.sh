@@ -175,6 +175,7 @@ for m in \
          20261106130000_exos_price_steps \
          20261106140000_exos_buyer_geo_genre \
          20261107100000_exos_pos_walkup \
+         20261107110000_exos_dice_gaps_6 \
          20261107130000_exos_pos_terminal; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -391,6 +392,7 @@ for m in \
          20261106130000_exos_price_steps \
          20261106140000_exos_buyer_geo_genre \
          20261107100000_exos_pos_walkup \
+         20261107110000_exos_dice_gaps_6 \
          20261107130000_exos_pos_terminal; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -499,3 +501,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_geo
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_walkup.sql"
 # claude/exos-pos-terminal: card at the door through Stripe Terminal: locations, readers, tokens, card sale states, webhook idempotency, refunds, cross-org (mig 20261107130000; race: race_pos_terminal.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_terminal.sql"
+# claude/exos-dice-gaps-6 (mig 20261107110000): fee-change log (append-only, refunds, RLS), add-on entry codes at their own lists (online + offline), conditional checkout questions (race: race_dice_gaps_6.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_gaps_6.sql"

@@ -92,6 +92,7 @@ MIGRATIONS=(
   20261106130000_exos_price_steps
   20261106140000_exos_buyer_geo_genre
   20261107100000_exos_pos_walkup      # claude/exos-pos-walkup; no cron
+  20261107110000_exos_dice_gaps_6  # claude/exos-dice-gaps-6: fee log, add-on entry codes, conditional questions
   20261107130000_exos_pos_terminal    # claude/exos-pos-terminal; no cron; card stays off until EXOS_POS_CARD=on
 )
 

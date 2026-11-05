@@ -135,7 +135,7 @@ What a promoter gets:
 | DICE field | Exos | Import | Status |
 |---|---|---|---|
 | Extra `id`, `code`, `fullPrice`, `commission`, `diceCommission`, `total`, `fees` | `exos_event_addons`, add-on lines on the order | the ticket's `data.extras` (id, code) | built (as data) |
-| `hasSeparateAccessBarcode` | n/a | `data.extras[].separate_barcode` | planned (6): a separate entry barcode for an add-on |
+| `hasSeparateAccessBarcode` | `exos_event_addons.separate_access_barcode`; each unit an `exos_addon_passes` code (A-), scanned at a check-in list with `admits` add-ons | `data.extras[].separate_barcode` | built (mig 20261107110000) |
 | `holder`, `product`, `ticket`, `variant` | add-on → order → ticket | `product` name kept | built (as data) |
 | Product `id`, `name`, `description`, `totalAllocationQty`, `archived`, `faceValue`, `externalSku`, `ticketTypes` | `exos_event_addons` | event `data.products` | built (as data) |
 | Variant `id`, `name`, `size`, `sku`, `externalSku` | n/a | not asked for | n/a (no merch variants in Exos) |
@@ -175,7 +175,7 @@ What a promoter gets:
 |---|---|---|---|
 | Return `id`, `ticket` / `ticketId`, `order`, `returnedAt`, `reason` | `exos_order_refunds` | `exos_dice_id_map` (entity `return`, `data`); the entry is voided (a return seen first voids the ticket when it arrives) | built |
 | TicketTransfer `id`, `tickets`, `orders`, `transferredAt` | `exos_transfers` | the entry's holder, `data.transferred_at` | built |
-| Adjustment `reason`, `processedAt`, `ticket`, `feesChange` | `exos_order_edits` | `exos_dice_orders.adjustments` | built (as data); planned (6) |
+| Adjustment `reason`, `processedAt`, `ticket`, `feesChange` | `exos_fee_adjustments` (`reason`, `processed_at`, `ticket_id`, `fees_change_cents`), `GET /v1/orders/:id/adjustments`, `GET /v1/events/:id/fee-adjustments` | `exos_dice_orders.adjustments` | built (mig 20261107110000; imported DICE adjustments stay as data) |
 
 ## Venue, VenueSpace, Address, Image, SocialLink, Genre
 

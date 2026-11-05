@@ -7,11 +7,20 @@
 // 2026-09-29, "Keep reentry optional"). On a re-entry list a ticket is inside
 // when its last scan on that list was an entry; an exit scan lets it back in.
 //
+// A list can also admit add-on entry codes (mig 20261107110000; DICE
+// Extra.hasSeparateAccessBarcode): admits 'tickets' (the default), 'addons'
+// (a VIP lounge, a merch pickup: add-on codes only) or 'both', and addonIds
+// narrows the add-ons it takes (null = every add-on with its own code).
+//
 // Pure helpers (no network, storage passed in), unit-tested.
 
 import type { StorageLike } from './kv';
 
 export type DoorDirection = 'entry' | 'exit';
+
+/** What a list scans: ticket codes, add-on entry codes, or both. */
+export type ListAdmits = 'tickets' | 'addons' | 'both';
+export const LIST_ADMITS: readonly ListAdmits[] = ['tickets', 'addons', 'both'];
 
 export interface DoorCheckinList {
   id: string;
@@ -23,11 +32,17 @@ export interface DoorCheckinList {
   validFrom: string | null;
   validUntil: string | null;
   sortOrder: number;
+  /** Absent on rows from before mig 20261107110000: tickets. */
+  admits?: ListAdmits;
+  /** The add-ons an add-on list takes; null = every add-on with its own code. */
+  addonIds?: string[] | null;
 }
 
 export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
   const s = (v: unknown) => (typeof v === 'string' && v ? v : null);
   const tiers = Array.isArray(r.tier_ids) ? (r.tier_ids as unknown[]).filter((x): x is string => typeof x === 'string') : null;
+  const addons = Array.isArray(r.addon_ids) ? (r.addon_ids as unknown[]).filter((x): x is string => typeof x === 'string') : null;
+  const admits = LIST_ADMITS.includes(r.admits as ListAdmits) ? (r.admits as ListAdmits) : 'tickets';
   return {
     id: String(r.id),
     name: String(r.name ?? ''),
@@ -36,6 +51,8 @@ export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
     validFrom: s(r.valid_from),
     validUntil: s(r.valid_until),
     sortOrder: Number(r.sort_order ?? 0) || 0,
+    admits,
+    addonIds: admits !== 'tickets' && addons && addons.length > 0 ? addons : null,
   };
 }
 
@@ -103,9 +120,18 @@ export function saveDirection(storage: StorageLike | null, eventId: string, d: D
 /** Does the list admit this ticket type? An unknown tier (a roster from before
  *  the migration) is left to the server. */
 export function listAdmitsTier(list: DoorCheckinList, tierId: string | null | undefined): boolean {
+  if (list.admits === 'addons') return false;
   if (!list.tierIds) return true;
   if (!tierId) return true;
   return list.tierIds.includes(tierId);
+}
+
+/** Why a list refuses an add-on code, or null when it takes it (SQL
+ *  _exos_check_in_addon_pass). No list at all is a ticket door. */
+export function addonListRefusal(list: DoorCheckinList | null, addonId: string | null | undefined): 'tickets-only-list' | 'wrong-list' | null {
+  if (!list || (list.admits ?? 'tickets') === 'tickets') return 'tickets-only-list';
+  if (list.addonIds && (!addonId || !list.addonIds.includes(addonId))) return 'wrong-list';
+  return null;
 }
 
 export type ListWindowState = 'open' | 'not-yet' | 'closed';
@@ -144,6 +170,10 @@ export interface CheckinListInput {
   allowReentry: boolean;
   validFrom: string | null;
   validUntil: string | null;
+  /** Default 'tickets'. */
+  admits?: ListAdmits;
+  /** null = every add-on with its own entry code (add-on lists only). */
+  addonIds?: string[] | null;
 }
 
 /** Problems with a list before it's saved, or null. */
@@ -151,6 +181,8 @@ export function checkinListInputError(l: CheckinListInput): string | null {
   if (!l.name.trim()) return 'Give the list a name, e.g. Main door or VIP deck.';
   if (l.name.trim().length > 60) return 'Keep the name under 60 characters.';
   if (l.tierIds && l.tierIds.length === 0) return 'Pick at least one ticket type, or all of them.';
+  if (l.admits && !LIST_ADMITS.includes(l.admits)) return 'Pick what the list scans.';
+  if (l.addonIds && l.addonIds.length === 0) return 'Pick at least one add-on, or all of them.';
   const from = l.validFrom ? Date.parse(l.validFrom) : NaN;
   const until = l.validUntil ? Date.parse(l.validUntil) : NaN;
   if (l.validFrom && !Number.isFinite(from)) return 'The start time is not a valid date.';
@@ -160,7 +192,10 @@ export function checkinListInputError(l: CheckinListInput): string | null {
 }
 
 /** One line describing a list, for the editor and the door picker. */
-export function describeList(l: DoorCheckinList, tierName: (id: string) => string): string {
+export function describeList(l: DoorCheckinList, tierName: (id: string) => string, addonName?: (id: string) => string): string {
   const tiers = l.tierIds ? l.tierIds.map(tierName).join(', ') : 'All ticket types';
-  return `${tiers} · ${l.allowReentry ? 're-entry allowed' : 'no re-entry'}`;
+  const addons = l.addonIds && addonName ? l.addonIds.map(addonName).join(', ') : 'all add-on codes';
+  const what = l.admits === 'addons' ? `Add-on codes only (${addons})`
+    : l.admits === 'both' ? `${tiers} + ${addons}` : tiers;
+  return `${what} · ${l.allowReentry ? 're-entry allowed' : 'no re-entry'}`;
 }
