@@ -167,6 +167,8 @@ import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
 import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffice.ts";
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
+// claude/exos-dice-import (mig 20261106100000).
+import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -416,6 +418,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (approval) return json(approval, 403);
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
+    if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -564,6 +567,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       sb, orgId, keyId: c.cred.id, credKind: c.cred.kind, params: c.params, q: c.q, body: c.body,
       idempotencyKey: c.idempotencyKey,
     });
+  }
+  // claude/exos-dice-import (mig 20261106100000): import from DICE.
+  if (DICE_ROUTES.has(route.id)) {
+    return await handleDice(route, { sb, orgId, cred: c.cred, page, body: c.body, env: (k) => Deno.env.get(k) });
   }
   // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
   if (LOCATION_ROUTES.has(route.id)) {

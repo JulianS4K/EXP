@@ -410,7 +410,7 @@ export default function EventDetails() {
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   // Sold on the organizer's own Eventbrite / pretix / hi.events / Luma shop (mig 20261016100000).
   const externalShop = event?.ticketBackend && event.ticketBackend !== 'exos' && event.externalTicketUrl
-    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma', posh: 'Posh' } as const)[event.ticketBackend] }
+    ? { url: event.externalTicketUrl, name: ({ eventbrite: 'Eventbrite', pretix: 'pretix', hievents: 'hi.events', luma: 'Luma', posh: 'Posh', dice: 'DICE' } as const)[event.ticketBackend] }
     : null;
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 

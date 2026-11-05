@@ -1,0 +1,371 @@
+{
+  "file": "dice-import",
+  "name": "Import from DICE",
+  "order": 62.5,
+  "description": "Bring an organization's DICE events, ticket holders and fans into Exos, read only from DICE's partner Ticket Holders API (GraphQL queries only; Exos never writes to DICE). An owner or manager connects once in Org settings → Integrations by pasting the API token generated in MIO, DICE's partner dashboard; the token is stored in Vault and never returned by any route. Each upcoming DICE event becomes a **draft link-out event** (`ticket_backend` `dice`): Exos lists it and sends buyers to DICE, and never sells its inventory. Each DICE ticket of such an event becomes an entry on the event's `DICE` door list carrying its DICE code, so the holder's DICE barcode scans at the Exos door; a DICE return voids it. Buyers and holders become fans; a fan joins the organization's email list **only** when DICE's `optInPartners` is true. The first sync reads everything; later syncs read what changed since the last one (events by `updatedAt`, orders by `purchasedAt`, returns by `returnedAt`, transfers by `transferredAt`), and a sync stopped by its caps resumes where it stopped. Re-running never duplicates anything. Field-by-field mapping: docs/dice-coverage.md. Needs `org:admin`; behind the `EXOS_DICE_IMPORT` switch (503 when off).",
+  "endpoints": [
+    {
+      "id": "get-dice-import",
+      "method": "GET",
+      "path": "/v1/dice-import",
+      "summary": "Read the DICE connection",
+      "description": "Whether DICE is connected (`status`: not_connected, connected, error when DICE refused the token, disconnected), the DICE account's name, when it last synced and whether a sync is running, each entity's incremental cursor (`since`; `resuming` when a capped pass is part way), what was imported (`events` created in Exos, `events_past` recorded only, door entries, orders, fans and how many of them have marketing consent from DICE) and the last run. Never the token.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "connected": true,
+              "status": "connected",
+              "account_name": "Night Owl Promotions",
+              "connected_at": "2026-11-01T18:20:00+00:00",
+              "disconnected_at": null,
+              "syncing": false,
+              "last_sync_at": "2026-11-06T10:00:00+00:00",
+              "last_ok_at": "2026-11-06T10:00:42+00:00",
+              "last_error": null,
+              "full_sync_done_at": "2026-11-01T18:24:10+00:00",
+              "cursors": {
+                "events": {
+                  "since": "2026-11-06T10:00:00+00:00",
+                  "resuming": false
+                },
+                "tickets": {
+                  "since": "2026-11-01T18:20:05+00:00",
+                  "resuming": false
+                },
+                "orders": {
+                  "since": "2026-11-06T10:00:00+00:00",
+                  "resuming": false
+                },
+                "returns": {
+                  "since": "2026-11-06T10:00:00+00:00",
+                  "resuming": false
+                },
+                "transfers": {
+                  "since": "2026-11-06T10:00:00+00:00",
+                  "resuming": false
+                }
+              },
+              "imported": {
+                "events": 6,
+                "events_past": 41,
+                "ticket_types": 120,
+                "tickets": 5230,
+                "door_entries": 610,
+                "returns": 85,
+                "orders": 3920,
+                "fans": 3104,
+                "fans_marketing_consent": 1288
+              },
+              "last_run": {
+                "id": "5b0c7a1e-2d3f-4e5a-9b8c-7d6e5f4a3b21",
+                "kind": "incremental",
+                "trigger": "api",
+                "dry_run": false,
+                "status": "ok",
+                "started_at": "2026-11-06T10:00:00+00:00",
+                "finished_at": "2026-11-06T10:00:42+00:00",
+                "counts": {
+                  "events": {
+                    "read": 3,
+                    "created": 1,
+                    "updated": 1,
+                    "past": 1
+                  },
+                  "orders": {
+                    "read": 12,
+                    "created": 12,
+                    "tickets_created": 19,
+                    "fans_created": 9,
+                    "fans_consented": 4
+                  },
+                  "returns": {
+                    "read": 1,
+                    "voided": 1
+                  },
+                  "transfers": {
+                    "read": 0
+                  }
+                },
+                "errors": [],
+                "error": null
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 503,
+          "description": "Import from DICE is switched off on this install (EXOS_DICE_IMPORT is not on).",
+          "example": {
+            "error": "Import from DICE is switched off on this Exos install (EXOS_DICE_IMPORT). Ask the operator to turn it on.",
+            "reason": "disabled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-dice-import-runs",
+      "method": "GET",
+      "path": "/v1/dice-import/runs",
+      "summary": "List DICE import runs",
+      "description": "Every sync and dry run, newest first: `kind` (full or incremental), `trigger` (dashboard, api, cron), `dry_run`, `status` (running, ok, partial when a cap stopped it and the next run resumes, error), the counts per entity (`read`, `created`, `updated`, `past`, `no_event`, `voided`, `pending`, `fans_created`, `fans_consented`, `errors` …; a dry run's `preview`), DICE's warnings and the error.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5b0c7a1e-2d3f-4e5a-9b8c-7d6e5f4a3b21",
+                "kind": "incremental",
+                "trigger": "api",
+                "dry_run": false,
+                "status": "ok",
+                "started_at": "2026-11-06T10:00:00+00:00",
+                "finished_at": "2026-11-06T10:00:42+00:00",
+                "counts": {
+                  "events": {
+                    "read": 3,
+                    "created": 1,
+                    "updated": 1,
+                    "past": 1
+                  },
+                  "orders": {
+                    "read": 12,
+                    "created": 12,
+                    "tickets_created": 19,
+                    "fans_created": 9,
+                    "fans_consented": 4
+                  },
+                  "returns": {
+                    "read": 1,
+                    "voided": 1
+                  },
+                  "transfers": {
+                    "read": 0
+                  }
+                },
+                "errors": [],
+                "error": null
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 503,
+          "description": "Import from DICE is switched off on this install (EXOS_DICE_IMPORT is not on).",
+          "example": {
+            "error": "Import from DICE is switched off on this Exos install (EXOS_DICE_IMPORT). Ask the operator to turn it on.",
+            "reason": "disabled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "start-dice-import-sync",
+      "method": "POST",
+      "path": "/v1/dice-import/sync",
+      "summary": "Sync from DICE now",
+      "description": "Runs one sync and answers when it is done (up to about 100 seconds): the full first read until it has completed once, incremental after. A run reads at most 40 pages of 50 per entity and 5,000 rows in all; `result` `partial` means the next run (another call, the dashboard or the hourly schedule) continues where this one stopped. `dry_run: true` reads the same way (at most 4 pages per entity) and writes nothing but its log row: `preview` says how many upcoming and past events, ticket types, tickets, orders, returns and transfers it read and how many distinct fans, of whom how many would get marketing consent. Runs as the member who created the key, who must be an owner or manager; needs an organization API key. One sync at a time per organization, at most one a minute; five dry runs a minute.",
+      "auth": "api_key",
+      "scope": "org:admin",
+      "parameters": [
+        {
+          "name": "dry_run",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true: read and count only.",
+          "example": false,
+          "default": false
+        }
+      ],
+      "request_example": {
+        "dry_run": false
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "The sync ran.",
+          "example": {
+            "data": {
+              "dry_run": false,
+              "kind": "incremental",
+              "run_id": "5b0c7a1e-2d3f-4e5a-9b8c-7d6e5f4a3b21",
+              "result": "ok",
+              "entities": {
+                "events": {
+                  "read": 3,
+                  "pages": 1,
+                  "total": 3,
+                  "done": true,
+                  "counts": {
+                    "read": 3,
+                    "created": 1,
+                    "updated": 1,
+                    "past": 1
+                  }
+                },
+                "tickets": {
+                  "read": 0,
+                  "pages": 0,
+                  "total": null,
+                  "done": true,
+                  "skipped": "kept current by orders and transfers",
+                  "counts": {}
+                },
+                "orders": {
+                  "read": 12,
+                  "pages": 1,
+                  "total": 12,
+                  "done": true,
+                  "counts": {
+                    "read": 12,
+                    "created": 12,
+                    "tickets_created": 19,
+                    "fans_created": 9,
+                    "fans_consented": 4
+                  }
+                },
+                "returns": {
+                  "read": 1,
+                  "pages": 1,
+                  "total": 1,
+                  "done": true,
+                  "counts": {
+                    "read": 1,
+                    "voided": 1
+                  }
+                },
+                "transfers": {
+                  "read": 0,
+                  "pages": 1,
+                  "total": 0,
+                  "done": true,
+                  "counts": {
+                    "read": 0
+                  }
+                }
+              },
+              "warnings": []
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field other than dry_run, or dry_run not a boolean.",
+          "example": {
+            "error": "dry_run must be true or false"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key's creator is no longer an owner or manager, or a personal / OAuth token (writes need an organization API key).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks org:admin.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "org:admin"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+          }
+        },
+        {
+          "status": 409,
+          "description": "DICE isn't connected, a sync is running, or the last one finished less than a minute ago.",
+          "example": {
+            "error": "a DICE sync is already running",
+            "reason": "busy"
+          }
+        },
+        {
+          "status": 429,
+          "description": "More than five dry runs in a minute.",
+          "example": {
+            "error": "Too many previews. Wait a minute.",
+            "reason": "rate_limited"
+          }
+        },
+        {
+          "status": 502,
+          "description": "DICE refused the token or failed to answer. A refused token sets the connection's status to error until it is connected again.",
+          "example": {
+            "error": "DICE didn't accept the token. Generate a new API token in MIO and connect again.",
+            "reason": "dice_auth",
+            "run_id": "5b0c7a1e-2d3f-4e5a-9b8c-7d6e5f4a3b21",
+            "result": "error"
+          }
+        },
+        {
+          "status": 503,
+          "description": "Import from DICE is switched off on this install (EXOS_DICE_IMPORT is not on).",
+          "example": {
+            "error": "Import from DICE is switched off on this Exos install (EXOS_DICE_IMPORT). Ask the operator to turn it on.",
+            "reason": "disabled"
+          }
+        }
+      ]
+    }
+  ]
+}
