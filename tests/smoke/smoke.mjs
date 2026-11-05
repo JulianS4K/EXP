@@ -6,18 +6,27 @@ import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables } from './mock.mjs';
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const IG = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.2.23.108 (iPhone15,2; iOS 17_5; en_US; en; scale=3.00; 1179x2556; 624443862)';
-const browser = await chromium.launch();
+const FB_ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-S918U Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.71 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/471.0.0.35.80;]';
+// SMOKE_CHROMIUM: a local browser binary when Playwright's own download isn't available.
+const browser = await chromium.launch(process.env.SMOKE_CHROMIUM ? { executablePath: process.env.SMOKE_CHROMIUM } : {});
 const results = [];
 async function run(name, fn, opts = {}) {
   const ctx = await browser.newContext({ ...devices[opts.device || 'iPhone 13'], ...(opts.ua ? { userAgent: opts.ua } : {}) });
   const log = []; const errors = [];
+  // In-app browsers that block storage (Instagram / Facebook with cookies off):
+  // touching localStorage or sessionStorage throws, as it does there.
+  if (opts.noStorage) await ctx.addInitScript(() => {
+    for (const k of ['localStorage', 'sessionStorage']) {
+      Object.defineProperty(window, k, { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });
+    }
+  });
   // Third-party hosts (pixel vendors, fonts) never load: fast, offline, and a
   // test asserts on what the app injected, not on what a vendor did.
   await ctx.route((u) => !u.href.startsWith('http://localhost') && !u.href.startsWith('https://mock.supabase.test/'), (r) => r.abort());
   await ctx.route('https://mock.supabase.test/**', (r) => handle(r, log, opts.mock));
   // A visitor who already answered the cookie banner (declined), so it stays
   // out of the way; the consent tests start fresh.
-  if (!opts.freshConsent) await ctx.addInitScript(() => {
+  if (!opts.freshConsent && !opts.noStorage) await ctx.addInitScript(() => {
     if (!localStorage.getItem('exos.consent.v2')) localStorage.setItem('exos.consent.v2', JSON.stringify({ analytics: 'denied', advertising: 'denied' }));
   });
   if (opts.gpc) await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true, configurable: true }));
@@ -170,6 +179,118 @@ await run('Instagram in-app banner', async (page) => {
   await page.goto(BASE + '/event/' + EV);
   await expectText(page, 'You can buy right here in Instagram');
 }, { ua: IG });
+
+// ── In-app browser checkout (roadmap 7a): Instagram iOS and Facebook Android,
+// storage blocked, guest checkout through a stubbed Stripe page and back. ──
+// Stripe Checkout, stubbed: a page whose "Pay" goes to the success URL.
+async function stubStripe(page, checkout) {
+  await page.route('https://checkout.stripe.com/**', (r) => {
+    const back = String(checkout.body?.success_url ?? '').replace('{CHECKOUT_SESSION_ID}', 'cs_test_iab');
+    return r.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Stripe</title><h1>Stripe test checkout</h1><a id="pay" href="${back}">Pay</a>` });
+  });
+}
+const checkoutFn = (into) => ({ fns: { 'exos-checkout': (body) => {
+  into.body = body;
+  return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_iab', session_id: 'cs_test_iab' } };
+} } });
+const until = async (cond, what, ms = 5000) => {
+  for (let i = 0; i < ms / 100 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert(await cond(), 'timed out waiting for ' + what);
+};
+const storageThrows = (page) => page.evaluate(() => { try { localStorage.getItem('x'); return false; } catch { return true; } });
+async function rejectCookies(page) {
+  // No storage, so the consent banner asks on every load; the choice holds for the page.
+  const b = page.getByRole('dialog').filter({ hasText: 'analytics and advertising cookies' });
+  await b.waitFor({ timeout: 8000 });
+  await b.getByRole('button', { name: 'Reject all' }).click();
+  await b.waitFor({ state: 'hidden' });
+}
+async function payAsGuest(page, email) {
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  const dlg = page.getByRole('dialog').filter({ hasText: 'Where should we send your tickets?' });
+  await dlg.waitFor({ timeout: 8000 });
+  // Read before paying: the page leaves for Stripe right after.
+  const text = (await dlg.innerText()).replace(/\s+/g, ' ');
+  await dlg.getByLabel('Email').fill(email);
+  await dlg.getByRole('button', { name: 'Continue to payment' }).click();
+  return text;
+}
+
+const igCheckout = {};
+await run('Instagram iOS, no storage: checkout link keeps the cart, guest pays by card, back from Stripe', async (page, log) => {
+  const popups = [];
+  page.context().on('page', (p) => popups.push(p.url()));
+  await stubStripe(page, igCheckout);
+  await page.goto(BASE + '/checkout?products=' + TIER2 + ':2&utm_source=instagram&utm_medium=story&fbclid=IwAR_iab1');
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  assert(await storageThrows(page), 'storage is blocked in this context');
+  await expectText(page, 'Fall Party');
+  await rejectCookies(page);
+  // The cart survives without sessionStorage: VIP x 2 = $100.
+  await until(async () => /\$100/.test(await page.locator('body').innerText()), 'VIP x 2 pre-filled from the URL');
+  // The escape hatch: menu steps, copy link, and a URL carrying cart + attribution + iab_from.
+  const hatch = page.getByTestId('in-app-escape').first();
+  await expectText(page, 'You can buy right here in Instagram. For Apple Pay, open this page in Safari.');
+  await expectText(page, 'Open in external browser');
+  const escape = await hatch.getAttribute('data-url');
+  assert(escape.includes('/checkout?') && escape.includes('products=' + TIER2 + '%3A2') && escape.includes('utm_source=instagram')
+    && escape.includes('fbclid=IwAR_iab1') && escape.includes('iab_from=instagram'), 'escape URL carries the cart: ' + escape);
+  // http://localhost can't become x-safari-https:, so only steps + copy here (vitest covers the link).
+  assert(await hatch.getByRole('link', { name: /Open in Safari/ }).count() === 0, 'no x-safari link for an http page');
+  const dlg = await payAsGuest(page, 'fan@example.com');
+  assert(/Pay with card, and we/.test(dlg) && dlg.includes('Card works right here.'), 'no Apple Pay promise inside Instagram: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = igCheckout.body;
+  assert(b && b.in_app_browser === 'instagram', 'records the in-app browser: ' + JSON.stringify(b));
+  assert(b.guest_email === 'fan@example.com' && b.tier_id === TIER2 && b.quantity === 2, 'guest VIP x2: ' + JSON.stringify(b));
+  assert(b.attribution?.utm_source === 'instagram' && b.attribution?.fbclid === 'IwAR_iab1', 'attribution kept: ' + JSON.stringify(b.attribution));
+  assert(b.success_url.includes('guest=1') && b.success_url.includes('to=f***%40example.com'), 'masked inbox on the return URL: ' + b.success_url);
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+  await expectText(page, 'Check your email');
+  await expectText(page, 'f***@example.com');
+  assert(popups.length === 0, 'no popup or new tab: ' + popups.join(', '));
+}, { ua: IG, noStorage: true, mock: checkoutFn(igCheckout) });
+
+const fbCheckout = {};
+await run('Facebook Android, no storage: intent escape, guest checkout to Stripe and back', async (page) => {
+  const popups = [];
+  page.context().on('page', (p) => popups.push(p.url()));
+  await stubStripe(page, fbCheckout);
+  await page.goto(BASE + '/event/' + EV + '?utm_source=facebook&utm_medium=post');
+  await expectText(page, 'Fall Party');
+  assert(await storageThrows(page), 'storage is blocked in this context');
+  await rejectCookies(page);
+  await expectText(page, 'You can buy right here in Facebook. For Google Pay, open this page in your browser.');
+  const escape = await page.getByTestId('in-app-escape').first().getAttribute('data-url');
+  assert(escape.includes('utm_source=facebook') && escape.includes('iab_from=facebook'), 'escape URL: ' + escape);
+  const dlg = await payAsGuest(page, 'Guest@Example.com');
+  assert(/Card works right here/.test(dlg), 'the modal offers the escape for Google Pay: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(fbCheckout.body?.in_app_browser === 'facebook' && fbCheckout.body.guest_email === 'guest@example.com', 'body: ' + JSON.stringify(fbCheckout.body));
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+  await expectText(page, 'g***@example.com');
+  // Back from the confirmation, then back from Stripe: the Buy button works again.
+  await page.goBack();
+  await page.goBack();
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /Buy Tickets/i }).first().isEnabled(), 'Buy is enabled after coming back');
+  assert(popups.length === 0, 'no popup or new tab: ' + popups.join(', '));
+}, { ua: FB_ANDROID, device: 'Pixel 7', noStorage: true, mock: checkoutFn(fbCheckout) });
+
+const plainCheckout = {};
+await run('a normal browser is unchanged: no banner, wallets offered, recorded as none', async (page) => {
+  await stubStripe(page, plainCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  assert(await page.getByTestId('in-app-escape').count() === 0, 'no escape hatch in Safari');
+  const dlg = await payAsGuest(page, 'fan@example.com');
+  assert(/Apple Pay, Google Pay or card/.test(dlg) && !dlg.includes('Card works right here'), 'wallets offered: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(plainCheckout.body?.in_app_browser === 'none', 'recorded as a real browser: ' + JSON.stringify(plainCheckout.body));
+}, { mock: checkoutFn(plainCheckout) });
 
 // ── This week's screens: consent, marketing settings, sources, money, payouts, wallet ──
 
@@ -388,6 +509,21 @@ await run('event report: Sources by UTM, promoter and ad platform, with CSV', as
   assert(lines.includes('instagram,paid,fall,,Meta,,1,2,40.00,0,USD'), 'Instagram row: ' + lines.join(' | '));
   assert(lines.includes(',,,dj-kay,,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
 }, { signedIn: true, mock: reportMock });
+
+await run('event report: where buyers checked out (in-app vs browser)', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Where buyers checked out' }) });
+  await section.waitFor({ timeout: 8000 });
+  const text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['Instagram app', 'Browser, opened from Instagram', 'In-app conversion is 50% against 67% in browsers', '25% below the browser', '$75.00']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_in_app_report') && l.includes(EV)), 'report RPC called');
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: { exos_event_in_app_report: () => ({ currency: 'usd', rows: [
+  { in_app_browser: 'instagram', escaped_from: null, started: 4, paid: 2, tickets: 3, gross_cents: 7500 },
+  { in_app_browser: 'none', escaped_from: 'instagram', started: 1, paid: 1, tickets: 2, gross_cents: 5000 },
+  { in_app_browser: 'none', escaped_from: null, started: 2, paid: 1, tickets: 1, gross_cents: 2500 },
+] }) } }) });
 
 await run('event report: Money summary from the order money view', async (page, log) => {
   await page.goto(BASE + '/dashboard/event/' + EV);

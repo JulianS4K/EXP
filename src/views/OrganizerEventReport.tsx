@@ -37,6 +37,7 @@ import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
+import InAppReportPanel from '../components/InAppReportPanel';
 import ChannelSalesPanel from '../components/ChannelSalesPanel';
 import SalesCountsPanel from '../components/SalesCountsPanel';
 import { canSeeMoney } from '../lib/settlement';
@@ -538,6 +539,7 @@ export default function OrganizerEventReport() {
         {/* Sales by source: UTM, promoter code and ad platform (click ids) per
             paid order, with a CSV (owner / manager / finance; hidden if unreadable). */}
         <SourcesPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        <InAppReportPanel eventId={event.id} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Texts to fans who opted in, from the org's own number (mig 20261016120000). */}
         {event.orgId && (

@@ -4,6 +4,7 @@
 // back (Vault, service role only).
 
 import { supabase } from './supabase';
+import { callFn } from './integrationsFn';
 
 const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 /** Luma is plugged in but hidden until the operator sets VITE_EXOS_LUMA=on (and EXOS_LUMA_ENABLED=on on the edge functions). */
@@ -247,30 +248,8 @@ export function parseBackendStatus(d: any): BackendStatus {
 
 // ── Calls ───────────────────────────────────────────────────────────────
 
-const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
-
-export async function callFn<T>(path: string, body: unknown): Promise<T> {
-  const url = (env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
-  if (!url) throw new Error('Integrations are not configured.');
-  const { data } = await supabase.auth.getSession();
-  const jwt = data.session?.access_token;
-  if (!jwt) throw new Error('Sign in first.');
-  let res: Response;
-  try {
-    res = await fetch(`${url}/functions/v1/exos-integrations${path}`, {
-      method: 'POST',
-      headers: { ...(env.VITE_SUPABASE_ANON_KEY ? { apikey: env.VITE_SUPABASE_ANON_KEY } : {}), Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("Couldn't reach Exos. Check the connection.");
-  }
-  const out = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw new Error(typeof out?.error === 'string' ? out.error : res.status === 404 ? 'Integrations are not deployed yet.' : `Request failed (${res.status}).`);
-  }
-  return out as T;
-}
+// callFn lives in ./integrationsFn (lib/site.ts needs it on every page; this catalog it doesn't).
+export { callFn };
 
 const rpcMsg = (e: { message?: string }) => new Error((e.message ?? 'Not saved.').replace(/^exos_\w+: /, ''));
 

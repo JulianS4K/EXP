@@ -17,9 +17,12 @@ import {
 import { captureOrder, handleWebhook, refundPayPal, type Db } from '../../supabase/functions/_shared/paypal/flows.ts';
 import { paypalTxn, reconcilePayPal } from '../../supabase/functions/_shared/paypal/reconcile.ts';
 import { checkoutFeeSplit, PAYPAL_FEE, STRIPE_CARD_FEE } from '../../supabase/functions/_shared/platformFee.ts';
-import { orderIdFromReturn, paypalSdkUrl, readPayPalCart, stashPayPalCart, venmoPossible } from './paypal';
+import { orderIdFromReturn, payPalCartFragment, paypalSdkUrl, readPayPalCart, stashPayPalCart, venmoPossible } from './paypal';
 
 const SESSION = 'pp_0123456789abcdef0123456789abcdef';
+const CART_EV = '11111111-1111-4111-8111-111111111111';
+const CART_TIER = '22222222-2222-4222-8222-222222222222';
+const CART_ADDON = '33333333-3333-4333-8333-333333333333';
 const CFG: PayPalConfig = { env: 'sandbox', baseUrl: PAYPAL_HOSTS.sandbox, clientId: 'cid', clientSecret: 'sec', webhookId: 'WH-123' };
 
 // ── fetch mock ──────────────────────────────────────────────────────────────
@@ -489,9 +492,36 @@ describe('the SPA side', () => {
   it('keeps the cart for an hour at most', () => {
     const store = new Map<string, string>();
     vi.stubGlobal('sessionStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v) });
-    stashPayPalCart({ eventId: 'e', tierId: 't', quantity: 2, title: 'Show', currency: 'usd', at: 1_000 });
-    expect(readPayPalCart(2_000)?.quantity).toBe(2);
-    expect(readPayPalCart(1_000 + 3_600_001)).toBeNull();
+    stashPayPalCart({ eventId: CART_EV, tierId: CART_TIER, quantity: 2, title: 'Show', currency: 'usd', at: 1_000 });
+    expect(readPayPalCart(2_000, '')?.quantity).toBe(2);
+    expect(readPayPalCart(1_000 + 3_600_001, '')).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  // Instagram's browser can block storage: the event page also puts the cart
+  // in the PayPal page's URL fragment (never sent to a server).
+  it('reads the cart from the URL fragment when storage is blocked', () => {
+    vi.stubGlobal('sessionStorage', { getItem: () => { throw new DOMException('denied', 'SecurityError'); } });
+    const cart = {
+      eventId: CART_EV, tierId: CART_TIER, quantity: 3, title: 'Fête – Ñ', currency: 'usd', at: 1_000,
+      addons: [{ addon_id: CART_ADDON, quantity: 2 }], voucherCode: 'VIP10',
+      attribution: { utm_source: 'instagram', iab_from: 'instagram' as const }, displayCents: 9000,
+    };
+    const hash = payPalCartFragment(cart);
+    expect(hash).toMatch(/^#cart=[A-Za-z0-9_-]+$/);
+    expect(readPayPalCart(2_000, hash)).toEqual(cart);
+    expect(readPayPalCart(2_000, '')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it('checks every field of a fragment cart', () => {
+    const frag = (c: Record<string, unknown>) => '#cart=' + Buffer.from(JSON.stringify(c)).toString('base64url');
+    const base = { eventId: CART_EV, tierId: CART_TIER, quantity: 1, title: 'x', currency: 'usd', at: 1_000 };
+    expect(readPayPalCart(2_000, frag({ ...base, tierId: 'nope' }))).toBeNull();
+    expect(readPayPalCart(2_000, frag({ ...base, quantity: 11 }))).toBeNull();
+    expect(readPayPalCart(2_000, '#cart=%%%')).toBeNull();
+    const cleaned = readPayPalCart(2_000, frag({ ...base, voucherCode: '<b>', currency: 'US$', addons: [{ addon_id: 'x', quantity: 1 }],
+      attribution: { utm_source: 'ig', evil: 1 } }));
+    expect(cleaned).toMatchObject({ voucherCode: undefined, currency: 'usd', addons: undefined, attribution: { utm_source: 'ig' } });
   });
 });

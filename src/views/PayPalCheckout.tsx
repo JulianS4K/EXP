@@ -10,6 +10,12 @@
 //   onApprove   -> exos-paypal { action: 'capture' } -> My Tickets
 //   onCancel    -> exos-paypal { action: 'cancel' } (seats back now)
 // /pay/paypal/return is PayPal's redirect-flow return (?token=<order id>).
+//
+// Inside an in-app browser (Instagram, Facebook, ...) PayPal's buttons open
+// popups the app swallows, so the page uses the redirect flow instead: one
+// "Continue to PayPal" button, PayPal's own page in the same tab, and back to
+// /pay/paypal/return. The SDK isn't loaded there at all. The cart comes from
+// the URL fragment (#cart=) when the app's browser blocks storage.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -20,6 +26,9 @@ import {
   readPayPalCart, venmoPossible, type PayPalCart,
 } from '../lib/paypal';
 import { formatCurrency, publicUrl } from '../lib/utils';
+import { currentInAppBrowser } from '../lib/inAppBrowser';
+import { buildCheckoutLink } from '../lib/checkoutLink';
+import { EscapeHatch } from '../components/InAppBrowserBanner';
 
 interface PayPalButtonsApi {
   Buttons(opts: Record<string, unknown>): { isEligible(): boolean; render(el: HTMLElement): Promise<void>; close?(): void };
@@ -58,6 +67,27 @@ export default function PayPalCheckout() {
   const orderRef = useRef<string | null>(null);
   const clientId = paypalClientId();
   const guestReady = !!user || EMAIL_RE.test(email.trim());
+  // In-app browsers: PayPal's popups don't open there; use the redirect flow.
+  const [redirectFlow] = useState(() => currentInAppBrowser() !== null);
+
+  const goToPayPal = async () => {
+    if (!cart || busy) return;
+    setBusy('Opening PayPal…');
+    setError(null);
+    try {
+      const o = await createPayPalOrder(cart, {
+        guestEmail: user ? undefined : email.trim(),
+        successUrl: publicUrl('pay/paypal/return'),
+        cancelUrl: publicUrl(`event/${cart.eventId}`),
+        redirect: true,
+      });
+      if (!o.approveUrl) throw new Error('PayPal didn\'t send a link back. Try again.');
+      window.location.assign(o.approveUrl); // same tab: no popup to block
+    } catch (e) {
+      setBusy(null);
+      setError((e as Error).message);
+    }
+  };
 
   const done = (sessionId?: string) => {
     // A full page load leaves PayPal's SDK (and this page's CSP) behind.
@@ -94,7 +124,7 @@ export default function PayPalCheckout() {
 
   // The buttons: shown once we know who the tickets go to.
   useEffect(() => {
-    if (isReturn || !cart || !clientId || !guestReady) return undefined;
+    if (isReturn || !cart || !clientId || !guestReady || redirectFlow) return undefined;
     let alive = true;
     const rendered: { close?(): void }[] = [];
     loadSdk(paypalSdkUrl(clientId, cart.currency)).then((paypal) => {
@@ -170,7 +200,23 @@ export default function PayPalCheckout() {
         <p className="flex items-center gap-2 text-slate-600 font-bold mb-4"><Loader2 className="w-4 h-4 animate-spin" />{busy}</p>
       )}
       {error && <p role="alert" className="text-red-600 text-sm font-bold mb-4">{error}</p>}
-      {!isReturn && guestReady && (
+      {!isReturn && guestReady && redirectFlow && (
+        <div>
+          <button type="button" onClick={() => void goToPayPal()} disabled={!!busy}
+            className="w-full rounded-xl bg-[#ffc439] py-3 font-black text-slate-900 disabled:opacity-50">
+            Continue to PayPal
+          </button>
+          {/* The browser opens the event with this cart (an intent: link drops the #cart= fragment). */}
+          <EscapeHatch tone="light" reasons={[]} className="text-xs text-slate-500 mt-3"
+            url={cart ? buildCheckoutLink(publicUrl('checkout'), {
+              eventId: cart.eventId, tierId: cart.tierId, quantity: cart.quantity,
+              addons: cart.addons?.map((a) => ({ id: a.addon_id, quantity: a.quantity })),
+              coupon: cart.voucherCode, attribution: cart.attribution,
+            }) : undefined}
+            lead="Venmo, and PayPal's one-tap sign-in, work best in your browser." />
+        </div>
+      )}
+      {!isReturn && guestReady && !redirectFlow && (
         <div className={busy ? 'opacity-40 pointer-events-none' : ''}>
           <div ref={venmoRef} className="mb-3" />
           <div ref={paypalRef} />

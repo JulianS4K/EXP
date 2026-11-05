@@ -9,7 +9,8 @@
 // unless the operator went live) switches the button on.
 
 import { supabase } from './supabase';
-import type { Attribution } from './attribution';
+import { readAttribution, type Attribution } from './attribution';
+import { currentInAppRecord } from './inAppBrowser';
 
 export function paypalClientId(): string | null {
   const id = (import.meta as { env?: { VITE_PAYPAL_CLIENT_ID?: string } }).env?.VITE_PAYPAL_CLIENT_ID;
@@ -50,7 +51,9 @@ export async function eventTakesPayPal(eventId: string): Promise<boolean> {
   return (data as { paypal?: boolean } | null)?.paypal === true;
 }
 
-/** What the event page hands the PayPal page (kept in sessionStorage across the redirect flow). */
+/** What the event page hands the PayPal page: in the URL fragment (#cart=,
+ *  so it works where storage is blocked, as in Instagram's browser, and never
+ *  reaches a server log or a Referer), and in sessionStorage as a backup. */
 export interface PayPalCart {
   eventId: string;
   tierId: string;
@@ -66,19 +69,76 @@ export interface PayPalCart {
 }
 
 const CART_KEY = 'exos:paypal-cart';
+// An hour is plenty: the seat hold itself is 30 minutes.
+const CART_TTL_MS = 3600_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function stashPayPalCart(cart: PayPalCart): void {
-  try { sessionStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* storage blocked */ }
+  try { sessionStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* storage blocked: the fragment carries it */ }
 }
 
-export function readPayPalCart(now = Date.now()): PayPalCart | null {
+function toBase64Url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromBase64Url(s: string): string | null {
+  try {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
+/** "#cart=…" for the PayPal page URL. */
+export function payPalCartFragment(cart: PayPalCart): string {
+  return `#cart=${toBase64Url(JSON.stringify(cart))}`;
+}
+
+// A cart from either place, checked field by field: the fragment is a URL
+// anyone can edit (the server re-prices everything anyway).
+function parseCart(raw: unknown, now: number): PayPalCart | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.eventId !== 'string' || !UUID_RE.test(c.eventId)) return null;
+  if (typeof c.tierId !== 'string' || !UUID_RE.test(c.tierId)) return null;
+  const quantity = Number(c.quantity);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) return null;
+  const at = Number(c.at);
+  if (!Number.isFinite(at) || now - at > CART_TTL_MS) return null;
+  const addons = Array.isArray(c.addons)
+    ? c.addons.filter((a): a is { addon_id: string; quantity: number } =>
+      !!a && typeof a.addon_id === 'string' && UUID_RE.test(a.addon_id) && Number.isInteger(a.quantity) && a.quantity > 0 && a.quantity <= 10)
+    : undefined;
+  const attrIn = c.attribution && typeof c.attribution === 'object' ? (c.attribution as Record<string, unknown>) : {};
+  const displayCents = Number.isInteger(c.displayCents) ? (c.displayCents as number) : undefined;
+  return {
+    eventId: c.eventId, tierId: c.tierId, quantity, at,
+    title: typeof c.title === 'string' ? c.title.slice(0, 200) : '',
+    currency: typeof c.currency === 'string' && /^[a-z]{3}$/i.test(c.currency) ? c.currency.toLowerCase() : 'usd',
+    addons: addons && addons.length > 0 ? addons : undefined,
+    voucherCode: typeof c.voucherCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(c.voucherCode) ? c.voucherCode : undefined,
+    attribution: readAttribution((k) => attrIn[k]),
+    displayCents,
+  };
+}
+
+/** The cart from the URL fragment (#cart=), else the session copy. */
+export function readPayPalCart(now = Date.now(), hash: string = typeof location !== 'undefined' ? location.hash : ''): PayPalCart | null {
+  const m = /(?:^#|&)cart=([A-Za-z0-9_-]+)/.exec(hash || '');
+  if (m) {
+    const text = fromBase64Url(m[1]);
+    try {
+      const fromUrl = text ? parseCart(JSON.parse(text), now) : null;
+      if (fromUrl) return fromUrl;
+    } catch { /* not JSON: try storage */ }
+  }
   try {
     const raw = sessionStorage.getItem(CART_KEY);
-    if (!raw) return null;
-    const c = JSON.parse(raw) as PayPalCart;
-    // An hour is plenty: the seat hold itself is 30 minutes.
-    if (!c || typeof c.eventId !== 'string' || typeof c.tierId !== 'string' || now - Number(c.at) > 3600_000) return null;
-    return c;
+    return raw ? parseCart(JSON.parse(raw), now) : null;
   } catch {
     return null;
   }
@@ -109,6 +169,7 @@ export async function createPayPalOrder(cart: PayPalCart, opts: { guestEmail?: s
       voucher_code: cart.voucherCode || undefined,
       attribution: cart.attribution && Object.keys(cart.attribution).length > 0 ? cart.attribution : undefined,
       guest_email: opts.guestEmail?.trim().toLowerCase() || undefined,
+      in_app_browser: currentInAppRecord(),
     },
   });
   if (error) throw await fnError(error, 'Could not start PayPal checkout.');

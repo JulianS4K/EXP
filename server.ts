@@ -7,7 +7,7 @@ import fs from "fs";
 import { securityHeaders } from "./src/lib/hosting/headers";
 import { isLinkCrawler } from "./src/lib/hosting/crawler";
 import { domainRedirect, hostOnly, isPrimary, primaryHosts, ttlCache } from "./src/lib/hosting/domains";
-import { buildLlmsTxt, buildPreviewPage, buildSitemap, inject, injectBody, previewTarget, type PromoterReader, type PublicReader } from "./src/lib/hosting/seo";
+import { buildLlmsTxt, buildPreviewPage, buildSitemap, defaultTags, inject, injectBody, previewTarget, type PromoterReader, type PublicReader } from "./src/lib/hosting/seo";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -330,6 +330,8 @@ async function startServer() {
           const read = target ? await getReader() : null;
           const preview = target && read ? await buildPreviewPage(read, target, publicBase(req), { content: aiDiscovery, promoter: promoterReader }) : null;
           if (preview) return res.type("html").send(injectBody(inject(getShell(), preview.tags), preview.body));
+          // No record behind this page: the site card, with absolute URLs.
+          return res.type("html").send(inject(getShell(), defaultTags(publicBase(req), page)));
         } catch (err) {
           console.error(JSON.stringify({ lvl: "error", msg: "link preview failed", path: req.path, error: String(err) }));
         }

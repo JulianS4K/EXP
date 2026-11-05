@@ -194,20 +194,47 @@ export function esc(v: unknown): string {
     .replace(/'/g, '&#x27;');
 }
 
+/**
+ * An absolute https image URL for og:image (Facebook, Instagram and WhatsApp
+ * drop a relative one): a /path is resolved against the page's origin;
+ * anything that isn't http(s) falls back to `fallback`.
+ */
+export function absoluteImage(image: string, pageUrl: string, fallback: string): string {
+  try {
+    const u = new URL(image, pageUrl);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// og:type has no "event" in the Open Graph vocabulary (only website, article,
+// profile, book, music.*, video.*); Facebook's debugger flags it as invalid
+// and Instagram / WhatsApp then fall back to a bare link. Events are
+// described by the JSON-LD below; the card is a website card.
+const OG_TYPES = new Set(['website', 'article', 'profile']);
+
 function tags(title: string, desc: string, url: string, image: string, ogType: string, noindex: boolean, extra = ''): string {
-  const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(image)];
+  const fallback = new URL('/bridge/icon-512.png', url).toString();
+  const abs = absoluteImage(image, url, fallback);
+  const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(abs)];
   // The fallback is the square app icon: a big card would crop it.
-  const card = image.endsWith('/bridge/icon-512.png') ? 'summary' : 'summary_large_image';
+  const isIcon = abs.endsWith('/bridge/icon-512.png');
+  const card = isIcon ? 'summary' : 'summary_large_image';
   const lines = [
     `<title>${t}</title>`,
     `<meta name="description" content="${d}" />`,
     `<meta name="robots" content="${noindex ? 'noindex, nofollow' : 'index, follow'}" />`,
     '<meta property="og:site_name" content="Exos" />',
-    `<meta property="og:type" content="${ogType}" />`,
+    `<meta property="og:type" content="${OG_TYPES.has(ogType) ? ogType : 'website'}" />`,
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:url" content="${u}" />`,
     `<meta property="og:image" content="${img}" />`,
+    `<meta property="og:image:alt" content="${t}" />`,
+    // Known size for the icon, so the first share already shows it (Facebook
+    // otherwise fetches the image after the first unfurl).
+    ...(isIcon ? ['<meta property="og:image:width" content="512" />', '<meta property="og:image:height" content="512" />'] : []),
     '<meta property="og:locale" content="en_US" />',
     `<meta name="twitter:card" content="${card}" />`,
     `<meta name="twitter:title" content="${t}" />`,
@@ -280,6 +307,20 @@ export function bioTags(promoterName: string, org: Row, canonicalUrl: string, de
   const theme = org.theme && typeof org.theme === 'object' ? (org.theme as Row) : {};
   const image = str(marketing.shareImageUrl) ?? str(theme.logoUrl) ?? defaultImage;
   return tags(`${who} · ${name}`.slice(0, 200), `Tickets from ${who} for ${name}'s events.`.slice(0, 300), canonicalUrl, image, 'website', true);
+}
+
+/**
+ * The site card for a crawler on a page that names no event or organizer
+ * (home, /map, a bad link): the static tags in index.html, but with absolute
+ * URLs, since a relative og:image shows no picture in Instagram or WhatsApp.
+ */
+export function defaultTags(baseUrl: string, page = ''): string {
+  const clean = page.replace(/[?#].*$/, '').replace(/^\/+/, '');
+  // req.path arrives still percent-encoded; tags() escapes it for the attribute.
+  const url = `${baseUrl}/bridge/${clean}`;
+  const title = 'Exos | Live the Moment';
+  const desc = 'Exos — ticketing for independent venues and promoters.';
+  return tags(title, desc, url, `${baseUrl}/bridge/icon-512.png`, 'website', false);
 }
 
 /** Swap the SSR_META block in the SPA shell for `tagBlock`; no-op on any miss. */

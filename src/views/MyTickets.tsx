@@ -38,6 +38,9 @@ export default function MyTickets() {
   const { user, openAuth } = useAuth();
   // Back from a guest checkout (mig 20260928050000): tickets went by email.
   const [guestDone, setGuestDone] = useState(false);
+  // The masked inbox from the return URL (?to=j***@gmail.com), for browsers
+  // where the stored email is gone (in-app browsers can block storage).
+  const [guestTo, setGuestTo] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -127,6 +130,8 @@ export default function MyTickets() {
     }
     if (params.get('checkout') === 'success' && params.get('guest') === '1') {
       setGuestDone(true);
+      const to = params.get('to') ?? '';
+      if (/^[a-z0-9]\*\*\*@[a-z0-9.-]{1,253}$/i.test(to)) setGuestTo(to.toLowerCase());
     } else if (params.get('checkout') === 'success') {
       toast({ kind: 'success', title: 'Payment received', message: 'Your tickets will appear here in a moment.' });
     } else if (Number.isInteger(claimed) && claimed > 0) {
@@ -198,13 +203,14 @@ export default function MyTickets() {
     };
   }, [user, toast]);
 
+  const inbox = guestEmailHint() ?? guestTo;
   if (!user && guestDone) return (
     <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
       <div className="max-w-md" role="status">
         <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
         <h1 className="disp text-4xl tracking-tight leading-none mb-4">Check your email</h1>
         <p className="text-white/70 mb-6">
-          Your tickets are on their way{guestEmailHint() ? <> to <strong className="text-white">{guestEmailHint()}</strong></> : null}.
+          Your tickets are on their way{inbox ? <> to <strong className="text-white">{inbox}</strong></> : null}.
           Sign in with that email (we'll send a one-time code, no password) to see your QR codes here.
           Tickets can be forwarded to friends from the email.
         </p>

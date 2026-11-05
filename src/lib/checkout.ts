@@ -10,6 +10,7 @@
 import { supabase } from './supabase';
 import type { Attribution } from './attribution';
 import type { AdIds, MarketingConsent } from './adIds';
+import { currentInAppRecord, type InAppRecord } from './inAppBrowser';
 
 /** Ad click ids / browser ids and consent for the checkout record (lib/adIds.ts). */
 interface CheckoutRecordInput {
@@ -17,10 +18,14 @@ interface CheckoutRecordInput {
   consent?: MarketingConsent;
 }
 
-function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consent?: MarketingConsent } {
+// in_app_browser: which in-app browser (Instagram, ...) the checkout started
+// in, or 'none' (mig 20261105140000). exos-checkout trusts its own reading of
+// the user agent first; this hint adds what only the page can probe.
+export function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consent?: MarketingConsent; in_app_browser: InAppRecord } {
   return {
     ad_ids: input.adIds && Object.keys(input.adIds).length > 0 ? input.adIds : undefined,
     consent: input.consent,
+    in_app_browser: currentInAppRecord(),
   };
 }
 

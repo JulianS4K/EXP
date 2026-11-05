@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCheckoutLink, parseCheckoutLink } from './checkoutLink';
+import { buildCheckoutLink, cartSearchParams, parseCheckoutLink, prefillFromSearch } from './checkoutLink';
 import { withAttribution } from './attribution';
 
 const T = '11111111-1111-4111-8111-111111111111';
@@ -86,5 +86,22 @@ describe('resolveCheckout', () => {
   });
   it('refuses an empty link', () => {
     expect(resolveCheckout(parseCheckoutLink(''), [], []).ok).toBe(false);
+  });
+});
+
+describe('cart on the event URL (?cart=, for browsers that block storage)', () => {
+  const T = '22222222-2222-4222-8222-222222222222';
+  const A = '33333333-3333-4333-8333-333333333333';
+  it('round-trips a prefill, tier first', () => {
+    const p = { tierId: T, quantity: 3, addons: { [A]: 2 }, coupon: 'PRESALE' };
+    const q = cartSearchParams(p);
+    expect(q.get('cart')).toBe(`${T}:3,${A}:2`);
+    expect(q.get('coupon')).toBe('PRESALE');
+    expect(prefillFromSearch('?' + q.toString() + '&utm_source=instagram')).toEqual(p);
+  });
+  it('drops junk and caps quantities', () => {
+    expect(prefillFromSearch('?cart=nope')).toBeNull();
+    expect(prefillFromSearch('?utm_source=x')).toBeNull();
+    expect(prefillFromSearch(`?cart=${T}:99,bad:1&coupon=%3Cb%3E`)).toEqual({ tierId: T.toLowerCase(), quantity: 10, addons: {}, coupon: undefined });
   });
 });

@@ -4,7 +4,7 @@ import { EventFaq, EventGallery, EventGoodToKnow, EventLineup, EventVideo } from
 import { RichText } from '../lib/richText';
 import { ageLabel } from '../lib/storeContent';
 import { formatLabel, isOnline } from '../lib/onlineEvents';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
@@ -19,7 +19,6 @@ import { shareEventToStory } from '../lib/poster';
 import { useAuth } from '../context/AuthContext';
 import { Calendar, MapPin, Ticket, ShieldCheck, Share2, ArrowLeft, CheckCircle2, Copy, Send, Instagram, Minus, Plus, Tag } from 'lucide-react';
 import { formatCurrency, generateBarcodeContent, handleFirestoreError, OperationType, publicUrl } from '../lib/utils';
-import { getStripe } from '../lib/stripe';
 import { formatInTz } from '../lib/datetime';
 import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
@@ -30,14 +29,16 @@ import { initOrgPixels, pixelsLive, trackPixelEvent } from '../lib/pixels';
 import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from '../lib/purchasePixel';
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
+import { copyText, currentInAppBrowser } from '../lib/inAppBrowser';
+import { maskEmail } from '../lib/doorSearch';
+import { withAttribution } from '../lib/attribution';
 import VenueMap from '../components/VenueMap';
 import EventArtistLineup from '../components/EventArtistLineup';
 import { getPublicLineups, jsonLdPerformers, type JsonLdPerformer, type LineupSlot } from '../lib/artists';
 import { captureAttribution, type Attribution } from '../lib/attribution';
-import { clearPrefill, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
+import { buildCheckoutLink, clearPrefill, prefillFromSearch, readPrefill, type CheckoutPrefill } from '../lib/checkoutLink';
 import { getVoucherTier } from '../lib/vouchers';
 import { attachReferral } from '../lib/referrals';
-import ShareModal from '../components/ShareModal';
 import GuestCheckoutModal from '../components/GuestCheckoutModal';
 import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
@@ -57,18 +58,22 @@ import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
 import { useT } from '../context/LanguageContext';
 import { paymentsEnabled } from '../lib/payments';
-import { eventTakesPayPal, stashPayPalCart, venmoPossible } from '../lib/paypal';
+import { eventTakesPayPal, payPalCartFragment, stashPayPalCart, venmoPossible, type PayPalCart } from '../lib/paypal';
 import SubscribeCalendar from '../components/SubscribeCalendar';
 import { venueFeedLinks, venueKey } from '../lib/calendar';
-import SeatPicker from '../components/seating/SeatPicker';
 import { getSeatedTierIds } from '../lib/seatingApi';
 // Timed entry + series dates (mig 20261030150000).
-import SlotPicker from '../components/SlotPicker';
 import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } from '../lib/seriesTimedApi';
 // Matched seats (mig 20261031210000): the optional quiz before checkout.
-import MatchedQuiz from '../components/MatchedQuiz';
 import { getPublicMatchedTiers, saveIntake, type PublicMatchedTier } from '../lib/matchedSeatsApi';
 import { answersBody, EMPTY_ANSWERS, type QuizAnswers } from '../lib/matchedSeats';
+
+// Shown only for some events or after a tap, and the heaviest pieces of the
+// page: split out so the first load (often a slow Instagram webview) skips them.
+const SeatPicker = lazy(() => import('../components/seating/SeatPicker'));
+const SlotPicker = lazy(() => import('../components/SlotPicker'));
+const MatchedQuiz = lazy(() => import('../components/MatchedQuiz'));
+const ShareModal = lazy(() => import('../components/ShareModal'));
 
 const RESUME_KEY = 'exos.resumeBuy';
 const RESUME_TTL_MS = 10 * 60 * 1000;
@@ -158,7 +163,9 @@ export default function EventDetails() {
     setAttribution(captureAttribution(id, window.location.search));
     // Ad click ids (gclid, ttclid, ...) for the checkout record, kept for the visit.
     captureClickIds(id, window.location.search);
-    setPrefill(readPrefill(id));
+    // A checkout link's cart: kept for the visit, and in the URL (?cart=) for
+    // in-app browsers that block storage, so a reload keeps it too.
+    setPrefill(readPrefill(id) ?? prefillFromSearch(window.location.search));
     // A promo link (?code=…, mig 20261016110000): pre-fill the code and count the visit.
     const promo = codeFromSearch(window.location.search);
     setPromoCode(promo);
@@ -466,15 +473,17 @@ export default function EventDetails() {
     if (!event) return;
     const tier = selectedTier ?? allTiers[0];
     if (!tier?.id) return;
-    stashPayPalCart({
+    const cart: PayPalCart = {
       eventId: event.id, tierId: tier.id, quantity, title: event.title,
       currency: (event.currency || 'USD').toLowerCase(),
       addons: addonSel.items, voucherCode: voucher?.code, attribution,
       displayCents: Math.round((priceToDisplay * quantity) * 100) + addonSel.totalCents,
       at: Date.now(),
-    });
+    };
+    stashPayPalCart(cart);
     // A full page load: the PayPal page has its own CSP (PayPal in, Stripe out).
-    window.location.assign(publicUrl('pay/paypal'));
+    // The cart rides in the fragment too, for browsers that block storage.
+    window.location.assign(publicUrl('pay/paypal') + payPalCartFragment(cart));
   };
 
   // Paid checkout (signed in, or as a guest with just an email).
@@ -488,7 +497,9 @@ export default function EventDetails() {
         quantity,
         // Stripe fills in {CHECKOUT_SESSION_ID}; My Tickets uses it to report
         // the Purchase pixel once per session (lib/purchasePixel.ts).
-        successUrl: publicUrl(`my-tickets?checkout=success${guestEmail ? '&guest=1' : ''}&session_id={CHECKOUT_SESSION_ID}`),
+        // A guest's return page names the inbox from `to` (masked: j***@gmail.com),
+        // so it needs no storage (in-app browsers may block it).
+        successUrl: publicUrl(`my-tickets?checkout=success${guestEmail ? `&guest=1&to=${encodeURIComponent(maskEmail(guestEmail) ?? '')}` : ''}&session_id={CHECKOUT_SESSION_ID}`),
         cancelUrl: publicUrl(`event/${event.id}`),
         addons: addonSel.items,
         seatIds: seatedSelected ? seatSel : undefined,
@@ -713,6 +724,15 @@ export default function EventDetails() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, event?.id]);
 
+  // Back from Stripe: Safari and in-app browsers restore this page from the
+  // back-forward cache exactly as it was left, "Starting checkout…" included,
+  // so the buyer couldn't tap Buy again. Un-stick it.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) setPurchasing(false); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
+
   // Closing the sign-in modal without signing in drops the pending purchase.
   useEffect(() => {
     if (isAuthModalOpen || user || !pendingBuyRef.current) return;
@@ -749,8 +769,9 @@ export default function EventDetails() {
       if (navigator.share) {
         await navigator.share(shareData);
       } else {
-        await navigator.clipboard.writeText(window.location.href);
-        toast({ kind: 'success', message: 'Link copied to clipboard.' });
+        // Clipboard API first, execCommand after (in-app browsers often refuse the API).
+        if (await copyText(window.location.href)) toast({ kind: 'success', message: 'Link copied to clipboard.' });
+        else toast({ kind: 'info', message: window.location.href });
       }
     } catch (err) {
       console.error('Error sharing:', err);
@@ -872,9 +893,19 @@ export default function EventDetails() {
   const accentBgStyle = event.branding?.accentColor ? { backgroundColor: event.branding.accentColor } : {};
   const accentBorderStyle = event.branding?.accentColor ? { borderColor: event.branding.accentColor } : {};
 
+  // "Open in your browser" (in-app browsers only): a checkout link with this
+  // cart and the visit's attribution, so the browser opens where the buyer is.
+  const escapeUrl = !currentInAppBrowser() ? undefined : (selectedTier?.id
+    ? buildCheckoutLink(publicUrl('checkout'), {
+      eventId: event.id, tierId: selectedTier.id, quantity,
+      addons: addonSel.items.map((a) => ({ id: a.addon_id, quantity: a.quantity })),
+      coupon: voucher?.code, attribution,
+    })
+    : withAttribution(publicUrl(`event/${event.id}`), attribution));
+
   return (
     <div className="wall grain min-h-screen text-white relative">
-      <InAppBrowserBanner />
+      <InAppBrowserBanner url={escapeUrl} />
       {/* Local reproduction of the mockup's bespoke `.grain` film-grain
           overlay — not in index.css, so it's copied verbatim from the
           EventDetails/Checkout mockup <style> blocks. `.wall`, `.disp`,
@@ -1242,7 +1273,7 @@ export default function EventDetails() {
                           : 'before the event'}.
                       </p>
                       {m.quizEnabled && m.status === 'open' && (user
-                        ? <MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} />
+                        ? <Suspense fallback={null}><MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} /></Suspense>
                         : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
                     </div>
                   );
@@ -1251,8 +1282,10 @@ export default function EventDetails() {
 
                 {/* Timed entry: date + time slot for the chosen ticket type. */}
                 {slotTier && timed && selectedTierId && (
+                  <Suspense fallback={null}>
                   <SlotPicker eventId={event.id} config={timed} tierId={selectedTierId} quantity={seatedSelected ? Math.max(seatSel.length, 1) : quantity}
                     value={slotId} onChange={setSlotId} />
+                  </Suspense>
                 )}
 
                 {/* Series: the other dates of this show. */}
@@ -1272,6 +1305,7 @@ export default function EventDetails() {
 
                 {seatedSelected && (
                 <div className="mb-8">
+                  <Suspense fallback={<p className="type text-[11px] text-white/50 uppercase tracking-widest">Loading the seat map…</p>}>
                   <SeatPicker
                     eventId={event.id}
                     tiers={visibleTiers.filter((x) => seatedTierIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name, price: buyerTierPrice(x) }))}
@@ -1283,6 +1317,7 @@ export default function EventDetails() {
                     onSelectionChange={(ids) => setSeatSel(ids)}
                     reloadKey={seatReload}
                   />
+                  </Suspense>
                 </div>
                 )}
 
@@ -1566,6 +1601,7 @@ export default function EventDetails() {
         onClose={() => setGuestOpen(false)}
         onSignIn={() => { setGuestOpen(false); void signInToBuy(); }}
         free={guestFree}
+        escapeUrl={escapeUrl}
         onContinue={(email) => {
           const tierId = selectedTierId ?? allTiers[0]?.id;
           if (!tierId) return;
@@ -1573,7 +1609,8 @@ export default function EventDetails() {
           else void goToCheckout(tierId, email);
         }}
       />
-      {event && (
+      {event && showShare && (
+        <Suspense fallback={null}>
         <ShareModal
           open={showShare}
           onClose={() => setShowShare(false)}
@@ -1582,6 +1619,7 @@ export default function EventDetails() {
           promoterId={attribution.promoter}
           tags={shareTags}
         />
+        </Suspense>
       )}
     </div>
   );

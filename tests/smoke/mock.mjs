@@ -90,7 +90,7 @@ export const schema = {
     ticket_ids payment_intent failure_reason created_at fulfilled_at addons voucher_id tax_cents promoter_id attribution
     reconcile_attempts reconcile_checked_at reconcile_next_at reconcile_done_at reconcile_note dispute_id dispute_status
     disputed_at dispute_closed_at guest ad_ids consent_marketing client_ip_hash user_agent application_fee_cents
-    exos_fee_cents card_fee_est_cents fee_bps fee_free`),
+    exos_fee_cents card_fee_est_cents fee_bps fee_free in_app_browser`),
   // View, 20260929131000.
   exos_order_money: cols(`session_id org_id event_id status currency created_at fulfilled_at gross_cents tax_cents
     application_fee_cents exos_fee_cents card_fee_est_cents card_fee_actual_cents fee_bps fee_free organizer_net_cents

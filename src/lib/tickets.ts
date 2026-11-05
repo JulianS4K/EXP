@@ -21,7 +21,7 @@ import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
 import { estimateOffset, restoreClockOffset, saveClockOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
-import { fetchAllPages } from './door/roster';
+import { fetchAllPages } from './pagedRead';
 import { parseListState, type ListState } from './door/lists';
 import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
 
