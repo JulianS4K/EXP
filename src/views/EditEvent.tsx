@@ -1,4 +1,7 @@
 import { geocodeEvent } from '../lib/geo';
+import LocationModePicker from '../components/LocationModePicker';
+import { blankLocationDraft, draftFromView, draftToPayload, isPrivateMode, validateLocationDraft, type Address, type LocationDraft, type LocationMode } from '../lib/eventLocation';
+import { getEventLocation, setEventLocation } from '../lib/eventLocationApi';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
@@ -148,6 +151,11 @@ export default function EditEvent() {
   // separately (staff RPC); `linkLoaded` guards against overwriting a link
   // we couldn't read, and `savedLink` skips the RPC when nothing changed.
   const onlineSupported = eventData.format !== undefined;
+  // Location modes (mig 20261105130000): shown once the loaded row has the
+  // column. `locSaved` is the mode as loaded (a mode change picks the save order).
+  const locSupported = eventData.locationMode !== undefined;
+  const [loc, setLoc] = useState<LocationDraft>(() => blankLocationDraft());
+  const [locSaved, setLocSaved] = useState<LocationMode>('venue_record');
   const [online, setOnline] = useState<OnlineDraft>(blankOnline());
   const [linkLoaded, setLinkLoaded] = useState(false);
   const [savedLink, setSavedLink] = useState('');
@@ -229,6 +237,18 @@ export default function EditEvent() {
         getPublishBlockers(eventId).then(setBlockers).catch((err) => console.warn('publish blockers unavailable:', err));
       }
       if (data.lineup !== undefined) setStore(storeFromEvent(data));
+      if (data.locationMode !== undefined) {
+        setLocSaved(data.locationMode);
+        const startIso = data.timing?.startTime?.toDate?.()?.toISOString() ?? data.date?.toDate?.()?.toISOString() ?? null;
+        setLoc({ ...draftFromView({ location_mode: data.locationMode, venue_location: data.location,
+          location_reveal_at: data.locationRevealAt, tba_allow_sales: data.tbaAllowSales }, startIso) });
+        // Staff read the secret place through its RPC (never on the event row).
+        if (data.locationMode !== 'venue_record') {
+          getEventLocation(eventId)
+            .then((v) => setLoc(draftFromView(v, startIso)))
+            .catch((err) => console.warn('event location unavailable:', err));
+        }
+      }
       if (data.format !== undefined) {
         setOnline(onlineFromEvent(data));
         getEventJoinLinkForStaff(eventId)
@@ -311,6 +331,15 @@ export default function EditEvent() {
     }
     if ((eventData.location || '').length > LOCATION_MAX) {
       return `Location must be ${LOCATION_MAX} characters or fewer.`;
+    }
+    if (locSupported && loc.mode !== 'venue_record') {
+      const online0 = onlineSupported && !needsVenue(online.format);
+      const locErr = validateLocationDraft(isPrivateMode(loc.mode) ? loc
+        : { ...loc, venueName: eventData.location || '', address: (eventData.address ?? {}) as Address }, { online: online0 });
+      if (locErr) return locErr;
+      if ((eventData.ticketTiers || []).some((t) => !(Number(t.capacity) > 0))) {
+        return 'Give every ticket type a capacity (an event without a venue on Exos can\'t be unlimited).';
+      }
     }
     if ((eventData.subgenres || []).length > SUBGENRES_MAX_COUNT) {
       return `Please choose at most ${SUBGENRES_MAX_COUNT} subgenres.`;
@@ -664,6 +693,16 @@ export default function EditEvent() {
         ts && typeof ts.toDate === 'function' ? ts.toDate().toISOString() : null;
       const startTs = ed.timing?.startTime ?? ed.date;
 
+      // Where it happens (mig 20261105130000). Leaving a secret / TBA mode is
+      // saved before the fields below (they carry a public venue again);
+      // anything else after them, against the start as saved.
+      const locChanged = locSupported && (loc.mode !== 'venue_record' || locSaved !== 'venue_record');
+      const locPayload = (startIso: string | null) => draftToPayload(
+        { ...loc, venueName: ed.location || '', address: (ed.address ?? {}) as Address }, startIso);
+      const privateNow = locSupported && isPrivateMode(loc.mode);
+      const leavingPrivate = locChanged && isPrivateMode(locSaved) && !privateNow;
+      if (leavingPrivate) await setEventLocation(eventId, locPayload(tsToIso(startTs)));
+
       // 1. Update the event fields via the seam.
       await updateEvent(eventId, {
         name: ed.title,
@@ -676,9 +715,11 @@ export default function EditEvent() {
         timezone: tz,
         currency: (ed.currency || 'USD').toUpperCase(),
         // A fully online event with no venue shows "Online" wherever a venue goes.
-        venueName: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
-        venueLocation: (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
-        venueAddress: ed.address as any,
+        // A secret / TBA event's row carries the public area only.
+        venueName: privateNow ? '' : (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
+        venueLocation: privateNow ? loc.area.trim()
+          : (ed.location || '').trim() || (onlineSupported && isOnline(online.format) ? 'Online' : ed.location),
+        venueAddress: privateNow ? undefined : ed.address as any,
         // With a lineup, performer_names is written by exos_lineup_save, not here.
         primaryPerformerName: hasLineup ? undefined : ed.performers?.[0],
         performerNames: hasLineup ? undefined : ed.performers,
@@ -769,8 +810,18 @@ export default function EditEvent() {
       setOriginalCodes(ed.discountCodes || []);
       setOriginalTiers((ed.ticketTiers || []).map((t) => ({ id: t.id, name: t.name })));
       setOriginalTierIds((ed.ticketTiers || []).map((t) => t.id));
-      // Re-pin the venue if its address changed (server skips unchanged, fresh pins).
-      if (!onlineSupported || needsVenue(online.format)) void geocodeEvent(eventId);
+      if (locChanged && !leavingPrivate) {
+        try {
+          await setEventLocation(eventId, locPayload(tsToIso(startTs)));
+          setLocSaved(loc.mode);
+        } catch (locErr) {
+          toast({ kind: 'error', message: `Changes saved, but the location did not save: ${(locErr as Error).message}` });
+          return;
+        }
+      } else if (leavingPrivate) setLocSaved(loc.mode);
+      // Re-pin the venue if its address changed (server skips unchanged, fresh
+      // pins). Never a secret or TBA location: nothing public to pin.
+      if (!privateNow && (!onlineSupported || needsVenue(online.format))) void geocodeEvent(eventId);
       if (publishing) {
         const r = await publishEvent(eventId);
         if (!r.published) {
@@ -1248,8 +1299,10 @@ export default function EditEvent() {
            )}
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Venue Destination</label>
+              <div className={`space-y-2 ${locSupported ? 'md:col-span-2' : ''}`}>
+                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{locSupported ? 'Where it happens' : 'Venue Destination'}</label>
+                {(() => {
+                  const venueInputs = (<>
                 <input
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.location || ''}
@@ -1286,6 +1339,12 @@ export default function EditEvent() {
                     ))}
                   </div>
                 </details>
+                  </>);
+                  return locSupported ? (
+                    <LocationModePicker draft={loc} onChange={setLoc} orgId={eventData.orgId}
+                      venueFields={venueInputs} venueName={eventData.location || ''} venueCity={eventData.address?.city || ''} />
+                  ) : venueInputs;
+                })()}
               </div>
               <div className="space-y-2">
                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total Venue Capacity</label>
@@ -1643,7 +1702,8 @@ export default function EditEvent() {
         {eventId && eventData.orgId && (
           <EventBookingPanels
             eventId={eventId}
-            canEditVenue={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+            canEditVenue={(locSaved === 'venue_record') /* a promoter-mode event takes no venue record (mig 20261105130000) */
+              && (isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? ''))}
             canEdit={isAdmin || ['owner', 'manager', 'content'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
             authorName={user?.displayName || user?.email || 'Staff'}
             onDoorsChange={(iso) => setEventData((d) => ({

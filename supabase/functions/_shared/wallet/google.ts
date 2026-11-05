@@ -13,7 +13,7 @@
 import { fromBase64Url, toBase64Url, utf8 } from "./bytes.ts";
 import { importRsaSigningKey, rsaSign, WalletKeyError } from "./keys.ts";
 import { TOTP_DIGITS, TOTP_PERIOD_MS } from "./codes.ts";
-import { displayState, localIso, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
+import { displayState, localIso, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
 
 export const WALLET_API = "https://walletobjects.googleapis.com/walletobjects/v1";
 export const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -94,6 +94,15 @@ export function buildEventTicketObject(p: WalletPayload, issuerId: string): Reco
     }];
   } else if (p.google_key_hex) {
     obj.rotatingBarcode = googleRotatingBarcode(p.google_pattern, p.google_key_hex, shortTicket(p.ticket.id));
+  }
+  // A revealed secret location (mig 20261105130000): on this ticket's object
+  // only, never on the event's class (which every holder's pass shares).
+  const secret = revealedLocation(p);
+  if (secret) {
+    obj.textModulesData = [...((obj.textModulesData as unknown[]) ?? []), {
+      id: "location", header: secret.name,
+      body: secret.directions ? `${secret.line}\n${secret.directions}` : secret.line,
+    }];
   }
   if (p.event.ends_at) {
     obj.validTimeInterval = { end: { date: localIso(new Date(new Date(p.event.ends_at).getTime() + 12 * 3600_000).toISOString(), p.event.timezone) } };

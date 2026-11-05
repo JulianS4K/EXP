@@ -13,6 +13,7 @@ import { parseAccessibility, type EventAccessibility } from './accessibility';
 import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseEventFormat } from './onlineEvents';
+import { parseLocationMode } from './eventLocation';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
 import { parseUnitFees } from './fees';
@@ -140,6 +141,14 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
           ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma', 'posh'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
           externalTicketUrl: typeof row.external_ticket_url === 'string' && row.external_ticket_url.startsWith('https://')
             ? row.external_ticket_url : undefined,
+        }
+      : {}),
+    // Location mode (mig 20261105130000); likewise.
+    ...('location_mode' in row
+      ? {
+          locationMode: parseLocationMode(row.location_mode),
+          locationRevealAt: row.location_reveal_at ?? null,
+          tbaAllowSales: typeof row.tba_allow_sales === 'boolean' ? row.tba_allow_sales : null,
         }
       : {}),
   };

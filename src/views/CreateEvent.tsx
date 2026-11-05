@@ -79,6 +79,10 @@ import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocke
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
+import LocationModePicker, { useLocationModes } from '../components/LocationModePicker';
+import { blankLocationDraft, draftToPayload, isPrivateMode, parseOrgType, validateLocationDraft, type LocationDraft } from '../lib/eventLocation';
+import { setEventLocation } from '../lib/eventLocationApi';
+import { blockersSentence, publishEvent } from '../lib/publishBlockers';
 
 const AUTOMATIQ_ENABLED =
   (import.meta as any).env?.VITE_AUTOMATIQ_ENABLED === 'true';
@@ -95,6 +99,8 @@ export default function CreateEvent() {
   const accessOk = useAccessColumns();
   const storeOk = useStoreColumns();
   const onlineOk = useOnlineColumns();
+  // Location modes (mig 20261105130000): the picker shows once the column exists.
+  const locOk = useLocationModes();
   const { user } = useAuth();
   // Bridge multi-tenant: every new event must belong to the active org.
   // Falls back to legacy uid-only path if the user has no orgs yet so
@@ -107,6 +113,13 @@ export default function CreateEvent() {
   const [loading, setLoading] = useState(false);
   // Ticketing (mig 20261019090000): primary QR platform + the other platforms to sell on.
   const [channels, setChannels] = useState<ChannelChoice>({ primary: 'exos', also: [] });
+  // Where it happens: the org type's default mode until the organizer picks one.
+  const [loc, setLoc] = useState<LocationDraft>(() => blankLocationDraft());
+  const locTouched = useRef(false);
+  useEffect(() => {
+    if (!locTouched.current) setLoc(blankLocationDraft(parseOrgType(activeOrg?.orgType)));
+  }, [activeOrg?.orgType]);
+  const privateLoc = locOk && isPrivateMode(loc.mode);
   const [hydratingClone, setHydratingClone] = useState<boolean>(!!cloneFromId);
   const [uploadingImage, setUploadingImage] = useState(false);
   // Track every Storage path the user has uploaded during this session.
@@ -525,7 +538,14 @@ export default function CreateEvent() {
       if (onlineErr) return onlineErr;
     }
     const venueRequired = !onlineOk || needsVenue(formData.online.format);
-    if (venueRequired && !formData.location.trim()) return 'Please enter a venue.';
+    if (privateLoc) {
+      const locErr = validateLocationDraft(loc, { online: !venueRequired });
+      if (locErr) return locErr;
+    } else if (venueRequired && !formData.location.trim()) return 'Please enter a venue.';
+    if (locOk && venueRequired && loc.mode === 'unlisted_venue') {
+      const locErr = validateLocationDraft({ ...loc, venueName: formData.location, address: formData.address });
+      if (locErr) return locErr;
+    }
 
     if (formData.location.length > LOCATION_MAX) {
       return `Location must be ${LOCATION_MAX} characters or fewer.`;
@@ -746,12 +766,15 @@ export default function CreateEvent() {
         : undefined;
 
       let eventId: string;
+      let livePublished = publish;
       try {
         const input = (slugValue: string): EventInput => ({
           orgId: activeOrg.id,
           name: formData.title.trim(),
           description: formData.description.trim(),
-          status: publish ? 'published' : 'draft',
+          // A promoter-mode event is saved as a draft, gets its location, then
+          // goes live through exos_publish_event (which checks the blockers).
+          status: publish && !(locOk && loc.mode !== 'venue_record') ? 'published' : 'draft',
           slug: slugValue || null,
           startsAt: startUtc.toISOString(),
           doorsAt: doorsUtc ? doorsUtc.toISOString() : null,
@@ -759,9 +782,11 @@ export default function CreateEvent() {
           timezone: tz,
           currency: formData.currency.toUpperCase(),
           // A fully online event with no venue shows "Online" wherever a venue goes.
-          venueName: formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
-          venueLocation: formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
-          venueAddress: addr,
+          // A secret / TBA event's row carries the public area only (mig 20261105130000).
+          venueName: privateLoc ? '' : formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
+          venueLocation: privateLoc ? loc.area.trim()
+            : formData.location.trim() || (onlineOk && isOnline(formData.online.format) ? 'Online' : ''),
+          venueAddress: privateLoc ? undefined : addr,
           primaryPerformerName: formData.performers[0],
           performerNames: formData.performers.length > 0 ? formData.performers : undefined,
           artistLinks: normalizeArtistLinks(formData.artistLinks),
@@ -835,8 +860,28 @@ export default function CreateEvent() {
             toast({ kind: 'error', message: `Event saved, but selling on other platforms didn't turn on: ${(chErr as Error).message} Open Edit event → Also sell on.` });
           }
         }
-        // Pin the venue for the map (server-side geocode; best-effort).
-        if (!onlineOk || needsVenue(formData.online.format)) void geocodeEvent(created.eventId);
+        // Where it happens (mig 20261105130000): saved through its RPC, then
+        // published there so the location blockers apply.
+        if (locOk && loc.mode !== 'venue_record') {
+          try {
+            await setEventLocation(created.eventId, draftToPayload(
+              { ...loc, venueName: formData.location, address: formData.address }, startUtc.toISOString()));
+            if (publish) {
+              const res = await publishEvent(created.eventId);
+              if (!res.published) {
+                livePublished = false;
+                toast({ kind: 'error', title: 'Saved as a draft', message: blockersSentence(res.blockers) });
+              }
+            }
+          } catch (locErr) {
+            console.error('location save failed:', locErr);
+            livePublished = false;
+            toast({ kind: 'error', message: `Event saved as a draft, but its location did not save: ${(locErr as Error).message} Open Edit event to finish it.` });
+          }
+        }
+        // Pin the venue for the map (server-side geocode; best-effort). Never
+        // for a secret or TBA location: nothing public to pin.
+        if (!privateLoc && (!onlineOk || needsVenue(formData.online.format))) void geocodeEvent(created.eventId);
       } catch (commitErr) {
         // exos_events.slug is UNIQUE — a collision surfaces as a unique violation.
         if (customSlug && isSlugConflict(commitErr)) {
@@ -863,10 +908,10 @@ export default function CreateEvent() {
       uploadedImagePathRef.current = null;
       toast({
         kind: 'success',
-        message: publish ? 'Event published.' : 'Draft saved.',
+        message: livePublished ? 'Event published.' : 'Draft saved.',
       });
       // A published event lands on its share screen ("You're live").
-      navigate(publish ? `/dashboard/event/${eventId}/promote?new=1` : '/dashboard');
+      navigate(livePublished ? `/dashboard/event/${eventId}/promote?new=1` : '/dashboard');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'events', toast);
     } finally {
@@ -1213,7 +1258,9 @@ export default function CreateEvent() {
             </div>
 
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Venue</label>
+              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{locOk ? 'Where it happens' : 'Venue'}</label>
+              {(() => {
+                const venueInputs = (<>
               <div className="relative">
                 <MapPin className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4" aria-hidden="true" />
                 <input aria-label="Venue"
@@ -1283,6 +1330,13 @@ export default function CreateEvent() {
                   />
                 </div>
               </details>
+                </>);
+                return locOk ? (
+                  <LocationModePicker draft={loc} orgId={activeOrg?.id}
+                    onChange={(d) => { locTouched.current = true; setLoc(d); }}
+                    venueFields={venueInputs} venueName={formData.location} venueCity={formData.address.city} />
+                ) : venueInputs;
+              })()}
             </div>
 
             <div className="md:col-span-2 space-y-2">

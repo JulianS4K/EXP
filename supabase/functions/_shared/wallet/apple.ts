@@ -9,7 +9,7 @@
 
 import { toHex, sha1, utf8 } from "./bytes.ts";
 import type { PassSigner } from "./pkcs7.ts";
-import { displayState, localIso, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
+import { displayState, localIso, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
 import { solidPng } from "./png.ts";
 import { zipStore } from "./zip.ts";
 
@@ -49,7 +49,12 @@ export function buildApplePassJson(
       dateStyle: "PKDateStyleMedium", timeStyle: "PKDateStyleShort", ignoresTimeZone: true,
     });
   }
-  if (ev.venue_name) secondaryFields.push({ key: "venue", label: "VENUE", value: ev.venue_name });
+  // A secret location (mig 20261105130000): the place once revealed, else "Secret location".
+  const secret = revealedLocation(p);
+  const secretMode = p.location?.location_mode === "secret_location";
+  if (secret) secondaryFields.push({ key: "venue", label: "VENUE", value: secret.name, changeMessage: "Location: %@" });
+  else if (secretMode) secondaryFields.push({ key: "venue", label: "VENUE", value: "Secret location", changeMessage: "Location: %@" });
+  else if (ev.venue_name) secondaryFields.push({ key: "venue", label: "VENUE", value: ev.venue_name });
 
   const auxiliaryFields: Field[] = [];
   const tier = [p.ticket.tier_name, p.ticket.section_label].filter(Boolean).join(" · ");
@@ -81,7 +86,12 @@ export function buildApplePassJson(
   const backFields: Field[] = [
     { key: "ticket", label: "Ticket", value: shortTicket(p.ticket.id) },
   ];
-  if (ev.venue_location) backFields.push({ key: "address", label: "Address", value: ev.venue_location });
+  if (secret) {
+    backFields.push({ key: "address", label: "Address", value: secret.line, changeMessage: "The address: %@" });
+    if (secret.directions) backFields.push({ key: "directions", label: "Directions", value: secret.directions });
+  } else if (ev.venue_location) {
+    backFields.push({ key: "address", label: secretMode ? "Area" : "Address", value: ev.venue_location });
+  }
   if (state === "void") {
     backFields.unshift({
       key: "void", label: "Void",

@@ -49,6 +49,7 @@ import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAl
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
 import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from '../lib/marketplace/lastCall';
 import LinkOutBuyCard from '../components/LinkOutBuyCard';
+import { isPrivateMode, parseLocationMode, publicLocation, salesOpen } from '../lib/eventLocation';
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import CheckoutExtras, { type CheckoutExtrasValue } from '../components/CheckoutExtras';
@@ -230,7 +231,10 @@ export default function EventDetails() {
                     name: data.title,
                     startDate: startIso,
                     endDate: endIso,
-                    location: {
+                    // A secret / TBA location publishes the area only (mig 20261105130000).
+                    location: isPrivateMode(parseLocationMode(data.locationMode)) ? {
+                      name: data.location || 'To be announced',
+                    } : {
                       name: data.location,
                       streetAddress: data.address?.street,
                       city: data.address?.city,
@@ -858,6 +862,21 @@ export default function EventDetails() {
   // state means the viewer is authorized — no extra client gate needed.
 
   const elsewhere = sellsElsewhere(sale);
+  // Where it happens (mig 20261105130000): a secret location shows its area and
+  // the reveal time, TBA says so; neither gets a map. The row never has a secret address.
+  const pubLoc = publicLocation({
+    location_mode: event.locationMode, venue_name: event.location, venue_location: event.location,
+    venue_address: event.address, location_reveal_at: event.locationRevealAt, tba_allow_sales: event.tbaAllowSales,
+    starts_at: event.timing?.startTime?.toDate?.()?.toISOString() ?? event.date?.toDate?.()?.toISOString() ?? null,
+  }, (iso) => {
+    try {
+      return new Date(iso).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: event.timezone || undefined });
+    } catch {
+      return new Date(iso).toLocaleString();
+    }
+  });
+  const privateLoc = isPrivateMode(pubLoc.mode);
+  const locationSalesOpen = salesOpen(pubLoc.mode, event.tbaAllowSales);
   const soldOut = elsewhere || (selectedTier
     ? (() => {
         const t = liveTier(selectedTier.id, selectedTier.capacity);
@@ -1019,7 +1038,9 @@ export default function EventDetails() {
                 </div>
                 <div>
                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">location</p>
-                   <p className="disp text-xl tracking-tight">{event.location}</p>
+                   <p className="disp text-xl tracking-tight">{privateLoc ? pubLoc.title : event.location}</p>
+                   {privateLoc && pubLoc.detail && <p className="type text-xs text-white/70 mt-1">{pubLoc.detail}</p>}
+                   {pubLoc.note && <p className="type text-xs text-white/60 mt-1">{pubLoc.note}</p>}
                    {isOnline(event.format) && (
                      <p className="type text-xs text-white/60 mt-1">
                        {event.format === 'hybrid' ? 'Also online. ' : ''}Ticket holders get the join link on their ticket.
@@ -1027,7 +1048,7 @@ export default function EventDetails() {
                    )}
                 </div>
               </div>
-              {event.format !== 'online' && (
+              {event.format !== 'online' && !privateLoc && (
                 <VenueMap eventId={event.id} location={event.location} address={event.address} />
               )}
               <EventAccessInfo accessibility={event.accessibility} />
@@ -1122,6 +1143,8 @@ export default function EventDetails() {
                 {event.linkOut ? (
                   <LinkOutBuyCard event={event} linkOut={event.linkOut}
                     onBuy={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })} />
+                ) : !locationSalesOpen ? (
+                  <p role="status" className="type text-sm text-white/80">Tickets go on sale once the location is announced.</p>
                 ) : (<>
                 <div className="mb-8">
                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
@@ -1512,7 +1535,7 @@ export default function EventDetails() {
                   <AddToCalendar event={event} />
                   {(() => {
                     // The venue's calendar: every Exos event at this venue (docs/calendar.md).
-                    const key = venueKey(event.location, event.address);
+                    const key = privateLoc ? null : venueKey(event.location, event.address);
                     return key ? (
                       <SubscribeCalendar links={venueFeedLinks(key)} label={`${event.location} calendar`} />
                     ) : null;

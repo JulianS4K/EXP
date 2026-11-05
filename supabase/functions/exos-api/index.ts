@@ -152,6 +152,8 @@ import {
   handleOrgAccess, ORG_ACCESS_CREATED, ORG_ACCESS_ROUTES, OrgAccessError, orgAccessDbError, venueApprovalAnswer,
 } from "./orgAccess.ts";
 import { stripStaffVenueFields } from "../_shared/api/orgAccess.ts";
+// claude/exos-promoter-events (mig 20261105130000).
+import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -353,6 +355,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const approval = venueApprovalAnswer(e);
     if (approval) return json(approval, 403);
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
+    if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -451,6 +454,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
   // claude/exos-org-access (mig 20261104180000): role API permissions, venue requests, co-hosts, partner presale.
   if (ORG_ACCESS_ROUTES.has(route.id)) return await handleOrgAccess(route, c);
+  // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
+  if (LOCATION_ROUTES.has(route.id)) {
+    return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
+  }
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
