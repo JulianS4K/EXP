@@ -164,6 +164,23 @@ SELECT pg_temp.exos_patch_n('public.exos_api_me(text,text,text,text,jsonb)',
   '/* exos: api tokens can''t mint */',
   $o$      IF jsonb_typeof(a->'scopes') IS DISTINCT FROM 'array' OR jsonb_array_length(a->'scopes') NOT BETWEEN 1 AND 40 THEN$o$,
   $n$      /* exos: api tokens can't mint */
+      -- Lock the maker's row, then re-read it. The token was authenticated at
+      -- the top of this call, but a revoke can commit while the mint runs:
+      -- FOR SHARE waits for that revoke, and the re-read below (a new
+      -- statement, so a new snapshot) sees it and refuses. A revoke that
+      -- starts after the lock waits for this mint to commit, and its cascade
+      -- (a later statement) then sees the child. So no child outlives a
+      -- revoke that was in flight when it was minted.
+      PERFORM 1 FROM public.exos_personal_tokens p WHERE p.id = (v_cred->>'credential_id')::uuid FOR SHARE;
+      PERFORM 1 FROM public.exos_account_tokens t WHERE t.id = (v_cred->>'credential_id')::uuid FOR SHARE;
+      IF NOT EXISTS (SELECT 1 FROM public.exos_personal_tokens p
+                      WHERE p.id = (v_cred->>'credential_id')::uuid AND p.revoked_at IS NULL
+                        AND (p.expires_at IS NULL OR p.expires_at > now()))
+         AND NOT EXISTS (SELECT 1 FROM public.exos_account_tokens t
+                          WHERE t.id = (v_cred->>'credential_id')::uuid AND t.revoked_at IS NULL
+                            AND (t.expires_at IS NULL OR t.expires_at > now())) THEN
+        RAISE EXCEPTION 'exos_api_me: invalid or revoked token' USING ERRCODE = '42501';
+      END IF;
       IF EXISTS (SELECT 1 FROM public.exos_personal_tokens p
                   WHERE p.id = (v_cred->>'credential_id')::uuid AND p.parent_token_id IS NOT NULL)
          OR EXISTS (SELECT 1 FROM public.exos_account_tokens t
