@@ -10,7 +10,13 @@
 // The two user tokens act as their user: every request reads the user's LIVE
 // role (exos_api_token_auth, mig 20261031130500), narrows the token's scopes to
 // it, and refuses a user who is no longer an active member (403). Every
-// request is scoped to the credential's org.
+// request is scoped to the credential's org; a personal access token made
+// with "works across all my organizations" (multi_org) may name another org
+// of its user with X-Exos-Org (exos_api_token_auth_org, mig 20261105120000),
+// held to the user's role there; a pinned one gets 403 token_pinned_to_org.
+// Box office (./boxOffice.ts, mig 20261105120000): printed tickets (one-time
+// print codes, JSON / HTML / PDF), membership reservations, staff shifts,
+// moving a tag assignment.
 //
 // Auth: `Authorization: Bearer sk_live_...`. The key is never stored in plaintext
 // (migration 20260616200000) — we SHA-256 the presented key and look up the
@@ -157,6 +163,8 @@ import { handleMe, ME_ROUTE_IDS } from "./me.ts";
 import { GAP_ROUTES, handleGapWrites } from "./gapWrites.ts";
 import { publicApi, publicPreflight } from "./publicApi.ts";
 import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
+// claude/exos-na-build (mig 20261105120000).
+import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffice.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -253,6 +261,8 @@ interface Credential {
   clientId: string | null;
   /** An account token (exos_pat_… of a user with no organization, me:* only; mig 20261105110000). */
   account: boolean;
+  /** A personal access token acting in another org (X-Exos-Org): the org it was made in. */
+  homeOrgId?: string | null;
 }
 
 interface Ctx {
@@ -300,11 +310,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json({ error: "missing bearer API key" }, 401);
 
+  // X-Exos-Org (mig 20261105120000): a personal access token acting in
+  // another organization of its user (team switching).
+  const switchOrg = req.headers.get("x-exos-org")?.trim() || null;
+  if (switchOrg !== null && !UUID_RE.test(switchOrg)) return json({ error: "X-Exos-Org must be an organization id (a UUID)" }, 400);
+
   const sb = service();
-  const resolved = await resolveCredential(sb, token);
+  const resolved = await resolveCredential(sb, token, switchOrg);
   const tokenHash = await sha256Hex(token);
   if (resolved === "membership") {
     return json({ error: "this token's user is no longer a member of the organization" }, 403);
+  }
+  if (resolved === "token_pinned_to_org") {
+    return json({
+      error: "token_pinned_to_org",
+      message: "this personal access token works only in the organization it was made for; make one with \"works across all my organizations\" to use X-Exos-Org",
+    }, 403);
+  }
+  if (resolved === "not_member") {
+    return json({ error: "this token's user is not a member of the organization X-Exos-Org names" }, 403);
+  }
+  if (resolved === "org_switch") {
+    return json({
+      error: "only a personal access token can act in another organization (X-Exos-Org); an OAuth token and an organization API key stay in their own",
+    }, 403);
+  }
+  if (resolved === "account_no_org") {
+    return json({ error: "account_no_org", message: "an account token has no organization, so it can't use X-Exos-Org" }, 403);
   }
   if (!resolved) return json({ error: "invalid or revoked API key" }, 401);
   const { cred, orgId } = resolved;
@@ -348,7 +380,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Personal and OAuth tokens (#74) may call every GET and the platform routes.
   // Every other write records or checks an org API key id (exos_api_write,
   // booking, offers, listing keys), so it needs one.
-  if (!ME_ROUTE_IDS.has(match.route.id) && !userTokenMayCall(cred.kind, method, match.route.id)) {
+  if (
+    !ME_ROUTE_IDS.has(match.route.id) && !userTokenMayCall(cred.kind, method, match.route.id) &&
+    !USER_TOKEN_WRITES.has(match.route.id)
+  ) {
     return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
   }
 
@@ -433,10 +468,19 @@ const FAN_ROUTES = new Set([
   "create-tagged-item", "delete-tagged-item", "list-canonical-tags", "list-refund-requests",
 ]);
 
-/** The credential behind a bearer string and its org, "membership" for a user who left, else null. */
+/**
+ * The credential behind a bearer string and its org, "membership" for a user
+ * who left, else null. `switchOrg` (X-Exos-Org, mig 20261105120000): the org
+ * a personal access token made with multi_org acts in instead of its own,
+ * when its user is an active member there ("not_member" otherwise); a pinned
+ * personal token naming another org is "token_pinned_to_org", an OAuth token
+ * or an API key "org_switch".
+ */
 async function resolveCredential(
-  sb: SupabaseClient, token: string,
-): Promise<{ cred: Credential; orgId: string } | "membership" | null> {
+  sb: SupabaseClient, token: string, switchOrg: string | null = null,
+): Promise<
+  { cred: Credential; orgId: string } | "membership" | "not_member" | "org_switch" | "token_pinned_to_org" | "account_no_org" | null
+> {
   const kind = bearerKind(token);
   if (!kind) return null;
   const hash = await sha256Hex(token);
@@ -449,6 +493,7 @@ async function resolveCredential(
       return null;
     }
     if (!k) return null;
+    if (switchOrg !== null && switchOrg.toLowerCase() !== String(k.org_id).toLowerCase()) return "org_switch";
     return {
       orgId: k.org_id as string,
       cred: {
@@ -457,7 +502,9 @@ async function resolveCredential(
       },
     };
   }
-  const { data, error } = await sb.rpc("exos_api_token_auth", { p_hash: hash, p_kind: kind });
+  const { data, error } = switchOrg === null
+    ? await sb.rpc("exos_api_token_auth", { p_hash: hash, p_kind: kind })
+    : await sb.rpc("exos_api_token_auth_org", { p_hash: hash, p_kind: kind, p_org: switchOrg });
   if (error) {
     console.error("exos-api: token lookup failed", error.message);
     return null;
@@ -471,9 +518,12 @@ async function resolveCredential(
       return null;
     }
     t = acct as Record<string, unknown> | null;
+    // An account token has no organization, so it can't act in one (X-Exos-Org).
+    if (t && switchOrg !== null) return "account_no_org";
   }
   if (!t) return null;
   if (t.error === "membership") return "membership";
+  if (t.error === "not_member" || t.error === "org_switch" || t.error === "token_pinned_to_org") return t.error;
   const account = t.account === true;
   return {
     orgId: account ? "" : String(t.org_id),
@@ -482,6 +532,7 @@ async function resolveCredential(
       key_prefix: (t.key_prefix as string | null) ?? null, scopes: (t.scopes ?? []) as string[],
       userId: String(t.user_id), role: account ? null : String(t.role), clientId: (t.client_id as string | null) ?? null,
       account,
+      homeOrgId: (t.home_org_id as string | null) ?? null,
     },
   };
 }
@@ -490,6 +541,13 @@ async function resolveCredential(
 
 async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   const { sb, orgId, page } = c;
+  // claude/exos-na-build (mig 20261105120000): printing, box-office memberships, staff shifts, retagging.
+  if (BOX_OFFICE_ROUTES.has(route.id)) {
+    return await handleBoxOffice(route, {
+      sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+      credKind: c.cred.kind, userId: c.cred.userId, role: c.cred.role, scopes: c.cred.scopes,
+    });
+  }
   // claude/exos-org-access (mig 20261104180000): role API permissions, venue requests, co-hosts, partner presale.
   if (ORG_ACCESS_ROUTES.has(route.id)) return await handleOrgAccess(route, c);
   // claude/exos-fan-api (mig 20261105110000): the token's own user, and the gap list's org writes.
@@ -539,6 +597,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           credential: {
             kind: c.cred.kind, user_id: c.cred.userId, role: c.cred.role, client_id: c.cred.clientId,
             ...(c.cred.account ? { account: true } : {}),
+            // Set when X-Exos-Org switched a personal access token to this org.
+            ...(c.cred.homeOrgId ? { home_org_id: c.cred.homeOrgId } : {}),
           },
           effective_scopes: effectiveScopes(c.cred.scopes),
         },

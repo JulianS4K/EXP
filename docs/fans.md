@@ -76,7 +76,20 @@ itself. A plain `<iframe>` version and a direct link are offered too. The page h
 the org (artists once `exos_artists` exists) and that the tag's scope fits. Filters: the fan list (all chosen
 tags), the Tags tab's event list (`exos_org_tag_filter`), and `?tag_id=` on `GET /v1/events` and `/v1/fans`.
 Owner / manager write; finance and content read. Through the API, tags are `events:*`, and anything on a fan
-also needs `fans:*`.
+also needs `fans:*`. `PUT /v1/tagged-items/:id` moves an assignment to another tag (`tag_id`, or
+`tag_attributes[name]` found or made with the record's type), mig 20261105120000.
+
+## Tixel waitlist signups
+
+Mig `20261105120000`, edge function `exos-tixel-webhook` (Opendate's `POST /public/tixel/waitlist_signups`). Tixel
+posts fan activity to one URL with the organizer's secret in `X-Secret`. The secrets live in the function's env,
+never in the database: `EXOS_TIXEL_WEBHOOK_SECRETS` = `{"<org id>": "<secret of 16+ characters>", …}`; the secret
+picks the organization, and with the variable unset the function answers 404. Only `WAITLIST` is kept
+(`PURCHASE`, `AUTO_PURCHASE`, `LISTING` get 200 so Tixel doesn't retry); no `user.email` is 422. A signup is stored
+in `exos_tixel_signups` (owner / manager read) and, when exactly one upcoming published event of the org has the
+Tixel event title as its name (case-insensitive), put on that event's waitlist (`exos_waitlist`, `meta.source =
+'tixel'`). Redelivery of the same payload answers the first result. Tixel's `marketingConsent` is not applied: consent
+changes only by the fan. Inbound only: nothing is sent to Tixel. 32 KB a body, 120 deliveries a minute per org.
 
 ## Refund requests
 
@@ -106,7 +119,7 @@ How each Opendate endpoint in these areas maps to Exos.
 | `GET /api/v2/public/confirm_fan_infos/{id}` | `exos_public_events` (anon view), the listing feed's `GET /v1/public/events/:id` (PR #69) | Lookup by order number isn't offered (it would confirm an order exists); fans use My Tickets |
 | `GET /api/v2/public/orders/{id}/refund_request` | `exos_my_refund_asks(event)`, `exos_my_refund_asks_all()` | Signed in (the payer's account or confirmed email), not shared key + typed email |
 | `POST /api/v2/public/orders/{id}/refund_request` | `exos_ask_refund(ticket_ids, reason)` | Per ticket, within the refund policy |
-| `POST /api/v2/public/tixel/waitlist_signups` | not built | An inbound Tixel webhook; Exos has no Tixel integration. The waitlist is `exos_waitlist` |
+| `POST /api/v2/public/tixel/waitlist_signups` | `exos-tixel-webhook` (POST) | Into `exos_waitlist` for the event with that title; the secret is an env var ("Tixel waitlist signups" above) |
 | `GET /api/v2/admin/fans` | `GET /v1/fans` | Per org (the key's); no cross-org admin API |
 | `GET /api/v2/admin/fans/:id` | `GET /v1/fans/:id` | |
 | `POST /api/v2/admin/fans` | `POST /v1/fans` | |
@@ -120,7 +133,7 @@ How each Opendate endpoint in these areas maps to Exos.
 | `GET /api/v2/tagged_items` | `GET /v1/tagged-items` | `taggable_type` accepts `CalendarEvent` |
 | `GET /api/v2/tagged_items/{id}` | `GET /v1/tagged-items/:id` | |
 | `POST /api/v2/tagged_items` | `POST /v1/tagged-items` | `tag_id` or `tag_attributes[name]` |
-| `PUT /api/v2/tagged_items/{id}` | not provided | An assignment has nothing to edit: delete and create |
+| `PUT /api/v2/tagged_items/{id}` | `PUT /v1/tagged-items/:id` | Moves the assignment to another tag (by id or name) |
 | `DELETE /api/v2/tagged_items/{id}` | `DELETE /v1/tagged-items/:id` | |
 | `GET /api/v2/canonical_tags` | `GET /v1/canonical-tags` | Seeded library: genres, audiences, formats, age rules |
 | `GET /api/v2/public/discovery/confirms` | `exos_public_events` view; listing feed `GET /v1/public/events` (PR #69) | |

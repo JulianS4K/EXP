@@ -7,6 +7,8 @@ import {
   orderQuery, parseOrderEdit, parseOrderRow, type OrderEditRow, type OrderRow, type OrderTableState, type PreviewRow,
 } from './orderDesk';
 import { parseRecEvent, parseRecFan, type RecEvent, type RecFan } from './recommendations';
+import type { PrintedOrder } from './printOrder';
+import { printPdf, type PrintTicket } from '../../supabase/functions/_shared/print/tickets';
 
 const msg = (e: { message?: string }) => new Error((e.message ?? 'Failed.').replace(/^_?exos_\w+: /, ''));
 const int = (v: unknown) => Math.max(0, Math.trunc(Number(v) || 0));
@@ -31,6 +33,14 @@ export async function updateOrder(sessionId: string, fields: Record<string, stri
 export async function sendReceipt(sessionId: string, email: string | null): Promise<{ to: string; resendsLeft: number }> {
   const d = await call('exos_order_send_receipt', { p_session_id: sessionId, p_email: email });
   return { to: String(d?.to ?? ''), resendsLeft: int(d?.resends_left_this_hour) };
+}
+
+/** Paper tickets for an order (mig 20261105120000): one-time print codes, drawn into a PDF here. */
+export async function printOrder(sessionId: string): Promise<PrintedOrder> {
+  const d = await call('exos_order_print', { p_session_id: sessionId });
+  const tickets = (Array.isArray(d?.tickets) ? d.tickets : []) as PrintTicket[];
+  const skipped = (Array.isArray(d?.skipped) ? d.skipped : []) as PrintedOrder['skipped'];
+  return { pdf: tickets.length ? printPdf(tickets, 'Tickets') : new Uint8Array(), printed: tickets.length, skipped };
 }
 
 export async function checkOutOrder(sessionId: string, reason: string | null) {

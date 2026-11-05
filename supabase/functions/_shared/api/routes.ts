@@ -737,6 +737,36 @@ export const ROUTES: readonly ApiRoute[] = [
   },
   { id: 'public-create-fan', method: 'POST', auth: A, path: '/public/fans', scope: null, paged: false },
   { id: 'public-create-form-submission', method: 'POST', auth: A, path: '/public/forms/:id/submissions', scope: null, paged: false },
+  // claude/exos-na-build (mig 20261105120000, exos-api/boxOffice.ts): printed
+  // tickets (one-time print codes, docs/wallet.md "Printed tickets"),
+  // box-office membership reservations, staff shifts, retagging.
+  {
+    id: 'print-ticket', method: 'POST', auth: K, path: '/tickets/:id/print', scope: 'tickets:write', paged: false,
+    aliases: ['/confirms/:eid/tickets/:id/print'],
+  },
+  { id: 'void-ticket-print', method: 'DELETE', auth: K, path: '/tickets/:id/print', scope: 'tickets:write', paged: false },
+  {
+    id: 'print-order', method: 'POST', auth: K, path: '/orders/:id/print', scope: 'tickets:write', paged: false,
+    aliases: ['/confirms/:eid/orders/:id/print'],
+  },
+  { id: 'get-membership-capacity', method: 'GET', auth: K, path: '/membership-products/:id/capacity', scope: 'commerce:read', paged: false },
+  { id: 'set-membership-capacity', method: 'PUT', auth: K, path: '/membership-products/:id/capacity', scope: 'commerce:write', paged: false },
+  {
+    id: 'create-membership-reservation', method: 'POST', auth: K, path: '/membership-products/:id/reservations',
+    scope: 'commerce:write', paged: false, aliases: ['/membership_products/:id/membership_reservations'],
+  },
+  {
+    id: 'cancel-membership-reservation', method: 'DELETE', auth: K, path: '/membership-products/:id/reservations/:token',
+    scope: 'commerce:write', paged: false, aliases: ['/membership_products/:id/membership_reservations/:token'],
+  },
+  {
+    id: 'complete-membership-reservation', method: 'POST', auth: K, path: '/membership-products/:id/reservations/:token/complete',
+    scope: 'commerce:write', paged: false, aliases: ['/membership_products/:id/membership_reservations/:token/complete'],
+  },
+  { id: 'list-staff-shifts', method: 'GET', auth: K, path: '/staff-shifts', scope: 'events:read', paged: false },
+  { id: 'clock-in', method: 'POST', auth: K, path: '/staff-shifts/clock-in', scope: 'checkin:write', paged: false },
+  { id: 'clock-out', method: 'POST', auth: K, path: '/staff-shifts/clock-out', scope: 'checkin:write', paged: false },
+  { id: 'update-tagged-item', method: 'PUT', auth: K, path: '/tagged-items/:id', scope: 'events:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

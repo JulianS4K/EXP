@@ -239,6 +239,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const giftTo = p.gift_to_email ? normalizeGuestEmail(p.gift_to_email) : null;
     if (p.gift_to_email && !giftTo) return json({ error: "gift email isn't valid" }, 400);
     if (giftTo && !prod.giftable) return json({ error: "this membership can't be given as a gift" }, 409);
+    // A capacity-limited product (mig 20261105120000): NULL = no limit. Soft
+    // check, like a pass's max_sold: a checkout already open still completes.
+    // On a lookup error the sale goes on (the box office's reservations are
+    // the hard limit).
+    const { data: left, error: capErr } = await sb.rpc("exos_membership_capacity_left", { p_product_id: prod.id });
+    if (capErr) console.error("exos-commerce: membership capacity check failed", capErr.message);
+    else if (left === 0) return json({ error: "sold out" }, 409);
     orgId = prod.org_id; currency = prod.currency; kind = "membership"; productId = prod.id; amountCents = prod.price_cents;
     details = giftTo
       ? { gift_to_email: giftTo, gift_message: typeof p.gift_message === "string" ? p.gift_message.slice(0, 1000) : null,

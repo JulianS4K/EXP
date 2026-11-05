@@ -45,6 +45,9 @@ export interface DoorKeys {
   wg?: string;
   /** The live pass epoch. */
   we?: number;
+  /** SHA-256 hex of the ticket's live print code (mig 20261105120000): the
+   *  ticket is printed, so only that paper admits it. */
+  p?: string;
 }
 
 export function parseDoorKeys(v: unknown): DoorKeys | null {
@@ -61,6 +64,7 @@ export function parseDoorKeys(v: unknown): DoorKeys | null {
   if (typeof r.wa === "string" && /^[0-9a-f]{64}$/.test(r.wa)) out.wa = r.wa;
   if (typeof r.wg === "string" && /^[0-9a-f]{40}$/.test(r.wg)) out.wg = r.wg;
   if (typeof r.we === "number" && Number.isInteger(r.we)) out.we = r.we;
+  if (typeof r.p === "string" && /^[0-9a-f]{64}$/.test(r.p)) out.p = r.p;
   return out;
 }
 
@@ -92,6 +96,16 @@ export async function doorKeysFromSecret(
     out.wg = toHex(await googleTotpKey(ticketId, ownerId, secret, walletEpoch));
   }
   return out;
+}
+
+/** The door's local check of a P- print code (docs/wallet.md "Printed
+ *  tickets"): its SHA-256 against the live code's (`keys.p`). The server also
+ *  spends it, once; offline, a paper another door took is a conflict. The
+ *  code itself is upper-cased P (the SQL hashes it so). */
+export async function verifyPrintWithKeys(payload: string, keys: DoorKeys | null): Promise<{ ok: boolean; noKey?: boolean }> {
+  if (!keys?.p) return { ok: false, noKey: true };
+  const got = toHex(await sha256(utf8("P" + payload.trim().slice(1))));
+  return { ok: timingSafeEqual(got, keys.p) };
 }
 
 /** The door's local check of a W- wallet code against the keys it holds. The

@@ -163,7 +163,8 @@ for m in \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
          20261105100000_exos_sim_decisions \
-         20261105110000_exos_fan_api; do
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -367,7 +368,8 @@ for m in \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
          20261105100000_exos_sim_decisions \
-         20261105110000_exos_fan_api; do
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -451,3 +453,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commissio
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"
 # Fan API: /v1/me, account tokens, the org writes of the gap list (mig 20261105110000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fan_api.sql"
+# claude/exos-na-build: printed tickets, box-office memberships, team switch, staff shifts, Tixel, retag (mig 20261105120000; race: race_print_codes.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_na_build.sql"

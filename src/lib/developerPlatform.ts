@@ -105,22 +105,38 @@ export interface PersonalToken {
   last_used_at: string | null;
   revoked_at: string | null;
   created_at: string;
+  /** Works across all the user's organizations with X-Exos-Org (mig 20261105120000); fixed at creation. */
+  multi_org?: boolean;
 }
+
+const PAT_COLS = 'id, org_id, name, key_prefix, scopes, expires_at, last_used_at, revoked_at, created_at';
 
 export async function listPersonalTokens(): Promise<PersonalToken[]> {
-  const { data, error } = await supabase.from('exos_personal_tokens')
-    .select('id, org_id, name, key_prefix, scopes, expires_at, last_used_at, revoked_at, created_at')
+  const q = (cols: string) => supabase.from('exos_personal_tokens').select(cols)
     .is('revoked_at', null).order('created_at', { ascending: false });
+  let { data, error } = await q(`${PAT_COLS}, multi_org`);
+  // A database without the column yet (42703): the tokens without it.
+  if (error && (error as { code?: string }).code === '42703') ({ data, error } = await q(PAT_COLS));
   if (error) throw error;
-  return (data ?? []) as PersonalToken[];
+  return (data ?? []) as unknown as PersonalToken[];
 }
 
-export async function createPersonalToken(orgId: string, name: string, scopes: string[], expiresDays: number | null) {
+/** The warning shown next to "works across all my organizations". */
+export const MULTI_ORG_WARNING =
+  'A token that works across organizations can act in every organization you belong to now or join later (send '
+  + 'X-Exos-Org: <organization id>), at your role in each. Anyone holding it can reach all of them. You choose this '
+  + 'now and it can\'t be changed later; leave it off unless one tool really needs several organizations.';
+
+export async function createPersonalToken(orgId: string, name: string, scopes: string[], expiresDays: number | null,
+                                          multiOrg = false) {
+  // multiOrg goes to the 5-argument create (mig 20261105120000); a pinned
+  // token keeps the original call, so it works on a database without it.
   const { data, error } = await supabase.rpc('exos_create_personal_token', {
     p_org_id: orgId, p_name: name, p_scopes: scopes, p_expires_days: expiresDays,
+    ...(multiOrg ? { p_multi_org: true } : {}),
   });
   if (error) throw error;
-  return data as { id: string; token: string; key_prefix: string; scopes: string[]; expires_at: string | null };
+  return data as { id: string; token: string; key_prefix: string; scopes: string[]; expires_at: string | null; multi_org?: boolean };
 }
 
 export async function revokePersonalToken(id: string) {

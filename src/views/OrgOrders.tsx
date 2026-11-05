@@ -16,7 +16,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ArrowUp, History, LogOut, Mail, Pencil } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, History, LogOut, Mail, Pencil, Printer } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
@@ -31,12 +31,13 @@ import {
 } from '../lib/orderDesk';
 import {
   checkOutOrder, fanRecommendations, getOrderSettings, listOrderEdits, listOrders, orderTickets, previewGuestList,
-  saveOrderSettings, sendReceipt, similarEvents, updateOrder, updateTicketAttendee,
+  printOrder, saveOrderSettings, sendReceipt, similarEvents, updateOrder, updateTicketAttendee,
   type OrderSettings, type OrderTicket,
 } from '../lib/orderDeskApi';
 import {
   viewRecEvents, viewRecFans, type RecEvent, type RecEventFilter, type RecEventSort, type RecFan, type RecFanSort,
 } from '../lib/recommendations';
+import { canPrintOrder, printSummary, printWarning } from '../lib/printOrder';
 import type { Event } from '../types';
 import OrderProofQueue from '../components/OrderProofQueue';
 
@@ -156,6 +157,28 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
     if (perm.resend) getOrderSettings(orgId).then(setSettings).catch(() => setSettings(null));
   }, [orgId, perm.resend]);
 
+  // Paper tickets (mig 20261105120000): one-time print codes, saved as a PDF.
+  const print = async (o: OrderRow) => {
+    if (!window.confirm(printWarning(buyerLabel(o)))) return;
+    setBusy(o.sessionId);
+    try {
+      const r = await printOrder(o.sessionId);
+      if (r.printed) {
+        const url = URL.createObjectURL(new Blob([r.pdf as BlobPart], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tickets-${o.sessionId.slice(-12)}.pdf`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+      toast({ kind: r.printed ? 'success' : 'error', message: printSummary(r) });
+    } catch (e) {
+      toast({ kind: 'error', message: err(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const checkOut = async (o: OrderRow) => {
     if (!window.confirm(`Check out every ticket on ${buyerLabel(o)}'s order that is inside? They can come back in on a re-entry list.`)) return;
     setBusy(o.sessionId);
@@ -201,7 +224,8 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
               return (
                 <Fragment key={o.sessionId}><OrderRowView o={o} actions={actions} busy={busy === o.sessionId} open={open?.id === o.sessionId ? open.kind : null}
                   onOpen={(kind) => setOpen(open?.id === o.sessionId && open.kind === kind ? null : { id: o.sessionId, kind })}
-                  onCheckOut={() => void checkOut(o)} orgId={orgId} settings={settings} onChanged={() => void load()} /></Fragment>
+                  onCheckOut={() => void checkOut(o)} orgId={orgId} settings={settings} onChanged={() => void load()}
+                  onPrint={canPrintOrder(o, perm.edit) ? () => void print(o) : undefined} /></Fragment>
               );
             })}
             {rows !== null && rows.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">No orders match.</td></tr>}
@@ -214,10 +238,10 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
   );
 }
 
-function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, settings, onChanged }: {
+function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, settings, onChanged, onPrint }: {
   o: OrderRow; actions: ReturnType<typeof orderActions>; busy: boolean; open: 'edit' | 'receipt' | 'history' | null;
   onOpen: (k: 'edit' | 'receipt' | 'history') => void; onCheckOut: () => void; orgId: string; settings: OrderSettings | null;
-  onChanged: () => void;
+  onChanged: () => void; onPrint?: () => void;
 }) {
   return (
     <>
@@ -233,6 +257,7 @@ function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, setti
             {actions.includes('edit') && <button type="button" className={btn} aria-expanded={open === 'edit'} onClick={() => onOpen('edit')}><Pencil size={12} /> Edit</button>}
             {actions.includes('receipt') && <button type="button" className={btn} aria-expanded={open === 'receipt'} onClick={() => onOpen('receipt')}><Mail size={12} /> Receipt</button>}
             {actions.includes('check_out') && <button type="button" className={btn} disabled={busy} onClick={onCheckOut}><LogOut size={12} /> Check out</button>}
+            {onPrint && <button type="button" className={btn} disabled={busy} onClick={onPrint}><Printer size={12} /> Print</button>}
             {actions.includes('history') && <button type="button" className={btn} aria-expanded={open === 'history'} onClick={() => onOpen('history')}><History size={12} /> History</button>}
           </span>
         </td>
