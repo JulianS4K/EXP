@@ -108,7 +108,7 @@
       "method": "GET",
       "path": "/v1/orders/:id",
       "summary": "Get an order",
-      "description": "One order with its tickets, add-ons and refunds.",
+      "description": "One order with its tickets, add-ons and refunds. `buyer_location` is where the buyer is, from the billing address Stripe or PayPal gave (country, region, city, postal code; never a street, never an IP lookup); null for free orders, RSVPs and orders without one. `source`: stripe_billing, stripe_card_billing, stripe_card_country (country only), paypal_payer or paypal_shipping.",
       "auth": "api_key",
       "scope": "orders:read",
       "parameters": [
@@ -160,7 +160,14 @@
                 }
               ],
               "add_ons": [],
-              "refunds": []
+              "refunds": [],
+              "buyer_location": {
+                "country": "US",
+                "region": "NY",
+                "city": "Brooklyn",
+                "postal_code": "11211",
+                "source": "stripe_billing"
+              }
             }
           }
         },

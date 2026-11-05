@@ -1,0 +1,377 @@
+{
+  "file": "buyer-locations-genres",
+  "name": "Buyer locations and genres",
+  "order": 31,
+  "description": "Where an organization's buyers are (per event and across the organization), and the genres its events use. The genre filter on the events lists is documented with them (GET /v1/events, GET /v1/public/discovery/events).",
+  "endpoints": [
+    {
+      "id": "get-event-buyer-locations",
+      "method": "GET",
+      "path": "/v1/events/:id/buyer-locations",
+      "summary": "Where an event's buyers are",
+      "description": "Where buyers are, from the billing address Stripe or PayPal gave at payment (country, region, city; Exos never looks up IP addresses, never stores a street, and the report carries no postal code). Counts the organization's Exos orders that were paid (including partly or fully refunded ones) and free checkout orders. `countries` and `cities` are the top `limit` by orders, each with its tickets and gross (what buyers paid, all-in, in `currency`'s minor unit). `unknown` is the orders with no location: free orders, card payments that carried no country, and orders from before locations were recorded. `other_tickets` counts live tickets that came from no checkout (RSVPs, comps, door sales, imports), which have no location either. DICE: Order.ipCity / ipCountry.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "limit",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 10,
+          "description": "How many countries and cities to list, most orders first: 1-100 (default 10). The unknown row is always there.",
+          "example": 10
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_id": "7d1c2b3a-4e5f-4a6b-9c8d-0e1f2a3b4c5d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "since": null,
+              "orders": 61,
+              "tickets": 74,
+              "located_orders": 55,
+              "unknown_orders": 6,
+              "countries": [
+                {
+                  "country": "US",
+                  "currency": "USD",
+                  "orders": 49,
+                  "tickets": 60,
+                  "gross_cents": 151200
+                },
+                {
+                  "country": "CA",
+                  "currency": "USD",
+                  "orders": 4,
+                  "tickets": 5,
+                  "gross_cents": 12600
+                },
+                {
+                  "country": "GB",
+                  "currency": "USD",
+                  "orders": 2,
+                  "tickets": 2,
+                  "gross_cents": 5040
+                }
+              ],
+              "cities": [
+                {
+                  "country": "US",
+                  "region": "NY",
+                  "city": "Brooklyn",
+                  "currency": "USD",
+                  "orders": 21,
+                  "tickets": 26,
+                  "gross_cents": 65520
+                },
+                {
+                  "country": "US",
+                  "region": "NY",
+                  "city": "New York",
+                  "currency": "USD",
+                  "orders": 17,
+                  "tickets": 20,
+                  "gross_cents": 50400
+                },
+                {
+                  "country": "US",
+                  "region": "NJ",
+                  "city": "Jersey City",
+                  "currency": "USD",
+                  "orders": 5,
+                  "tickets": 6,
+                  "gross_cents": 15120
+                }
+              ],
+              "unknown": [
+                {
+                  "country": null,
+                  "currency": "USD",
+                  "orders": 6,
+                  "tickets": 7,
+                  "gross_cents": 0
+                }
+              ],
+              "other_tickets": 12
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad limit.",
+          "example": {
+            "error": "limit must be 1-100."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-buyer-locations",
+      "method": "GET",
+      "path": "/v1/buyer-locations",
+      "summary": "Where the organization's buyers are",
+      "description": "The same report across every event of the organization, optionally for orders placed since a date. Where buyers are, from the billing address Stripe or PayPal gave at payment (country, region, city; Exos never looks up IP addresses, never stores a street, and the report carries no postal code)..",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "since",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Only orders placed at or after this date or time.",
+          "example": "2026-10-01"
+        },
+        {
+          "name": "limit",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 10,
+          "description": "How many countries and cities to list, most orders first: 1-100 (default 10). The unknown row is always there.",
+          "example": 10
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_id": "7d1c2b3a-4e5f-4a6b-9c8d-0e1f2a3b4c5d",
+              "event_id": null,
+              "since": "2026-10-01T00:00:00.000Z",
+              "orders": 412,
+              "tickets": 530,
+              "located_orders": 371,
+              "unknown_orders": 41,
+              "countries": [
+                {
+                  "country": "US",
+                  "currency": "USD",
+                  "orders": 49,
+                  "tickets": 60,
+                  "gross_cents": 151200
+                },
+                {
+                  "country": "CA",
+                  "currency": "USD",
+                  "orders": 4,
+                  "tickets": 5,
+                  "gross_cents": 12600
+                },
+                {
+                  "country": "GB",
+                  "currency": "USD",
+                  "orders": 2,
+                  "tickets": 2,
+                  "gross_cents": 5040
+                }
+              ],
+              "cities": [
+                {
+                  "country": "US",
+                  "region": "NY",
+                  "city": "Brooklyn",
+                  "currency": "USD",
+                  "orders": 21,
+                  "tickets": 26,
+                  "gross_cents": 65520
+                },
+                {
+                  "country": "US",
+                  "region": "NY",
+                  "city": "New York",
+                  "currency": "USD",
+                  "orders": 17,
+                  "tickets": 20,
+                  "gross_cents": 50400
+                },
+                {
+                  "country": "US",
+                  "region": "NJ",
+                  "city": "Jersey City",
+                  "currency": "USD",
+                  "orders": 5,
+                  "tickets": 6,
+                  "gross_cents": 15120
+                }
+              ],
+              "unknown": [
+                {
+                  "country": null,
+                  "currency": "USD",
+                  "orders": 6,
+                  "tickets": 7,
+                  "gross_cents": 0
+                }
+              ],
+              "other_tickets": 96
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad since or limit.",
+          "example": {
+            "error": "since must be an ISO 8601 date or time."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-genres",
+      "method": "GET",
+      "path": "/v1/genres",
+      "summary": "List the genres in use",
+      "description": "Every genre on the organization's events, any status, most used first. `genre` is the key the filters compare (lower case, single spaces); `name` the spelling used most; `events` and `published_events` how many events carry it. Filter with GET /v1/events?genre=. DICE: genreTypes.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "genre": "house",
+                "name": "House",
+                "events": 14,
+                "published_events": 9
+              },
+              {
+                "genre": "techno",
+                "name": "Techno",
+                "events": 6,
+                "published_events": 4
+              },
+              {
+                "genre": "hip hop",
+                "name": "Hip Hop",
+                "events": 2,
+                "published_events": 2
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-discovery-genres",
+      "method": "GET",
+      "path": "/v1/public/discovery/genres",
+      "summary": "Genres with upcoming events",
+      "description": "The genres of upcoming published events, most events first (at most 50), optionally one organizer's: what a fan app shows as genre chips. Events the organizer keeps out of search are not counted, and drafts never are. `variants` are the spellings in use (at most 5). Filter with GET /v1/public/discovery/events?genre=. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+      "auth": "public",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this organizer's events (id or slug).",
+          "example": "blue-room"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "genre": "house",
+                "name": "House",
+                "events": 31,
+                "variants": [
+                  "House",
+                  "house"
+                ]
+              },
+              {
+                "genre": "jazz",
+                "name": "Jazz",
+                "events": 12,
+                "variants": [
+                  "Jazz"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such organizer.",
+          "example": {
+            "error": "venue not found"
+          }
+        },
+        {
+          "status": 429,
+          "description": "More than 60 requests a minute from this network.",
+          "example": {
+            "error": "too many requests from this network; try again in a minute"
+          },
+          "headers": {
+            "Retry-After": "23"
+          }
+        }
+      ]
+    }
+  ]
+}

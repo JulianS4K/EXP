@@ -423,6 +423,37 @@ Nothing new is granted to anon. Points to review:
   never another org. 32 KB bodies, 120 a minute per org; nothing is sent to
   Tixel.
 
+### Buyer location and genres (mig 20261106140000)
+
+Nothing new is granted to anon. Points to review:
+
+- **Buyer location is personal data, kept small.** `exos_order_locations`
+  holds country, region, city and postal code of the billing address Stripe
+  (Checkout `customer_details.address`, else the charge's billing address or
+  card country) or PayPal (the payer's address in the capture response) gave
+  at payment. Never a street (the table has no column for one), never an IP
+  lookup. Written only by `exos_record_order_location` (service role:
+  stripe-webhook, exos-paypal), which re-cleans every value, skips free and
+  unpaid orders and closed accounts, and keeps the first location an order
+  gets. RLS: the org's owner / manager / finance, and the buyer for their own
+  order (through `exos_checkout_sessions.buyer_uid`); no client writes.
+- **Erasure.** `exos_delete_my_account` deletes the locations of the caller's
+  own orders and of guest orders under their **confirmed** email, before any
+  email is cleared (marker `exos: buyer location`). There is no other
+  retention sweep for order data to hook into.
+- **Reports aggregate.** `exos_event_buyer_geo` / `exos_org_buyer_geo`
+  (authenticated, owner / manager / finance or platform admin, else 42501)
+  and `_exos_buyer_geo` (service role, exos-api `/v1/events/:id/buyer-locations`
+  and `/v1/buyer-locations`, `orders:read`) return counts and gross per
+  country and city; no postal code, no order ids. `GET /v1/orders/:id`
+  (`orders:read`) shows that order's `buyer_location`.
+- **Genres.** `_exos_org_event_ids_by_genre` and `_exos_org_genres` are
+  service role (exos-api, scoped to the key's org). Public discovery gains a
+  `genres.list` action and a genres filter inside `exos_api_public` /
+  `_exos_api_public` (already in H3): published, upcoming events only, and
+  `noindex` events are now left out of `events.list`, `search` and
+  `genres.list` (they are meant to stay out of public feeds).
+
 ### Search path
 ### Search path
 

@@ -76,7 +76,10 @@ describe('Developers', () => {
     expect(feed.textContent).not.toContain('Authorization: Bearer');
     // Writes show their JSON body.
     expect(container.querySelector('article#create-artist')!.textContent).toContain('-X POST');
-  });
+    // jsdom renders one article per category plus the ones looked at (about 50
+    // and growing by one per API category); under a full parallel run that can
+    // pass vitest's 5 s default, so this test gets its own budget.
+  }, 20_000);
 
   it('says so when the spec cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));

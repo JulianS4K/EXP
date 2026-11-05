@@ -19,6 +19,9 @@ export interface ChargeLike {
   application_fee_amount?: number | null;
   transfer?: Id;
   balance_transaction?: string | { id?: string | null; fee?: number | null; net?: number | null } | null;
+  // Read by the buyer-location fallback (_shared/buyerLocation.ts, mig 20261106140000).
+  billing_details?: { address?: unknown } | null;
+  payment_method_details?: { card?: { country?: string | null } | null } | null;
 }
 
 export interface FeeActuals {
@@ -109,7 +112,11 @@ export async function recordFeeActuals(
   stripe: FeeStripe,
   sessionId: string,
   paymentIntent: string,
-  opts: { timeoutMs?: number; log?: (msg: string, err?: unknown) => void; force?: boolean } = {},
+  opts: {
+    timeoutMs?: number; log?: (msg: string, err?: unknown) => void; force?: boolean;
+    /** Handed the charge this read fetched (stripe-webhook's buyer-location fallback); its errors are logged, never thrown. */
+    onCharge?: (charge: ChargeLike) => void | Promise<void>;
+  } = {},
 ): Promise<FeeRecordOutcome> {
   const log = opts.log ?? ((msg: string, err?: unknown) => console.error(msg, err ?? ""));
   try {
@@ -132,6 +139,13 @@ export async function recordFeeActuals(
     if (!charge) {
       log(`fee actuals: no charge on ${paymentIntent} for ${sessionId} yet`);
       return "no_charge";
+    }
+    if (opts.onCharge) {
+      try {
+        await opts.onCharge(charge);
+      } catch (e) {
+        log(`fee actuals: onCharge failed for ${sessionId}`, e);
+      }
     }
     const { data: sess } = await sb.from("exos_checkout_sessions")
       .select("application_fee_cents").eq("session_id", sessionId).maybeSingle();

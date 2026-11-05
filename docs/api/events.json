@@ -9,7 +9,7 @@
       "method": "GET",
       "path": "/v1/events",
       "summary": "List events",
-      "description": "The organization's events, every status, latest start first.",
+      "description": "The organization's events, every status, latest start first. Each event carries its `category`, `genres` and `subgenres` (free text the organizer chose; GET /v1/genres lists the ones in use).",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -51,6 +51,22 @@
           "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
         },
         {
+          "name": "genre",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only the organization's events (any status) with this genre (any case and spacing: \"Hip Hop\" matches \"hip  hop\").",
+          "example": "House"
+        },
+        {
+          "name": "genres",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only the organization's events (any status) with at least one of these genres: comma-separated, or the parameter repeated (genres[] works too). With genre, the two are combined. At most 20.",
+          "example": "house,techno"
+        },
+        {
           "name": "page",
           "location": "query",
           "type": "integer",
@@ -84,7 +100,13 @@
                 "currency": "USD",
                 "tickets_sold": 0,
                 "total_tickets": 150,
-                "created_at": "2026-10-20T09:41:55.004+00:00"
+                "created_at": "2026-10-20T09:41:55.004+00:00",
+                "category": "Music",
+                "genres": [
+                  "House",
+                  "Techno"
+                ],
+                "subgenres": []
               },
               {
                 "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
@@ -95,7 +117,13 @@
                 "currency": "USD",
                 "tickets_sold": 57,
                 "total_tickets": 400,
-                "created_at": "2026-10-01T15:12:09.120+00:00"
+                "created_at": "2026-10-01T15:12:09.120+00:00",
+                "category": "Music",
+                "genres": [
+                  "House",
+                  "Techno"
+                ],
+                "subgenres": []
               }
             ],
             "meta": {
@@ -108,7 +136,7 @@
         },
         {
           "status": 400,
-          "description": "A bad page, per_page or filter value.",
+          "description": "A bad page, per_page or filter value (more than 20 genres, say).",
           "example": {
             "error": "status must be draft, published or cancelled."
           }
@@ -131,7 +159,7 @@
       "method": "GET",
       "path": "/v1/events/:id",
       "summary": "Get an event",
-      "description": "One event with its venue and times, and every ticket type (hidden ones included) as `tiers`. `venue_location` is free text as the organizer typed it. `exos_venue_id` / `exos_room_id` link one of the organization's venues and rooms (GET /v1/venues/:id) and `hold_id` the hold a draft was converted from; each is null when not set.",
+      "description": "One event with its venue and times, and every ticket type (hidden ones included) as `tiers`. `venue_location` is free text as the organizer typed it. `exos_venue_id` / `exos_room_id` link one of the organization's venues and rooms (GET /v1/venues/:id) and `hold_id` the hold a draft was converted from; each is null when not set. `category`, `genres` and `subgenres` are the organizer's free text (genres: GET /v1/genres).",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -167,6 +195,12 @@
               "tickets_sold": 57,
               "total_tickets": 400,
               "created_at": "2026-10-01T15:12:09.120+00:00",
+              "category": "Music",
+              "genres": [
+                "House",
+                "Techno"
+              ],
+              "subgenres": [],
               "tiers": [
                 {
                   "id": "a3f1c2d4-5b6e-4f70-8a91-b2c3d4e5f601",

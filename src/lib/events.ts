@@ -213,6 +213,21 @@ export async function listPublicEvents(limit = 50): Promise<Event[]> {
   return withPublicTiers(data ?? []);
 }
 
+// Published events with any of these genres (exact spellings: the variants
+// exos_api_public 'genres.list' returns), for Home's genre chips (mig 20261106140000).
+export async function listPublicEventsWithGenres(variants: string[], limit = 50): Promise<Event[]> {
+  const spellings = [...new Set(variants.map((v) => v.trim()).filter(Boolean))].slice(0, 20);
+  if (spellings.length === 0) return [];
+  const { data, error } = await supabase
+    .from('exos_public_events')
+    .select('*')
+    .overlaps('genres', spellings)
+    .order('starts_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return withPublicTiers(data ?? []);
+}
+
 // Published events for a specific org (public org storefront).
 export async function listPublicEventsForOrg(orgId: string): Promise<Event[]> {
   const { data, error } = await supabase
