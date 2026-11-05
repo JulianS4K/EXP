@@ -16,9 +16,9 @@
 // list-tickets, get-ticket: attachAnswers), the shape of DICE's
 // Ticket.fanSurveyAnswers (label = fanSurveyQuestion.title, display = value).
 // A ticket's own (per-ticket) answers come with tickets:read; its order's
-// answers are order data and come only with orders:read, or to a credential
-// of an owner / manager / finance (canReadOrderAnswers). A door or check-in
-// integration holding only tickets:read sees per-ticket answers only.
+// answers are order data and come only with orders:read (canReadOrderAnswers;
+// the credential's scopes decide, never its user's or creator's role). A door
+// or check-in integration holding only tickets:read sees per-ticket answers only.
 //
 // The function runs with the service role: every call names the key's org
 // and the SQL cores take it, so another org's event or question is a 404.
