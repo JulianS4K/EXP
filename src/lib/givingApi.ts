@@ -89,6 +89,15 @@ export async function listRecurringRows(orgId: string): Promise<RecurringRow[]> 
   return (data ?? []) as unknown as RecurringRow[];
 }
 
+/** The donor updates a monthly gift's card (Stripe's billing portal); the
+ *  "update your card" mail links here (mig 20261105100000). */
+export async function openDonationPortal(recurringId: string, returnUrl: string): Promise<string> {
+  const d = await commerce<{ url?: string }>({ action: 'recurring_donation_portal', recurring_id: recurringId, return_url: returnUrl },
+    'Could not open billing.');
+  if (!d?.url) throw new Error('Could not open billing.');
+  return d.url;
+}
+
 export async function cancelRecurring(id: string): Promise<unknown> {
   return commerce({ action: 'cancel_recurring_donation', recurring_id: id }, 'Could not cancel the monthly gift.');
 }

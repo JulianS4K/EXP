@@ -6,11 +6,12 @@ import { useParams } from 'react-router-dom';
 import { HeartHandshake } from 'lucide-react';
 import { campaignProgress, coverFeesCents, donate, majorToCents, publicCampaign, type GivingCampaign } from '../lib/commerce';
 import { useAuth } from '../context/AuthContext';
+import { openDonationPortal } from '../lib/givingApi';
 import { formatCurrency, publicUrl } from '../lib/utils';
 
 export default function Give() {
   const { orgSlug = '', campaignSlug = '' } = useParams();
-  const { user } = useAuth();
+  const { user, openAuth } = useAuth();
   const [c, setC] = useState<GivingCampaign | null | undefined>(undefined);
   const [amount, setAmount] = useState<number | null>(null);
   const [custom, setCustom] = useState('');
@@ -21,6 +22,16 @@ export default function Give() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const thanks = new URLSearchParams(window.location.search).get('thanks') === '1';
+  // From the "update your card" mail (mig 20261105100000): a monthly gift's card failed.
+  const updateCard = new URLSearchParams(window.location.search).get('update_card');
+  const validUpdate = !!updateCard && /^[0-9a-f-]{36}$/i.test(updateCard);
+  const openPortal = async () => {
+    if (!validUpdate) return;
+    setBusy(true); setErr(null);
+    try {
+      window.location.href = await openDonationPortal(updateCard!, publicUrl(`give/${orgSlug}/${campaignSlug}`));
+    } catch (x: any) { setErr(x?.message || 'Could not open billing.'); setBusy(false); }
+  };
 
   useEffect(() => { publicCampaign(orgSlug, campaignSlug).then(setC).catch(() => setC(null)); }, [orgSlug, campaignSlug]);
 
@@ -53,6 +64,17 @@ export default function Give() {
         </div>
       )}
       {thanks && <p className="mb-6 font-bold" role="status">Thank you! Your receipt is on its way.</p>}
+      {validUpdate && (
+        <div className="mb-6 border p-4" role="status">
+          <p className="font-bold mb-2">Your monthly gift's card was declined.</p>
+          <p className="text-sm mb-3">Update the card to keep your gift going. If the card works on the next try, you don't need to do anything.</p>
+          {user ? (
+            <button disabled={busy} onClick={() => void openPortal()} className="bg-brand-primary text-black px-4 py-2 font-black disabled:opacity-40">Update your card</button>
+          ) : (
+            <button onClick={() => openAuth('code', '')} className="bg-brand-primary text-black px-4 py-2 font-black">Sign in to update your card</button>
+          )}
+        </div>
+      )}
       {!c.open ? <p>Donations open {c.starts_at?.slice(0, 10)}.</p> : (
         <div className="space-y-3">
           <div className="flex flex-wrap gap-2">

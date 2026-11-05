@@ -79,6 +79,7 @@ import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocke
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 const AUTOMATIQ_ENABLED =
   (import.meta as any).env?.VITE_AUTOMATIQ_ENABLED === 'true';
@@ -589,8 +590,9 @@ export default function CreateEvent() {
       if (!Number.isFinite(tp) || tp < 0) {
         return `Tier "${t.name}" has an invalid price.`;
       }
-      if (!Number.isInteger(tc) || tc < 1) {
-        return `Tier "${t.name}" has an invalid capacity.`;
+      if (!isSellableCapacity(tc)) {
+        // No unlimited (mig 20261105100000): a ticket type sells up to its capacity.
+        return `Tier "${t.name}" ${CAPACITY_REQUIRED}.`;
       }
       const tableErr = validateTableDraft(t.table ?? BLANK_TABLE_DRAFT, t.name);
       if (tableErr) return tableErr;

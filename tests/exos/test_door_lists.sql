@@ -304,8 +304,10 @@ BEGIN
   ASSERT r ->> 'reason' = 'wrong-list' AND (r ->> 'forced')::boolean, 'L6: wrong-list replay, got ' || r::text;
   ASSERT (SELECT forced AND conflict = 'wrong-list' AND list_id = 'd1000000-0000-0000-0000-00000000aa02'
             FROM public.exos_event_checkins WHERE ticket_id = pg_temp.tk('c1001')), 'L6: forced on the list';
-  ASSERT (SELECT status FROM public.exos_tickets WHERE id = pg_temp.tk('c1001')) = 'active',
-         'L6: a forced row never changes the ticket';
+  -- mig 20261105100000 (SIM-DOOR-16): the door let them in, so a forced
+  -- wrong-list / invalid-time / doors-not-open / too-old entry uses the ticket.
+  ASSERT (SELECT status FROM public.exos_tickets WHERE id = pg_temp.tk('c1001')) = 'used',
+         'L6: a forced wrong-list entry uses the ticket';
 
   -- Too old: e3 ended four days ago, the scan was three days ago.
   r := public.exos_check_in_offline('d1000000-0000-0000-0000-0000000f0103', pg_temp.tk('c5001'),

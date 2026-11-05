@@ -5,8 +5,9 @@
 --   OK    SIM-BUYER-n  the behaviour is right (or intended, with the reason)
 --   KNOWN SIM-BUYER-n  a real gap left for a product decision (the report has
 --                      the proposal); it does not fail the run
--- Fixes are in mig 20261104100000_exos_sim_buyer_fixes; the scenarios that
--- exercise them are their regression tests.
+-- Fixes are in mig 20261104100000_exos_sim_buyer_fixes; the product decisions
+-- on the KNOWN ones (8, 12, 13, 26, 31, 34) in mig 20261105100000. The
+-- scenarios that exercise them are their regression tests.
 -- Self-contained (be… ids), BEGIN / ROLLBACK. Runs after the full run_p0.sh
 -- chain:  psql -d <db> -v ON_ERROR_STOP=1 -f tests/exos/sim_buyer.sql
 -- Races (real parallel sessions) are in race_sim_buyer.sh.
@@ -251,32 +252,49 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- SIM-BUYER-8 The webhook arrives after the hold expired AND the seat went to
--- another buyer's live hold. The late payer takes it; the buyer holding a
--- live reservation then pays and is refunded "sold out while you were paying".
--- KNOWN: someone paid is refunded either way. Proposal: keep the hold 10
--- minutes past Stripe's expires_at (webhook grace), so a seat paid for in
--- time is never offered to the next buyer.
+-- SIM-BUYER-8 The webhook arrives late (Stripe retrying) for a buyer who paid
+-- in time, and another buyer wants the same last seat. Was KNOWN (the late
+-- payer took the seat from a live hold and the second buyer was refunded).
+-- Decision (mig 20261105100000): a hold lasts until Stripe's Checkout Session
+-- expires_at (exos-checkout sets it and records it as provider_expires_at)
+-- + 10 minutes, so a seat paid for in time is never offered to the next
+-- buyer; checkout.session.expired frees it at once.
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE h1 uuid; h2 uuid; a uuid[]; b uuid[];
+DECLARE h1 uuid; h3 uuid; a uuid[]; e text;
 BEGIN
   PERFORM pg_temp.act(pg_temp.u('0000000000b1')::text);
   h1 := public.exos_create_hold(pg_temp.u('0000000000e2'), pg_temp.u('0000000000d2'), 1);
-  PERFORM pg_temp.sess('cs_simb_8a', '0000000000e2', '0000000000d2', '0000000000b1', 'b1@sim-b.test', 1, 2000, h1);
-  UPDATE public.exos_cart_holds SET expires_at = now() - interval '1 minute' WHERE id = h1;
+  -- Stripe's page closed 5 minutes ago; b1 paid just before it did.
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,currency,status,created_at,provider_expires_at)
+  VALUES ('cs_simb_8a', pg_temp.u('0000000000e2'), pg_temp.u('0000000000d2'), pg_temp.u('000000000001'), pg_temp.u('0000000000b1'),
+          'b1@sim-b.test', 1, 2000, 'usd', 'pending', now() - interval '35 minutes', now() - interval '5 minutes');
+  UPDATE public.exos_cart_holds SET checkout_session_id = 'cs_simb_8a', expires_at = now() - interval '5 minutes' WHERE id = h1;
+  ASSERT (SELECT expires_at FROM public.exos_cart_holds WHERE id = h1) >= now() + interval '5 minutes' - interval '1 second',
+         'SIM-BUYER-8: the hold runs to Stripe''s expires_at + 10 minutes';
   PERFORM public.exos_expire_holds();
+  ASSERT (SELECT status FROM public.exos_cart_holds WHERE id = h1) = 'active', 'SIM-BUYER-8: the sweep leaves it (webhook grace)';
+  -- b2 wants the seat meanwhile: refused before paying, not refunded after.
   PERFORM pg_temp.act(pg_temp.u('0000000000b2')::text);
-  h2 := public.exos_create_hold(pg_temp.u('0000000000e2'), pg_temp.u('0000000000d2'), 1);
-  PERFORM pg_temp.sess('cs_simb_8b', '0000000000e2', '0000000000d2', '0000000000b2', 'b2@sim-b.test', 1, 2000, h2);
+  e := pg_temp.err($q$SELECT public.exos_create_hold(pg_temp.u('0000000000e2'), pg_temp.u('0000000000d2'), 1)$q$);
+  ASSERT e LIKE '%not enough tickets available%', 'SIM-BUYER-8: the next buyer waits: ' || coalesce(e, 'none');
   a := pg_temp.paid('cs_simb_8a');   -- b1's delayed webhook
-  b := pg_temp.paid('cs_simb_8b');   -- b2 paid inside a live hold
+  ASSERT cardinality(a) = 1, 'SIM-BUYER-8: the in-time payer gets the seat';
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.u('0000000000d2')) = 1, 'SIM-BUYER-8: never oversold';
-  IF cardinality(a) = 1 AND cardinality(b) = 0 THEN
-    RAISE NOTICE 'KNOWN SIM-BUYER-8 late webhook beats a live hold: the live-hold buyer (b2) is refunded';
-  ELSE
-    RAISE NOTICE 'OK SIM-BUYER-8 late webhook: the live hold wins';
-  END IF;
+  -- A session without a recorded expires_at (an older checkout): Stripe's
+  -- 30 minutes from creation, + 10.
+  PERFORM pg_temp.act(pg_temp.u('0000000000b3')::text);
+  h3 := public.exos_create_hold(pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), 1);
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,quantity,amount_cents,currency,status)
+  VALUES ('cs_simb_8c', pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), pg_temp.u('000000000001'), pg_temp.u('0000000000b3'),
+          'b3@sim-b.test', 1, 2000, 'usd', 'pending');
+  UPDATE public.exos_cart_holds SET checkout_session_id = 'cs_simb_8c' WHERE id = h3;
+  ASSERT (SELECT expires_at FROM public.exos_cart_holds WHERE id = h3) >= now() + interval '40 minutes' - interval '1 second',
+         'SIM-BUYER-8: created_at + 30 + 10 without expires_at';
+  -- Stripe says the page expired unpaid: the seat is free at once.
+  PERFORM pg_temp.expired('cs_simb_8c');
+  ASSERT (SELECT status FROM public.exos_cart_holds WHERE id = h3) = 'released', 'SIM-BUYER-8: checkout.session.expired releases the hold';
+  RAISE NOTICE 'OK SIM-BUYER-8 late webhook: the hold outlives Stripe''s session by 10 minutes, so the in-time payer keeps the seat and the next buyer waits';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -359,64 +377,200 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- SIM-BUYER-12 Mistypes their email at guest checkout ("b2@sim-b.tset"),
--- then tries to get the tickets. Nothing lets the buyer fix it themselves:
--- the real address can't claim without the link and isn't the payer for a
--- refund ask. The organizer CAN recover it: the parked transfer's sender is
--- the org owner, who cancels it and sends it to the right address.
--- KNOWN (UX): no "wrong email?" fix for the buyer and no organizer action
--- for it. Proposal: echo the email on the success page with a 15-minute
--- "fix my email" (session id + a browser token) that re-points unclaimed
--- parked transfers; and an organizer "resend to another email" on the order.
+-- SIM-BUYER-12/13 Guest email typos. Was KNOWN (12: no way to recover but the
+-- organizer's cancel + resend; 13: a typo that is someone's real account got
+-- the tickets at once). Decision (mig 20261105100000): a guest (or an
+-- unconfirmed account) proves the email (a code mailed to it) or a phone
+-- (an SMS code) on the page they paid on before the tickets are released.
+-- Until then the order is paid and the seats are kept, but the tickets are
+-- parked on the organizer: they don't scan, can't be claimed and aren't
+-- attached to any account. The organizer can send the order to a corrected
+-- email (Orders page). The paying page holds a browser token (exos-checkout);
+-- its SHA-256 is on the session.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE h uuid; ids uuid[]; tr uuid; k text; e text; j jsonb;
+CREATE FUNCTION pg_temp.gsess(p_sid text, p_email text, p_buyer text DEFAULT NULL) RETURNS uuid[] LANGUAGE plpgsql AS $$
+DECLARE h uuid;
 BEGIN
-  PERFORM pg_temp.act(NULL);
-  h := public.exos_create_guest_hold(pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), 1, 'b2@sim-b.tset', 'iphash-simb-12');
-  PERFORM pg_temp.sess('cs_simb_12', '0000000000e1', '0000000000d1', NULL, 'b2@sim-b.tset', 1, 2000, h);
-  ids := pg_temp.paid('cs_simb_12');
-  SELECT id, claim_key INTO tr, k FROM public.exos_transfers WHERE ticket_id = ids[1] AND status = 'pending';
-  ASSERT tr IS NOT NULL AND (SELECT receiver_email FROM public.exos_transfers WHERE id = tr) = 'b2@sim-b.tset',
-         'SIM-BUYER-12: parked, claim link mailed to the typo';
-  -- the real b2, signed in, without the link
-  PERFORM pg_temp.act(pg_temp.u('0000000000b2')::text);
-  e := pg_temp.err(format('SELECT public.exos_claim_transfer(%L::uuid)', tr));
-  ASSERT e LIKE '%open the claim link from the email%', 'SIM-BUYER-12: claim without the link refused with a clear message';
-  j := public.exos_ask_refund(ARRAY[ids[1]]);
-  ASSERT j->0->>'reason' = 'not-buyer', 'SIM-BUYER-12: and is not the payer for a refund ask';
-  -- the organizer's recovery: cancel the parked transfer, send to the right email
+  IF p_buyer IS NULL THEN
+    PERFORM pg_temp.act(NULL);
+    h := public.exos_create_guest_hold(pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), 1, p_email, 'iphash-' || p_sid);
+  ELSE
+    PERFORM pg_temp.act(pg_temp.u(p_buyer)::text);
+    BEGIN
+      h := public.exos_create_hold(pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), 1);
+    EXCEPTION WHEN others THEN
+      h := NULL;  -- an unconfirmed account can't hold; a bypass code skips the hold
+    END;
+  END IF;
+  PERFORM pg_temp.sess(p_sid, '0000000000e1', '0000000000d1', p_buyer, p_email, 1, 2000, h);
+  UPDATE public.exos_checkout_sessions SET proof_token_hash = pg_temp.h('tok-' || p_sid || '-0123456789abcdef') WHERE session_id = p_sid;
+  RETURN pg_temp.paid(p_sid);
+END $$;
+CREATE FUNCTION pg_temp.tok(p_sid text) RETURNS text LANGUAGE sql AS $$ SELECT 'tok-' || p_sid || '-0123456789abcdef' $$;
+-- The code in the latest proof mail to an address.
+CREATE FUNCTION pg_temp.mailed_code(p_email text) RETURNS text LANGUAGE sql AS $$
+  SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+   WHERE to_email = lower(p_email) AND template = 'rsvp-code' ORDER BY created_at DESC, html DESC LIMIT 1;
+$$;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_temp TO anon, authenticated, service_role;
+
+DO $$
+DECLARE ids uuid[]; tr uuid; k text; e text; j jsonb;
+BEGIN
+  -- SIM-BUYER-12 Mistypes their email ("b2@sim-b.tset"): paid, seat kept, parked.
+  ids := pg_temp.gsess('cs_simb_12', 'b2@sim-b.tset');
+  ASSERT cardinality(ids) = 1 AND (SELECT status FROM public.exos_checkout_sessions WHERE session_id = 'cs_simb_12') = 'fulfilled',
+         'SIM-BUYER-12: paid and the seat is kept';
+  ASSERT (SELECT status FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12') = 'pending', 'SIM-BUYER-12: waits for proof';
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000a0'), 'SIM-BUYER-12: parked on the organizer';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'b2@sim-b.tset' AND template IN ('transfer-initiated', 'ticket-issued')),
+         'SIM-BUYER-12: no claim links to the typo';
+  -- it doesn't scan
   PERFORM pg_temp.act(pg_temp.u('0000000000a0')::text);
-  PERFORM public.exos_cancel_transfer(tr);
-  tr := public.exos_create_transfer(ids[1], 'b2@sim-b.test');
+  j := public.exos_check_in_ticket(ids[1], 'camera', 'verified', pg_temp.t_code(ids[1], now()), pg_temp.u('0000000000e1'));
+  ASSERT NOT (j->>'ok')::boolean, 'SIM-BUYER-12: a parked ticket doesn''t scan: ' || j::text;
+  -- the organizer's old recovery (cancel the parked transfer) is refused: it
+  -- would strand the tickets in the organizer's wallet
+  SELECT id, claim_key INTO tr, k FROM public.exos_transfers WHERE ticket_id = ids[1] AND status = 'pending';
+  e := pg_temp.err(format('SELECT public.exos_cancel_transfer(%L::uuid)', tr));
+  ASSERT e LIKE '%Send to another email%', 'SIM-BUYER-12: cancel points to the resend: ' || coalesce(e, 'none');
+  -- the real b2, signed in, can't claim (not with the link either)
   PERFORM pg_temp.act(pg_temp.u('0000000000b2')::text);
-  ASSERT public.exos_claim_transfer(tr) = ids[1], 'SIM-BUYER-12: the right address claims';
-  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000b2'), 'SIM-BUYER-12: b2 owns it';
-  -- the typo'd link (if that inbox exists) is dead
+  e := pg_temp.err(format('SELECT public.exos_claim_transfer(%L::uuid, %L)', tr, k));
+  ASSERT e LIKE '%waiting for the buyer to confirm%', 'SIM-BUYER-12: no claim before proof: ' || coalesce(e, 'none');
+  -- the organizer sends the order to the corrected email (Orders page)
+  PERFORM pg_temp.act(pg_temp.u('0000000000a9')::text);
+  e := pg_temp.err($q$SELECT public.exos_order_proof_resend('cs_simb_12', 'b2@sim-b.test')$q$);
+  ASSERT e LIKE '%order not found%', 'SIM-BUYER-12: another org can''t resend: ' || coalesce(e, 'none');
+  PERFORM pg_temp.act(pg_temp.u('0000000000a0')::text);
+  e := pg_temp.err($q$SELECT public.exos_order_proof_resend('cs_simb_12', 'not an email')$q$);
+  ASSERT e LIKE '%valid email%', 'SIM-BUYER-12: a bad address is refused';
+  j := public.exos_order_proof_resend('cs_simb_12', ' B2@Sim-B.test ');
+  ASSERT (j->>'ok')::boolean AND (SELECT email || ':' || original_email || ':' || proven_via FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12')
+         = 'b2@sim-b.test:b2@sim-b.tset:organizer', 'SIM-BUYER-12: corrected (original kept): ' || j::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'b2@sim-b.test' AND template = 'transfer-initiated' AND html LIKE '%/claim/%'),
+         'SIM-BUYER-12: claim links to the corrected email';
+  -- the old link is dead; the new one works for b2
   PERFORM pg_temp.act(pg_temp.u('0000000000b3')::text);
-  e := pg_temp.err(format('SELECT public.exos_claim_transfer(%L::uuid, %L)',
-                          (SELECT id FROM public.exos_transfers WHERE ticket_id = ids[1] AND receiver_email = 'b2@sim-b.tset'), k));
-  ASSERT e LIKE '%transfer is cancelled%', 'SIM-BUYER-12: the old link is dead: ' || coalesce(e, 'none');
-  RAISE NOTICE 'KNOWN SIM-BUYER-12 mistyped guest email: recoverable only by the organizer (cancel + resend), no buyer self-fix';
+  e := pg_temp.err(format('SELECT public.exos_claim_transfer(%L::uuid, %L)', tr, k));
+  ASSERT e LIKE '%transfer is cancelled%', 'SIM-BUYER-12: the typo''s link is dead: ' || coalesce(e, 'none');
+  SELECT id, claim_key INTO tr, k FROM public.exos_transfers WHERE ticket_id = ids[1] AND status = 'pending';
+  PERFORM pg_temp.act(pg_temp.u('0000000000b2')::text);
+  ASSERT public.exos_claim_transfer(tr, k) = ids[1], 'SIM-BUYER-12: b2 claims';
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000b2'), 'SIM-BUYER-12: b2 owns it';
+  RAISE NOTICE 'OK SIM-BUYER-12 mistyped guest email: paid, seat kept, nothing released to the typo; the organizer resends to the right address';
+
+  -- SIM-BUYER-13 The typo is someone else's real, confirmed account: they get nothing.
+  ids := pg_temp.gsess('cs_simb_13', 'typo-owner@sim-b.test');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000a0'), 'SIM-BUYER-13: not in the stranger''s wallet';
+  SELECT id, claim_key INTO tr, k FROM public.exos_transfers WHERE ticket_id = ids[1] AND status = 'pending';
+  PERFORM pg_temp.act(pg_temp.u('0000000000b6')::text);
+  e := pg_temp.err(format('SELECT public.exos_claim_transfer(%L::uuid)', tr));
+  ASSERT e IS NOT NULL, 'SIM-BUYER-13: the stranger can''t claim by their email';
+  -- the stranger has the code mail, but not the paying browser's token
+  j := public.exos_order_proof_verify('cs_simb_13', 'tok-guess-0123456789abcdefghij', pg_temp.mailed_code('typo-owner@sim-b.test'));
+  ASSERT j->>'error' = 'unknown', 'SIM-BUYER-13: the code alone does nothing: ' || j::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'typo-owner@sim-b.test' AND template IN ('transfer-initiated', 'ticket-issued')),
+         'SIM-BUYER-13: no ticket mail to the stranger';
+  -- the buyer, still on the paying page, sees "ty…@sim-b.test" and proves a phone instead
+  PERFORM pg_temp.act(NULL);
+  j := public.exos_order_proof_status('cs_simb_13', pg_temp.tok('cs_simb_13'));
+  ASSERT j->>'status' = 'pending' AND j->>'email' = 'ty…@sim-b.test', 'SIM-BUYER-13: the page shows the masked email: ' || j::text;
+  j := public.exos_order_proof_send('cs_simb_13', pg_temp.tok('cs_simb_13'), 'sms', '(212) 555-0190');
+  ASSERT (j->>'ok')::boolean, 'SIM-BUYER-13: SMS code sent: ' || j::text;
+  j := public.exos_order_proof_verify('cs_simb_13', pg_temp.tok('cs_simb_13'),
+         (SELECT substring(body from '^([0-9]{6})') FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550190' ORDER BY created_at DESC LIMIT 1));
+  ASSERT (j->>'ok')::boolean AND NOT (j->>'attached')::boolean AND jsonb_array_length(j->'tickets') = 1,
+         'SIM-BUYER-13: proven by phone: the claim link is on the page: ' || j::text;
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000a0'), 'SIM-BUYER-13: still not the stranger''s';
+  RAISE NOTICE 'OK SIM-BUYER-13 typo matches a real account: that account gets nothing; the buyer proves a phone and gets the claim link';
 END $$;
 
 -- ---------------------------------------------------------------------------
--- SIM-BUYER-13 The typo is someone else's real (confirmed) account: the
--- tickets land in that stranger's wallet at once, no claim step. The buyer
--- can only get a refund through the organizer.
--- KNOWN: proposal: for guests, park on the org unless the session's own
--- account (or a magic-link sign-in) proved the email, or show "these go to
--- typo-owner@… is that you?" before payment.
+-- SIM-BUYER-12b..e Proof: the right email releases; five wrong codes; an
+-- unconfirmed account; replays.
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE h uuid; ids uuid[];
+DECLARE ids uuid[]; ids2 uuid[]; j jsonb; c text; wrong text; i int; n int;
 BEGIN
+  -- 12b the right email, which has a confirmed account: proving it puts the
+  -- tickets in that account (and only then)
+  ids := pg_temp.gsess('cs_simb_12b', 'b4@sim-b.test');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000a0'), 'SIM-BUYER-12b: parked before proof';
   PERFORM pg_temp.act(NULL);
-  h := public.exos_create_guest_hold(pg_temp.u('0000000000e1'), pg_temp.u('0000000000d1'), 1, 'typo-owner@sim-b.test', 'iphash-simb-13');
-  PERFORM pg_temp.sess('cs_simb_13', '0000000000e1', '0000000000d1', NULL, 'typo-owner@sim-b.test', 1, 2000, h);
-  ids := pg_temp.paid('cs_simb_13');
-  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000b6'), 'SIM-BUYER-13: straight to the stranger';
-  RAISE NOTICE 'KNOWN SIM-BUYER-13 typo matches a real account: tickets go straight to that stranger';
+  j := public.exos_order_proof_verify('cs_simb_12b', pg_temp.tok('cs_simb_12b'), pg_temp.mailed_code('b4@sim-b.test'));
+  ASSERT (j->>'ok')::boolean AND (j->>'attached')::boolean, 'SIM-BUYER-12b: proven: ' || j::text;
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000b4')
+     AND (SELECT pending_transfer_id FROM public.exos_tickets WHERE id = ids[1]) IS NULL, 'SIM-BUYER-12b: in b4''s wallet';
+  -- replay (second tab / retry): same answer, nothing twice
+  j := public.exos_order_proof_verify('cs_simb_12b', pg_temp.tok('cs_simb_12b'), '000000');
+  ASSERT (j->>'ok')::boolean AND j->>'status' = 'proven', 'SIM-BUYER-12b: replay is idempotent: ' || j::text;
+  ASSERT public.exos_fulfill_checkout('cs_simb_12b') = ids, 'SIM-BUYER-12b: re-fulfilment returns the same tickets';
+  ASSERT (SELECT count(*) FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12b') = 1,
+         'SIM-BUYER-12b: re-fulfilment opens nothing new';
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE to_email = 'b4@sim-b.test' AND template = 'ticket-issued' AND html LIKE '%Email confirmed%') = 1,
+         'SIM-BUYER-12b: one wallet mail';
+  RAISE NOTICE 'OK SIM-BUYER-12b the right email proven by code: the tickets go to that account, once';
+
+  -- 12c five wrong codes lock the live code (even the right one); a new code
+  -- (after the 60-second wait) works; a wrong token never counts
+  ids := pg_temp.gsess('cs_simb_12c', 'g12c@sim-b.test');
+  c := pg_temp.mailed_code('g12c@sim-b.test');
+  wrong := CASE WHEN c = '000000' THEN '111111' ELSE '000000' END;
+  j := public.exos_order_proof_verify('cs_simb_12c', 'tok-wrong-0123456789abcdef', wrong);
+  ASSERT j->>'error' = 'unknown', 'SIM-BUYER-12c: a wrong token is no order';
+  FOR i IN 1..4 LOOP
+    j := public.exos_order_proof_verify('cs_simb_12c', pg_temp.tok('cs_simb_12c'), wrong);
+    ASSERT j->>'error' = 'wrong_code' AND (j->>'attempts_left')::int = 5 - i, 'SIM-BUYER-12c: miss ' || i || ': ' || j::text;
+  END LOOP;
+  j := public.exos_order_proof_verify('cs_simb_12c', pg_temp.tok('cs_simb_12c'), wrong);
+  ASSERT j->>'error' = 'locked', 'SIM-BUYER-12c: the fifth miss locks: ' || j::text;
+  j := public.exos_order_proof_verify('cs_simb_12c', pg_temp.tok('cs_simb_12c'), c);
+  ASSERT j->>'error' = 'locked', 'SIM-BUYER-12c: the right code after the lock is refused: ' || j::text;
+  j := public.exos_order_proof_send('cs_simb_12c', pg_temp.tok('cs_simb_12c'), 'email');
+  ASSERT j->>'error' = 'rate_limited', 'SIM-BUYER-12c: a new code waits 60 seconds: ' || j::text;
+  UPDATE public.exos_order_proofs SET email_code_at = now() - interval '2 minutes' WHERE session_id = 'cs_simb_12c';
+  DELETE FROM public.exos_mail WHERE to_email = 'g12c@sim-b.test' AND template = 'rsvp-code';  -- (same now(): keep the new one findable)
+  j := public.exos_order_proof_send('cs_simb_12c', pg_temp.tok('cs_simb_12c'), 'email');
+  ASSERT (j->>'ok')::boolean AND j->>'to' = 'g1…@sim-b.test', 'SIM-BUYER-12c: new code sent: ' || j::text;
+  IF pg_temp.mailed_code('g12c@sim-b.test') <> c THEN
+    j := public.exos_order_proof_verify('cs_simb_12c', pg_temp.tok('cs_simb_12c'), c);
+    ASSERT j->>'error' = 'wrong_code', 'SIM-BUYER-12c: the old code is gone: ' || j::text;
+  END IF;
+  j := public.exos_order_proof_verify('cs_simb_12c', pg_temp.tok('cs_simb_12c'), pg_temp.mailed_code('g12c@sim-b.test'));
+  ASSERT (j->>'ok')::boolean AND NOT (j->>'attached')::boolean, 'SIM-BUYER-12c: the new code proves it: ' || j::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'g12c@sim-b.test' AND template = 'transfer-initiated' AND html LIKE '%/claim/%'),
+         'SIM-BUYER-12c: no account: the claim links are mailed once proven';
+  -- send limits: 5 code mails per order
+  ids := pg_temp.gsess('cs_simb_12d', 'g12d@sim-b.test');
+  FOR i IN 2..5 LOOP
+    UPDATE public.exos_order_proofs SET email_code_at = now() - interval '2 minutes' WHERE session_id = 'cs_simb_12d';
+    ASSERT (public.exos_order_proof_send('cs_simb_12d', pg_temp.tok('cs_simb_12d'), 'email') ->> 'ok')::boolean, 'SIM-BUYER-12c: send ' || i;
+  END LOOP;
+  UPDATE public.exos_order_proofs SET email_code_at = now() - interval '2 minutes' WHERE session_id = 'cs_simb_12d';
+  ASSERT public.exos_order_proof_send('cs_simb_12d', pg_temp.tok('cs_simb_12d'), 'email') ->> 'error' = 'rate_limited', 'SIM-BUYER-12c: the sixth mail is refused';
+  RAISE NOTICE 'OK SIM-BUYER-12c five wrong codes lock it; a new code after 60 s works; 5 mails per order; a wrong token is no order';
+
+  -- 12e a signed-in account whose email isn't confirmed can't take a hold
+  -- (exos_create_hold refuses it), but an order can still reach fulfilment
+  -- (a capacity-bypass code skips the hold): it proves the email too, and
+  -- once proven the tickets go to that account (theirs, whichever channel)
+  ids := pg_temp.gsess('cs_simb_12e', 'unconfirmed@sim-b.test', '0000000000b7');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000a0')
+     AND (SELECT status FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12e') = 'pending', 'SIM-BUYER-12e: unconfirmed: parked';
+  j := public.exos_order_proof_verify('cs_simb_12e', pg_temp.tok('cs_simb_12e'), pg_temp.mailed_code('unconfirmed@sim-b.test'));
+  ASSERT (j->>'attached')::boolean AND (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = pg_temp.u('0000000000b7'),
+         'SIM-BUYER-12e: proven: in their own account: ' || j::text;
+  -- a confirmed account skips proof
+  ids2 := pg_temp.gsess('cs_simb_12f', 'b5@sim-b.test', '0000000000b5');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids2[1]) = pg_temp.u('0000000000b5')
+     AND NOT EXISTS (SELECT 1 FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12f'), 'SIM-BUYER-12e: confirmed: straight in';
+  -- a refund closes the proof
+  ids := pg_temp.gsess('cs_simb_12g', 'g12g@sim-b.test');
+  UPDATE public.exos_checkout_sessions SET status = 'refunded' WHERE session_id = 'cs_simb_12g';
+  ASSERT (SELECT status FROM public.exos_order_proofs WHERE session_id = 'cs_simb_12g') = 'cancelled'
+     AND public.exos_order_proof_status('cs_simb_12g', pg_temp.tok('cs_simb_12g')) ->> 'status' = 'cancelled', 'SIM-BUYER-12e: refunded: closed';
+  RAISE NOTICE 'OK SIM-BUYER-12e an unconfirmed account proves too (then its own wallet); a confirmed one skips proof; a refund closes it';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -732,19 +886,31 @@ BEGIN
   PERFORM pg_temp.sess('cs_simb_26', '0000000000e7', '0000000000d7', '0000000000b1', 'b1@sim-b.test', 1, 2000, h);
   ids := pg_temp.paid('cs_simb_26');
   ASSERT cardinality(ids) = 1, 'SIM-BUYER-26: bought while waitlisted';
-  -- later a refund frees a seat: the offer goes to the head of the queue
+  ASSERT (SELECT status FROM public.exos_waitlist WHERE id = w1) = 'converted', 'SIM-BUYER-26: the buyer is marked converted';
+  -- later a refund frees a seat: the offer skips b1 and goes to b2
   PERFORM pg_temp.act(pg_temp.u('0000000000a0')::text);
-  n := public.exos_waitlist_offer_next(pg_temp.u('0000000000e7'), 2, 48, NULL);
-  IF (SELECT status FROM public.exos_waitlist WHERE id = w1) = 'offered' THEN
-    -- KNOWN: b1 already holds a ticket and still gets the first offer (two
-    -- seats, 48 h), so b2 waits behind someone who no longer needs it.
-    -- Proposal: a purchase marks the buyer's waiting rows for that event
-    -- 'converted' (or the offer skips emails that already hold tickets),
-    -- unless they asked for more than they hold.
-    RAISE NOTICE 'KNOWN SIM-BUYER-26 waitlist: a buyer who already bought still gets the next offer ahead of others';
-  ELSE
-    RAISE NOTICE 'OK SIM-BUYER-26 waitlist: one row per buyer; buying takes them out of the queue';
-  END IF;
+  UPDATE public.exos_ticket_tiers SET capacity = 3 WHERE id = pg_temp.u('0000000000d7');
+  n := public.exos_waitlist_offer_next(pg_temp.u('0000000000e7'), 1, 48, NULL);
+  ASSERT (SELECT status FROM public.exos_waitlist WHERE id = w1) = 'converted'
+     AND (SELECT status FROM public.exos_waitlist WHERE event_id = pg_temp.u('0000000000e7') AND email = 'b2@sim-b.test') = 'offered',
+         'SIM-BUYER-26: the offer goes to the next in line';
+  -- another seat opens (nobody waiting, so no offer), b3 joins, and b2 buys
+  -- that seat through normal checkout without the offer code: b2 is
+  -- converted and the unused offer passes to b3
+  UPDATE public.exos_ticket_tiers SET capacity = 4 WHERE id = pg_temp.u('0000000000d7');  -- another seat (b2's offer still holds one)
+  PERFORM pg_temp.act(pg_temp.u('0000000000b3')::text);
+  PERFORM public.exos_join_waitlist(pg_temp.u('0000000000e7'), NULL, NULL, 'B Three', 1, NULL);
+  PERFORM pg_temp.act(pg_temp.u('0000000000b2')::text);
+  h := public.exos_create_hold(pg_temp.u('0000000000e7'), pg_temp.u('0000000000d7'), 1);
+  PERFORM pg_temp.sess('cs_simb_26b', '0000000000e7', '0000000000d7', '0000000000b2', 'b2@sim-b.test', 1, 2000, h);
+  ASSERT cardinality(pg_temp.paid('cs_simb_26b')) = 1, 'SIM-BUYER-26: b2 bought';
+  ASSERT (SELECT status FROM public.exos_waitlist WHERE event_id = pg_temp.u('0000000000e7') AND email = 'b2@sim-b.test') = 'converted',
+         'SIM-BUYER-26: b2 converted';
+  ASSERT (SELECT v.valid_until <= now() FROM public.exos_waitlist w JOIN public.exos_vouchers v ON v.id = w.voucher_id
+           WHERE w.event_id = pg_temp.u('0000000000e7') AND w.email = 'b2@sim-b.test'), 'SIM-BUYER-26: b2''s unused offer is retired';
+  ASSERT (SELECT status FROM public.exos_waitlist WHERE event_id = pg_temp.u('0000000000e7') AND email = 'b3@sim-b.test') = 'offered',
+         'SIM-BUYER-26: and passed to b3';
+  RAISE NOTICE 'OK SIM-BUYER-26 waitlist: one row per buyer; buying marks them converted and passes their open offer to the next in line';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -769,7 +935,10 @@ BEGIN
   r := public.exos_phone_rsvp_start(pg_temp.u('0000000000e5'), 'Ana', '(212) 555-0176', NULL, 0, NULL, true);   -- the right one
   ASSERT (r->>'ok')::boolean, 'SIM-BUYER-27: retry with the right number';
   INSERT INTO simb VALUES ('rsvp27', r->>'rsvp_id'), ('code27', r->>'code');
-  RAISE NOTICE 'OK SIM-BUYER-27 phone RSVP wrong number: malformed refused; a wrong real number just gets a code the guest never sees';
+  -- SIM-ORG-14 (mig 20261105100000): an email typed as the name is refused
+  v := public.exos_phone_rsvp_start(pg_temp.u('0000000000e5'), 'ana@sim-b.test', '(212) 555-0176', NULL, 0, NULL, true);
+  ASSERT v->>'error' = 'name_is_email', 'SIM-BUYER-27: name is an email: ' || v::text;
+  RAISE NOTICE 'OK SIM-BUYER-27 phone RSVP wrong number: malformed refused; a wrong real number just gets a code the guest never sees; an email as the name is refused';
 
   -- SIM-BUYER-28 five wrong codes, then the right one
   code := r->>'code';
@@ -803,21 +972,14 @@ BEGIN
 
   -- SIM-BUYER-31 at capacity: 1 seat left (Ana +1 took 2 of 3)
   r := public.exos_phone_rsvp_start(pg_temp.u('0000000000e5'), 'Di', '(212) 555-0173', NULL, 1, NULL, true);
-  IF r->>'error' = 'sold_out' THEN
-    -- KNOWN (unclear error): Di could come alone, but "sold out" doesn't say
-    -- so. Proposal: answer {error:'not_enough_seats', seats_left:1} when
-    -- 1 + plus_ones > seats_left > 0 (seats_left is not an RSVP oracle: the
-    -- public offer already shows availability).
-    RAISE NOTICE 'KNOWN SIM-BUYER-31 RSVP with a plus-one when one seat is left says "sold out", not "come alone"';
-  ELSE
-    RAISE EXCEPTION 'SIM-BUYER-31: unexpected %', r;
-  END IF;
+  -- Was KNOWN ("sold_out" when Di could come alone): now says how many are left.
+  ASSERT r->>'error' = 'not_enough_seats' AND (r->>'seats_left')::int = 1, 'SIM-BUYER-31: ' || r::text;
   r := public.exos_phone_rsvp_start(pg_temp.u('0000000000e5'), 'Di', '(212) 555-0173', NULL, 0, NULL, true);
   v := public.exos_phone_rsvp_verify((r->>'rsvp_id')::uuid, r->>'code', 'https://exos.test');
   ASSERT (v->>'ok')::boolean, 'SIM-BUYER-31: alone fits';
   r := public.exos_phone_rsvp_start(pg_temp.u('0000000000e5'), 'Ed', '(212) 555-0172', NULL, 0, NULL, true);
   ASSERT r->>'error' = 'sold_out', 'SIM-BUYER-31: full: ' || r::text;
-  RAISE NOTICE 'OK SIM-BUYER-31 RSVP at capacity: sold_out, never over capacity';
+  RAISE NOTICE 'OK SIM-BUYER-31 RSVP plus-one at the last seat: not_enough_seats with seats_left 1; alone fits; then sold_out, never over capacity';
 END $$;
 RESET ROLE;
 DO $$
@@ -928,15 +1090,78 @@ END $$;
 RESET ROLE;
 DO $$
 BEGIN
-  -- Exos itself sends the donor nothing on a failed charge (Stripe's own
-  -- failed-payment emails, if switched on in the dashboard, are the only notice).
-  -- Proposal: on the first 'failed' per invoice, queue a "your monthly gift
-  -- didn't go through, update your card" mail with the billing-portal link.
-  IF NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'b2@sim-b.test' AND (subject ILIKE '%fail%' OR subject ILIKE '%card%' OR html ILIKE '%update your card%')) THEN
-    RAISE NOTICE 'KNOWN SIM-BUYER-34 monthly donation card fails: past_due + ledger right, but Exos never tells the donor';
-  ELSE
-    RAISE NOTICE 'OK SIM-BUYER-34 monthly donation card fails: past_due, donor told';
-  END IF;
+  -- Was KNOWN (Exos never told the donor). Now one "update your card" mail
+  -- per failure streak: the retried failure above counted once, so one mail.
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE to_email = 'b2@sim-b.test' AND html LIKE '%update your card%') = 1,
+         'SIM-BUYER-34: one mail for the first streak';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'b2@sim-b.test' AND html LIKE '%update_card=be000000-0000-0000-0000-00000000cd01%'),
+         'SIM-BUYER-34: the mail links to the card update';
+END $$;
+SET ROLE service_role;
+DO $$
+DECLARE s text; rid uuid := 'be000000-0000-0000-0000-00000000cd01';
+BEGIN
+  -- a new streak: fails, fails again (Stripe's next retry), then paid
+  s := public.exos_recurring_donation_invoice(NULL, 'sub_simb', NULL, 'in_simb_3', NULL, 1500, 'usd', NULL, 'failed', 'evt_simb_f2', 'card_declined');
+  s := public.exos_recurring_donation_invoice(NULL, 'sub_simb', NULL, 'in_simb_3', NULL, 1500, 'usd', NULL, 'failed', 'evt_simb_f3', 'card_declined');
+  ASSERT (SELECT failed_payments FROM public.exos_recurring_donations WHERE id = rid) = 2, 'SIM-BUYER-34: two failures in the streak';
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE to_email = 'b2@sim-b.test' AND html LIKE '%update your card%') = 2,
+         'SIM-BUYER-34: one more mail for the second streak, not one per failure';
+  RAISE NOTICE 'OK SIM-BUYER-34 monthly donation card fails: past_due, ledger right, one "update your card" mail per failure streak';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- SIM-BUYER-13b The typo-owner's confirmed account (typo-owner@, b6) and the
+-- guest order's paper trail (mig 20261105100000). An order's email makes its
+-- owner the payer only once that email is proven: before, b6 sees no
+-- receipt, can't ask for a refund and gets no reschedule offer for the
+-- stranger's order (cs_simb_13, proven by phone, so the email never was);
+-- for an order proven to b6's email (cs_simb_13b) b6 sees all three.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE ids uuid[]; t13 uuid; t13b uuid; j jsonb; inv13 uuid; inv13b uuid;
+BEGIN
+  t13 := (SELECT ticket_ids[1] FROM public.exos_checkout_sessions WHERE session_id = 'cs_simb_13');
+  ids := pg_temp.gsess('cs_simb_13b', 'typo-owner@sim-b.test');   -- a second guest order with that email, still unproven
+  t13b := ids[1];
+  SELECT id INTO inv13 FROM public.exos_invoices WHERE session_id = 'cs_simb_13';
+  SELECT id INTO inv13b FROM public.exos_invoices WHERE session_id = 'cs_simb_13b';
+  ASSERT inv13 IS NOT NULL AND inv13b IS NOT NULL, 'SIM-BUYER-13b: both orders have a receipt';
+  PERFORM pg_temp.act(pg_temp.u('0000000000a0')::text);
+  PERFORM public.exos_reschedule_event(pg_temp.u('0000000000e1'), now() + interval '20 days', p_offer_refunds => true);
+
+  -- Unproven (13b pending, 13 proven by phone only): nothing for b6.
+  PERFORM pg_temp.act(pg_temp.u('0000000000b6')::text);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id IN ('cs_simb_13', 'cs_simb_13b')), 'SIM-BUYER-13b: no receipt in the list';
+  ASSERT pg_temp.err(format('SELECT public.exos_invoice_document(%L::uuid)', inv13b)) LIKE '%not found%', 'SIM-BUYER-13b: the receipt itself is not found';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id IN (t13, t13b)),
+         'SIM-BUYER-13b: no refund ask listed';
+  j := public.exos_ask_refund(ARRAY[t13b]);
+  ASSERT j->0->>'reason' = 'not-buyer', 'SIM-BUYER-13b: a refund ask is refused: ' || j::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_refund_asks WHERE session_id IN ('cs_simb_13', 'cs_simb_13b')), 'SIM-BUYER-13b: no ask recorded';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id IN (t13, t13b)), 'SIM-BUYER-13b: no reschedule offer';
+
+  -- 13b proven to b6's email (it was theirs after all): all three appear.
+  PERFORM pg_temp.act(NULL);
+  ASSERT (public.exos_order_proof_verify('cs_simb_13b', pg_temp.tok('cs_simb_13b'), (SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+             WHERE template = 'rsvp-code' AND html LIKE '%confirm=cs_simb_13b&amp;%' LIMIT 1)) ->> 'ok')::boolean,
+         'SIM-BUYER-13b: proven by the mailed code (that order''s mail)';
+  PERFORM pg_temp.act(pg_temp.u('0000000000b6')::text);
+  ASSERT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id = 'cs_simb_13b')
+     AND NOT EXISTS (SELECT 1 FROM public.exos_my_invoices() x WHERE x.session_id = 'cs_simb_13'), 'SIM-BUYER-13b: the proven order''s receipt, only';
+  ASSERT public.exos_invoice_document(inv13b) IS NOT NULL, 'SIM-BUYER-13b: the receipt opens';
+  ASSERT (SELECT x.reason FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13b) IS DISTINCT FROM 'not-buyer'
+     AND EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13b), 'SIM-BUYER-13b: the refund ask is theirs';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_refund_asks(pg_temp.u('0000000000e1')) x WHERE x.ticket_id = t13), 'SIM-BUYER-13b: not the phone-proven one';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id = t13b AND x.reason IS DISTINCT FROM 'not-buyer'),
+         'SIM-BUYER-13b: the reschedule offer is theirs';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_my_reschedule_offers() x WHERE x.ticket_id = t13), 'SIM-BUYER-13b: not for the phone-proven one';
+  PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK SIM-BUYER-13b a typo-owner''s account gets no receipt, refund ask or reschedule offer for an unproven guest order; once proven to their email, all three';
 END $$;
 
 ROLLBACK;

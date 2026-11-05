@@ -48,7 +48,7 @@ INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold,
   ('fe000000-0000-0000-0000-0000000000d6', 'fe000000-0000-0000-0000-0000000000e3', 'GA', 40, 100, 0, 'public'),
   ('fe000000-0000-0000-0000-0000000000d7', 'fe000000-0000-0000-0000-0000000000e4', 'GA', 40, 100, 0, 'public');
 INSERT INTO public.exos_event_addons (id, event_id, name, price, capacity, sold) VALUES
-  ('fe000000-0000-0000-0000-0000000000c1', 'fe000000-0000-0000-0000-0000000000e1', 'Parking', 10, 0, 0);
+  ('fe000000-0000-0000-0000-0000000000c1', 'fe000000-0000-0000-0000-0000000000e1', 'Parking', 10, 100, 0);
 
 -- F1 -------------------------------------------------------------------------
 SET ROLE authenticated;

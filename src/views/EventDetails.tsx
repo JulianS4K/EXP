@@ -423,7 +423,7 @@ export default function EventDetails() {
     if (!event) return;
     setPurchasing(true);
     try {
-      const { issued, email } = await claimFreeAsGuest({
+      const { issued, email, sessionId } = await claimFreeAsGuest({
         eventId: event.id,
         tierId,
         quantity,
@@ -439,6 +439,12 @@ export default function EventDetails() {
       });
       clearPrefill(event.id);
       setGuestOpen(false);
+      // The tickets wait for proof of the email (mig 20261105100000): the
+      // confirm step is on My Tickets.
+      if (sessionId) {
+        navigate(`/my-tickets?checkout=success&guest=1&session_id=${encodeURIComponent(sessionId)}`);
+        return;
+      }
       toast({
         kind: 'success',
         title: issued > 1 ? `${issued} tickets on their way` : 'Your ticket is on its way',

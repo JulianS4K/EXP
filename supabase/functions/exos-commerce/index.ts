@@ -23,6 +23,9 @@
 //   donate_monthly { campaign_id, amount_cents, cover_fees?, anonymous?, donor_name?, note?,
 //                    success_url, cancel_url } -> { url, session_id, recurring_id }
 //       signed in: a monthly Stripe subscription (mig 20261102110000, _shared/recurringDonation.ts)
+//   recurring_donation_portal { recurring_id, return_url } -> { url }  (the donor only:
+//       Stripe's billing portal to update the card, linked from the
+//       "update your card" mail, mig 20261105100000)
 //   cancel_recurring_donation { recurring_id } -> { recurring_donation }
 //       the donor, or the org's owner / manager / finance (exos_recurring_donation_can_cancel)
 //   complete_campaign { campaign_id } -> { campaign, not_cancelled }  (owner / manager)
@@ -98,6 +101,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ url: portal.url });
     } catch (e) {
       console.error("exos-commerce: portal failed", e);
+      return json({ error: "could not open billing" }, 502);
+    }
+  }
+
+  // A monthly gift's card failed (mig 20261105100000): the donor updates it in
+  // Stripe's billing portal. The donor's own account only.
+  if (p.action === "recurring_donation_portal") {
+    if (!user) return json({ error: "sign in" }, 401);
+    if (!isAllowedRedirect(p.return_url, allowed)) return json({ error: "redirect URL not allowed" }, 400);
+    const id = String(p.recurring_id ?? "");
+    if (!UUID_RE.test(id)) return json({ error: "missing recurring_id" }, 400);
+    const { data: r } = await sb.from("exos_recurring_donations")
+      .select("id, donor_uid, stripe_customer_id, status").eq("id", id).maybeSingle();
+    if (!r || r.donor_uid !== user.id) return json({ error: "monthly gift not found" }, 404);
+    if (!r.stripe_customer_id || r.status === "cancelled") return json({ error: "this monthly gift has no card to update" }, 409);
+    const stripe = stripeClient();
+    if (!stripe) return json({ error: "server misconfigured: STRIPE_SECRET_KEY unset" }, 500);
+    try {
+      const portal = await stripe.billingPortal.sessions.create({ customer: r.stripe_customer_id, return_url: p.return_url });
+      return json({ url: portal.url });
+    } catch (e) {
+      console.error("exos-commerce: donation portal failed", e);
       return json({ error: "could not open billing" }, 502);
     }
   }

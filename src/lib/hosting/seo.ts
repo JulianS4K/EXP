@@ -16,6 +16,7 @@ import {
 } from '../../../supabase/functions/_shared/attendance.ts';
 import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
 import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
+import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
@@ -482,8 +483,8 @@ export function eventBody(ev: Row, tiers: Row[], s: EventSummary, url: string, n
     out.push('<h2>Tickets</h2><p>Prices are all-in: the price shown is the price paid.</p><ul>');
     for (const t of priced.slice(0, 20)) {
       const cents = fromPriceCents([t as TierRow], now) ?? 0;
-      const cap = Number(t.capacity ?? 0);
-      const soldOut = cap > 0 && Number(t.sold ?? 0) >= cap;
+      // Capacity 0 is closed, never unlimited (mig 20261105100000).
+      const soldOut = t.capacity != null && isSoldOut(t.capacity, t.sold);
       const ended = typeof t.sales_end === 'string' && parseInstant(t.sales_end) < now.getTime();
       const starts = typeof t.sales_start === 'string' ? parseInstant(t.sales_start) : NaN;
       const notYet = !Number.isNaN(starts) && starts > now.getTime();

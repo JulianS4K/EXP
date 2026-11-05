@@ -8,6 +8,7 @@
 // localStorage with a pending-arrival queue, like the ticket registry.
 
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import {
   mapGuestEntry,
   mapGuestListMeta,
@@ -103,6 +104,7 @@ export interface GuestInput {
 }
 
 export async function addGuest(listId: string, g: GuestInput): Promise<string> {
+  assertNotEmailName(g.guestName);
   const { data, error } = await supabase.rpc('exos_add_guest', {
     p_list_id: listId, p_guest_name: g.guestName, p_email: g.email || null, p_phone: g.phone || null,
     p_plus_ones: g.plusOnes, p_note: g.note || null,
@@ -112,6 +114,7 @@ export async function addGuest(listId: string, g: GuestInput): Promise<string> {
 }
 
 export async function updateGuest(entryId: string, g: GuestInput): Promise<void> {
+  assertNotEmailName(g.guestName);
   const { error } = await supabase.rpc('exos_update_guest', {
     p_entry_id: entryId, p_guest_name: g.guestName, p_email: g.email || null, p_phone: g.phone || null,
     p_plus_ones: g.plusOnes, p_note: g.note || null,
@@ -157,6 +160,7 @@ export async function getPromoterGuestLists(token: string): Promise<PromoterGues
 export async function promoterAddGuest(
   token: string, listId: string, g: { guestName: string; plusOnes: number; email?: string; phone?: string },
 ): Promise<string> {
+  assertNotEmailName(g.guestName);
   const { data, error } = await supabase.rpc('exos_promoter_add_guest', {
     p_token: token, p_list_id: listId, p_guest_name: g.guestName, p_plus_ones: g.plusOnes,
     p_email: g.email || null, p_phone: g.phone || null,

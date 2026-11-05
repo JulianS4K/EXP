@@ -604,7 +604,7 @@
       "method": "GET",
       "path": "/v1/events/:id/ticket-types/:tier",
       "summary": "Get a ticket type",
-      "description": "One ticket type of the event. price is in the event's currency (major unit); capacity 0 means unlimited.",
+      "description": "One ticket type of the event. price is in the event's currency (major unit); capacity is what it may sell; 0 means closed (stop sales), never unlimited.",
       "scope": "events:read",
       "parameters": [
         {
@@ -671,7 +671,7 @@
       "method": "POST",
       "path": "/v1/events/:id/ticket-types",
       "summary": "Create a ticket type",
-      "description": "Adds a ticket type. Writable fields: name (required), description, price (major unit), capacity (0 = unlimited), ticket_type (paid, free, donation), visibility (public, hidden), sales_start, sales_end, sort_order, price_schedule ([{ startsAt, price }]), accessible, accessible_note, market_split.",
+      "description": "Adds a ticket type. Writable fields: name (required), description, price (major unit), capacity (required, 1 or more; there is no unlimited, and an update may set 0 to close it), ticket_type (paid, free, donation), visibility (public, hidden), sales_start, sales_end, sort_order, price_schedule ([{ startsAt, price }]), accessible, accessible_note, market_split.",
       "scope": "events:write",
       "parameters": [
         {
@@ -1000,7 +1000,7 @@
       "method": "POST",
       "path": "/v1/events/:id/add-ons",
       "summary": "Create an add-on",
-      "description": "Adds an add-on. Writable fields: name (required), description, price (major unit, 0 or more), capacity (0 = unlimited), max_per_order, visibility (public, hidden), image_url, sort_order.",
+      "description": "Adds an add-on. Writable fields: name (required), description, price (major unit, 0 or more), capacity (required, 1 or more; an update may set 0 to close it), max_per_order, visibility (public, hidden), image_url, sort_order.",
       "scope": "events:write",
       "parameters": [
         {

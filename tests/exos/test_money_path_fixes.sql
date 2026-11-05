@@ -88,12 +88,15 @@ BEGIN
   UPDATE public.exos_cart_holds SET checkout_session_id = 'free_6f_h3' WHERE id = h;
   ids := public.exos_fulfill_checkout('free_6f_h3');
   IF cardinality(ids) <> 2 THEN RAISE EXCEPTION 'H3 FAIL: issued %', cardinality(ids); END IF;
+  -- mig 20261105100000: a guest's order waits for proof of the email; the
+  -- first mail is the code (no claim links, no receipt), the links follow it.
   SELECT html INTO m FROM public.exos_mail WHERE to_email = '6f-rsvp@x.com' ORDER BY created_at DESC LIMIT 1;
-  IF m NOT LIKE '<p>You''re in. Your 2 tickets%' OR m LIKE '%Payment received%' OR m NOT LIKE '%?k=%' OR m LIKE '%Paid:%' THEN
+  IF m NOT LIKE '%Your 2 tickets%' OR m LIKE '%?k=%' OR m LIKE '%Paid:%'
+     OR (SELECT status FROM public.exos_order_proofs WHERE session_id = 'free_6f_h3') <> 'pending' THEN
     RAISE EXCEPTION 'H3 FAIL: mail %', left(m, 300);
   END IF;
   IF (SELECT status FROM public.exos_cart_holds WHERE id = h) = 'active' THEN RAISE EXCEPTION 'H3 FAIL: hold still live'; END IF;
-  RAISE NOTICE 'H3 ok: a guest''s free claim is issued as keyed claim links, "You''re in"';
+  RAISE NOTICE 'H3 ok: a guest''s free claim is issued, parked until the email is proven';
 END $$;
 
 ROLLBACK;

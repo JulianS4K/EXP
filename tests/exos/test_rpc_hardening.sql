@@ -164,7 +164,10 @@ BEGIN
        'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',
        -- inbound booking requests (mig 20261102130000): an org's form text
        -- when it is on, and the rate-limited, honeypotted, 16 KB-capped submit
-       'exos_inbound_form_public', 'exos_inbound_submit');
+       'exos_inbound_form_public', 'exos_inbound_submit',
+       -- a guest order's proof of email / phone (mig 20261105100000): a 256-bit
+       -- browser token from exos-checkout gates all three; 5 tries per code
+       'exos_order_proof_status', 'exos_order_proof_send', 'exos_order_proof_verify');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

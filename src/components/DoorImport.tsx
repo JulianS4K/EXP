@@ -149,6 +149,9 @@ export default function DoorImport({ eventId, onImported }: { eventId: string; o
                 {map.code === undefined ? ' (no code column: check-in by name only)' : ''}.
               </p>
               {plan.noName > 0 && <p>{plan.noName} row(s) have no name and are skipped.</p>}
+              {plan.nameIsEmail > 0 && (
+                <p>{plan.nameIsEmail} row(s) have an email in the name column and are skipped: are your columns swapped?</p>
+              )}
               {plan.repeatedCodes > 0 && <p>{plan.repeatedCodes} row(s) repeat an earlier row and are kept once.</p>}
               {plan.sharedCodes > 0 && (
                 <p>{plan.sharedCodes} attendee(s) share a code with someone else (an order number?): imported for check-in by name.</p>

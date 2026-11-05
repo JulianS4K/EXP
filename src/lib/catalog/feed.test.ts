@@ -103,8 +103,8 @@ describe('priceAndAvailability', () => {
     expect(priceAndAvailability(ev({ total_tickets: 50, tickets_sold: 50 }), [tier()], NOW)?.availability).toBe('out of stock');
   });
 
-  it('treats capacity 0 as unlimited', () => {
-    expect(priceAndAvailability(ev(), [tier({ capacity: 0, sold: 9999 })], NOW)?.availability).toBe('in stock');
+  it('treats capacity 0 as closed, never unlimited (mig 20261105100000)', () => {
+    expect(priceAndAvailability(ev(), [tier({ capacity: 0, sold: 0 })], NOW)?.availability).toBe('out of stock');
   });
 });
 
@@ -244,9 +244,9 @@ describe('request parsing', () => {
 describe('exosLeft (mig 20261014160000)', () => {
   it('uses what Exos can sell when the view has it', () => {
     expect(exosLeft({ capacity: 100, sold: 20, available: 5 })).toBe(5);
-    expect(exosLeft({ capacity: 100, sold: 20, available: null })).toBe(Infinity);
+    expect(exosLeft({ capacity: 100, sold: 20, available: null })).toBe(80);  // never "no cap"
     expect(exosLeft({ capacity: 100, sold: 20 })).toBe(80);
-    expect(exosLeft({ capacity: 0, sold: 20 })).toBe(Infinity);
+    expect(exosLeft({ capacity: 0, sold: 20 })).toBe(0);  // closed
     expect(exosLeft({ capacity: 100, sold: 20, available: -3 })).toBe(0);
   });
   it('a tier whose rest is held for S4K or marketplaces is out of stock on Exos', () => {
