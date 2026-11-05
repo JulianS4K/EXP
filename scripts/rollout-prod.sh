@@ -92,6 +92,10 @@ q() { psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c "$1"; }
 migrations() {
   : "${DB_URL:?set DB_URL}"
   echo "exos crons before:"; q "select jobname||' '||active from cron.job where jobname like 'exos%' order by 1"
+  # The operator may have turned some crons on (2026-11-04: 14 of 16). Remember
+  # which, so the check below only fails on a cron THIS rollout made active.
+  local before_active
+  before_active=$(q "select coalesce(string_agg(quote_literal(jobname), ',' order by jobname), '''''') from cron.job where jobname like 'exos%' and active")
   for m in "${MIGRATIONS[@]}"; do
     f="$MIG/$m.sql"; [ -f "$f" ] || { echo "missing $f"; exit 1; }
     if [ "$(q "select count(*) from supabase_migrations.schema_migrations where name in ('$m','${m#*_}')")" != 0 ]; then
@@ -106,9 +110,10 @@ migrations() {
     psql "$DB_URL" -X -q -1 -v ON_ERROR_STOP=1 -f "$f" \
       -c "insert into supabase_migrations.schema_migrations(version, name) values ('$v', '$m')"
   done
-  echo "exos crons after (every row must say f):"; q "select jobname||' '||active from cron.job where jobname like 'exos%' order by 1"
-  active=$(q "select count(*) from cron.job where jobname like 'exos%' and active")
-  [ "$active" = 0 ] || { echo "WARNING: $active exos cron(s) active"; exit 1; }
+  echo "exos crons after:"; q "select jobname||' '||active from cron.job where jobname like 'exos%' order by 1"
+  # Every cron these migrations create starts inactive; any newly active one is a bug.
+  newly=$(q "select coalesce(string_agg(jobname, ' '), '') from cron.job where jobname like 'exos%' and active and jobname not in ($before_active)")
+  [ -z "$newly" ] || { echo "WARNING: cron(s) made active by this rollout: $newly"; exit 1; }
   echo "migrations done"
 }
 
