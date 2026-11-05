@@ -1133,9 +1133,12 @@ GRANT EXECUTE ON FUNCTION public.exos_pos_paid_out(uuid, integer, text, uuid) TO
 -- The QR (screen) or paper for a walk-up's tickets: one-time print codes
 -- (docs/wallet.md "Printed tickets"), so they scan like any printed ticket.
 -- Door staff of the event, for a paid POS order's own tickets only.
--- The seller or an owner / manager (the void rule). The seller: only tickets
--- still with them (not emailed, claimed or scanned), so paper can't be made
--- for a ticket the buyer already holds in the app.
+-- The seller or an owner / manager (the void rule), and for everyone only
+-- tickets the seller still holds (active, never checked in, owned by the
+-- seller): a live paper code makes the holder's app code read "printed", so
+-- printing a claimed ticket would take it over. A buyer's ticket is printed
+-- only through exos_ticket_print and its own rules. A ticket in the seller's
+-- claim link comes back under skipped (in-transfer).
 CREATE OR REPLACE FUNCTION public.exos_pos_order_codes(p_order_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE o public.exos_pos_orders%ROWTYPE; v_ids uuid[]; v_role text;
@@ -1153,10 +1156,10 @@ BEGIN
     RAISE EXCEPTION 'this sale is %', CASE WHEN o.status = 'open' THEN 'pending' ELSE o.status END USING ERRCODE = '55000';
   END IF;
   SELECT array_agg(x) INTO v_ids FROM public.exos_pos_order_lines l, unnest(coalesce(l.ticket_ids, '{}')) x WHERE l.order_id = o.id;
-  IF v_ids IS NOT NULL AND v_role NOT IN ('owner', 'manager') THEN
+  IF v_ids IS NOT NULL THEN
     SELECT array_agg(t.id) INTO v_ids FROM public.exos_tickets t
-     WHERE t.id = ANY (v_ids) AND t.status = 'active' AND t.pending_transfer_id IS NULL
-       AND t.owner_id IS NOT DISTINCT FROM o.rung_by AND t.check_in_at IS NULL;
+     WHERE t.id = ANY (v_ids) AND t.status = 'active' AND t.check_in_at IS NULL
+       AND o.rung_by IS NOT NULL AND t.owner_id = o.rung_by;
     IF v_ids IS NULL THEN
       RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned' USING ERRCODE = '55000', HINT = 'handed-over';
     END IF;
