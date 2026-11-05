@@ -9,7 +9,7 @@
    "method": "GET",
    "path": "/v1/public/discovery/events",
    "summary": "Discover events",
-   "description": "Published events from now on, soonest first: the public event, its organizer and from_price_cents, the lowest all-in ticket price on sale (fees and exclusive tax included; buyers never see a fee line). Opendate GET /public/discovery/confirms. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "description": "Published events from now on, soonest first, optionally of some genres (GET /v1/public/discovery/genres lists them): the public event, its organizer and from_price_cents, the lowest all-in ticket price on sale (fees and exclusive tax included; buyers never see a fee line). Opendate GET /public/discovery/confirms. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it). Events the organizer marked noindex are left out here and in search.",
    "auth": "public",
    "scope": null,
    "parameters": [
@@ -60,6 +60,22 @@
      "required": false,
      "description": "Before this time.",
      "example": "2027-01-01T00:00:00Z"
+    },
+    {
+     "name": "genre",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only events with this genre (any case and spacing: \"Hip Hop\" matches \"hip  hop\").",
+     "example": "House"
+    },
+    {
+     "name": "genres",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only events with at least one of these genres: comma-separated, or the parameter repeated (genres[] works too). With genre, the two are combined. At most 20.",
+     "example": "house,techno"
     }
    ],
    "responses": [
@@ -281,7 +297,7 @@
    "method": "GET",
    "path": "/v1/public/search",
    "summary": "Search",
-   "description": "Up to 20 upcoming published events and 20 organizers whose names match. Opendate GET /public/search. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "description": "Up to 20 upcoming published events and 20 organizers whose names match. Opendate GET /public/search. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it). Events the organizer marked noindex are never found.",
    "auth": "public",
    "scope": null,
    "parameters": [

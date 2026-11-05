@@ -16,6 +16,7 @@ import {
   captureFacts, captureIdFromRef, type CaptureFacts, disputeFacts, HANDLED_EVENTS, orderCapture, ppRef,
   PAYPAL_ORDER_RE, refundFacts, type RefundFacts, toPayPalValue, webhookHeaders,
 } from "./model.ts";
+import { locationFromPayPalOrder, recordBuyerLocation } from "../buyerLocation.ts";
 
 export interface DbError { code?: string; message?: string }
 export interface Db {
@@ -116,6 +117,12 @@ export async function captureOrder(db: Db, pp: PayPalClient, orderId: string, lo
     return { http: 409, body: { error: "order mismatch" } };
   }
   const r = await settleCapture(db, pp, { ...f, orderId }, eventId, log);
+  // Buyer location (mig 20261106140000): the payer's country / region / city
+  // / postal code in this capture response; never a street. Best effort,
+  // never throws; the SQL skips an order that isn't fulfilled.
+  if (r.session_id && f.status === "COMPLETED") {
+    await recordBuyerLocation(db, r.session_id, locationFromPayPalOrder(order), log);
+  }
   return { http: 200, body: { status: r.session_status, payment_status: r.payment_status, session_id: r.session_id } };
 }
 

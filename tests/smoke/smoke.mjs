@@ -575,6 +575,51 @@ await run('event report: where buyers checked out (in-app vs browser)', async (p
   { in_app_browser: 'none', escaped_from: null, started: 2, paid: 1, tickets: 1, gross_cents: 2500 },
 ] }) } }) });
 
+// ── claude/exos-buyer-geo-genre (mig 20261106140000): where buyers are, genre chips ──
+const GEO = (orders) => ({
+  orders, tickets: orders + 1, located_orders: orders - 1, unknown_orders: 1, other_tickets: 2,
+  countries: [{ country: 'US', currency: 'USD', orders: orders - 2, tickets: orders - 1, gross_cents: 10500 },
+    { country: 'GB', currency: 'USD', orders: 1, tickets: 1, gross_cents: 3000 }],
+  cities: [{ country: 'US', region: 'NY', city: 'Brooklyn', currency: 'USD', orders: orders - 2, tickets: orders - 1, gross_cents: 10500 }],
+  unknown: [{ country: null, currency: 'USD', orders: 1, tickets: 1, gross_cents: 0 }],
+});
+await run('event report: where buyers are (countries, cities, unknown; org-wide)', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Where buyers are' }) });
+  await section.getByText('Brooklyn, NY').waitFor({ timeout: 8000 });
+  let text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['United States', 'United Kingdom', 'Unknown', '$105.00', '3 of 4 orders have a location', '2 more tickets came from RSVPs']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_buyer_geo') && l.includes(EV)), 'event RPC called');
+  await section.getByRole('button', { name: 'All events' }).click();
+  await section.getByText('9 of 10 orders').waitFor({ timeout: 8000 });
+  assert(log.some((l) => l.startsWith('rpc exos_org_buyer_geo') && l.includes(ORG)), 'org RPC called');
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: {
+  exos_event_buyer_geo: () => GEO(4), exos_org_buyer_geo: () => GEO(10),
+} }) });
+
+await run('home: genre chips filter the events', async (page, log) => {
+  await page.goto(BASE + '/');
+  const chips = page.getByRole('group', { name: 'Filter by genre' });
+  await chips.getByRole('button', { name: 'JAZZ' }).waitFor({ timeout: 8000 });
+  await expectText(page, 'Fall Party');
+  await expectText(page, 'Late Jazz');
+  await chips.getByRole('button', { name: 'JAZZ' }).click();
+  await page.getByText('Fall Party').first().waitFor({ state: 'detached', timeout: 8000 });
+  await expectText(page, 'Late Jazz');
+  assert(log.some((l) => l.startsWith('rpc exos_api_public') && l.includes('genres.list')), 'genres from public discovery');
+  assert(log.some((l) => l.startsWith('GET exos_public_events') && l.includes('genres=ov.')), 'the genre read: ' + log.filter((l) => l.includes('exos_public_events')).join(' | '));
+  await chips.getByRole('button', { name: 'ALL' }).click();
+  await expectText(page, 'Fall Party');
+}, { mock: { tables: { exos_public_events: [
+  { ...baseTables.exos_public_events[0], genres: ['House'] },
+  { ...baseTables.exos_public_events[0], id: '99999999-9999-4999-8999-999999999991', slug: 'late-jazz', name: 'Late Jazz', genres: ['Jazz'] },
+] }, rpcs: { exos_api_public: () => [
+  { genre: 'house', name: 'House', events: 1, variants: ['House'] },
+  { genre: 'jazz', name: 'Jazz', events: 1, variants: ['Jazz'] },
+] } } });
+
 await run('event report: Money summary from the order money view', async (page, log) => {
   await page.goto(BASE + '/dashboard/event/' + EV);
   const section = page.locator('section', { has: page.getByRole('heading', { name: 'Money' }) });
