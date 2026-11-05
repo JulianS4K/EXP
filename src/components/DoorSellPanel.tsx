@@ -6,9 +6,15 @@
 // drawer opens, pays out and closes here too.
 //
 // Phone first: one column, big tap targets (at least 48px), the total and the
-// change in large type. Card at the door isn't connected yet, so the Card
-// button is there but disabled with the reason. No card field, no script,
-// nothing that could touch card data (docs/pci.md).
+// change in large type. Card at the door (mig 20261107130000): the Card button
+// works when the server's switch (EXOS_POS_CARD) is on and the org has a
+// reader; pick the reader, "Charge $X on reader", and the screen polls until
+// the reader captured, declined or was cancelled. The card is handled by the
+// reader: no card field, no script, nothing that could touch card data here
+// (docs/pci.md). Owners and managers add a reader by the code it shows.
+// TODO(native app, docs/pos.md "Card at the door"): Tap to Pay on iPhone stays
+// hidden until the native wrapper (Terminal iOS SDK + Apple's entitlement)
+// exists; it will use connection_token and card_payment mode "sdk".
 //
 // Every rule is enforced in SQL (exos-pos → exos_pos_*); this screen only
 // mirrors them (lib/pos walkup.ts) to show the right buttons.
@@ -18,10 +24,14 @@ import { Banknote, CreditCard, Gift, Loader2, Mail, Minus, Plus, Printer, QrCode
 import { useToast } from '../context/ToastContext';
 import { formatCents } from '../lib/refunds';
 import { parseCash } from '../lib/drawerRecount';
-import { changeDue, quickCash, reverseOption, walkupQuote, WALKUP_CARD_MESSAGE } from '../lib/pos';
 import {
-  closeDrawer, emailSale, getRecentSales, getWalkupCatalog, newOrderKey, openDrawer, paidOut, posErrorText, refundSale,
-  saleCodes, sellWalkup, ticketsPdf, voidSale, type WalkupCatalog, type WalkupOrder,
+  CARD_POLL_GIVE_UP_MS, CARD_POLL_MS, cardStateDone, cardStateText, changeDue, quickCash, reverseOption, walkupQuote,
+  WALKUP_CARD_MESSAGE, type CardSaleState,
+} from '../lib/pos';
+import {
+  beginCardSale, cancelCardSale, cardStatus, chargeOnReader, closeDrawer, emailSale, getRecentSales, getWalkupCatalog,
+  newOrderKey, openDrawer, paidOut, posErrorText, refundSale, registerReader, saleCodes, sellWalkup, setupCardLocation,
+  ticketsPdf, voidSale, type CardProgress, type WalkupCatalog, type WalkupOrder,
 } from '../lib/posWalkup';
 import { answersBody, EMPTY_DRAFT, hasQuestions, ticketTiersFor, type AnswerDraft } from '../lib/checkoutQuestions';
 import { qrSvg } from '../../supabase/functions/_shared/print/qr.ts';
@@ -47,7 +57,14 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
   const [sales, setSales] = useState<WalkupOrder[]>([]);
   const [tierId, setTierId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
-  const [payment, setPayment] = useState<'cash' | 'comp'>('cash');
+  const [payment, setPayment] = useState<'cash' | 'comp' | 'card'>('cash');
+  const [readerId, setReaderId] = useState<string | null>(null);
+  // A card sale under way: the pending order and where the reader is.
+  const [cardSale, setCardSale] = useState<{ order: WalkupOrder; state: CardSaleState; startedAt: number; polls: number } | null>(null);
+  // Adding a reader (owner / manager).
+  const [rdCode, setRdCode] = useState('');
+  const [rdLabel, setRdLabel] = useState('Door reader');
+  const [addr, setAddr] = useState({ line1: '', city: '', state: '', postal_code: '', country: 'US' });
   const [received, setReceived] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -75,6 +92,9 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       // Only ever this member's own drawer by default; an owner / manager picks another one by hand.
       setDrawerId((cur) => (cur && c.drawers.some((d) => d.id === cur) ? cur : c.drawers.find((d) => d.mine)?.id ?? null));
       setTierId((cur) => cur ?? c.tiers.find((t) => t.remaining === null || t.remaining > 0)?.tier_id ?? null);
+      const readers = c.card.connected ? c.card.readers ?? [] : [];
+      setReaderId((cur) => (cur && readers.some((r) => r.device_id === cur) ? cur : readers[0]?.device_id ?? null));
+      if (!c.card.connected) setPayment((cur) => (cur === 'card' ? 'cash' : cur));
       setSales(await getRecentSales(eventId, 15));
     } catch (e) {
       setLoadErr(posErrorText(e));
@@ -93,7 +113,9 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
   const asks = cat && tierId ? hasQuestions(cat.questions, ticketTiers) : false;
   const maxQty = Math.max(1, Math.min(10, tier?.remaining ?? 10));
   const drawer = cat?.drawers.find((d) => d.id === drawerId) ?? null;
-  const needsDrawer = (quote?.cashDueCents ?? 0) > 0;
+  const needsDrawer = payment === 'cash' && (quote?.cashDueCents ?? 0) > 0;
+  const readers = cat?.card.connected ? cat.card.readers ?? [] : [];
+  const reader = readers.find((r) => r.device_id === readerId) ?? null;
   const change = received !== null && quote ? changeDue(quote.cashDueCents, received) : null;
 
   const resetSale = () => {
@@ -120,6 +142,88 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       void load();
     } catch (e) {
       // The same key retries the same sale; a refusal keeps it for a fix and retry.
+      toast({ kind: 'error', message: posErrorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A finished card sale: hand the tickets over like a cash sale, or say why not.
+  const finishCard = useCallback((r: CardProgress) => {
+    setCardSale(null);
+    if (r.state === 'succeeded' && r.order) {
+      setDone(r.order);
+      setCodes(null);
+      setCodeAt(0);
+      setSendTo(r.order.buyer_email ?? '');
+      toast({ kind: 'success', message: `Paid by card: ${r.order.quantity} × ${r.order.tier_name}` });
+    } else {
+      toast({ kind: 'error', message: cardStateText(r.state, r.decline_code) });
+    }
+    setQty(1); setReceived(null); setName(''); setEmail(''); setDraft(EMPTY_DRAFT); setShowQs(false);
+    setOrderKey(newOrderKey());
+    void load();
+  }, [toast, load]);
+
+  const cancelCard = useCallback(async (orderId: string, reason: string) => {
+    try {
+      finishCard(await cancelCardSale(orderId, reason));
+    } catch (e) {
+      toast({ kind: 'error', message: posErrorText(e) });
+    }
+  }, [finishCard, toast]);
+
+  // While the guest is at the reader: ask every 2 s; the server captures once
+  // the reader authorized (or cancels a decline). Give up after the reservation.
+  useEffect(() => {
+    if (!cardSale || cardSale.state !== 'waiting') return undefined;
+    let stop = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await cardStatus(cardSale.order.id);
+        if (stop) return;
+        if (cardStateDone(r.state)) { finishCard(r); return; }
+        if (Date.now() - cardSale.startedAt > CARD_POLL_GIVE_UP_MS) { void cancelCard(cardSale.order.id, 'timed out at the reader'); return; }
+      } catch {
+        if (stop) return;   // a dropped request: ask again
+      }
+      setCardSale((c) => (c && c.order.id === cardSale.order.id ? { ...c, polls: c.polls + 1 } : c));
+    }, CARD_POLL_MS);
+    return () => { stop = true; clearTimeout(t); };
+  }, [cardSale, finishCard, cancelCard]);
+
+  const chargeCard = async () => {
+    if (!cat || !tier || !quote || !reader) return;
+    setBusy(true);
+    let pending: WalkupOrder | null = null;
+    try {
+      pending = await beginCardSale({
+        eventId, tierId: tier.tier_id, quantity: qty, orderKey, buyerName: name, buyerEmail: email,
+        answers: asks ? answersBody(cat.questions, ticketTiers, draft) : undefined,
+      });
+      setCardSale({ order: pending, state: 'starting', startedAt: Date.now(), polls: 0 });
+      await chargeOnReader(pending.id, reader.device_id);
+      setCardSale((c) => (c && c.order.id === pending!.id ? { ...c, state: 'waiting' } : c));
+    } catch (e) {
+      toast({ kind: 'error', message: posErrorText(e) });
+      // The reader never got it: give the places back.
+      if (pending) void cancelCard(pending.id, 'the reader could not start');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addReader = async () => {
+    if (!cat) return;
+    if (rdCode.trim().length < 3) { toast({ kind: 'error', message: 'Type the code the reader shows.' }); return; }
+    setBusy(true);
+    try {
+      if (!cat.card.has_location) await setupCardLocation(eventId, addr);
+      await registerReader(eventId, rdCode.trim(), rdLabel.trim() || 'Door reader');
+      setRdCode('');
+      toast({ kind: 'success', message: 'Reader added.' });
+      void load();
+    } catch (e) {
       toast({ kind: 'error', message: posErrorText(e) });
     } finally {
       setBusy(false);
@@ -359,15 +463,26 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                 className={`${BIG} flex flex-col items-center justify-center gap-1 ${payment === 'comp' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white'} disabled:opacity-40`}>
                 <Gift className="w-5 h-5" /> Comp
               </button>
-              <button type="button" role="radio" aria-checked={false} disabled title={WALKUP_CARD_MESSAGE}
-                className={`${BIG} flex flex-col items-center justify-center gap-1 border border-slate-200 bg-slate-50 text-slate-400`}>
+              <button type="button" role="radio" aria-checked={payment === 'card'} disabled={!cat.card.connected || !!cardSale}
+                title={cat.card.connected ? undefined : cat.card.message || WALKUP_CARD_MESSAGE} onClick={() => setPayment('card')}
+                className={`${BIG} flex flex-col items-center justify-center gap-1 ${payment === 'card' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white'} disabled:opacity-40`}>
                 <CreditCard className="w-5 h-5" /> Card
               </button>
             </div>
-            <p className="text-xs text-slate-500">{WALKUP_CARD_MESSAGE}</p>
+            {!cat.card.connected && <p className="text-xs text-slate-500">{cat.card.message || WALKUP_CARD_MESSAGE}</p>}
+            {payment === 'card' && readers.length > 1 && (
+              <label className="block text-sm">
+                <span className="block font-bold mb-1">Reader</span>
+                <select value={readerId ?? ''} onChange={(e) => setReaderId(e.target.value || null)} className={INPUT}>
+                  {readers.map((r) => <option key={r.device_id} value={r.device_id}>{r.label}</option>)}
+                </select>
+              </label>
+            )}
 
             <div className="rounded-2xl bg-slate-900 text-white p-4">
-              <p className="text-xs uppercase tracking-widest text-white/60">{payment === 'comp' ? 'Comp' : 'Due'}</p>
+              <p className="text-xs uppercase tracking-widest text-white/60">
+                {payment === 'comp' ? 'Comp' : payment === 'card' ? `Due · on ${reader?.label ?? 'the reader'}` : 'Due'}
+              </p>
               <p className="text-4xl font-black">{money(payment === 'comp' ? 0 : quote.cashDueCents)}</p>
               {quote.taxCents > 0 && <p className="text-xs text-white/60">incl. {money(quote.taxCents)} tax</p>}
               {payment === 'cash' && quote.cashDueCents > 0 && (
@@ -412,12 +527,32 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
             </div>
 
             {needsDrawer && !drawer && <p role="alert" className="text-sm text-amber-700">Open a cash drawer below to take cash.</p>}
-            <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty)}
-              onClick={() => void sell()}
-              className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
-              {busy && <Loader2 className="w-5 h-5 animate-spin" />}
-              {payment === 'comp' ? `Comp ${qty} ticket${qty === 1 ? '' : 's'}` : `Take ${money(quote.cashDueCents)} · sell ${qty}`}
-            </button>
+            {cardSale ? (
+              <div role="status" aria-live="polite" className="rounded-2xl border-2 border-sky-500 bg-sky-50 p-4 space-y-3">
+                <p className="text-lg font-black flex items-center gap-2">
+                  {!cardStateDone(cardSale.state) && <Loader2 className="w-5 h-5 animate-spin" />}
+                  {money(cardSale.order.total_cents)} · {cardStateText(cardSale.state)}
+                </p>
+                <button type="button" onClick={() => void cancelCard(cardSale.order.id, 'cancelled at the door')}
+                  className={`${BIG} w-full border border-slate-300 bg-white`}>
+                  Cancel the card payment
+                </button>
+              </div>
+            ) : payment === 'card' ? (
+              <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0}
+                onClick={() => void chargeCard()}
+                className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+                <CreditCard className="w-5 h-5" /> Charge {money(quote.totalCents)} on reader
+              </button>
+            ) : (
+              <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty)}
+                onClick={() => void sell()}
+                className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+                {payment === 'comp' ? `Comp ${qty} ticket${qty === 1 ? '' : 's'}` : `Take ${money(quote.cashDueCents)} · sell ${qty}`}
+              </button>
+            )}
           </>
         )}
       </section>
@@ -496,6 +631,35 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
           </>
         )}
       </section>
+
+      {/* Card readers: owners and managers add a smart reader (Stripe Reader S700, WisePOS E) by its code. */}
+      {cat.card.switched_on && cat.card.can_manage && (
+        <section aria-labelledby="reader-h" className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <h2 id="reader-h" className="text-sm font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
+            <CreditCard className="w-4 h-4" /> Card readers
+          </h2>
+          {readers.length > 0 && <p className="text-sm">{readers.map((r) => r.label).join(' · ')}</p>}
+          {!cat.card.has_location && (
+            <div className="grid gap-2">
+              <p className="text-xs text-slate-500">The venue's address (Stripe needs it once for this organization's readers).</p>
+              <input aria-label="Street" value={addr.line1} onChange={(e) => setAddr({ ...addr, line1: e.target.value })} placeholder="Street" className={INPUT} />
+              <div className="grid grid-cols-2 gap-2">
+                <input aria-label="City" value={addr.city} onChange={(e) => setAddr({ ...addr, city: e.target.value })} placeholder="City" className={INPUT} />
+                <input aria-label="State" value={addr.state} onChange={(e) => setAddr({ ...addr, state: e.target.value })} placeholder="State" className={INPUT} />
+                <input aria-label="Postal code" value={addr.postal_code} onChange={(e) => setAddr({ ...addr, postal_code: e.target.value })} placeholder="Postal code" className={INPUT} />
+                <input aria-label="Country" value={addr.country} maxLength={2} onChange={(e) => setAddr({ ...addr, country: e.target.value.toUpperCase() })} placeholder="US" className={INPUT} />
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-sm"><span className="block font-bold mb-1">Code on the reader</span>
+              <input value={rdCode} onChange={(e) => setRdCode(e.target.value)} autoComplete="off" placeholder="sepia-cerulean-aqua" className={INPUT} /></label>
+            <label className="text-sm"><span className="block font-bold mb-1">Name</span>
+              <input value={rdLabel} maxLength={80} onChange={(e) => setRdLabel(e.target.value)} className={INPUT} /></label>
+          </div>
+          <button type="button" disabled={busy} onClick={() => void addReader()} className={`${BIG} w-full border border-slate-300`}>Add reader</button>
+        </section>
+      )}
     </div>
   );
 }

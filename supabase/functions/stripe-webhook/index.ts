@@ -40,6 +40,17 @@
 //                       (dispute-opened / -won / -lost, once per dispute and
 //                       person). A mail problem never fails the event.
 //   account.updated  -> exos_record_org_stripe() (Connect onboarding status).
+//   payment_intent.amount_capturable_updated / .succeeded / .payment_failed /
+//   .canceled with metadata.exos_pos_order (card at the door, mig
+//                       20261107130000, _shared/pos/stripeTerminal.ts): a door
+//                       sale whose app lost its connection still completes
+//                       (authorized -> captured -> tickets; a capture that
+//                       can't become tickets is refunded) or gives its places
+//                       back (declined / cancelled). Every step is gated on the
+//                       order's state in SQL, so a replay, or an event after
+//                       the door finished, changes nothing. A door card
+//                       refund's later state (charge.refunded, refund.updated,
+//                       refund.failed) lands on its reversal ledger row.
 //
 // exos: commerce orders (mig 20261030130000, docs/gift-cards.md, giving.md,
 // memberships.md). A session whose metadata.exos_kind is gift_card, donation,
@@ -107,6 +118,8 @@ import { recordFeeActuals } from "../_shared/feeActuals.ts";
 import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
 import { locationFromStripeCharge, locationFromStripeSession, recordBuyerLocation } from "../_shared/buyerLocation.ts";
+import { type CardDb, handlePosIntentEvent, posOrderOf } from "../_shared/pos/stripeTerminal.ts";
+import { terminalStripe } from "../_shared/pos/stripeAdapter.ts";
 
 // exos: commerce orders (exos-commerce). Stripe metadata.exos_kind values.
 const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership", "recurring_donation"]);
@@ -515,6 +528,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const pi = typeof obj.payment_intent === "string" ? obj.payment_intent : obj.payment_intent?.id;
         if (!pi) break;
         const sessionId = await sessionIdForPaymentIntent(sb, pi);
+        // exos: a card refund at the door (mig 20261107130000): the refund's
+        // state on its reversal ledger row (or the card row of a capture that
+        // couldn't be fulfilled). Not a checkout session. Door PaymentIntents
+        // are the platform's (a connected account's event never reaches here:
+        // see the event.account gate above, repeated for clarity). The metadata
+        // only names a candidate order: the SQL changes nothing unless this
+        // PaymentIntent is the one recorded for it, and the refund id matches
+        // a stored one. Unmatched: logged, 200, no retry.
+        const posOrder = sessionId || event.account ? null : posOrderOf(obj as { metadata?: Record<string, string> | null });
+        if (posOrder) {
+          const refunds = obj.object === "refund" ? [obj as Stripe.Refund] : ((obj as Stripe.Charge).refunds?.data ?? []);
+          for (const rf of refunds) {
+            const rfPi = typeof rf.payment_intent === "string" ? rf.payment_intent : rf.payment_intent?.id ?? pi;
+            if (rfPi !== pi) {
+              console.error(`stripe-webhook: door card refund ${rf.id} isn't on ${pi}; ignored`);
+              continue;
+            }
+            const { data: rec, error } = await sb.rpc("_exos_pos_card_refund_record", {
+              p_order: posOrder, p_pi: pi, p_refund_ref: rf.id, p_status: ledgerRefundStatus(rf.status), p_error: rf.failure_reason ?? null,
+            });
+            if (error) {
+              console.error(`stripe-webhook: door card refund record failed for ${posOrder}`, error);
+              return new Response("refund handling error", { status: 500 });
+            }
+            if ((rec as { recorded?: boolean } | null)?.recorded !== true) {
+              console.error(`stripe-webhook: door card refund ${rf.id} on ${pi} doesn't match order ${posOrder}'s record; ignored`);
+            }
+          }
+          break;
+        }
         if (!sessionId) {
           // exos: a commerce order (gift card, donation, pass, membership term).
           const { data: co } = await sb.from("exos_commerce_orders").select("session_id, subscription_id")
@@ -685,6 +728,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
         break;
       }
 
+      // exos: card at the door (mig 20261107130000). Not a door sale: ignored.
+      case "payment_intent.amount_capturable_updated":
+      case "payment_intent.succeeded":
+      case "payment_intent.payment_failed":
+      case "payment_intent.canceled": {
+        // Door PaymentIntents are the platform's: a connected account's event is never one.
+        if (event.account) break;
+        try {
+          const r = await handlePosIntentEvent(posCardDb(sb), terminalStripe(stripe), event);
+          if (r.ignored) console.error(`stripe-webhook: door card ${event.type} ${(event.data.object as { id?: string }).id} ignored: ${r.ignored}`);
+        } catch (e) {
+          console.error(`stripe-webhook: door card ${event.type} failed for ${(event.data.object as { id?: string }).id}`, e);
+          return new Response("pos card handling error", { status: 500 });
+        }
+        break;
+      }
+
       default:
         break; // ignore unhandled event types
     }
@@ -759,5 +819,15 @@ function recurringInvoiceArgs(event: Stripe.Event, kind: "paid" | "failed") {
     p_failure: kind === "failed"
       ? `payment failed (attempt ${Number(inv.attempt_count ?? 1)})`
       : null,
+  };
+}
+
+// exos: the service-role client as the door card flows' CardDb (mig 20261107130000).
+function posCardDb(sb: SupabaseClient): CardDb {
+  return {
+    rpc: async (fn, args) => {
+      const { data, error } = await sb.rpc(fn, args);
+      return { data, error: error ? { code: error.code, message: error.message, hint: error.hint } : null };
+    },
   };
 }
