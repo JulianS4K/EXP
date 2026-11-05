@@ -487,6 +487,11 @@ describe('the SPA side', () => {
   it('reads the order id from PayPal\'s return', () => {
     expect(orderIdFromReturn('?token=5O190127TN364715T&PayerID=X')).toBe('5O190127TN364715T');
     expect(orderIdFromReturn('?token=<x>')).toBeNull();
+    // Our guest return URL ends in #pt=: PayPal may put its query before it or after it.
+    const pt = '#pt=' + 'a'.repeat(43);
+    expect(orderIdFromReturn('?token=5O190127TN364715T&PayerID=X', pt)).toBe('5O190127TN364715T');
+    expect(orderIdFromReturn('', pt + '?token=5O190127TN364715T&PayerID=X')).toBe('5O190127TN364715T');
+    expect(orderIdFromReturn('', pt)).toBeNull();
   });
 
   it('keeps the cart for an hour at most', () => {

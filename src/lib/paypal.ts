@@ -196,9 +196,15 @@ export async function cancelPayPalOrder(orderId: string): Promise<void> {
   } catch { /* the hold expires on its own */ }
 }
 
-/** PayPal's redirect back: /pay/paypal/return?token=<order id>&PayerID=… */
-export function orderIdFromReturn(search: string): string | null {
-  const q = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-  const t = q.get('token') ?? '';
-  return /^[A-Z0-9]{8,40}$/.test(t) ? t : null;
+/** PayPal's redirect back: /pay/paypal/return?token=<order id>&PayerID=…
+ *  Our return URL carries a fragment for guests (#pt=, the proof token), so
+ *  the query is also looked for after it (#pt=…?token=…), in case PayPal
+ *  appends its parameters to the end of the URL instead of before the #. */
+export function orderIdFromReturn(search: string, hash = ''): string | null {
+  const pick = (raw: string) => {
+    const t = new URLSearchParams(raw).get('token') ?? '';
+    return /^[A-Z0-9]{8,40}$/.test(t) ? t : null;
+  };
+  const q = hash.indexOf('?');
+  return pick(search.startsWith('?') ? search.slice(1) : search) ?? (q >= 0 ? pick(hash.slice(q + 1)) : null);
 }

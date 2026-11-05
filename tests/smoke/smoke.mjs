@@ -185,7 +185,9 @@ await run('Instagram in-app banner', async (page) => {
 // Stripe Checkout, stubbed: a page whose "Pay" goes to the success URL.
 async function stubStripe(page, checkout) {
   await page.route('https://checkout.stripe.com/**', (r) => {
-    const back = String(checkout.body?.success_url ?? '').replace('{CHECKOUT_SESSION_ID}', 'cs_test_iab');
+    // Stripe goes back to the session's success_url: the one exos-checkout
+    // gave it (with the #pt= fragment for a guest), else the page's.
+    const back = String(checkout.successBack ?? checkout.body?.success_url ?? '').replace('{CHECKOUT_SESSION_ID}', 'cs_test_iab');
     return r.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Stripe</title><h1>Stripe test checkout</h1><a id="pay" href="${back}">Pay</a>` });
   });
 }
@@ -193,6 +195,29 @@ const checkoutFn = (into) => ({ fns: { 'exos-checkout': (body) => {
   into.body = body;
   return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_iab', session_id: 'cs_test_iab' } };
 } } });
+// A guest order waiting for proof of the email (mig 20261105100000), as
+// exos-checkout answers it: the browser token in the body, and the same token
+// on Stripe's success_url fragment (withProofFragment), since storage may be
+// blocked. The proof RPCs accept only that token, and the code 123456.
+const PROOF_TOKEN = 'smokeProofToken_0123456789abcdefghijklmnopq';
+const proofCheckoutFn = (into) => ({
+  fns: { 'exos-checkout': (body) => {
+    into.body = body;
+    into.successBack = body.success_url + '#pt=' + PROOF_TOKEN;
+    return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_iab', session_id: 'cs_test_iab', proof_token: PROOF_TOKEN } };
+  } },
+  rpcs: {
+    exos_order_proof_status: (b) => (b.p_session_id === 'cs_test_iab' && b.p_token === PROOF_TOKEN
+      ? { status: into.proven ? 'proven' : 'pending', email: 'fa…@example.com', attempts_left: 5, attached: false, tickets: [] }
+      : { status: 'unknown' }),
+    exos_order_proof_verify: (b) => {
+      if (b.p_session_id !== 'cs_test_iab' || b.p_token !== PROOF_TOKEN) return { ok: false, error: 'unknown' };
+      if (b.p_code !== '123456') return { ok: false, error: 'wrong_code', attempts_left: 4 };
+      into.proven = true;
+      return { ok: true, status: 'proven', attached: false, tickets: [{ ticket_id: 't1', path: '/claim/abc' }, { ticket_id: 't2', path: '/claim/def' }] };
+    },
+  },
+});
 const until = async (cond, what, ms = 5000) => {
   for (let i = 0; i < ms / 100 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 100));
   assert(await cond(), 'timed out waiting for ' + what);
@@ -245,12 +270,37 @@ await run('Instagram iOS, no storage: checkout link keeps the cart, guest pays b
   assert(b.guest_email === 'fan@example.com' && b.tier_id === TIER2 && b.quantity === 2, 'guest VIP x2: ' + JSON.stringify(b));
   assert(b.attribution?.utm_source === 'instagram' && b.attribution?.fbclid === 'IwAR_iab1', 'attribution kept: ' + JSON.stringify(b.attribution));
   assert(b.success_url.includes('guest=1') && b.success_url.includes('to=f***%40example.com'), 'masked inbox on the return URL: ' + b.success_url);
+  assert(!b.success_url.includes('#'), 'the page asks for no fragment; exos-checkout adds it: ' + b.success_url);
+  // Stripe's "Pay" goes to success_url + #pt=: the token rides in the
+  // fragment, never in the query.
+  const pay = await page.locator('#pay').getAttribute('href');
+  assert(new URL(pay).hash === '#pt=' + PROOF_TOKEN && !new URL(pay).search.includes(PROOF_TOKEN), 'token in the fragment only: ' + pay);
   await page.locator('#pay').click();
   await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
-  await expectText(page, 'Check your email');
-  await expectText(page, 'f***@example.com');
+  // Proof of email: storage is blocked, so the token can only have come
+  // from the fragment (the Stripe page was a full page load).
+  await expectText(page, 'Confirm your email');
+  await expectText(page, 'enter the 6-digit code we emailed to');
+  await until(() => log.some((l) => l.startsWith('rpc exos_order_proof_status ') && l.includes('"p_token":"' + PROOF_TOKEN + '"')
+    && l.includes('"p_session_id":"cs_test_iab"')), 'status asked with the fragment token');
+  // ...and it's gone from the address bar (and from history) once read.
+  const here = await page.evaluate(() => location.href);
+  assert(!here.includes(PROOF_TOKEN) && !here.includes('pt='), 'token stripped from the URL: ' + here);
+  assert(await storageThrows(page), 'still no storage');
+  // A wrong code first, then the mailed one.
+  const codeBox = page.getByLabel('6-digit code');
+  await codeBox.fill('000000');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expectText(page, "That code isn't right. 4 tries left.");
+  await codeBox.fill('123 456');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expectText(page, 'Confirmed.');
+  await expectText(page, 'Claim ticket 2');
+  assert(log.some((l) => l.startsWith('rpc exos_order_proof_verify ') && l.includes('"p_token":"' + PROOF_TOKEN + '"') && l.includes('"p_code":"123456"')),
+    'verify sent the fragment token and the code: ' + log.filter((l) => l.includes('proof')).join(' | '));
+  assert(!(await page.evaluate(() => location.href)).includes(PROOF_TOKEN), 'still not in the URL');
   assert(popups.length === 0, 'no popup or new tab: ' + popups.join(', '));
-}, { ua: IG, noStorage: true, mock: checkoutFn(igCheckout) });
+}, { ua: IG, noStorage: true, mock: proofCheckoutFn(igCheckout) });
 
 const fbCheckout = {};
 await run('Facebook Android, no storage: intent escape, guest checkout to Stripe and back', async (page) => {

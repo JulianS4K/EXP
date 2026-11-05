@@ -125,7 +125,7 @@ import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { inAppRecordFor } from "../_shared/inAppBrowser.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { capacityLeft } from "../_shared/capacity.ts";
-import { newProofToken, proofTokenHash } from "../_shared/orderProof.ts";
+import { newProofToken, proofTokenHash, withProofFragment } from "../_shared/orderProof.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import {
   EXOS_FEE_BPS, FREE_TIER_FEE_BPS, FREE_TIER_MAX_CAPACITY, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit,
@@ -827,6 +827,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ...(proofToken ? { proof_token_hash: await proofTokenHash(proofToken) } : {}),
   };
   const proofOut = proofToken ? { proof_token: proofToken } : {};
+  // The same token on the way back, in the return URL's fragment (#pt=), for
+  // in-app browsers that block the localStorage the page keeps it in
+  // (_shared/orderProof.ts withProofFragment). A fragment never reaches a
+  // server; Stripe and PayPal keep the URL, and the token alone releases
+  // nothing (the mailed code is still needed). Validated as success_url was.
+  const successBack = success_url && proofToken ? withProofFragment(success_url, proofToken) : success_url;
 
   // Reserve inventory with a cart hold BEFORE creating the Stripe session, so a
   // buyer who is about to pay actually holds the seats (closes the read-then-
@@ -983,7 +989,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         sessionId, currency, amountCents, lines: chargeLines,
         brandName: Deno.env.get("EXOS_PAYPAL_BRAND_NAME") ?? "Exos",
         description: ev.name,
-        ...(redirect ? { returnUrl: success_url, cancelUrl: cancel_url } : {}),
+        ...(redirect ? { returnUrl: successBack, cancelUrl: cancel_url } : {}),
       }), sessionId);
     } catch (e) {
       console.error("exos-checkout: paypal order create failed", e);
@@ -1091,7 +1097,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // only redirect-based methods come back through return_url.
       ...(embedded
         ? { ui_mode: "embedded" as const, return_url: returnUrl, redirect_on_completion: "if_required" as const }
-        : { success_url, cancel_url }),
+        : { success_url: successBack, cancel_url }),
       // Stripe's minimum (30 minutes), set explicitly: the seat hold runs to
       // this + 10 minutes, so nobody pays after their seats went back to the
       // pool, and a late webhook still finds its seat.

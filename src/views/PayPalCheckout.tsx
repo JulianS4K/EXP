@@ -25,6 +25,7 @@ import {
   cancelPayPalOrder, capturePayPalOrder, createPayPalOrder, orderIdFromReturn, paypalClientId, paypalSdkUrl,
   readPayPalCart, venmoPossible, type PayPalCart,
 } from '../lib/paypal';
+import { recallProofToken, takeProofTokenFromUrl, withProofFragment } from '../lib/orderProof';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { currentInAppBrowser } from '../lib/inAppBrowser';
 import { buildCheckoutLink } from '../lib/checkoutLink';
@@ -90,8 +91,12 @@ export default function PayPalCheckout() {
   };
 
   const done = (sessionId?: string) => {
-    // A full page load leaves PayPal's SDK (and this page's CSP) behind.
-    window.location.replace(publicUrl(`my-tickets?checkout=success&processor=paypal${user ? '' : '&guest=1'}${sessionId ? `&order=${encodeURIComponent(sessionId)}${user ? '' : `&session_id=${encodeURIComponent(sessionId)}`}` : ''}`));
+    // A full page load leaves PayPal's SDK (and this page's CSP) behind. The
+    // proof token (guests, mig 20261105100000) goes along in the fragment
+    // (#pt=): this page holds it in memory (the buttons) or read it from
+    // PayPal's return URL (the redirect), and storage may be blocked.
+    const url = publicUrl(`my-tickets?checkout=success&processor=paypal${user ? '' : '&guest=1'}${sessionId ? `&order=${encodeURIComponent(sessionId)}${user ? '' : `&session_id=${encodeURIComponent(sessionId)}`}` : ''}`);
+    window.location.replace(sessionId ? withProofFragment(url, recallProofToken(sessionId)) : url);
   };
 
   const capture = async (orderId: string) => {
@@ -116,7 +121,8 @@ export default function PayPalCheckout() {
   // Redirect flow: PayPal sent the buyer back with the order id.
   useEffect(() => {
     if (!isReturn) return;
-    const id = orderIdFromReturn(location.search);
+    const id = orderIdFromReturn(location.search, window.location.hash);
+    takeProofTokenFromUrl(); // #pt= off the address bar, kept for done()
     if (id) void capture(id);
     else { setBusy(null); setError('That PayPal link is missing its order.'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps

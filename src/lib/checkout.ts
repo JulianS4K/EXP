@@ -8,7 +8,7 @@
 // these and redirects to the returned Stripe-hosted URL.
 
 import { supabase } from './supabase';
-import { rememberProofToken } from './orderProof';
+import { rememberProofToken, withProofFragment } from './orderProof';
 import type { Attribution } from './attribution';
 import type { AdIds, MarketingConsent } from './adIds';
 import { currentInAppRecord, type InAppRecord } from './inAppBrowser';
@@ -91,14 +91,16 @@ export async function startCheckout(input: {
   // Free seats are issued straight away (no Stripe): go to My Tickets.
   const free = data as { free?: boolean; issued?: number } | null;
   if (free?.free && free.issued) {
+    // The token rides in the fragment too (#pt=): the caller leaves the page
+    // with this URL, and storage may be blocked (in-app browsers).
     return proof?.proof_token && proof.session_id
-      ? `/my-tickets?checkout=success&guest=1&session_id=${encodeURIComponent(proof.session_id)}`
+      ? withProofFragment(`/my-tickets?checkout=success&guest=1&session_id=${encodeURIComponent(proof.session_id)}`, proof.proof_token)
       : `/my-tickets?claimed=${free.issued}`;
   }
   // The gift card covered everything: no Stripe page, the tickets are issued.
   const paid = data as { paid_with_gift_card?: boolean; session_id?: string } | null;
   if (paid?.paid_with_gift_card) {
-    return input.successUrl.replace('{CHECKOUT_SESSION_ID}', encodeURIComponent(paid.session_id ?? ''));
+    return withProofFragment(input.successUrl.replace('{CHECKOUT_SESSION_ID}', encodeURIComponent(paid.session_id ?? '')), proof?.proof_token);
   }
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');

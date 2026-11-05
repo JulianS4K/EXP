@@ -14,6 +14,48 @@ export function newProofToken(): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+// --- The token in the return URL's fragment (#pt=) ----------------------------
+// Instagram / Facebook in-app browsers can block localStorage, so the token
+// the paying browser was given would be gone by the time it is back from
+// Stripe or PayPal. exos-checkout therefore also puts it on the return URL,
+// in the fragment: browsers never send a fragment to a server (no request
+// line, no access log, no Referer), and the page strips it from the address
+// bar as soon as it has read it. The token alone releases nothing: the
+// 6-digit code mailed to the buyer's address (or an SMS code) is still needed,
+// and 5 wrong codes lock it. Stripe and PayPal do keep the full return URL on
+// their side (the Checkout Session / PayPal order), which is why the token
+// alone must stay worthless.
+
+const TOKEN_RE = /^[A-Za-z0-9_-]{20,128}$/;
+
+/** url + #pt=<token> (or &pt= when it already has a fragment). An unusable
+ *  token leaves the URL as it was. */
+export function withProofFragment(url: string, token: string | null | undefined): string {
+  if (!token || !TOKEN_RE.test(token)) return url;
+  const i = url.indexOf("#");
+  if (i < 0) return `${url}#pt=${token}`;
+  const frag = url.slice(i + 1);
+  return frag ? `${url}&pt=${token}` : `${url}pt=${token}`;
+}
+
+// pt= at the start of the fragment or after &, up to the next & or ?. The ?
+// covers a provider that appends its query after our fragment
+// (#pt=...?token=...&PayerID=...) instead of before it.
+const FRAG_RE = /(^#?|&)pt=([A-Za-z0-9_-]{20,128})(?=$|[&?])/;
+
+/** The proof token in a location.hash, or null. */
+export function proofTokenFromHash(hash: string | null | undefined): string | null {
+  const m = FRAG_RE.exec(hash ?? "");
+  return m ? m[2] : null;
+}
+
+/** The hash with pt= taken out ("" when nothing else was in it). */
+export function hashWithoutProofToken(hash: string | null | undefined): string {
+  const h = (hash ?? "").replace(/^#/, "");
+  const rest = h.replace(/(^|&)pt=[A-Za-z0-9_-]{20,128}(?=$|[&?])/, "").replace(/^&/, "");
+  return rest ? `#${rest}` : "";
+}
+
 /** What the order stores: SHA-256 hex of the token (as the SQL checks it). */
 export async function proofTokenHash(token: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token.trim()));
