@@ -4,7 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 OUT=$(mktemp -d)
-VITE_SUPABASE_URL=https://mock.supabase.test VITE_SUPABASE_ANON_KEY=anon-test npx vite build --outDir "$OUT" >/dev/null
+# A test publishable key turns paid checkout on (lib/payments.ts); Stripe's page
+# itself is stubbed in smoke.mjs, so nothing reaches Stripe.
+VITE_SUPABASE_URL=https://mock.supabase.test VITE_SUPABASE_ANON_KEY=anon-test VITE_STRIPE_PUBLISHABLE_KEY=pk_test_smoke \
+  npx vite build --outDir "$OUT" >/dev/null
 # A preview left over from an earlier run would keep port 4174 and serve an old
 # build (ours would fail --strictPort silently): refuse to start instead.
 if curl -sf http://localhost:4174/bridge/ >/dev/null; then

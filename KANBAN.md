@@ -683,8 +683,29 @@ that:
     (an Android intent link; on iOS, copy the link).
   - Checkout was already a same-tab redirect.
 
-  **Still to do:** test on real devices (per iOS and Instagram release), and use `og:` data for
-  richer previews.
+  **Built (2026-11-05, mig `20261105140000`, not applied):**
+  - Detection covers Threads, Snapchat, X, LinkedIn and Messenger on Android ("Orca") too, plus
+    generic Android / iOS webviews (capability probes: home-screen app, storage, Apple Pay). The UA
+    rules are shared with `exos-checkout` (`_shared/inAppBrowser.ts`).
+  - Works with storage blocked: the checkout link's cart rides on the event URL (`?cart=`), the PayPal
+    cart in the page fragment (`#cart=`), the guest return page names the inbox from `?to=` (masked).
+  - Escape hatch everywhere it's needed: Android `intent:`, iOS `x-safari-https:` plus each app's menu
+    steps and a copy link that falls back to `execCommand`. It opens a checkout link with the cart and
+    attribution, tagged `iab_from=<app>`. On the guest checkout sheet (card works here, Apple / Google
+    Pay need the browser), on Apple Wallet (a .pkpass can't reach Wallet from a webview; Google's save
+    link goes out by `intent:`), and on the PayPal page.
+  - PayPal uses its redirect flow (no popups) in webviews; back from Stripe re-enables Buy (bfcache).
+  - Measurement: `exos_checkout_sessions.in_app_browser` (backfilled from `user_agent`), escapes in
+    `attribution.iab_from`, and "Where buyers checked out" (conversion in-app vs browser) on the event
+    report's Marketing tab (`exos_event_in_app_report`).
+  - Link previews: `og:type` is `website` (Open Graph has no `event`), absolute `og:image` with alt
+    text, and crawlers on other pages get the site card with absolute URLs. People in TikTok's and
+    Pinterest's in-app browsers are no longer treated as crawlers.
+  - Lighter event page: the sign-in modal, the door's caches, the integrations catalog and the door
+    scan logic left the first download; seat map, time slots, quiz and share sheet load on use.
+
+  **Still to do:** test on real devices (per iOS and Instagram release); check that `x-safari-https:`
+  opens Safari from Instagram's current iOS app; deploy `exos-checkout` with the migration.
 - **Interactive maps, phase 1** ✅ (`docs/maps.md`):
   - `exos-geocode` is the server-side Geocoding proxy (organizers only, key stays server-side);
     `exos-geocode-refresh` is its daily cron.

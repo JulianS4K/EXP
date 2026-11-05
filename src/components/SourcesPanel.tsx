@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, Megaphone } from 'lucide-react';
 import { Event } from '../types';
 import { supabase } from '../lib/supabase';
-import { fetchAllPages } from '../lib/door/roster';
+import { fetchAllPages } from '../lib/pagedRead';
 import { formatCents } from '../lib/refunds';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import {

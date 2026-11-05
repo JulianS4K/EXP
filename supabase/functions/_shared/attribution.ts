@@ -10,6 +10,7 @@
 // dashboards and CSV exports.
 
 import { type AiAssistant, sanitizeAiAssistant } from "./aiSources.ts";
+import { type InAppKind, sanitizeInAppKind } from "./inAppBrowser.ts";
 
 export interface Attribution {
   promoter?: string;
@@ -23,6 +24,9 @@ export interface Attribution {
   ref?: string;
   /** The AI assistant the buyer came from (referrer on landing; _shared/aiSources.ts). */
   ai_ref?: AiAssistant;
+  /** The in-app browser (Instagram, ...) the buyer left through the page's
+   *  "open in your browser" link (?iab_from=, _shared/inAppBrowser.ts). */
+  iab_from?: InAppKind;
 }
 
 const PROMOTER_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -63,6 +67,8 @@ export function readAttribution(get: (key: string) => unknown): Attribution {
   if (typeof ref === "string" && REF_RE.test(ref)) out.ref = ref;
   const ai = sanitizeAiAssistant(get("ai_ref"));
   if (ai) out.ai_ref = ai;
+  const iab = sanitizeInAppKind(get("iab_from"));
+  if (iab) out.iab_from = iab;
   return out;
 }
 

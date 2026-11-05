@@ -72,6 +72,7 @@ MIGRATIONS=(
   20261105110000_exos_fan_api       # exos-api's /v1/me, account tokens: apply before deploying exos-api
   20261105120000_exos_na_build      # exos-api's X-Exos-Org calls exos_api_token_auth_org: apply before deploying exos-api
   20261105130000_exos_promoter_events
+  20261105140000_exos_ig_checkout
   20261105150000_exos_wave3_integration
 )
 

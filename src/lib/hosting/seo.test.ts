@@ -1,6 +1,8 @@
 // Ported from Terminal-2 tests/test_exos_link_preview.py (same cases, same expectations).
 import { describe, it, expect } from 'vitest';
 import {
+  absoluteImage,
+  defaultTags,
   buildLlmsTxt,
   buildPreview,
   buildPreviewPage,
@@ -424,3 +426,33 @@ describe('AI discovery (EXOS_AI_DISCOVERY, off until launch)', () => {
   });
 });
 
+
+// Link previews in Instagram / Facebook DMs and WhatsApp (item 7a).
+describe('Open Graph for Meta and WhatsApp', () => {
+  const url = `https://x.example/bridge/event/${EV}`;
+  it('never sends og:type "event" (not an Open Graph type)', () => {
+    const tags = eventTags(summary(), url, 'https://x.example/bridge/icon-512.png');
+    expect(tags).toContain('og:type" content="website"');
+    expect(tags).not.toContain('og:type" content="event"');
+    expect(tags).toContain('"@type":"Event"');
+  });
+  it('makes the image absolute and describes it', () => {
+    const tags = eventTags(summary({ image_url: '/media/poster.jpg' }), url, 'https://x.example/bridge/icon-512.png');
+    expect(tags).toContain('og:image" content="https://x.example/media/poster.jpg"');
+    expect(tags).toContain('og:image:alt" content="DJ &quot;Kay&quot; &lt;live&gt;"');
+    expect(absoluteImage('javascript:alert(1)', url, 'https://x.example/i.png')).toBe('https://x.example/i.png');
+    expect(absoluteImage('https://cdn.x/p.jpg', url, 'f')).toBe('https://cdn.x/p.jpg');
+  });
+  it('gives the icon its size so the first share shows it', () => {
+    const tags = eventTags(summary({ image_url: null }), url, 'https://x.example/bridge/icon-512.png');
+    expect(tags).toContain('og:image:width" content="512"');
+    expect(tags).toContain('twitter:card" content="summary"');
+    expect(eventTags(summary(), url, 'https://x.example/bridge/icon-512.png')).not.toContain('og:image:width');
+  });
+  it('the site card for any other page has absolute URLs', () => {
+    const tags = defaultTags('https://x.example', 'map?utm_source=instagram');
+    expect(tags).toContain('og:image" content="https://x.example/bridge/icon-512.png"');
+    expect(tags).toContain('og:url" content="https://x.example/bridge/map"');
+    expect(inject('<head><!-- SSR_META_START --><title>x</title><!-- SSR_META_END --></head>', tags)).toContain('Exos | Live the Moment');
+  });
+});

@@ -3,7 +3,10 @@
 // back to after paying. The order is paid and the seats are saved; the
 // tickets are released once the buyer types the 6-digit code mailed to the
 // address they entered, or proves a phone by SMS instead (the way out of a
-// mistyped email). The browser token from exos-checkout gates every call.
+// mistyped email). The browser token from exos-checkout gates every call:
+// from localStorage, or, where an in-app browser blocks storage, from the
+// return URL's fragment (#pt=, the parent passes it in; lib/orderProof.ts).
+// The token alone releases nothing; the code is still needed.
 // No card field on this page (docs/pci.md).
 
 import { useEffect, useState, type FormEvent } from 'react';
@@ -13,13 +16,18 @@ import {
   type ProofClaimLink, type ProofState,
 } from '../lib/orderProof';
 
-export default function OrderProofPanel({ sessionId, initialCode, onSignIn }: {
+export default function OrderProofPanel({ sessionId, initialCode, token: given, emailHint, onSignIn }: {
   sessionId: string;
   /** From the mailed link (?proof_code=): tried once on load. */
   initialCode?: string | null;
+  /** The browser token when the page read it from the URL fragment (#pt=). */
+  token?: string | null;
+  /** The masked inbox from the return URL (?to=j***@gmail.com), when known. */
+  emailHint?: string | null;
   onSignIn: (email: string) => void;
 }) {
-  const token = recallProofToken(sessionId);
+  // Read once: the fragment is gone from the URL after the first read.
+  const [token] = useState<string | null>(() => recallProofToken(sessionId) ?? given ?? null);
   const [state, setState] = useState<ProofState | null>(null);
   const [code, setCode] = useState(initialCode ?? '');
   const [phone, setPhone] = useState('');
@@ -79,7 +87,8 @@ export default function OrderProofPanel({ sessionId, initialCode, onSignIn }: {
   if (!token || state?.status === 'unknown') {
     return (
       <p className="text-white/70 mb-6">
-        To get your tickets, enter the code from our email on the device and browser you paid on.
+        To get your tickets, enter the code we emailed{emailHint ? <> to <strong className="text-white">{emailHint}</strong></> : null} on
+        the device and browser you paid on.
         Paid somewhere else, or can't find the email? Ask the organizer to resend your tickets.
       </p>
     );
@@ -119,7 +128,7 @@ export default function OrderProofPanel({ sessionId, initialCode, onSignIn }: {
     <div className="mb-6 text-left text-white/70">
       <p className="mb-3">
         Your seats are saved. To get your tickets, enter the 6-digit code we emailed to{' '}
-        <strong className="text-white">{sentTo ?? state.email ?? 'your email'}</strong>.
+        <strong className="text-white">{sentTo ?? state.email ?? emailHint ?? 'your email'}</strong>.
       </p>
       <form onSubmit={submit} className="flex gap-2 mb-2">
         <input

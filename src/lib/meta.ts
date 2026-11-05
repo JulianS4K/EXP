@@ -80,7 +80,8 @@ export function applyMeta(input: MetaInput): void {
 
   // Open Graph.
   setOrCreateMeta('property', 'og:title', input.title);
-  setOrCreateMeta('property', 'og:type', input.event ? 'event' : 'website');
+  // Always 'website': Open Graph has no 'event' type (the JSON-LD says Event); same as hosting/seo.ts.
+  setOrCreateMeta('property', 'og:type', 'website');
   if (input.description) setOrCreateMeta('property', 'og:description', input.description);
   if (input.imageUrl) setOrCreateMeta('property', 'og:image', input.imageUrl);
   if (input.canonicalUrl) setOrCreateMeta('property', 'og:url', input.canonicalUrl);

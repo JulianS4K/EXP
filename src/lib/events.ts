@@ -10,7 +10,7 @@
 
 import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
-import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
+import { parseNameCheckinMode, type NameCheckinMode } from './door/nameCheckinMode';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseEventFormat } from './onlineEvents';
 import { parseLocationMode } from './eventLocation';

@@ -1,14 +1,15 @@
 // /checkout?products=<tierId>:<qty>,<addonId>:<qty>&coupon=…&promoter=…
 //
 // Resolves a checkout link (lib/checkoutLink.ts) to its event, stores the
-// cart as a prefill for the visit, and hands off to the event page, which
+// cart as a prefill for the visit (and puts it on the event URL as ?cart=,
+// for browsers that block storage), and hands off to the event page, which
 // re-validates everything and runs the normal checkout. Attribution params
 // ride along on the event URL so lib/attribution.ts captures them there.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { parseCheckoutLink, resolveCheckout, savePrefill, type ResolvedRow } from '../lib/checkoutLink';
+import { cartSearchParams, parseCheckoutLink, resolveCheckout, savePrefill, type ResolvedRow } from '../lib/checkoutLink';
 import { applyMeta } from '../lib/meta';
 
 export default function CheckoutLink() {
@@ -38,7 +39,9 @@ export default function CheckoutLink() {
         return;
       }
       savePrefill(r.eventId, r.prefill);
-      const attr = new URLSearchParams();
+      // The cart also rides on the event URL (?cart=): in-app browsers can
+      // block the stored copy (lib/checkoutLink.ts prefillFromSearch).
+      const attr = cartSearchParams(r.prefill);
       for (const [k, v] of Object.entries(parsed.attribution)) if (v) attr.set(k, v);
       const q = attr.toString();
       navigate(`/event/${r.eventId}${q ? `?${q}` : ''}`, { replace: true, state: { checkoutNotes: r.notes } });

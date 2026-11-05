@@ -122,9 +122,10 @@ import {
 } from "../_shared/fees.ts";
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
+import { inAppRecordFor } from "../_shared/inAppBrowser.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
 import { capacityLeft } from "../_shared/capacity.ts";
-import { newProofToken, proofTokenHash } from "../_shared/orderProof.ts";
+import { newProofToken, proofTokenHash, withProofFragment } from "../_shared/orderProof.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import {
   EXOS_FEE_BPS, FREE_TIER_FEE_BPS, FREE_TIER_MAX_CAPACITY, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit,
@@ -184,6 +185,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 'paypal' -> a PayPal / Venmo order instead of a Stripe session.
     processor?: string;
     paypal_flow?: string;
+    // The page's own answer to "which in-app browser is this?" (mig 20261105140000).
+    in_app_browser?: string;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -218,6 +221,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const adIds = readAdIds((k) => (adIdsIn as Record<string, unknown>)[k]);
   const consentMarketing = normalizeConsent(p.consent);
   const userAgent = truncateUserAgent(req.headers.get("user-agent"));
+  // Instagram / Facebook / ... in-app browser, or 'none' (mig 20261105140000):
+  // the request's user agent first, then the page's hint (_shared/inAppBrowser.ts).
+  const inAppBrowser = inAppRecordFor(req.headers.get("user-agent"), p.in_app_browser);
   if (embedded) {
     if (!event_id || !tier_id || !returnUrl) {
       return json({ error: "missing event_id / tier_id / return_url" }, 400);
@@ -817,9 +823,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     consent_marketing: consentMarketing,
     client_ip_hash: ipHash,
     user_agent: userAgent,
+    in_app_browser: inAppBrowser,
     ...(proofToken ? { proof_token_hash: await proofTokenHash(proofToken) } : {}),
   };
   const proofOut = proofToken ? { proof_token: proofToken } : {};
+  // The same token on the way back, in the return URL's fragment (#pt=), for
+  // in-app browsers that block the localStorage the page keeps it in
+  // (_shared/orderProof.ts withProofFragment). A fragment never reaches a
+  // server; Stripe and PayPal keep the URL, and the token alone releases
+  // nothing (the mailed code is still needed). Validated as success_url was.
+  const successBack = success_url && proofToken ? withProofFragment(success_url, proofToken) : success_url;
 
   // Reserve inventory with a cart hold BEFORE creating the Stripe session, so a
   // buyer who is about to pay actually holds the seats (closes the read-then-
@@ -976,7 +989,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         sessionId, currency, amountCents, lines: chargeLines,
         brandName: Deno.env.get("EXOS_PAYPAL_BRAND_NAME") ?? "Exos",
         description: ev.name,
-        ...(redirect ? { returnUrl: success_url, cancelUrl: cancel_url } : {}),
+        ...(redirect ? { returnUrl: successBack, cancelUrl: cancel_url } : {}),
       }), sessionId);
     } catch (e) {
       console.error("exos-checkout: paypal order create failed", e);
@@ -1084,7 +1097,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // only redirect-based methods come back through return_url.
       ...(embedded
         ? { ui_mode: "embedded" as const, return_url: returnUrl, redirect_on_completion: "if_required" as const }
-        : { success_url, cancel_url }),
+        : { success_url: successBack, cancel_url }),
       // Stripe's minimum (30 minutes), set explicitly: the seat hold runs to
       // this + 10 minutes, so nobody pays after their seats went back to the
       // pool, and a late webhook still finds its seat.
@@ -1180,7 +1193,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 // Columns added by mig 20260929131000 (checkout records). Nice to have, never
 // worth losing a sale over.
 const RECORD_COLUMNS = [
-  "ad_ids", "consent_marketing", "client_ip_hash", "user_agent",
+  "ad_ids", "consent_marketing", "client_ip_hash", "user_agent", "in_app_browser",
   "application_fee_cents", "exos_fee_cents", "card_fee_est_cents", "fee_bps", "fee_free",
   // mig 20261105100000 (hold timing, proof of email)
   "provider_expires_at", "proof_token_hash",
@@ -1204,6 +1217,13 @@ async function insertSessionRow(
   const feeLines = row.fee_breakdown;
   delete row.fee_breakdown;
   let { error } = await sb.from("exos_checkout_sessions").insert(row);
+  // in_app_browser (mig 20261105140000) is reporting only: before that
+  // migration, drop just it, even from a strict (PayPal) row.
+  if (missingColumn(error) && "in_app_browser" in row && /in_app_browser/.test(error?.message ?? "")) {
+    console.error("exos-checkout: in_app_browser column missing (apply 20261105140000); recording without it");
+    delete row.in_app_browser;
+    ({ error } = await sb.from("exos_checkout_sessions").insert(row));
+  }
   if (error && opts.strict) return error;
   if (error && (missingColumn(error) || error.code === "23514") && RECORD_COLUMNS.some((k) => k in row)) {
     console.error("exos-checkout: checkout-record columns refused (apply 20260929131000?); recording without them", error.message);

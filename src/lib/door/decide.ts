@@ -44,6 +44,7 @@ import {
   type DoorDirection,
   type ListState,
 } from './lists';
+import { parseNameCheckinMode, type NameCheckinMode } from './nameCheckinMode';
 
 export const DUPLICATE_READ_MS = 2_000;
 export const SAME_TICKET_HOLD_MS = 8_000;
@@ -102,13 +103,7 @@ export interface RecentRead {
   admitted: boolean;
 }
 
-/** exos_events.door_name_checkin. */
-export type NameCheckinMode = 'staff' | 'managers' | 'off';
-
-/** The column's value, or null when the database doesn't have it yet. */
-export function parseNameCheckinMode(v: unknown): NameCheckinMode | null {
-  return v === 'staff' || v === 'managers' || v === 'off' ? v : null;
-}
+export { parseNameCheckinMode, type NameCheckinMode };
 
 /** May this person check someone in by name? `isManager` = owner, manager or
  *  platform admin. Per-event scanner scope is the server's (the page only

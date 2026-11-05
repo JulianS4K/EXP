@@ -34,14 +34,20 @@ import { formatCents } from '../lib/refunds';
 import { listMyInvoices, type MyInvoice } from '../lib/invoicesApi';
 import { formatDocNumber, invoicePath } from '../lib/invoices';
 import OrderProofPanel from '../components/OrderProofPanel';
+import { takeProofTokenFromUrl } from '../lib/orderProof';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
   // Back from a guest checkout (mig 20260928050000): tickets went by email.
   const [guestDone, setGuestDone] = useState(false);
+  // The masked inbox from the return URL (?to=j***@gmail.com), for browsers
+  // where the stored email is gone (in-app browsers can block storage).
+  const [guestTo, setGuestTo] = useState<string | null>(null);
   // The guest's order waits for proof of the email (mig 20261105100000): the
-  // order to confirm (from the return URL, or the code mail's link).
-  const [proofOrder, setProofOrder] = useState<{ id: string; code: string | null } | null>(null);
+  // order to confirm (from the return URL, or the code mail's link), and the
+  // browser token when it came back in the URL fragment (#pt=, for browsers
+  // that block storage; lib/orderProof.ts).
+  const [proofOrder, setProofOrder] = useState<{ id: string; code: string | null; token: string | null } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -122,6 +128,9 @@ export default function MyTickets() {
     //   ?checkout=success — back from Stripe; stripe-webhook mints the tickets
     //   ?claimed=N        — a free claim that already minted N tickets
     const params = new URLSearchParams(location.search);
+    // First thing: take the proof token out of the fragment (#pt=) and the
+    // address bar, before the org's pixels below load (they read the URL).
+    const fragmentToken = takeProofTokenFromUrl();
     const claimed = Number(params.get('claimed'));
     if (params.get('checkout') === 'success') {
       // Paid Purchase pixel, once per Stripe session. Async: it loads the
@@ -131,12 +140,14 @@ export default function MyTickets() {
     }
     const sid = params.get('session_id') ?? params.get('confirm');
     if (sid && /^[A-Za-z0-9_-]{8,255}$/.test(sid) && (params.get('guest') === '1' || params.get('confirm'))) {
-      setProofOrder({ id: sid, code: params.get('proof_code') });
+      setProofOrder({ id: sid, code: params.get('proof_code'), token: fragmentToken });
     }
     if (params.get('confirm')) {
       setGuestDone(true);
     } else if (params.get('checkout') === 'success' && params.get('guest') === '1') {
       setGuestDone(true);
+      const to = params.get('to') ?? '';
+      if (/^[a-z0-9]\*\*\*@[a-z0-9.-]{1,253}$/i.test(to)) setGuestTo(to.toLowerCase());
     } else if (params.get('checkout') === 'success') {
       toast({ kind: 'success', title: 'Payment received', message: 'Your tickets will appear here in a moment.' });
     } else if (Number.isInteger(claimed) && claimed > 0) {
@@ -208,12 +219,13 @@ export default function MyTickets() {
     };
   }, [user, toast]);
 
+  const inbox = guestEmailHint() ?? guestTo;
   if (guestDone && proofOrder) return (
     <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
       <div className="max-w-md">
         <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
         <h1 className="disp text-4xl tracking-tight leading-none mb-4">Confirm your email</h1>
-        <OrderProofPanel sessionId={proofOrder.id} initialCode={proofOrder.code}
+        <OrderProofPanel sessionId={proofOrder.id} initialCode={proofOrder.code} token={proofOrder.token} emailHint={inbox}
           onSignIn={(email) => openAuth('code', email || guestEmailHint() || '')} />
         {user && (
           <button onClick={() => { setGuestDone(false); setProofOrder(null); }} className="underline text-white/60 text-sm">
@@ -229,7 +241,7 @@ export default function MyTickets() {
         <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
         <h1 className="disp text-4xl tracking-tight leading-none mb-4">Check your email</h1>
         <p className="text-white/70 mb-6">
-          We emailed{guestEmailHint() ? <> <strong className="text-white">{guestEmailHint()}</strong></> : null} a code to
+          We emailed{inbox ? <> <strong className="text-white">{inbox}</strong></> : null} a code to
           confirm it's yours. Enter it on the page where you paid, in this browser, and your tickets are released.
         </p>
         <button onClick={() => openAuth('code', guestEmailHint() ?? '')} className="bg-brand-primary text-black font-black uppercase tracking-wider px-8 py-3">

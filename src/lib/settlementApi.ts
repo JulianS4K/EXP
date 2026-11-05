@@ -4,7 +4,7 @@
 // schema) comes back as `null` from the primary read, and the screens hide.
 
 import { supabase } from './supabase';
-import { fetchAllPages } from './door/roster';
+import { fetchAllPages } from './pagedRead';
 import type {
   CommissionMoneyRow,
   MarketplaceMoneyRow,

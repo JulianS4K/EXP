@@ -1,13 +1,19 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, lazy, Suspense, useContext, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { AppUser, toAppUser, isAdminUser, setCurrentAppUser } from '../lib/auth';
-import { doorKV, forgetDoorCipher } from '../lib/door/kv';
-import { wipeDoorRosters } from '../lib/door/roster';
-import { signOutWarning } from '../lib/door/health';
-import { pendingScanCount } from '../lib/offlineCheckins';
-import AuthModal, { type AuthView } from '../components/AuthModal';
+import type { AuthView } from '../components/AuthModal';
+
+// Kept out of the first download (every page loads this provider; most
+// visitors, like a buyer opening an event from Instagram, never sign in):
+// the sign-in modal loads when first opened, or once the page is idle, and
+// the door's offline caches only matter at sign-out.
+const loadAuthModal = () => import('../components/AuthModal');
+const AuthModal = lazy(loadAuthModal);
+const loadDoorCleanup = () => Promise.all([
+  import('../lib/door/kv'), import('../lib/door/roster'), import('../lib/door/health'), import('../lib/offlineCheckins'),
+]);
 
 interface AuthContextType {
   user: AppUser | null;
@@ -45,6 +51,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  // Mounted from the first open on (it keeps its own state between opens).
+  const [modalMounted, setModalMounted] = useState(false);
+  useEffect(() => { if (isAuthModalOpen) setModalMounted(true); }, [isAuthModalOpen]);
+  // Fetch the modal's code once the page has settled, so a tap on Sign in
+  // rarely waits for it.
+  useEffect(() => {
+    const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }) : null;
+    if (!w) return undefined;
+    const prefetch = () => { void loadAuthModal().catch(() => {}); };
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(prefetch, { timeout: 8000 });
+      return () => (w as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(prefetch, 4000);
+    return () => clearTimeout(t);
+  }, []);
   const [modalView, setModalView] = useState<AuthView>('options');
   const [modalEmail, setModalEmail] = useState('');
   const [passwordRecovery, setPasswordRecovery] = useState(false);
@@ -145,26 +167,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /* storage unavailable */
     }
     // The roster itself lives in IndexedDB (lib/door/kv).
-    await wipeDoorRosters(doorKV()).catch(() => {});
-    forgetDoorCipher();
+    try {
+      const [{ doorKV, forgetDoorCipher }, { wipeDoorRosters }] = await loadDoorCleanup();
+      await wipeDoorRosters(doorKV()).catch(() => {});
+      forgetDoorCipher();
+    } catch (e) {
+      console.warn('door cache cleanup failed to load:', e);
+    }
     return !error;
   };
 
   // Door scans waiting to upload stay on the device after sign-out, but only
   // door staff of the event can upload them: say so before signing out.
-  const doorScansOk = (): boolean => {
+  const doorScansOk = async (): Promise<boolean> => {
     let storage: Storage | null = null;
     try {
       storage = localStorage;
     } catch {
       return true;
     }
-    const warn = signOutWarning(pendingScanCount(storage));
+    let warn: string | null = null;
+    try {
+      const [, , { signOutWarning }, { pendingScanCount }] = await loadDoorCleanup();
+      warn = signOutWarning(pendingScanCount(storage));
+    } catch {
+      return true; // couldn't load the check: sign out as asked
+    }
     return !warn || typeof window === 'undefined' || window.confirm(warn);
   };
 
   const logout = async (opts: { skipDoorCheck?: boolean } = {}) => {
-    if (!opts.skipDoorCheck && !doorScansOk()) return;
+    if (!opts.skipDoorCheck && !(await doorScansOk())) return;
     await signOutScoped('local');
   };
   const logoutEverywhere = () => signOutScoped('global');
@@ -177,7 +210,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} initialView={modalView} initialEmail={modalEmail} />
+      {modalMounted && (
+        <Suspense fallback={null}>
+          <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} initialView={modalView} initialEmail={modalEmail} />
+        </Suspense>
+      )}
     </AuthContext.Provider>
   );
 }

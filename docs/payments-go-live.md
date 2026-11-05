@@ -232,7 +232,8 @@ still need an account. The embedded (venue-site iframe) checkout still signs in 
 send the claim links to a stranger, or straight into a stranger's account when the typo was a real address. Now
 the order is paid and the seats are kept, but the tickets stay parked on the org owner until the buyer proves the
 email (the 6-digit code mailed to it, or its "confirm here" link) or a phone (an SMS code), on the page they paid
-on: `exos-checkout` returns a random `proof_token` that the browser keeps (localStorage) and the session stores only
+on: `exos-checkout` returns a random `proof_token` that the browser keeps (localStorage; where an in-app browser blocks
+storage, it comes back in the return URL's fragment, `#pt=`, see [`guest-checkout.md`](guest-checkout.md)) and the session stores only
 its SHA-256 (`exos_checkout_sessions.proof_token_hash`). The code without that browser does nothing, so a mistyped
 inbox that belongs to someone else gets nothing. Until proven the tickets don't scan, can't be claimed (link or the
 email's own account) and aren't attached to any account; the door can still check the buyer in by name. Proven by

@@ -351,7 +351,7 @@ export interface Event {
   accessibility?: import('./lib/accessibility').EventAccessibility;
   // Who may check people in by name at the door (mig 20260929130000):
   // 'staff' (default), 'managers' or 'off'. Undefined until the column exists.
-  doorNameCheckin?: import('./lib/door/decide').NameCheckinMode;
+  doorNameCheckin?: import('./lib/door/nameCheckinMode').NameCheckinMode;
   // Store page content (mig 20260929120000). All undefined until the columns
   // exist on the database this build talks to.
   summary?: string;
