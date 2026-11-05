@@ -19,8 +19,8 @@
 import { isRegistryFresh } from '../offlineCheckins';
 import { parseNameCheckinMode, type DoorGate, type NameCheckinMode } from './decide';
 import { DEVICE_KEY, isSealed, storageKeys, type DoorCipher, type DoorKV, type SealedBlob, type StorageLike } from './kv';
-import type { DoorCheckinList, ListState } from './lists';
-import { doorKeysFromSecret, type DoorKeys } from '../../../supabase/functions/_shared/doorKeys.ts';
+import { parseListState, type DoorCheckinList, type ListState } from './lists';
+import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../../supabase/functions/_shared/doorKeys.ts';
 
 export const ROSTER_PAGE_SIZE = 1000;
 /** While the page is open and online, the roster is refreshed this often:
@@ -67,9 +67,40 @@ export interface DoorRosterEntry {
   tierId?: string | null;
   /** Last direction per re-entry list (roster list_state + this device). */
   lists?: ListState;
+  /** An add-on's own entry code (mig 20261107110000), not a ticket. */
+  addon?: boolean;
+  /** The add-on it is for (null: the add-on was deleted). */
+  addonId?: string | null;
 }
 
 export type DoorRoster = Record<string, DoorRosterEntry>;
+
+/**
+ * The event's add-on entry codes (exos_event_addon_passes: door keys, never a
+ * secret) as saved-list entries, keyed by pass id, so the door checks an A-
+ * code offline too. Anything malformed is skipped.
+ */
+export function buildAddonRoster(raw: unknown): DoorRoster {
+  const out: DoorRoster = {};
+  if (!Array.isArray(raw)) return out;
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r.id !== 'string') continue;
+    const name = typeof r.addon_name === 'string' && r.addon_name ? r.addon_name : 'Add-on';
+    const lists = parseListState(r.list_state);
+    out[r.id] = {
+      used: r.status === 'used',
+      voided: r.status === 'voided',
+      name,
+      tier: name,
+      ownerId: typeof r.owner_id === 'string' ? r.owner_id : undefined,
+      doorKeys: parseDoorKeys(r.door_keys),
+      addon: true,
+      addonId: typeof r.addon_id === 'string' ? r.addon_id : null,
+      ...(lists ? { lists } : {}),
+    };
+  }
+  return out;
+}
 
 export interface RosterRow {
   id: string;

@@ -75,8 +75,14 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
    by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
    migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
-6. Later: a fee-change log after a sale (`Adjustment`), and a separate entry barcode for an add-on
-   (`Extra.hasSeparateAccessBarcode`).
+6. **[built: claude/exos-dice-gaps-6] Fee-change log, add-on entry codes, conditional questions** (mig `20261107110000`).
+   `exos_fee_adjustments` (DICE `Adjustment`): append-only; refunds log the buyer-fee part of what they return, finance adds
+   manual changes with a note (Orders → Fees); `GET /v1/orders/:id/adjustments`, `/v1/events/:id/fee-adjustments`, settlement
+   inputs. An add-on can have its own rotating entry code per unit (`Extra.hasSeparateAccessBarcode`), shown in the buyer's
+   ticket and scanned at a check-in list that admits add-ons (online, offline, offline merge); a ticket is refused there and
+   an add-on code at a ticket list. Checkout questions can be "show only if" another is answered a given way (SQL + TS rules,
+   builder, buyer form). Left: refunds don't reverse `exos_order_fees` (the log records the fee share; settlement fee lines
+   don't read it yet), add-on codes in Apple / Google Wallet, undoing an add-on scan, and a POST for manual adjustments in the API.
 
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 

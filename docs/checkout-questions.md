@@ -44,6 +44,24 @@ At most 50 questions per event that aren't archived. Writes go through `exos_sav
 `exos_archive_event_question` / `exos_reorder_event_questions` (owner or manager of the event's org) and the API; the
 table has no client write grant.
 
+### Show only if… (mig 20261107110000)
+
+A question can depend on another: `parent_question_id` plus `parent_values`, the parent's answers that show it.
+"Your guest's name" is asked only when "Bringing a guest?" is answered Yes.
+
+- The parent is a `single_choice`, `multiple_choice` or `checkbox` question of the same event that isn't archived.
+  The values are its options (any picked one of a multiple choice shows the child); for a checkbox, `["true"]`
+  (ticked).
+- A per-order question depends only on a per-order question. A per-ticket question may depend on a per-order
+  question (shown on every ticket when the order's answer matches) or a per-ticket one (the same ticket's answer).
+- No loops, at most 10 levels. A parent with questions depending on it can't be archived, change its kind or scope,
+  or drop an option they use: change them first.
+- A hidden question is never required, and whatever was sent for it is dropped. A shown one follows every usual
+  rule. A parent the buyer isn't asked (hidden, archived, another ticket type) hides the child.
+- The rule is `_exos_question_hidden` in SQL and `hiddenQuestions` in `_shared/questions.ts`;
+  `tests/exos/test_dice_gaps_6.sql` (DG6-CASES) and `src/lib/conditionalQuestions.test.ts` run the same cases
+  through both. The free-claim guard counts only questions every buyer is asked.
+
 ### Changing a question after sales
 
 - Renaming keeps every answer with the label the buyer saw (`exos_question_answers.label`); the report shows today's

@@ -458,6 +458,42 @@ Nothing new is granted to anon. Points to review:
   `noindex` events are now left out of `events.list`, `search` and
   `genres.list` (they are meant to stay out of public feeds).
 
+### Fee log, add-on entry codes, conditional questions (mig 20261107110000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **The fee log is append-only.** `exos_fee_adjustments` refuses UPDATE,
+  DELETE and TRUNCATE in a trigger, for its owner and the service role too;
+  only a foreign-key cascade (deleting the org, the event or the order)
+  removes rows. RLS: owner / manager / finance of the org read; no client
+  insert. Writers: `exos_record_refund` (marker `exos: fee adjustments`,
+  through `_exos_fee_adj_sync_refunds`, under the order's row lock, so a
+  retried or concurrent refund logs the right total once) and
+  `exos_fee_adjustment_record` (authenticated; owner / manager / finance of
+  the order's org, else 42501; a note, an idempotency key, the order's net
+  fees never below zero). It records; it moves no money. The API reads it
+  with `orders:read` (one order) or `finance:read` (an event), scoped to the
+  key's org; another org's id is a 404 with nothing echoed.
+- **Add-on entry codes keep the ticket's secret rules.** Each
+  `exos_addon_passes` row has its own `barcode_secret`, which no client
+  column grant covers: the holder gets it from `exos_my_addon_passes`
+  (authenticated, own passes only, none once voided); door staff get day
+  keys only from `exos_event_addon_passes` (owner / manager / scanner who may
+  work the event, else 42501). A new owner (proof of email, guest claim)
+  rotates the secret. Scans go through `exos_check_in_ticket` (marker
+  `exos: addon pass codes`) into `_exos_check_in_addon_pass` (service role
+  only), which checks the scanner's org role (42501 otherwise), the event,
+  the code (day-key MAC, owner, bucket window) and the list before anything
+  is written; a typed pass id is an owner / manager override with a reason,
+  as for tickets. A ticket at an add-on-only list is refused in
+  `_exos_checkin_list_refusal` (marker `exos: addon lists`), and an offline
+  replay refused that way records a reject only, never a forced entry.
+- **Conditional questions add no read surface.** The condition rides in the
+  questions the public RPC already returns. A parent must be one of the same
+  event's questions; a parent id from another event or org is refused
+  without echoing its label. Hidden answers are dropped server-side
+  (`_exos_validate_answers_core`, markers `exos: conditional questions 1..4`).
+
 ### Search path
 ### Search path
 

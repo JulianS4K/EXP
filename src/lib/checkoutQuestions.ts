@@ -15,7 +15,7 @@
 import { supabase } from './supabase';
 import { toCsv } from './csv';
 import {
-  answerDisplay, questionsFor, validateAnswers, type AnswerProblem, type AnswerValue, type QuestionDef,
+  answerDisplay, questionsFor, validateAnswers, visibleQuestionsFor, type AnswerProblem, type AnswerValue, type QuestionDef,
 } from '../../supabase/functions/_shared/questions.ts';
 
 export type { AnswerProblem, AnswerValue, QuestionDef } from '../../supabase/functions/_shared/questions.ts';
@@ -106,10 +106,11 @@ export function hasQuestions(qs: readonly QuestionDef[], ticketTiers: readonly s
   return f.order.length > 0 || f.ticket.some((t) => t.length > 0);
 }
 
-/** The request body's `answers`: only questions this order is asked, one entry per ticket. */
+/** The request body's `answers`: only questions this order is asked (and shown, for
+ *  "show only if" questions: a hidden one's stale answer is left out), one entry per ticket. */
 export function answersBody(qs: readonly QuestionDef[], ticketTiers: readonly string[], draft: AnswerDraft): { order: Record<string, RawAnswer>; tickets: Record<string, RawAnswer>[] } | undefined {
-  const f = questionsFor(qs, ticketTiers);
-  if (f.order.length === 0 && f.ticket.every((t) => t.length === 0)) return undefined;
+  if (!hasQuestions(qs, ticketTiers)) return undefined;
+  const f = visibleQuestionsFor(qs, ticketTiers, draft);
   const pick = (src: Record<string, RawAnswer> | undefined, list: QuestionDef[]) => {
     const out: Record<string, RawAnswer> = {};
     for (const q of list) {

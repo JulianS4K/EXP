@@ -809,6 +809,11 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-buyer-locations', method: 'GET', auth: K, path: '/buyer-locations', scope: 'orders:read', paged: false },
   { id: 'list-genres', method: 'GET', auth: K, path: '/genres', scope: 'events:read', paged: false },
   { id: 'public-discovery-genres', method: 'GET', auth: A, path: '/public/discovery/genres', scope: null, paged: false },
+  // claude/exos-dice-gaps-6 (mig 20261107110000, exos-api/feeAdjustments.ts,
+  // docs/api/fee-adjustments.json): the fee-change log (DICE Adjustment).
+  // Existing scopes: orders:read for one order's, finance:read for an event's.
+  { id: 'get-order-fee-adjustments', method: 'GET', auth: K, path: '/orders/:id/adjustments', scope: 'orders:read', paged: false },
+  { id: 'list-event-fee-adjustments', method: 'GET', auth: K, path: '/events/:id/fee-adjustments', scope: 'finance:read', paged: true },
 ];
 
 /** Methods the API answers (anything else is 405). */

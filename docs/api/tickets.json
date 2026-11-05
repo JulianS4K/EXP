@@ -209,7 +209,7 @@
       "method": "GET",
       "path": "/v1/events/:id/check-in-lists",
       "summary": "List an event's check-in lists",
-      "description": "Door lists that split an event into areas or days: the ticket types each admits (`tier_ids` null = all), whether re-entry is allowed, and when the list is valid.",
+      "description": "Door lists that split an event into areas or days: the ticket types each admits (`tier_ids` null = all), whether re-entry is allowed, and when the list is valid. `admits` is what a list scans: `tickets` (the default), `addons` (add-on entry codes only, e.g. a VIP lounge) or `both`; `addon_ids` narrows the add-ons an add-on list takes (null = every add-on with its own entry code). An add-on code is refused at a ticket-only list, and a ticket at an add-on-only list (mig 20261107110000).",
       "auth": "api_key",
       "scope": "tickets:read",
       "parameters": [
@@ -237,7 +237,9 @@
                 "allow_reentry": true,
                 "valid_from": "2026-12-05T02:30:00+00:00",
                 "valid_until": null,
-                "sort_order": 0
+                "sort_order": 0,
+                "admits": "tickets",
+                "addon_ids": null
               }
             ]
           }

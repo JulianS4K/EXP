@@ -176,6 +176,7 @@ import {
 import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
 // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
 import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
+import { FEE_ADJ_ROUTES, FeeAdjError, handleFeeAdjustments } from "./feeAdjustments.ts";
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
@@ -432,6 +433,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (isQuestionsError(e)) return json({ error: e.message }, e.status);
     if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
+    if (e instanceof FeeAdjError) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -603,6 +605,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
   if (GEO_GENRE_ROUTES.has(route.id)) return await handleGeoGenre(route, { sb, orgId, params: c.params, q: c.q });
+  // claude/exos-dice-gaps-6 (mig 20261107110000): the fee-change log.
+  if (FEE_ADJ_ROUTES.has(route.id)) return await handleFeeAdjustments(route, { sb, orgId, params: c.params, page });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
@@ -689,7 +693,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     case "list-add-ons": {
       const id = await ownEvent(c);
       return rows(await sb.from("exos_event_addons")
-        .select("id, name, description, price, capacity, sold, max_per_order, visibility, sort_order")
+        .select("id, name, description, price, capacity, sold, max_per_order, visibility, sort_order, separate_access_barcode")
         .eq("event_id", id).order("sort_order", { ascending: true }));
     }
 
@@ -755,7 +759,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     case "list-check-in-lists": {
       const id = await ownEvent(c);
       return rows(await sb.from("exos_checkin_lists")
-        .select("id, name, tier_ids, allow_reentry, valid_from, valid_until, sort_order")
+        .select("id, name, tier_ids, allow_reentry, valid_from, valid_until, sort_order, admits, addon_ids")
         .eq("event_id", id).eq("org_id", orgId).order("sort_order", { ascending: true }));
     }
 

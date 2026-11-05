@@ -5,6 +5,10 @@
 // ride in the checkout request itself, never only in storage (in-app browsers
 // have none).
 //
+// "Show only if" questions (mig 20261107110000) appear once their parent has
+// an answer that shows them, and disappear (their answer left out of the
+// request) when it changes; the server applies the same rule.
+//
 // Accessibility: every field has a <label> (radio and checkbox groups a
 // <fieldset>/<legend>), required ones say so (aria-required + a visible
 // marker), and a problem shows under its field (role="alert",
@@ -12,7 +16,7 @@
 
 import { useId } from 'react';
 import {
-  maxLengthFor, problemText, questionsFor, type AnswerProblem, type QuestionDef,
+  maxLengthFor, problemText, visibleQuestionsFor, type AnswerProblem, type QuestionDef,
 } from '../../supabase/functions/_shared/questions.ts';
 import type { AnswerDraft, RawAnswer } from '../lib/checkoutQuestions';
 
@@ -35,7 +39,7 @@ const RADIO_MAX = 5;
 
 export default function CheckoutQuestionsForm({ questions, ticketTiers, value, onChange, problems, showErrors, ticketNames, tone = 'dark' }: Props) {
   const base = useId().replace(/:/g, '');
-  const f = questionsFor(questions, ticketTiers);
+  const f = visibleQuestionsFor(questions, ticketTiers, value);
   if (f.order.length === 0 && f.ticket.every((t) => t.length === 0)) return null;
   const dark = tone === 'dark';
   const cls = {

@@ -33,7 +33,7 @@ const TICKET_COLS =
   "order_ref, channel_source, created_at, updated_at";
 const TIER_COLS =
   "id, event_id, name, description, price, capacity, sold, ticket_type, visibility, sales_start, sales_end, sort_order";
-const ADDON_COLS = "id, event_id, name, description, price, capacity, sold, max_per_order, visibility, sort_order";
+const ADDON_COLS = "id, event_id, name, description, price, capacity, sold, max_per_order, visibility, sort_order, separate_access_barcode";
 // Never reserved_email: a promo code's holder is not the partner's business.
 const PROMO_COLS =
   "id, event_id, code, tier_id, max_uses, used_count, discount_percent, discount_amount, price_override, " +
@@ -125,7 +125,7 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
             "release_cutoff_hours, door_name_checkin, ticket_backend, external_ticket_url",
         ).eq("id", id).maybeSingle(),
         sb.from("exos_event_fee_settings").select("inherit_org_rules, skipped_org_rule_ids").eq("event_id", id).maybeSingle(),
-        sb.from("exos_checkin_lists").select("id, name, tier_ids, allow_reentry, valid_from, valid_until")
+        sb.from("exos_checkin_lists").select("id, name, tier_ids, allow_reentry, valid_from, valid_until, admits, addon_ids")
           .eq("event_id", id).eq("org_id", orgId).order("sort_order", { ascending: true }),
       ]);
       for (const r of [ev, fees, lists]) if (r.error) throw r.error;
@@ -216,6 +216,16 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
       // A ticket id, or the ticket id inside a rotating door code (T-<ticket>:<owner>:<window>:<mac>).
       // This only finds the ticket; check-in with the code is what verifies it.
       const code = p.code.trim();
+      // An add-on's own entry code (A-, mig 20261107110000): its pass, this org's only.
+      const a = /^A-([0-9a-f-]{36}):/i.exec(code);
+      if (a && UUID_RE.test(a[1])) {
+        const { data: pass, error } = await sb.from("exos_addon_passes")
+          .select("id, event_id, addon_id, addon_name, unit_index, status, check_in_at, order_ref")
+          .eq("org_id", c.orgId).eq("id", a[1]).maybeSingle();
+        if (error) throw error;
+        if (!pass) throw new CoreError(404, "no ticket for this code");
+        return { data: { code_type: "addon_code", addon_pass: pass } };
+      }
       const m = /^T-([0-9a-f-]{36}):/i.exec(code);
       const id = UUID_RE.test(code) ? code : m && UUID_RE.test(m[1]) ? m[1] : null;
       if (!id) throw new CoreError(404, "no ticket for this code");
