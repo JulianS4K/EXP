@@ -809,6 +809,11 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-buyer-locations', method: 'GET', auth: K, path: '/buyer-locations', scope: 'orders:read', paged: false },
   { id: 'list-genres', method: 'GET', auth: K, path: '/genres', scope: 'events:read', paged: false },
   { id: 'public-discovery-genres', method: 'GET', auth: A, path: '/public/discovery/genres', scope: null, paged: false },
+  // claude/exos-pos-walkup (mig 20261107100000, exos-api/posSales.ts,
+  // docs/api/pos-sales.json): the door's walk-up sales; a void moves cash, so
+  // refunds:write (an owner / manager key, checked in SQL).
+  { id: 'list-event-pos-orders', method: 'GET', auth: K, path: '/events/:id/pos-orders', scope: 'orders:read', paged: true },
+  { id: 'void-event-pos-order', method: 'POST', auth: K, path: '/events/:id/pos-orders/:order/void', scope: 'refunds:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

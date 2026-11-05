@@ -46,6 +46,7 @@ import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
+import DoorSellPanel from '../components/DoorSellPanel'; // claude/exos-pos-walkup
 import { EventScheduleReadOnly } from '../components/booking/EventBookingPanels';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
@@ -347,7 +348,8 @@ export default function OrganizerCheckIn() {
   // The last read, for the duplicate-read guard (lib/door/decide).
   const lastReadRef = useRef<RecentRead | null>(null);
   // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
-  const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
+  // + 'sell': walk-up sales at the door (mig 20261107100000).
+  const [mode, setMode] = useState<'tickets' | 'guests' | 'sell'>('tickets');
   // Exos Door (mig 20261013090000): a code from another platform read in
   // Tickets mode is handed to the guest-list door, which checks it in.
   const [guestCode, setGuestCode] = useState<{ text: string; at: number } | null>(null);
@@ -1771,14 +1773,14 @@ export default function OrganizerCheckIn() {
         </div>
       )}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
-        {(['tickets', 'guests'] as const).map((m) => (
+        {(['tickets', 'guests', 'sell'] as const).map((m) => (
           <button
             key={m}
             type="button"
             role="tab"
             aria-selected={mode === m}
             onClick={() => {
-              if (m === 'guests' && scanning) {
+              if (m !== 'tickets' && scanning) {
                 void stopScanner();
                 setScanning(false);
               }
@@ -1787,11 +1789,17 @@ export default function OrganizerCheckIn() {
             }}
             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
           >
-            {m === 'tickets' ? 'Tickets' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+            {m === 'tickets' ? 'Tickets' : m === 'sell' ? 'Sell' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
           </button>
         ))}
       </div>
-      {mode === 'guests' && eventId ? (
+      {mode === 'sell' && eventId ? (
+      <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {effectiveOffline
+          ? <p role="alert" className="text-sm text-amber-700">Selling needs a connection: the sale, the tickets and the cash are recorded on the server.</p>
+          : <DoorSellPanel eventId={eventId} />}
+      </div>
+      ) : mode === 'guests' && eventId ? (
       <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <GuestListDoor
           eventId={eventId}
