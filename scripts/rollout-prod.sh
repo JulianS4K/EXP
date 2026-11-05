@@ -74,6 +74,7 @@ MIGRATIONS=(
   20261105130000_exos_promoter_events
   20261105140000_exos_ig_checkout
   20261105150000_exos_wave3_integration
+  20261105160000_exos_token_lineage
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

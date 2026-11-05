@@ -4,6 +4,7 @@
 --   W1  every in-place patch of the four migrations is still in the live
 --       function body after the full apply + replay: no later migration's
 --       redefinition wiped another branch's change (markers, by function)
+--       (and the later in-place patches of mig 20261105160000, token lineage)
 --   W2  an account token (#85) has no organization, so X-Exos-Org (#87)
 --       reaches none: exos_api_token_auth_org gives nothing for it (exos-api
 --       then refuses it with account_no_org), and its own auth has no org
@@ -91,7 +92,11 @@ BEGIN
     -- wave 3 integration (mig 20261105150000)
     ('public._exos_api_public_tiers_json(uuid)', '/* exos: closed is sold out */'),
     ('public._exos_location_blockers_row(public.exos_events,boolean)', '/* exos: one sellable type */'),
-    ('public._exos_tg_tier_capacity_location()', '/* exos: 0 closes sales')
+    ('public._exos_tg_tier_capacity_location()', '/* exos: 0 closes sales'),
+    -- token lineage (mig 20261105160000)
+    ('public.exos_api_me(text,text,text,text,jsonb)', '/* exos: api tokens can''t mint */'),
+    ('public.exos_api_me(text,text,text,text,jsonb)', '/* exos: api tokens expire */'),
+    ('public.exos_api_me(text,text,text,text,jsonb)', '/* exos: api token parent */')
   ) AS t(sig, marker) LOOP
     n := n + 1;
     IF to_regprocedure(r.sig) IS NULL THEN
