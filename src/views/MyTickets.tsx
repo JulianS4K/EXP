@@ -33,6 +33,7 @@ import {
 import { formatCents } from '../lib/refunds';
 import { listMyInvoices, type MyInvoice } from '../lib/invoicesApi';
 import { formatDocNumber, invoicePath } from '../lib/invoices';
+import OrderProofPanel from '../components/OrderProofPanel';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
@@ -41,6 +42,9 @@ export default function MyTickets() {
   // The masked inbox from the return URL (?to=j***@gmail.com), for browsers
   // where the stored email is gone (in-app browsers can block storage).
   const [guestTo, setGuestTo] = useState<string | null>(null);
+  // The guest's order waits for proof of the email (mig 20261105100000): the
+  // order to confirm (from the return URL, or the code mail's link).
+  const [proofOrder, setProofOrder] = useState<{ id: string; code: string | null } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -128,7 +132,13 @@ export default function MyTickets() {
       // from the URL, so the vendors' PageView never sees it.
       void trackCheckoutReturn(params.get('session_id'));
     }
-    if (params.get('checkout') === 'success' && params.get('guest') === '1') {
+    const sid = params.get('session_id') ?? params.get('confirm');
+    if (sid && /^[A-Za-z0-9_-]{8,255}$/.test(sid) && (params.get('guest') === '1' || params.get('confirm'))) {
+      setProofOrder({ id: sid, code: params.get('proof_code') });
+    }
+    if (params.get('confirm')) {
+      setGuestDone(true);
+    } else if (params.get('checkout') === 'success' && params.get('guest') === '1') {
       setGuestDone(true);
       const to = params.get('to') ?? '';
       if (/^[a-z0-9]\*\*\*@[a-z0-9.-]{1,253}$/i.test(to)) setGuestTo(to.toLowerCase());
@@ -204,15 +214,29 @@ export default function MyTickets() {
   }, [user, toast]);
 
   const inbox = guestEmailHint() ?? guestTo;
+  if (guestDone && proofOrder) return (
+    <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
+      <div className="max-w-md">
+        <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
+        <h1 className="disp text-4xl tracking-tight leading-none mb-4">Confirm your email</h1>
+        <OrderProofPanel sessionId={proofOrder.id} initialCode={proofOrder.code}
+          onSignIn={(email) => openAuth('code', email || guestEmailHint() || '')} />
+        {user && (
+          <button onClick={() => { setGuestDone(false); setProofOrder(null); }} className="underline text-white/60 text-sm">
+            Go to my tickets
+          </button>
+        )}
+      </div>
+    </div>
+  );
   if (!user && guestDone) return (
     <div className="wall min-h-screen flex items-center justify-center p-8 text-center">
       <div className="max-w-md" role="status">
         <p className="type text-brand-primary uppercase tracking-widest text-[12px] mb-3">Payment received</p>
         <h1 className="disp text-4xl tracking-tight leading-none mb-4">Check your email</h1>
         <p className="text-white/70 mb-6">
-          Your tickets are on their way{inbox ? <> to <strong className="text-white">{inbox}</strong></> : null}.
-          Sign in with that email (we'll send a one-time code, no password) to see your QR codes here.
-          Tickets can be forwarded to friends from the email.
+          We emailed{inbox ? <> <strong className="text-white">{inbox}</strong></> : null} a code to
+          confirm it's yours. Enter it on the page where you paid, in this browser, and your tickets are released.
         </p>
         <button onClick={() => openAuth('code', guestEmailHint() ?? '')} className="bg-brand-primary text-black font-black uppercase tracking-wider px-8 py-3">
           Sign in to see tickets

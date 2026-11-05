@@ -305,11 +305,12 @@ describe('phone RSVP', () => {
   });
   it('has a message for every error the SQL answers', () => {
     for (const e of ['bad_phone', 'bad_name', 'bad_email', 'too_many_guests', 'sold_out', 'no_channel', 'rate_limited',
-                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over']) {
+                     'wrong_code', 'locked', 'expired', 'used', 'off', 'closed', 'over', 'name_is_email', 'not_enough_seats']) {
       expect(rsvpErrorMessage(e)).not.toBe(rsvpErrorMessage('???'));
     }
     expect(rsvpErrorMessage('wrong_code', { attempts_left: 1 })).toContain('1 try left');
     expect(rsvpErrorMessage('too_many_guests', { max_plus_ones: 2 })).toContain('up to 2 guests');
+    expect(rsvpErrorMessage('not_enough_seats', { seats_left: 1 })).toContain('Only 1 spot left');
   });
   it('turns a ticket link into an app path and counts heads', () => {
     const key = 'A'.repeat(43);

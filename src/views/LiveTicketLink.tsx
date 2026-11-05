@@ -11,6 +11,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { fetchTicketLink } from '../lib/developerPlatform';
 import { linkKeyFromHash, nextRefreshMs, stateMessage, type LinkView } from '../lib/ticketLink';
 import ClaimRsvpTicket from '../components/ClaimRsvpTicket';
+import TicketLocation from '../components/TicketLocation';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -76,6 +77,8 @@ export default function LiveTicketLink() {
         </p>
         <p className="text-xs text-white/80">{view.tier_name}{view.attendee_name ? ` · ${view.attendee_name}` : ''}</p>
       </div>
+      {/* A secret / TBA location (mig 20261105130000): through the link's own key. */}
+      <TicketLocation ticketId={ticketId} linkKey={key} timezone={view.event?.timezone} />
       {view.code ? (
         <div className="bg-white p-4 flex justify-center">
           <QRCodeSVG value={view.code} size={220} level="H" includeMargin={false} fgColor="#000000" />

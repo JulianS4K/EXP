@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Last call (mig 20261029100000): at or below the threshold, only the primary
 -- checkout sells.
---   L1 remaining: tier sums, the overall cap, an uncapped type (with and
+--   L1 remaining: tier sums, the overall cap, a closed type (capacity 0, with and
 --      without a cap), tables by party size; threshold: event > org >
 --      platform (10), 0 = off
 --   L2 the boundary: 11 left is not last call, 10 is
@@ -42,7 +42,7 @@ INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('d7000000-0000-0000-0000-000000000001','d7000000-0000-0000-0000-0000000000a2','finance'),
   ('d7000000-0000-0000-0000-000000000001','d7000000-0000-0000-0000-0000000000a3','scanner');
 -- e1: GA 150 + VIP 50 (direct marketplaces, Eventbrite, Luma). e2: the same on
--- the S4K route. e3: cap 50 with an uncapped type. e4: uncapped, no cap.
+-- the S4K route. e3: cap 50 over types of 50. e4: one closed type (capacity 0, mig 20261105100000), no cap.
 -- e5: 10 tables of 4.
 INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks,created_by) VALUES
   ('d7000000-0000-0000-0000-0000000000e1','d7000000-0000-0000-0000-000000000001','Show','d7-show','published',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}','d7000000-0000-0000-0000-0000000000a0'),
@@ -56,7 +56,7 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibi
   ('d7000000-0000-0000-0000-0000000000d3','d7000000-0000-0000-0000-0000000000e2','GA',40,150,0,'public',1,'standard',NULL),
   ('d7000000-0000-0000-0000-0000000000d4','d7000000-0000-0000-0000-0000000000e2','VIP',90,50,0,'public',2,'standard',NULL),
   ('d7000000-0000-0000-0000-0000000000d5','d7000000-0000-0000-0000-0000000000e3','GA',40,30,0,'public',1,'standard',NULL),
-  ('d7000000-0000-0000-0000-0000000000d6','d7000000-0000-0000-0000-0000000000e3','Open',0,0,0,'public',2,'standard',NULL),
+  ('d7000000-0000-0000-0000-0000000000d6','d7000000-0000-0000-0000-0000000000e3','Open',0,20,0,'public',2,'standard',NULL),
   ('d7000000-0000-0000-0000-0000000000d7','d7000000-0000-0000-0000-0000000000e4','Open',40,0,0,'public',1,'standard',NULL),
   ('d7000000-0000-0000-0000-0000000000d8','d7000000-0000-0000-0000-0000000000e5','Table',400,10,2,'public',1,'table',4);
 
@@ -120,8 +120,9 @@ END $$;
 DO $$
 BEGIN
   ASSERT public.exos_event_remaining(pg_temp.u('e1')) = 197, 'L1: tier sums';
-  ASSERT public.exos_event_remaining(pg_temp.u('e3')) = 42, 'L1: the overall cap with an uncapped type';
-  ASSERT public.exos_event_remaining(pg_temp.u('e4')) IS NULL AND NOT public.exos_event_last_call(pg_temp.u('e4')), 'L1: no limit';
+  ASSERT public.exos_event_remaining(pg_temp.u('e3')) = 42, 'L1: the overall cap under its types';
+  -- closed is 0 left, like a sell-out (so it is in last call: no channel sells), never "no limit"
+  ASSERT public.exos_event_remaining(pg_temp.u('e4')) = 0 AND public.exos_event_last_call(pg_temp.u('e4')), 'L1: closed is 0 left, never no limit';
   ASSERT public.exos_event_remaining(pg_temp.u('e5')) = 32, 'L1: 8 tables of 4';
   ASSERT public.exos_event_last_call_threshold(pg_temp.u('e1')) = 10, 'L1: platform default 10';
   UPDATE public.exos_orgs SET last_call_threshold = 40 WHERE id = 'd7000000-0000-0000-0000-000000000001';

@@ -16,6 +16,7 @@
 
 import { Timestamp } from './timestamp';
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import { getCurrentAppUser } from './auth';
 import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
@@ -846,6 +847,7 @@ export async function mintTickets(input: {
  * not in transfer, ≤80 chars (mig 20260911060000). Returns the stored name.
  */
 export async function setTicketAttendee(ticketId: string, name: string): Promise<string | null> {
+  assertNotEmailName(name);
   const { data, error } = await supabase.rpc('exos_set_ticket_attendee', {
     p_ticket_id: ticketId,
     p_name: name,

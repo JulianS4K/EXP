@@ -176,6 +176,9 @@ const REFUSAL_TEXT: Record<string, string> = {
   'name-needs-manager': 'Ask a manager. This event lets only owners and managers check people in by name.',
   'name-checkin-off':
     'Check-in by name is off for this event (QR only). Ask the holder to open their ticket and show the live code.',
+  // Printed tickets (mig 20261105120000, docs/wallet.md "Printed tickets").
+  printed: 'This ticket was printed, so only the paper gets in. Scan the printed ticket, or the box office can void the paper.',
+  'print-code-used': 'This printed ticket was already used. A paper ticket admits once.',
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -1086,7 +1089,8 @@ export default function OrganizerCheckIn() {
     ) return;
     const audit =
       result.reason === 'barcode-expired' ? 'expired-code'
-      : result.reason === 'barcode-rejected' ? 'invalid-barcode'
+      : result.reason === 'barcode-rejected' || result.reason === 'printed' ? 'invalid-barcode'
+      : result.reason === 'print-code-used' ? 'used'
       : result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event' ? result.reason
       : 'not-found';
     void writeScanReject(audit, src, { ticketIdAttempted: ticketId, reasonDetail: result.reason });
@@ -1425,7 +1429,7 @@ export default function OrganizerCheckIn() {
           // ticket's secret, which only the server can check.
           if (!code.bare && scanTicket.doorKeys) {
             const v = await verifyBarcode(raw, scanTicket.doorKeys, { now: serverNow() });
-            if (!v.ok && v.reason !== 'no-key' && v.reason !== 'signature-mismatch') {
+            if (!v.ok && v.reason !== 'no-key' && v.reason !== 'signature-mismatch' && v.reason !== 'printed') {
               setFoundTicket(scanTicket);
               setBuyerName(scanTicket.ownerName);
               denyLocal(scanTicket.id, scanTicket.ownerName, v, src);

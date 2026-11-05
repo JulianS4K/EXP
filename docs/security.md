@@ -72,7 +72,10 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_signup_unsubscribe` (mig 20261031120000) | OK | 64-hex per-fan unsubscribe token; only sets the opt-out on that fan's org list. Answers ok and the org name |
 | `exos_inbound_form_public` (mig 20261102130000) | OK | An org's booking-request form text (`/book/<org slug>`), only while an owner or manager has switched it on (off by default): org name and slug, title, intro, and the id and name of the venues it offers. No org id, no submissions |
 | `exos_inbound_submit` (mig 20261102130000) | OK (rate limited) | An artist's or agent's booking request to an org whose form is on. The body is capped at 16 KB and checked field by field (unknown fields refused; links must be https); a filled hidden `homepage` field (honeypot) answers `{ ok: true }` and stores nothing. Limits, counted under advisory locks so parallel requests can't slip past: per network 5 an hour per org and 20 a day across orgs (SHA-256 of `exos-inbound:` + the IP from `_exos_request_ip()`: `cf-connecting-ip`, else the LAST X-Forwarded-For entry, the one the platform's proxy appended, never the client-written first one (`request_ip_source` `xff_last` drops `cf-connecting-ip` for installs not behind Cloudflare, docs/self-hosting.md); IPv6 by /64; requests with no valid trusted IP share one `unknown` bucket with the same caps. The IP itself is never stored, and the hash has no client column grant), per email 3 a day per org, 300 a day per org; over a limit is 54000. Answers only `{ ok: true }`: nothing about the org's other requests, holds or staff. Writes only `exos_inbound_submissions` with status `new` |
+| `exos_order_proof_status`, `exos_order_proof_send`, `exos_order_proof_verify` (mig 20261105100000) | OK (anon + authenticated; 256-bit browser token) | A guest order's proof of email or phone, on the page the buyer paid on. exos-checkout gives the paying browser a random 32-byte token and stores only its SHA-256 on the order (`exos_checkout_sessions.proof_token_hash`, no client grant); every call needs the session id and that token, and a wrong token answers like no order at all. Status gives the masked email (`ab…@domain`), the last 4 digits of a proven phone and the attempts left; claim links only after a phone proof. Codes are 6 digits, stored as SHA-256(proof id:channel:code) with no client column grant; 5 wrong codes lock the live code until a new one is sent; 5 email and 3 SMS sends per order, 60 s apart on each channel, and 3 SMS per number per 10 minutes (the RSVP outbox count), never to a number that opted out of the org's texts. Until proven, the parked tickets can't be claimed by anyone (link or the typed email's own account), don't scan (in transfer) and aren't attached to any account. `exos_order_proof_resend` and `exos_org_order_proofs` are owner / manager only |
+| `exos_api_public` (mig 20261105110000) | OK (rate limited) | Public discovery, the SQL behind exos-api's no-credential `/v1/public/discovery/events`, `/public/venues`, `/public/search` and `/public/event-series` (Opendate's fan app and website series). Read-only and only what the storefront shows anyone: **published** events through `_exos_public_event_json`'s fixed column list, their **public** ticket types (name, price, price schedule, sales window, exclusive tax and a sold-out flag; never capacity, sold counts or hidden types), an organizer's public profile (id, name, slug, description, theme, follower count, upcoming event count; never the owner or settings), and the existing public series RPCs. Search words are reduced to letters, digits and `' & . -` before any ILIKE, so `%` / `_` can't widen a match. 60 calls a minute per network (`exos_rate_hit`, 54000 over it): for an anon caller the bucket is `_exos_request_ip_bucket()` (the platform-set IP, never one the caller names); exos-api calls the core `_exos_api_public` (service role only) with its own salted hash of the client IP. In the H3 allowlist |
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
+| `exos_ticket_link_location` (mig 20261105130000) | OK | The same 256-bit link key as `exos_ticket_link_view` (recomputed and compared; a wrong key and an unknown ticket give `{ ok: false }`). Answers that ticket's event location as the public sees it (mode, area, reveal time), plus a `secret_location` event's exact address only once its reveal time has passed and only for an active or used ticket. Read-only. docs/promoter-events.md |
 
 ### Callable by authenticated
 
@@ -134,7 +137,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `_exos_queue_dispute_mail`, `_exos_dispute_raw`, `_exos_jscalar` (mig 20261001101000) | Internal | No client grant. The mail helper never raises (a failure is a WARNING), so it can't fail the webhook |
 | `exos_org_audience_export` (mig 20260930101000) | OK | Owner / manager of the passed org (`exos_has_org_role`; finance, scanners and platform admins without a role are refused); `p_event_id` must be that org's event. Returns one jsonb of SHA-256 hashes only (email lower-cased and trimmed; phone as E.164 and digits-only), never an address or number, for buyers who granted advertising consent at checkout or follow the org from a signed-in account, minus anyone whose latest choice was `denied`, who unsubscribed (`exos_mail_prefs`, by account or email) or deleted their account. Throttled (3 a minute per org via `exos_rate_hit`, 20 a day per org) and logged in `exos_audience_exports` (RLS: owner / manager read, no client writes) |
 | `exos_reschedule_event` (8 args, mig 20260929150000) | OK | Owner / manager (or admin) of the event's org, looked up from the event row (locked). Moves the times, records the reschedule (refund offer + deadline, validated: future and not after the new start) and queues the holder mail in one transaction. The 6-arg version is dropped. `p_offer_refunds` NULL = no refunds |
-| `exos_my_reschedule_offers`, `exos_reschedule_release_mine` (mig 20260929150000) | OK | Self: tickets the caller holds or paid for (`auth.uid()`, or the confirmed email of a guest checkout). A refund needs the caller to be the payer (the money goes back to that card), a release the holder. Every rule is re-checked per ticket in `_exos_resched_ticket_state` |
+| `exos_my_reschedule_offers`, `exos_reschedule_release_mine` (mig 20260929150000) | OK | Self: tickets the caller holds or paid for (`auth.uid()`, or the confirmed email of a guest checkout, which counts only once that email was proven on the order: `_exos_guest_email_ok`, mig 20261105100000). A refund needs the caller to be the payer (the money goes back to that card), a release the holder. Every rule is re-checked per ticket in `_exos_resched_ticket_state` |
 | `exos_event_reschedule_summary` (mig 20260929150000) | OK | Owner / manager / finance (or admin) of the event's org. Counts and amounts only, no buyer emails |
 | `exos_request_reschedule_refund`, `exos_reschedule_release_svc`, `exos_reschedule_link_info` (mig 20260929150000) | Service role | Called by `exos-refund` with the verified JWT user or a mail-link token. A token (64 hex, 256 bits, `exos_reschedule_links`, no client grant) acts only on its own ticket, its own action (refund vs release) and the event's latest reschedule; any other ticket id in the same call is refused `not-authorized`. Claims lock the order row like `exos_refund_claim`; one request per ticket + reschedule (nonce `rsr:<reschedule>:<ticket>`), so a repeat returns it. Link info returns no emails |
 | `exos_tg_event_date_guard` (trigger), `_exos_resched_ticket_state`, `_exos_resched_actor_ok`, `_exos_reschedule_notify`, `_exos_reschedule_release` (mig 20260929150000) | Internal | No client grant. The trigger refuses a client (`role` authenticated / anon) changing a sold event's start by a qualifying amount except inside `exos_reschedule_event`, so the holder mail can't be skipped |
@@ -145,11 +148,16 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_oauth_states` (table, migs 20260930102000, 20261029140000) | OK | Connect Google Ads (`exos-oauth-google`) and Connect Eventbrite (`exos-eventbrite-oauth`; provider `eventbrite`, optional `return_event_id`): RLS on, no `anon` / `authenticated` grants (service role only). Holds the SHA-256 of each OAuth state (never the state), the org, the starting user, a 10-minute expiry and, between the provider's callback and `/finish`, the authorization code and the SHA-256 of the **finish token** (`finish_hash`, mig 20261029140000; both cleared when consumed) |
 | `exos_oauth_state_begin`, `exos_oauth_state_return`, `exos_oauth_state_consume`, `exos_set_google_ads_token`, `_exos_oauth_can_connect` (mig 20260930102000; return / consume replaced, begin patched by 20261029140000) | Service role | `exos-oauth-google` (and `exos-eventbrite-oauth` for begin / return), with the user id from the verified JWT. Begin: owner / manager (active membership) of the org, at most 10 starts per user per 10 minutes. Return `(state_hash, code, finish_hash)`: parks the code on a live, unused state once, **with the SHA-256 of a fresh 256-bit finish token** the callback sends only to the returning browser, in the URL fragment; no finish hash, no code parked. Consume `(state_hash, user_id, finish_hash)` (`_exos_oauth_state_take`): `google_ads` states only; needs the finish token (compared in constant time, `_exos_oauth_hash_eq`) **and** the starting user, once, before expiry, while still owner / manager. **Account-linking attack (fixed 2026-10-29):** the starter knows the raw state, so before this they could send the consent link to a victim and finish the victim's sign-in with their own JWT, attaching the victim's account to their org; binding `/finish` to the starting user didn't help, as the starter is the attacker. Now the starter never sees the finish token (refused `token`, state burned) and the victim's browser has it but not the starter's JWT (refused `other_user`, state burned). The old two-argument return / consume were **dropped**, so a stale `exos-oauth-google` deploy fails closed until redeployed. The SPA confirms before finishing (OAuthFinish: names the org, Confirm button, nothing sent on load). Store: re-checks the role; the refresh token goes to Vault as `exos_ad:<org>:google_ads` (same as `exos_set_ad_credential`), never returned |
 | `exos_tg_conversions_checkout`, `exos_tg_conversions_refund`, `_exos_email_sha256`, `_exos_email_sha256_google`, `_exos_ad_required_keys` (mig 20260930100000) | Internal | No client grant. The triggers queue rows only for a fulfilled paid checkout with `consent_marketing = 'granted'` and an enabled platform, and never fail fulfilment or a refund |
-| `exos_invoice_document`, `exos_credit_note_document`, `exos_my_invoices` (mig 20261001100000) | OK | Receipts and credit notes (`docs/invoices.md`). The invoice row is looked up first, then the caller is checked against it: owner / manager / finance of the invoice's org (`exos_has_org_role`), or the buyer (`auth.uid()` = the invoice's or the checkout session's buyer, or, for a guest checkout with no buyer account, an account whose **confirmed** email is the order's). No such id and not allowed give the same "not found" (42501). Returns the buyer email only to that buyer or finance-capable staff. `exos_my_invoices` lists only the caller's. No anon grant |
+| `exos_invoice_document`, `exos_credit_note_document`, `exos_my_invoices` (mig 20261001100000) | OK | Receipts and credit notes (`docs/invoices.md`). The invoice row is looked up first, then the caller is checked against it: owner / manager / finance of the invoice's org (`exos_has_org_role`), or the buyer (`auth.uid()` = the invoice's or the checkout session's buyer, or, for a guest checkout with no buyer account, an account whose **confirmed** email is the order's, and since mig 20261105100000 only once that email was proven on the order by the mailed code or the organizer's resend (`_exos_guest_email_ok`; orders from before proofs keep the plain match)). No such id and not allowed give the same "not found" (42501). Returns the buyer email only to that buyer or finance-capable staff. `exos_my_invoices` lists only the caller's. No anon grant |
 | `exos_org_legal`, `exos_credit_notes`, `exos_credit_note_counters` (tables), `exos_invoice_totals` (view) (mig 20261001100000) | OK | Legal details: RLS owner / manager / finance read and write, no anon grant, not a column of `exos_orgs` (so not in `exos_public_orgs` or visible to scanners). Credit notes: RLS read for the org's owner / manager / finance and the invoice's buyer; no client writes; frozen by trigger. Counters: RLS on, no client grants. The view is `security_invoker` |
 | `exos_next_credit_note_number`, `_exos_issue_credit_note`, `_exos_org_seller`, `exos_tg_refund_credit_note`, `exos_tg_invoice_seller`, `exos_tg_invoice_frozen`, `exos_tg_credit_note_frozen`, `exos_tg_org_legal_clean` (mig 20261001100000) | Internal | No client grant; triggers and the definer functions above only |
 | `exos_create_event_series`, `exos_notify_event_holders`, `exos_send_event_announcement`, `exos_send_event_reminder_now`, `exos_announce_to_followers`, `exos_event_analytics`, `exos_event_access_requests`, `exos_event_quotas`, `exos_event_refund_orders`, `exos_price_disclosure_export`, `exos_refund_preview` | OK | Org role looked up from the event / order row |
 | `exos_mint_tickets`, `exos_issue_comp_batch`, `exos_issue_ticket_to_email`, `exos_issue_voucher`, `exos_void_ticket`, `exos_release_ticket`, `exos_org_comp_usage`, `exos_set_org_comp_budget` | OK | Org role (owner / manager), comp budget enforced |
+| `exos_issue_comp_batch(…, p_request_key)` (mig 20261105100000) | OK | The keyed form; the 5-argument form forwards to it, so every comp batch goes through the twin guard. Same caller + key returns the first result (a different batch under the key is refused); with no key, the same caller's identical batch (event, ticket type, quantity, promoter, recipient set) within 10 minutes returns the first result. Serialized per caller + key / fingerprint by an advisory lock. Results in `exos_comp_batch_requests` (RLS: owner / manager read their org's; no client writes). The API passes `api:<key id>:<Idempotency-Key>` |
+| `exos_order_proof_resend`, `exos_org_order_proofs` (mig 20261105100000) | OK | Owner / manager of the order's org (or admin); another org's order answers "order not found". Resend sends an order still waiting for proof to a corrected email: the pending claim links are cancelled and new ones mailed (the original email is kept on the row); refused for a refunded order, one already in an account, and after 5 resends. The list returns emails of guest orders for one event, owner / manager only |
+| `exos_door_code_lookup` (mig 20261105100000) | OK | Door staff of the event (`exos_can_door_event`): the guest an imported code belongs to, exact match first, else the only entry whose code matches with punctuation dropped (two loose matches: none, so the door asks for the name). Returns an entry id only |
+| Guest email = payer (mig 20261105100000): `_exos_refund_ask_payer_ok`, `_exos_resched_actor_ok`, `exos_my_reschedule_offers`, `exos_my_invoices`, `exos_invoice_document`, `exos_my_refund_asks` | OK | A confirmed account whose email matches a guest order counts as its payer (or parked holder) only when `_exos_guest_email_ok` says the order's email was proven: the mailed code (`proven_via = email_code`) or the organizer's resend to a corrected address (`organizer`), for that address. A phone proof proves no email. Orders with no proof row (from before proofs) keep the plain email match; `buyer_uid` matches are unchanged. So a confirmed account at a mistyped address gets no receipt, refund ask or reschedule offer for a stranger's order |
+| `exos_name_has_email` (mig 20261105100000) | OK (not definer) | Immutable text check (is there an email in this name?), granted to anon / authenticated so forms can share the database's rule; reads nothing |
 | `exos_create_api_key`, `exos_list_api_keys`, `exos_revoke_api_key` | OK | Org role; listing shows the prefix only, never the key |
 | `exos_upsert_promoter`, `exos_set_promoter_status`, `exos_set_promoter_terms`, `exos_org_promoter_stats`, `exos_org_promoter_commissions`, `exos_record_promoter_payout` | OK | Org role on the promoter's org |
 | `exos_set_referral_reward_rule`, `exos_get_referral_reward_rule`, `exos_delete_referral_reward_rule`, `exos_referral_leaderboard` | OK | Org role; leaderboard masks emails |
@@ -245,6 +253,9 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_partner_caps`, `exos_set_partner_caps` (mig 20261104200000) | OK | Per-partner caps: owner / manager of the event's org (`exos_has_org_role`), looked up from the event; partners and tiers must be the org's / the event's. Table `exos_partner_caps`: RLS owner / manager read, no client writes. `_exos_partner_cap_used`, `_exos_partner_cap_left`, `_exos_partner_cap_check`, `_exos_partner_caps_json`, `_exos_partner_caps_set` are service role only (exos-api, `events:*`); the check runs inside `_exos_partner_reserve` under a per-partner, per-event advisory lock |
 | `exos_org_pending_members`, `exos_org_member_approve`, `exos_org_member_reject`, `exos_set_invite_approval` (mig 20261104200000) | OK | Invite approval. List: owner / manager of the org (returns claimers' account emails to them only). Approve / reject: an owner, or a manager for finance / content / scanner (`_exos_member_decider`, no client grant), never for oneself. The switch: owner. A pending member is `disabled`, so no `exos_has_org_role` check passes; trigger `_exos_tg_membership_approval` refuses clients (`current_user` authenticated / anon) changing the approval columns or enabling a pending row |
 | `exos_pos_recount_drawer` (mig 20261104200000) | OK | Owner / manager of the drawer's org (door staff close drawers but don't recount), a closed drawer, 7 days, 3 recounts, a reason, no final settlement; the replaced count goes to `exos_pos_drawer_recounts` (RLS owner / manager / finance read, no client writes) |
+| `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
+| `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
+| `exos_staff_clock_in`, `exos_staff_clock_out`, `exos_staff_shift_close`, `exos_staff_shift_report` (mig 20261105120000) | OK | Clock in / out: the caller only, as an active member of the org (the role is kept on the shift). Close a forgotten shift (with a reason) and the report: owner / manager. `exos_staff_shifts`: RLS own rows for members, all for owner / manager, no client writes |
 | `exos_event_in_app_report` (mig 20261105140000) | OK | Checkouts started / paid / tickets / gross per in-app browser (Instagram, Facebook, ...) and per escape source, for one event: owner / manager / finance of the event's org (`exos_has_org_role`, event looked up first; an unknown event and a refused caller are the same 42501). Counts and money only, no buyers. No anon grant. `_exos_in_app_browser_from_ua` (pure) and the insert trigger `_exos_tg_checkout_in_app_browser` (invoker, reads only NEW) have no client grant; the new `exos_checkout_sessions.in_app_browser` column is read under the existing `exos_checkout_sel` RLS (the buyer and the org's owner / manager / finance) |
 | All anon-callable functions above | as above | authenticated also holds them |
 
@@ -272,6 +283,61 @@ policy and write only whitelisted columns; server-owned columns are refused.
 Each write is logged in `exos_api_writes` (owner / manager can read their
 org's rows); refunds and comps are flagged `money_moving`. Tests:
 `tests/exos/test_core_api.sql` (C1-C16), races: `tests/exos/race_core_api.sh`.
+
+### The fan API and account tokens (mig 20261105110000)
+
+`exos-api` `/v1/me/…` (docs/api/me.json) acts for the token's own user. One
+service-role function, `exos_api_me(token_hash, kind, action, target, args)`,
+re-resolves the bearer from its hash (`exos_api_token_auth`, then
+`exos_api_account_token_auth`), so only a personal access token, an account
+token or an OAuth token has a user; an org API key's hash, a revoked or
+expired token or a member who left is 42501. It checks `me:read` / `me:write`
+(a `:write` covers its `:read`; the legacy `read` never covers `me:read`), sets
+the request claims to that user, calls the app's own signed-in RPC
+(`exos_bulk_create_transfers`, `exos_cancel_transfer`, `exos_claim_transfer`,
+`exos_ask_refund`, `exos_my_*`, `exos_wallet_*`, `exos_set_marketing_emails`,
+`exos_create_personal_token`, …) and puts the claims back. Points to review:
+
+- **User scopes.** `me:read` / `me:write` are in every role's token default
+  (`exos_role_token_scopes`) and never an org API key's: trigger
+  `exos_api_keys_no_user_scopes` refuses them on `exos_api_keys`, and
+  `_exos_tg_org_role_scopes` drops them from a role's org-configured set (they
+  are the user's, not the org's to set).
+- **Isolation.** Every row is filtered by the token's user id in SQL: tickets
+  by `owner_id`, orders by `buyer_uid`, transfers by sender (or a pending one
+  addressed to the user's confirmed email), refund requests and memberships
+  through the user's own RPCs. Another user's id answers 404, as one that
+  doesn't exist. An order's default transfer / refund set is the tickets the
+  user still holds.
+- **Barcodes.** Ticket detail carries the live 30-second code
+  (`T-<ticket>:<owner>:<bucket>:<mac>`, `_exos_door_code_mac` with the day key,
+  as the app and `exos_ticket_link_view`), only for an active ticket the user
+  holds, of an event not cancelled, not in a pending transfer. Lists never
+  carry a code; nothing returns `barcode_secret`. Wallet passes go through
+  `exos_wallet_issue_pass` / `exos_wallet_season_pass` (same transfer lock).
+- **Tokens from tokens.** Only a personal or account token (never an OAuth
+  app) lists, mints or revokes the user's tokens; a new one gets at most the
+  maker's effective scopes and never outlives it (its `expires_at` is clamped
+  to the maker's), a personal token mints only for its own org (and
+  `exos_create_personal_token`'s role rules hold), an account token only
+  account tokens.
+- **Account tokens** (`exos_account_tokens`): `exos_pat_…`, SHA-256 at rest,
+  shown once, for a user with no organization, `me:*` only (CHECK and the
+  create RPC), at most 10 active, 30 / 90 / 365 days or none, email confirmed
+  first. RLS: the user reads their own rows; no column grant on `key_hash`;
+  writes through `exos_create_account_token` / `exos_revoke_account_token`
+  (authenticated, `auth.uid()`) and `_exos_account_token_revoke_self`
+  (service role: `DELETE /v1/personal-access-tokens/current`). exos-api lets
+  an account token call `/v1/me/…`, `GET /v1/me` and that revoke only.
+
+The same migration's org writes (`exos_api_gap_write`: series, fee rules, API
+keys, orphaned seats, imported attendees, membership scans and gifts, gift
+card issue, offline donations) follow `exos_api_write`'s pattern below, with
+the key's effective scopes (`_exos_api_key_scopes`) and its creator's live
+role per action (`_exos_api_gap_action_roles` → `_exos_api_key_actor`; API
+keys: owner only, never above the making key's scopes, never a user scope,
+the new key's plaintext returned once and never logged). Every target is
+pinned to the key's org first. Tests: `tests/exos/test_fan_api.sql` (FA1-FA10).
 
 ### Organizer-controlled access (mig 20261104180000)
 
@@ -318,6 +384,43 @@ org; writes need a key whose creator holds the role now,
   the grantee key's creator (owner / manager now, `_exos_api_key_actor` in
   the SQL) and are logged in `exos_cohost_event_edits`.
 
+### Printed tickets, team switching, Tixel (mig 20261105120000)
+
+Nothing new is granted to anon. Points to review:
+
+- **Print codes are door credentials.** 128 random bits, shown once, stored as
+  SHA-256 only; never in `exos_api_writes` (the log keeps ticket ids and
+  counts). One live code a ticket (partial unique index); while live, the
+  ticket's `T-` / `W-` codes are refused, so a paper and a phone can't both
+  admit. The door spends it in the same transaction as the ticket (a row
+  update `WHERE status = 'active'`), and a trigger spends or voids it on any
+  other admission, transfer, refund / release / void or secret change.
+  Door phones get only its hash (`p` in the door keys). A print is never
+  replayed from an Idempotency-Key; print answers are `no-store`, the HTML
+  page has no script and a `default-src 'none'` CSP. Races:
+  `tests/exos/race_print_codes.sh`.
+- **`X-Exos-Org`** (`exos_api_token_auth_org`, service role): opt-in per
+  personal access token (`multi_org`, chosen at creation, fixed by trigger
+  `exos_personal_tokens_multi_org`; existing tokens are pinned and get 403
+  `token_pinned_to_org`). An opt-in token acts in another org only while its
+  user is an active member there, at the role there (the same narrowing as a
+  token made in that org). OAuth tokens never switch (consent was for one org); an org API
+  key naming another org is refused. The token's revocation still follows
+  its home org (leaving the home org revokes it everywhere).
+  An account token (mig 20261105110000) has no org at all:
+  `exos_api_token_auth_org` returns nothing for it and exos-api answers 403
+  `account_no_org` when it names one; a token minted through
+  `POST /v1/me/personal-access-tokens` is always pinned, even from an opt-in
+  parent (`tests/exos/test_wave3_integration.sql` W2, W3).
+- **`exos-tixel-webhook`** is public (no JWT). The secret in `X-Secret` is
+  compared in constant time against `EXOS_TIXEL_WEBHOOK_SECRETS` (an env
+  var, 16+ characters a secret, one org each); unset = 404. It writes only
+  through `_exos_tixel_ingest` (service role): a waitlist row for the one
+  upcoming published event of that org with the Tixel title, never consent,
+  never another org. 32 KB bodies, 120 a minute per org; nothing is sent to
+  Tixel.
+
+### Search path
 ### Search path
 
 `exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function

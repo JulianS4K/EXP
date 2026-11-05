@@ -51,6 +51,46 @@ expiry 30 / 90 / 365 days or none. Shown once (`exos_pat_` + 43 characters); onl
 13-character prefix are kept. A confirmed email is required; at most 25 live tokens per user. Revoke in the same
 panel, or with the token itself: `DELETE /v1/personal-access-tokens/current`.
 
+### Acting in another organization (`X-Exos-Org`)
+
+Mig `20261105120000`. Opt-in per token: when making a token, tick **Works across all my organizations**
+(`exos_create_personal_token(…, p_multi_org => true)`, column `multi_org`). It is chosen at creation and can't be
+changed afterwards (a trigger refuses it), so a token made for one organization never starts working on another;
+every token made before this, and every token made without the box, is pinned. An opt-in token works in its own
+organization, and in any other organization its user is an active member of when the request names it:
+`X-Exos-Org: <organization id>`. Every such request is held to the user's live role **there** (and that
+organization's role settings, mig `20261104180000`), exactly as a token made there would be; `GET /v1/me` then shows
+`credential.home_org_id`. Not a member there (removed or disabled): 403. A pinned token naming another organization:
+403 `{"error": "token_pinned_to_org"}`. Opendate's
+`PUT /team_memberships/{id}/switch` changes its web app's current team; the dashboard's organization picker does that
+here. OAuth access tokens stay in the organization the user approved the app for, and an org API key is its
+organization: either one naming another organization gets 403 (`exos_api_token_auth_org`). An account token (below) has no
+organization at all: naming one gets 403 `{"error": "account_no_org"}`.
+
+## The fan API and account tokens
+
+`/v1/me/…` (docs/api/me.json, mig 20261105110000) is the token's own user:
+their tickets (ticket detail carries the live 30-second barcode, never its
+secret), orders, transfers (start, cancel, claim), memberships, season passes
+and flex packs, refund requests, Apple / Google wallet passes, tokens, profile
+and marketing preference. It takes the user scopes `me:read` / `me:write`,
+which every role may give its own tokens and no organization API key can
+carry (an org key has no user and is refused). Each call runs the app's own
+signed-in RPC as that user, so transfer locks, claim keys and refund windows
+hold exactly as in the app.
+
+- **Personal access tokens** and **OAuth tokens** reach `/v1/me` when they
+  hold `me:*`.
+- **Account tokens** are for a user with no organization (any fan): Profile →
+  Developer → Account token, `me:read` or `me:read` + `me:write`, 30 / 90 /
+  365 days or none, at most 10 active. Same `exos_pat_…` format, SHA-256 at
+  rest, shown once. They call `/v1/me/…`, `GET /v1/me` and
+  `DELETE /v1/personal-access-tokens/current`, nothing else.
+- **Tokens from tokens** (`POST /v1/me/personal-access-tokens`, Opendate's
+  `POST /personal_access_tokens`): a personal or account token mints another
+  for its user, with at most its own scopes and never outliving it. OAuth apps
+  can't.
+
 ## OAuth apps
 
 Register at `/developers/apps`: name, homepage, redirect URIs, the scopes the app may ask for, and the type.
@@ -126,7 +166,7 @@ routes are in `docs/api/team.json`: `GET/PATCH /v1/team`, `GET /v1/team/members`
 | `POST /oauth/token` grant_type=password ("Log in") | not built: apps never see a password; use the code flow or a personal token |
 | `POST /personal_access_tokens` | Profile → Developer (`exos_create_personal_token`, signed in) |
 | `DELETE /personal_access_tokens/current` | `DELETE /v1/personal-access-tokens/current` |
-| `GET /team_memberships`, `PUT …/{id}/switch` | `GET /v1/me/memberships`; switching doesn't apply (a token is pinned to one org) |
+| `GET /team_memberships`, `PUT …/{id}/switch` | `GET /v1/me/memberships`; switching: the dashboard's org picker, and `X-Exos-Org` on a personal access token (above) |
 | `GET/PATCH /teams/{id}` | `GET/PATCH /v1/team` |
 | `GET /teams/{id}/team_memberships`, `PATCH/DELETE …/{id}` | `GET /v1/team/members`, `PATCH/DELETE /v1/team/members/:id` |
 | `GET/POST /teams/{id}/invitations`, `DELETE …/{id}` | `GET/POST /v1/team/invitations`, `DELETE /v1/team/invitations/:id` |

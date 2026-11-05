@@ -16,6 +16,7 @@ import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { marketTitle } from '../marketplace/eventStandard.ts';
 import { mdToPlain } from '../richText.ts';
 import { eventPageUrl } from '../googleEvents/feed.ts';
+import { isSoldOut } from '../capacity.ts';
 
 export interface CopyEventRow {
   id: string;
@@ -113,7 +114,7 @@ const clock = (p: Record<string, string>) => `${p.hour}:${p.minute} ${(p.dayPeri
 export function priceRange(tiers: readonly CopyTierRow[], currency: string, now: Date): string {
   if (!tiers.length) return '';
   const selling = tiers.filter((t) => !(t.sales_end && Date.parse(t.sales_end) < now.getTime())
-    && !(Number(t.capacity) > 0 && Number(t.sold) >= Number(t.capacity)));
+    && !(t.capacity != null && isSoldOut(t.capacity, t.sold)));  // capacity 0 = closed
   const use = selling.length ? selling : tiers;
   const cents = use.map((t) => allInCents(Math.round(effectiveTierPrice(Number(t.price), t.price_schedule, now) * 100), Number(t.exclusive_tax_percent) || 0));
   const lo = Math.min(...cents), hi = Math.max(...cents);

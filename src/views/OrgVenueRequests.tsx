@@ -9,11 +9,13 @@
 //     events other venues shared with this org.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { getUserRoleInOrg } from '../lib/orgs';
+import { useOrganization } from '../context/OrganizationContext';
+import { orgTypeDefaults, parseOrgType } from '../lib/eventLocation';
 import { listVenues } from '../lib/bookingApi';
 import DataTable from '../components/DataTable';
 import { BTN, BTN_PRIMARY, FLD, LABEL, Section, StatusBadge } from '../components/finance/ui';
@@ -36,7 +38,15 @@ export default function OrgVenueRequests() {
   const { user, isAdmin } = useAuth();
   const { toast } = useToast();
   const [role, setRole] = useState<string | null | undefined>(undefined);
-  const [tab, setTab] = useState<Tab>('received');
+  // ?tab=sent&q=… (from an event's "this venue is on Exos" suggestion). An org
+  // with no venue (promoter / collective, mig 20261105130000) opens on Sent.
+  const [params] = useSearchParams();
+  const { orgs } = useOrganization();
+  const noVenue = orgTypeDefaults(parseOrgType(orgs.find((o) => o.org.id === orgId)?.org.orgType)).hideVenueManagement;
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = params.get('tab');
+    return t === 'sent' || t === 'shared' || t === 'received' ? t : noVenue ? 'sent' : 'received';
+  });
   const [received, setReceived] = useState<VenueRequest[]>([]);
   const [sent, setSent] = useState<VenueRequest[]>([]);
   const [grants, setGrants] = useState<PartnerGrant[]>([]);
@@ -101,7 +111,7 @@ export default function OrgVenueRequests() {
       </>)}
 
       {tab === 'sent' && (<>
-        {canDecide && <NewRequest orgId={orgId} onErr={onErr} onDone={() => { load(); toast({ kind: 'success', message: 'Request sent.' }); }} />}
+        {canDecide && <NewRequest orgId={orgId} initialQuery={params.get('q') ?? ''} onErr={onErr} onDone={() => { load(); toast({ kind: 'success', message: 'Request sent.' }); }} />}
         <LinkRecords orgId={orgId} canEdit={canDecide} onErr={onErr} />
         <DataTable<VenueRequest> label="Requests sent" rows={sent} rowKey={(x) => x.id}
           searchFields={(x) => [x.title, x.venue_org.name, x.venue.name]} searchPlaceholder="Search show, venue"
@@ -245,8 +255,8 @@ function LinkRecords({ orgId, canEdit, onErr }: { orgId: string; canEdit: boolea
   );
 }
 
-function NewRequest({ orgId, onDone, onErr }: { orgId: string; onDone: () => void; onErr: (e: unknown) => void }) {
-  const [q, setQ] = useState('');
+function NewRequest({ orgId, initialQuery = '', onDone, onErr }: { orgId: string; initialQuery?: string; onDone: () => void; onErr: (e: unknown) => void }) {
+  const [q, setQ] = useState(initialQuery.slice(0, 100));
   const [found, setFound] = useState<DirectoryVenue[]>([]);
   const [venue, setVenue] = useState<DirectoryVenue | null>(null);
   const [room, setRoom] = useState('');

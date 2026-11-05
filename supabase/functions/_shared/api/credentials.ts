@@ -66,10 +66,15 @@ export const ROLE_SCOPES: Record<OrgRole, readonly Scope[]> = {
   manager: [
     'events:read', 'events:write', 'orders:read', 'tickets:read', 'tickets:write', 'checkin:write',
     'booking:read', 'booking:write', 'finance:read', 'finance:write', 'commerce:read', 'commerce:write',
+    'me:read', 'me:write',
   ],
-  finance: ['events:read', 'orders:read', 'tickets:read', 'booking:read', 'finance:read', 'finance:write', 'commerce:read'],
-  content: ['events:read', 'events:write', 'booking:read'],
-  scanner: ['events:read', 'tickets:read', 'checkin:write'],
+  finance: [
+    'events:read', 'orders:read', 'tickets:read', 'booking:read', 'finance:read', 'finance:write', 'commerce:read',
+    'me:read', 'me:write',
+  ],
+  // me:* is the token's own user (mig 20261105110000): every role may grant it.
+  content: ['events:read', 'events:write', 'booking:read', 'me:read', 'me:write'],
+  scanner: ['events:read', 'tickets:read', 'checkin:write', 'me:read', 'me:write'],
 };
 
 export const ROLE_INFO: Record<OrgRole, string> = {

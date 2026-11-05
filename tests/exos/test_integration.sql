@@ -50,7 +50,7 @@ INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold,
   ('1e000000-0000-0000-0000-0000000000d3', '1e000000-0000-0000-0000-0000000000e2', 'Comp crew', 0, 100, 0, 'hidden', 2),
   ('1e000000-0000-0000-0000-0000000000d4', '1e000000-0000-0000-0000-0000000000e3', 'GA', 25, 300, 0, 'public', 1),
   ('1e000000-0000-0000-0000-0000000000d5', '1e000000-0000-0000-0000-0000000000e3', 'Timed GA', 25, 300, 0, 'public', 2),
-  ('1e000000-0000-0000-0000-0000000000d6', '1e000000-0000-0000-0000-0000000000e4', 'GA', 20, 0, 0, 'public', 1);
+  ('1e000000-0000-0000-0000-0000000000d6', '1e000000-0000-0000-0000-0000000000e4', 'GA', 20, 100, 0, 'public', 1);
 
 CREATE FUNCTION pg_temp.act(p_uid text) RETURNS void LANGUAGE sql AS $$
   SELECT set_config('app.uid', coalesce(p_uid, ''), true), set_config('app.jwt', '', true);
@@ -379,7 +379,8 @@ END $$;
 DO $$
 DECLARE s text;
 BEGIN
-  ASSERT cardinality(public.exos_api_scope_names()) = 18
+  -- 20 since the fan API (mig 20261105110000) added me:read / me:write.
+  ASSERT cardinality(public.exos_api_scope_names()) = 20
      AND 'refunds:write' = ANY (public.exos_api_scope_names()) AND 'fans:read' = ANY (public.exos_api_scope_names()),
     'I6: the scope list is the union';
   ASSERT public.exos_role_token_scopes('owner') = public.exos_api_scope_names(), 'I6: an owner''s token may hold every scope';

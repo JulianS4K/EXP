@@ -14,6 +14,8 @@
 // for { type: 'vibepass:resize' }; they keep getting that (height only, to '*')
 // and nothing else.
 
+import { capacityLeft, isSoldOut } from '../../supabase/functions/_shared/capacity.ts';
+
 export const EMBED_RESIZE = 'exos:resize';
 export const EMBED_COMPLETE = 'exos:checkout-complete';
 export const LEGACY_RESIZE = 'vibepass:resize';
@@ -116,13 +118,13 @@ export type EmbedTier = {
 };
 
 /** Tiers a fan can pick in the embed right now: public, inside the sale
- *  window, not sold out (capacity 0 = unlimited). */
+ *  window, not sold out (capacity 0 = closed, never unlimited). */
 export function buyableTiers<T extends EmbedTier>(tiers: T[] | undefined, now = Date.now()): T[] {
   return (tiers ?? []).filter((t) => {
     if ((t.visibility ?? 'public') !== 'public') return false;
     if (t.salesStart && t.salesStart.toMillis() > now) return false;
     if (t.salesEnd && t.salesEnd.toMillis() < now) return false;
-    if (t.capacity > 0 && (t.sold || 0) >= t.capacity) return false;
+    if (isSoldOut(t.capacity, t.sold)) return false;
     return true;
   });
 }
@@ -130,6 +132,5 @@ export function buyableTiers<T extends EmbedTier>(tiers: T[] | undefined, now = 
 /** Most tickets the picker offers for a tier (exos-checkout caps at 10). */
 export function maxQuantity(tier: EmbedTier, maxPerOrder?: number | null): number {
   const perOrder = Math.min(10, maxPerOrder && maxPerOrder > 0 ? maxPerOrder : 8);
-  if (tier.capacity > 0) return Math.max(0, Math.min(perOrder, tier.capacity - (tier.sold || 0)));
-  return perOrder;
+  return Math.min(perOrder, capacityLeft(tier.capacity, tier.sold));
 }

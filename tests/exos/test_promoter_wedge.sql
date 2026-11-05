@@ -30,10 +30,10 @@ INSERT INTO public.exos_events(id,org_id,name,status,starts_at,currency) VALUES
   ('0f0f0000-0000-0000-0000-0000000000e2','0f0f0000-0000-0000-0000-000000000001','PW Free Night','published',now()+interval '3 days','usd'),
   ('0f0f0000-0000-0000-0000-0000000000e3','0f0f0000-0000-0000-0000-000000000002','PW Other Night','published',now()+interval '3 days','usd');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
-  ('0f0f0000-0000-0000-0000-0000000000d1','0f0f0000-0000-0000-0000-0000000000e1','GA',20,0,0),
+  ('0f0f0000-0000-0000-0000-0000000000d1','0f0f0000-0000-0000-0000-0000000000e1','GA',20,100,0),
   ('0f0f0000-0000-0000-0000-0000000000d2','0f0f0000-0000-0000-0000-0000000000e2','RSVP',0,6,0),
-  ('0f0f0000-0000-0000-0000-0000000000d3','0f0f0000-0000-0000-0000-0000000000e2','VIP',25,0,0),
-  ('0f0f0000-0000-0000-0000-0000000000d4','0f0f0000-0000-0000-0000-0000000000e3','RSVP',0,0,0);
+  ('0f0f0000-0000-0000-0000-0000000000d3','0f0f0000-0000-0000-0000-0000000000e2','VIP',25,100,0),
+  ('0f0f0000-0000-0000-0000-0000000000d4','0f0f0000-0000-0000-0000-0000000000e3','RSVP',0,100,0);
 
 -- Promoters: P (10%, step after 2 -> 15%), Q (10%), R in org B.
 SELECT set_config('app.uid','0f0f0000-0000-0000-0000-0000000000a1',false);
@@ -696,7 +696,8 @@ BEGIN
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = '0f0f0000-0000-0000-0000-0000000000d2') = 5, 'PW15: never oversold';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_tickets WHERE order_ref = 'rsvp:' || (r2->>'rsvp_id')), 'PW15: no partial mint';
   r2 := public.exos_phone_rsvp_start('0f0f0000-0000-0000-0000-0000000000e2', 'Ed', '+12125550123', NULL, 1, NULL, true);
-  ASSERT r2->>'error' = 'sold_out', 'PW15: start refuses 2 with 1 left';
+  -- mig 20261105100000 (SIM-BUYER-31): says how many are left, not "sold out"
+  ASSERT r2->>'error' = 'not_enough_seats' AND (r2->>'seats_left')::int = 1, 'PW15: start refuses 2 with 1 left ' || r2::text;
   RAISE NOTICE 'OK  PW15 capacity holds under a race';
 END $$;
 

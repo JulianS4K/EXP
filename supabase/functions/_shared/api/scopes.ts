@@ -10,6 +10,11 @@
 //   * A `:write` scope covers the `:read` scope of the same resource.
 //   * `refunds:write` (mig 20261031110000) is the only scope that can refund;
 //     no other scope implies it.
+//   * `me:read` / `me:write` (mig 20261105110000) are USER scopes: the
+//     token's own user's tickets, orders, transfers and profile (/v1/me/…).
+//     Only a personal access token, an account token or an OAuth token can
+//     hold them (an org API key has no user; the SQL refuses them on a key),
+//     and the legacy `read` does not cover me:read.
 //
 // The vocabulary is the same as the Firebase build's (PR #1, server/apiScopes.ts)
 // so keys can be narrowed now for areas whose routes arrive later (booking,
@@ -37,6 +42,8 @@ export const SCOPES = [
   'commerce:write',
   'webhooks:read',
   'webhooks:write',
+  'me:read',
+  'me:write',
   'org:admin',
 ] as const;
 
@@ -64,6 +71,8 @@ export const SCOPE_INFO: Record<Scope, { label: string; description: string }> =
   'commerce:write': { label: 'Manage memberships and gift cards', description: 'Create and change those products and issue gift cards.' },
   'webhooks:read': { label: 'Read webhooks', description: 'Webhook endpoints and the event types they receive (never the signing secret).' },
   'webhooks:write': { label: 'Manage webhooks', description: 'Add, change and remove webhook endpoints.' },
+  'me:read': { label: 'Read your account', description: 'Your own tickets (with the live rotating barcode), orders, transfers, memberships, passes, refund requests, wallet passes and profile. User tokens only.' },
+  'me:write': { label: 'Act on your account', description: 'Transfer, claim and cancel your tickets, ask for refunds, edit your profile and email preferences. User tokens only.' },
   'org:admin': { label: 'Organization admin', description: 'Organization settings and members.' },
 };
 
@@ -71,17 +80,28 @@ export function isScope(s: unknown): s is Scope {
   return typeof s === 'string' && (SCOPES as readonly string[]).includes(s);
 }
 
-/** Every `:read` scope: what the legacy `read` scope stands for. */
-export const READ_SCOPES: readonly Scope[] = SCOPES.filter((s) => s.endsWith(':read'));
+/** Scopes about the token's own user (/v1/me/…): user tokens only, never an org API key. */
+export const USER_SCOPES: readonly Scope[] = ['me:read', 'me:write'];
+
+export function isUserScope(s: string): boolean {
+  return (USER_SCOPES as readonly string[]).includes(s);
+}
+
+/** What an organization API key may be given: every scope but the user scopes. */
+export const KEY_SCOPES: readonly Scope[] = SCOPES.filter((s) => !isUserScope(s));
+
+/** Every org `:read` scope: what the legacy `read` scope stands for (not me:read). */
+export const READ_SCOPES: readonly Scope[] = KEY_SCOPES.filter((s) => s.endsWith(':read'));
 
 /**
  * `granted` (a key's stored scopes) covers `needed`. The legacy `read` covers
- * every `:read`; a `:write` covers the `:read` of the same resource.
+ * every org `:read` (not me:read); a `:write` covers the `:read` of the same
+ * resource.
  */
 export function hasScope(granted: readonly string[], needed: Scope): boolean {
   if (granted.includes(needed)) return true;
   if (needed.endsWith(':read')) {
-    if (granted.includes(LEGACY_READ)) return true;
+    if (granted.includes(LEGACY_READ) && !isUserScope(needed)) return true;
     return granted.includes(needed.replace(/:read$/, ':write'));
   }
   return false;

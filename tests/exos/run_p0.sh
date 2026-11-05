@@ -162,7 +162,12 @@ for m in \
          20261104180000_exos_org_access \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
-         20261105140000_exos_ig_checkout; do
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build \
+         20261105130000_exos_promoter_events \
+         20261105140000_exos_ig_checkout \
+         20261105150000_exos_wave3_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -365,7 +370,12 @@ for m in \
          20261104180000_exos_org_access \
          20261104190000_exos_commission_methods \
          20261104200000_exos_small_ops \
-         20261105140000_exos_ig_checkout; do
+         20261105100000_exos_sim_decisions \
+         20261105110000_exos_fan_api \
+         20261105120000_exos_na_build \
+         20261105130000_exos_promoter_events \
+         20261105140000_exos_ig_checkout \
+         20261105150000_exos_wave3_integration; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -447,5 +457,13 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_acces
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_commission_methods.sql"
 # Partner caps, invite approval, drawer recount (mig 20261104200000; race: race_sim_partner.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_small_ops.sql"
+# Fan API: /v1/me, account tokens, the org writes of the gap list (mig 20261105110000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fan_api.sql"
+# claude/exos-na-build: printed tickets, box-office memberships, team switch, staff shifts, Tixel, retag (mig 20261105120000; race: race_print_codes.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_na_build.sql"
+# Promoter-run events: org type, location modes, secret address reveal (mig 20261105130000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_promoter_events.sql"
 # Instagram / Facebook in-app browser checkout: where checkouts start, the report (mig 20261105140000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ig_checkout.sql"
+# Wave 3 integration (mig 20261105150000): every #85/#87/#88/#89 patch survives the replay; account tokens and X-Exos-Org; closed types sold out in public discovery
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wave3_integration.sql"

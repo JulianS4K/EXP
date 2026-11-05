@@ -3,7 +3,9 @@
 // /v1/tickets/:id, Opendate-style ({ order: { first_name } }) or flat. The
 // database (exos_order_update / exos_ticket_update) re-checks everything;
 // this only shapes the request and answers a clear 400 before a round trip.
-// Pure, no imports.
+// Pure; its one import (nameGuard) is pure too.
+
+import { NAME_IS_EMAIL, nameLooksLikeEmail } from './nameGuard.ts';
 
 export class EditError extends Error {}
 
@@ -53,6 +55,7 @@ export function orderEditFields(body: Record<string, unknown>): Partial<Record<O
   if (out.phone_number && !PHONE_RE.test(out.phone_number)) throw new EditError('phone_number is not a phone number.');
   for (const k of ['first_name', 'last_name'] as const) {
     if ((out[k]?.length ?? 0) > 60) throw new EditError(`${k} is at most 60 characters.`);
+    if (nameLooksLikeEmail(out[k])) throw new EditError(`${k}: ${NAME_IS_EMAIL}`);
   }
   if ((out.notes?.length ?? 0) > 1000) throw new EditError('notes are at most 1000 characters.');
   return out;
@@ -74,6 +77,9 @@ export function ticketEditFields(body: Record<string, unknown>): Record<string, 
     out[k] = s === null ? null : s.trim();
   }
   if (Object.keys(out).length === 0) throw new EditError('nothing to change: send attendee_name (or first_name and last_name).');
+  for (const k of ['attendee_name', 'name', 'first_name', 'last_name']) {
+    if (nameLooksLikeEmail(out[k])) throw new EditError(`${k}: ${NAME_IS_EMAIL}`);
+  }
   return out;
 }
 

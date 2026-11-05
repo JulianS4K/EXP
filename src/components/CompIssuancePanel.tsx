@@ -10,9 +10,9 @@
 // The per-org comp budget (OrgSettings) is enforced server-side: a batch that
 // would exceed it is refused whole, and the error text says how much is left.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Gift, Send } from 'lucide-react';
-import { issueCompBatch, parseEmailList, summarizeCompBatch, type CompBatchRow } from '../lib/comps';
+import { issueCompBatch, newCompRequestKey, parseEmailList, summarizeCompBatch, type CompBatchRow } from '../lib/comps';
 import { useToast } from '../context/ToastContext';
 import type { Event } from '../types';
 
@@ -43,6 +43,10 @@ export default function CompIssuancePanel({
 
   const candidates = useMemo(() => parseEmailList(text), [text]);
   const tiers = event.ticketTiers ?? [];
+  // One request key per batch (mig 20261105100000): a double click or a retry
+  // of the same batch issues once; changing the batch starts a new one.
+  const requestKey = useRef(newCompRequestKey());
+  useEffect(() => { requestKey.current = newCompRequestKey(); }, [text, tierId, qty, promoter]);
 
   if (!canIssue) return null;
 
@@ -58,6 +62,7 @@ export default function CompIssuancePanel({
       )
     )
       return;
+    if (busy) return;
     setBusy(true);
     try {
       const result = await issueCompBatch({
@@ -66,7 +71,9 @@ export default function CompIssuancePanel({
         emails: candidates,
         qtyEach: qty,
         promoterId: promoter.trim() || null,
+        requestKey: requestKey.current,
       });
+      requestKey.current = newCompRequestKey();
       setRows(result);
       const s = summarizeCompBatch(result);
       const created = result.reduce((n, r) => n + r.ticketIds.length, 0);

@@ -15,6 +15,12 @@
 # This script applies only the listed files, each in ONE transaction together with its
 # history row, skips any already recorded (by name), and stops at the first error.
 # 20261027090000_exos_api_scopes was applied on 2026-11-04 (version 20261104184729).
+#
+# After the rollout: run scripts/verify-prod.sh (read-only) with the same DB_URL
+# plus SUPABASE_URL and SUPABASE_ANON_KEY. It checks that every migration above is
+# recorded, their objects exist, anon grants and RLS, the exos crons, that each
+# edge function is deployed and boots, and the platform settings rows. Exit 0 = no FAIL.
+#   bash scripts/verify-prod.sh all      # or: db | http
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REF=hzrizjeaxlqcxfrtczpq
@@ -62,6 +68,11 @@ MIGRATIONS=(
   20261104180000_exos_org_access    # exos-api / exos-mcp call exos_api_key_auth: apply before deploying them
   20261104190000_exos_commission_methods
   20261104200000_exos_small_ops
+  20261105100000_exos_sim_decisions
+  20261105110000_exos_fan_api       # exos-api's /v1/me, account tokens: apply before deploying exos-api
+  20261105120000_exos_na_build      # exos-api's X-Exos-Org calls exos_api_token_auth_org: apply before deploying exos-api
+  20261105130000_exos_promoter_events
+  20261105150000_exos_wave3_integration
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

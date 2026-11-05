@@ -67,7 +67,7 @@ export interface ParsedDoorCode {
  *  downgrade and fails the signature check. */
 export function parseDoorCode(raw: string, source: DoorSource): ParsedDoorCode {
   const v = normalizeCodePrefix((raw || '').trim());
-  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.includes(':');
+  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.includes(':');
   const id = v ? extractTicketIdFromAny(v) || v : null;
   // Ticket ids are UUIDs: anything over 128 chars can't be one.
   return { raw: v, ticketId: id && id.length <= 128 ? id : null, bare };
@@ -240,7 +240,8 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
     // local copy says why (clock skew, screenshot).
-    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key') {
+    // 'printed' too: the paper may have been voided since the download.
+    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key' && v.reason !== 'printed') {
       return { action: 'reject', ticketId, reason: 'invalid-barcode' };
     }
     return { action: 'ask-server', ticketId };

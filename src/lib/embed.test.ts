@@ -111,16 +111,19 @@ describe('buyableTiers / maxQuantity', () => {
     { id: 'soldout', price: 20, capacity: 5, sold: 5 },
     { id: 'later', price: 20, capacity: 0, sold: 0, salesStart: ts(now + 1) },
     { id: 'ended', price: 20, capacity: 0, sold: 0, salesEnd: ts(now - 1) },
-    { id: 'unlimited', price: 20, capacity: 0, sold: 0, salesStart: ts(now - 1), salesEnd: ts(now + 1) },
+    { id: 'window', price: 20, capacity: 50, sold: 0, salesStart: ts(now - 1), salesEnd: ts(now + 1) },
+    // capacity 0 is closed (mig 20261105100000), never unlimited
+    { id: 'closed', price: 20, capacity: 0, sold: 0, salesStart: ts(now - 1), salesEnd: ts(now + 1) },
   ];
   it('keeps public, on-sale, in-stock tiers', () => {
-    expect(buyableTiers(tiers, now).map((t) => t.id)).toEqual(['a', 'unlimited']);
+    expect(buyableTiers(tiers, now).map((t) => t.id)).toEqual(['a', 'window']);
     expect(buyableTiers(undefined)).toEqual([]);
   });
   it('caps quantity by order limit, remaining stock and 10', () => {
-    expect(maxQuantity({ id: 'x', price: 1, capacity: 0, sold: 0 })).toBe(8);
-    expect(maxQuantity({ id: 'x', price: 1, capacity: 0, sold: 0 }, 25)).toBe(10);
-    expect(maxQuantity({ id: 'x', price: 1, capacity: 0, sold: 0 }, 4)).toBe(4);
+    expect(maxQuantity({ id: 'x', price: 1, capacity: 100, sold: 0 })).toBe(8);
+    expect(maxQuantity({ id: 'x', price: 1, capacity: 100, sold: 0 }, 25)).toBe(10);
+    expect(maxQuantity({ id: 'x', price: 1, capacity: 100, sold: 0 }, 4)).toBe(4);
+    expect(maxQuantity({ id: 'x', price: 1, capacity: 0, sold: 0 })).toBe(0);  // closed
     expect(maxQuantity({ id: 'x', price: 1, capacity: 10, sold: 7 }, 8)).toBe(3);
     expect(maxQuantity({ id: 'x', price: 1, capacity: 10, sold: 12 })).toBe(0);
   });

@@ -37,11 +37,41 @@ export interface WalletPayload {
     format?: string | null;
   };
   org_name: string | null;
+  /**
+   * The event's location as this ticket's holder sees it (mig 20261105130000):
+   * the public part, plus `secret_location` once a secret address is revealed
+   * to an active or used ticket. Absent on older payloads.
+   */
+  location?: {
+    location_mode?: string | null;
+    venue_location?: string | null;
+    revealed?: boolean | null;
+    secret_location?: {
+      venue_name?: string | null;
+      address?: { street?: string | null; city?: string | null; region?: string | null; postal?: string | null; country?: string | null } | null;
+      directions?: string | null;
+    } | null;
+  } | null;
   /** W-…:a{epoch}:… — null once the pass is voided. */
   apple_code: string | null;
   /** 20-byte TOTP key, hex — null once the pass is voided. */
   google_key_hex: string | null;
   google_pattern: string;
+}
+
+/**
+ * A secret location revealed to this pass's ticket: its name, one address
+ * line and the directions. Null before the reveal, for other modes and for a
+ * void pass. Only per-ticket fields carry it (never Google's shared class).
+ */
+export function revealedLocation(p: WalletPayload): { name: string; line: string; directions: string | null } | null {
+  const s = p.location?.secret_location;
+  if (!s || !s.address || displayState(p) === "void") return null;
+  const a = s.address;
+  const region = [a.region, a.postal].map((x) => (x ?? "").trim()).filter(Boolean).join(" ");
+  const line = [a.street, a.city, region, a.country].map((x) => (x ?? "").trim()).filter(Boolean).join(", ");
+  if (!line) return null;
+  return { name: (s.venue_name ?? "").trim() || "Location", line, directions: (s.directions ?? "").trim() || null };
 }
 
 /** What the holder sees about the pass's state. */
