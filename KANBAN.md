@@ -47,6 +47,31 @@
 9. Rotate the Eventbrite credentials shared in chat; drop the `public.exos_paste_probe` table (still there on
    2026-11-04).
 
+## DICE gaps 2026-11-05 (from DICE's partner Ticket Holders API; operator: add and build)
+
+DICE's partner API (`partners-endpoint.dice.fm/graphql`) is read-only GraphQL, gated to partners: events,
+tickets + holders, extras, orders, returns, transfers, genres. Exos already covers that surface and adds writes,
+webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, in build order:
+
+1. **[building] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
+   dashboard. Exos then reads their events, ticket holders and fans into `/migrated-attendees`, like the
+   Eventbrite import. It is read-only toward DICE (GraphQL queries only). Only fans with `optInPartners` go onto
+   marketing lists. Also adds `docs/dice-coverage.md`, mapping each DICE type and field to Exos.
+2. **[building] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
+   ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
+   ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
+   References: pretix `Question`, hi.events `Question`.
+3. **[building] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
+   across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
+4. **[building] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by
+   quantity sold (early bird → GA → final), plus an optional door price. The all-in price and the feeds follow
+   the current step. DICE equivalent: `PriceTier` (allocation, time, faceValue, price, doorSalesPrice).
+5. **[building] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
+   city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
+   by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`.
+6. Later: a fee-change log after a sale (`Adjustment`), and a separate entry barcode for an add-on
+   (`Extra.hasSeparateAccessBarcode`).
+
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 
 How fans find events (social and word of mouth create demand; search, feeds and marketplaces capture it), and
