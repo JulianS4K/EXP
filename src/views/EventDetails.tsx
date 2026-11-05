@@ -54,6 +54,12 @@ import { isPrivateMode, parseLocationMode, publicLocation, salesOpen } from '../
 import TableTierInfo from '../components/TableTierInfo';
 import AddonSelector, { type AddonSelection } from '../components/AddonSelector';
 import CheckoutExtras, { type CheckoutExtrasValue } from '../components/CheckoutExtras';
+// Checkout questions (mig 20261106110000).
+import CheckoutQuestionsForm from '../components/CheckoutQuestionsForm';
+import {
+  answersBody as questionAnswersBody, claimFreeTicketsAnswered, draftProblems, EMPTY_DRAFT, getPublicQuestions, hasQuestions, ticketTiersFor,
+  type AnswerDraft, type PublicQuestions,
+} from '../lib/checkoutQuestions';
 import MemberPassRedeem from '../components/MemberPassRedeem';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
@@ -148,6 +154,18 @@ export default function EventDetails() {
   const [addonSel, setAddonSel] = useState<AddonSelection>({ items: [], totalCents: 0 });
   // Gift card + add-a-donation (mig 20261030130000).
   const [extras, setExtras] = useState<CheckoutExtrasValue>({});
+  // Checkout questions (mig 20261106110000): the organizer's questions and the
+  // buyer's answers, sent in the checkout request itself (no storage needed).
+  const [questions, setQuestions] = useState<PublicQuestions>({ questions: [], partySizes: {} });
+  const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(EMPTY_DRAFT);
+  const [showAnswerErrors, setShowAnswerErrors] = useState(false);
+  const questionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!id) return undefined;
+    let live = true;
+    getPublicQuestions(id).then((q) => { if (live) setQuestions(q); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [id]);
   const [voucher, setVoucher] = useState<AppliedVoucher | null>(null);
   // A hidden tier the applied voucher unlocks. The public tier list never
   // contains hidden tiers, so it's fetched separately (exos_voucher_tier).
@@ -406,6 +424,26 @@ export default function EventDetails() {
   // (exos-checkout + exos_fulfill_checkout) is built but stays dormant until
   // payments are switched on. No key → paid tiers show "Coming soon".
   const stripeEnabled = paymentsEnabled();
+
+  // Checkout questions: the ticket type of each ticket in the cart (a table
+  // type is asked per seat), what the order is asked, and the request body.
+  const questionTierId = selectedTierId ?? allTiers[0]?.id ?? null;
+  const questionTiers = questionTierId
+    ? ticketTiersFor(questionTierId, seatedSelected ? Math.max(1, seatSel.length) : quantity, questions.partySizes)
+    : [];
+  const asksQuestions = questionTierId !== null && hasQuestions(questions.questions, questionTiers);
+  const answerProblems = asksQuestions ? draftProblems(questions.questions, questionTiers, answerDraft) : {};
+  const answersFor = (tierId: string) =>
+    questionAnswersBody(questions.questions, ticketTiersFor(tierId, seatedSelected ? Math.max(1, seatSel.length) : quantity, questions.partySizes), answerDraft);
+  // Before any checkout: every required answer given and valid, or the
+  // problems shown under their fields.
+  const answersReady = (): boolean => {
+    if (!asksQuestions || Object.keys(answerProblems).length === 0) return true;
+    setShowAnswerErrors(true);
+    toast({ kind: 'info', message: 'Answer the organizer\'s questions first.' });
+    questionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return false;
+  };
   // Same routing rule as handlePurchase: anything priced needs checkout.
   const nominalPrice = (selectedTier ?? allTiers[0])?.price ?? event?.price ?? 0;
   // Sold on the organizer's own Eventbrite / pretix / hi.events / Luma shop (mig 20261016100000).
@@ -447,6 +485,7 @@ export default function EventDetails() {
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
         slotId: slotTier ? slotId : null,
+        answers: answersFor(tierId),
       });
       clearPrefill(event.id);
       setGuestOpen(false);
@@ -481,6 +520,7 @@ export default function EventDetails() {
   // prices the order exactly as Stripe checkout would.
   const goToPayPal = () => {
     if (!event) return;
+    if (!answersReady()) return;
     const tier = selectedTier ?? allTiers[0];
     if (!tier?.id) return;
     const cart: PayPalCart = {
@@ -488,6 +528,7 @@ export default function EventDetails() {
       currency: (event.currency || 'USD').toLowerCase(),
       addons: addonSel.items, voucherCode: voucher?.code, attribution,
       displayCents: Math.round((priceToDisplay * quantity) * 100) + addonSel.totalCents,
+      answers: answersFor(tier.id),
       at: Date.now(),
     };
     stashPayPalCart(cart);
@@ -521,6 +562,7 @@ export default function EventDetails() {
         adIds: checkoutAdIds(event.id),
         consent: checkoutConsent(),
         slotId: slotTier ? slotId : null,
+        answers: answersFor(tierId),
       });
       clearPrefill(event.id);
       if (event.orgId) {
@@ -567,6 +609,8 @@ export default function EventDetails() {
       toast({ kind: 'info', message: 'Pick a date and time slot first.' });
       return;
     }
+    // Checkout questions: answered before checkout, signed in or not.
+    if (!answersReady()) return;
     if (!user) {
       // Paid tickets: check out as a guest with just an email (unless the
       // organizer switched that off, or the code is a personal capacity-bypass
@@ -639,7 +683,16 @@ export default function EventDetails() {
     try {
       // Shared idempotency/order ref so any free $0 extras attach to this claim.
       const orderRef = crypto.randomUUID();
-      const ids = await claimFreeTickets({
+      // Checkout questions: the answered claim stores them with the tickets
+      // (exos_claim_free_tickets_answered); otherwise the plain claim.
+      const freeAnswers = answersFor(tier.id);
+      const ids = freeAnswers
+        ? await claimFreeTicketsAnswered({
+          eventId: event.id, tierId: tier.id, quantity,
+          promoterId: attribution.promoter ?? null, channel: attribution.utm_source ?? null,
+          orderRef, answers: freeAnswers,
+        })
+        : await claimFreeTickets({
         eventId: event.id,
         tierId: tier.id,
         quantity,
@@ -1396,6 +1449,21 @@ export default function EventDetails() {
                      ))}
                    </div>
                 </div>
+                )}
+
+                {/* Checkout questions (mig 20261106110000): before payment. */}
+                {asksQuestions && !externalShop && (
+                  <div ref={questionsRef}>
+                    <CheckoutQuestionsForm
+                      questions={questions.questions}
+                      ticketTiers={questionTiers}
+                      value={answerDraft}
+                      onChange={setAnswerDraft}
+                      problems={answerProblems}
+                      showErrors={showAnswerErrors}
+                      ticketNames={attendeeNames}
+                    />
+                  </div>
                 )}
 
                 <div className="space-y-6 mb-6">

@@ -57,10 +57,11 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    dashboard. Exos then reads their events, ticket holders and fans into `/migrated-attendees`, like the
    Eventbrite import. It is read-only toward DICE (GraphQL queries only). Only fans with `optInPartners` go onto
    marketing lists. Also adds `docs/dice-coverage.md`, mapping each DICE type and field to Exos.
-2. **[building] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
+2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
    ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
-   References: pretix `Question`, hi.events `Question`.
+   References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
+   `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
 3. **[building] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
    across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
 4. **[building] Price steps** (mig `20261106130000`). One ticket type moves through prices by date or by

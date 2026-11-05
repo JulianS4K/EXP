@@ -167,6 +167,8 @@ import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
 import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffice.ts";
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
+// claude/exos-checkout-questions (mig 20261106110000): checkout questions and answers.
+import { attachAnswers, attachAnswersPage, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers } from "./questions.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -416,6 +418,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (approval) return json(approval, 403);
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
+    if (isQuestionsError(e)) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -569,6 +572,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   if (LOCATION_ROUTES.has(route.id)) {
     return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
   }
+  // claude/exos-checkout-questions (mig 20261106110000): questions and answers.
+  if (QUESTION_ROUTES.has(route.id)) {
+    return await handleQuestions(route, { sb, orgId, keyId: c.key.id, params: c.params, page, body: c.body });
+  }
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
@@ -670,14 +677,15 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       // Never barcode_secret.
       const status = c.q.get("status");
       if (status !== null && !/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
-      return paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
+      // exos: checkout questions — each attendee's answers (attachAnswersPage).
+      return await attachAnswersPage(sb, paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
         let q = sb.from("exos_tickets")
           .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
             "order_ref, channel_source, created_at" + extra, { count: "exact" })
           .eq("event_id", id).eq("org_id", orgId);
         if (status !== null) q = q.eq("status", status);
         return q.order("created_at", { ascending: false }).order("id").range(page.from, page.to);
-      }), page);
+      }), page));
     }
 
     case "list-seats": {
@@ -761,6 +769,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           .eq("org_id", orgId).eq("session_id", sid).order("created_at"),
       ]);
       for (const r of [tickets, addons, refunds]) if (r.error) throw r.error;
+      await attachAnswers(sb, tickets.data); // exos: checkout questions
       return { data: { ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data } };
     }
 
@@ -1356,9 +1365,11 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
 
     case "complete-organizer-reservation": {
       const token = await ownReservation(c, null);
+      // exos: checkout questions — optional answers, stored before the mint.
+      const resBody = await reservationAnswers(sb, orgId, token, c.body);
       const out = await rpc(sb, "_exos_partner_reservation_complete", {
         p_org_id: orgId, p_partner_id: null, p_token: token,
-        p_attrs: reservationAttrs(unwrapParams(c.body, "ticket_reservation")), p_app_base: appBase(),
+        p_attrs: reservationAttrs(unwrapParams(resBody, "ticket_reservation")), p_app_base: appBase(),
       }) as Record<string, unknown>;
       if (out.status === "expired") throw new ApiError(410, "this reservation expired; nothing was sold", { reason: "expired" });
       return out.fresh ? new Created({ data: out.order }) : { data: out.order };

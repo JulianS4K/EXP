@@ -167,10 +167,16 @@ export function analyticsSummaryCsv(a: EventAnalytics, eventTitle: string): stri
 }
 
 /** Attendee export: one row per ticket (voided included, flagged). */
-export function attendeesCsv(tickets: Ticket[]): string {
+// answers: checkout questions (mig 20261106110000): one extra column per
+// question (lib/checkoutQuestions answerColumns), the ticket's or its order's.
+export function attendeesCsv(
+  tickets: Ticket[],
+  answers?: { columns: string[]; forTicket: (ticketId: string, orderRef?: string | null) => string[] },
+): string {
   const header = [
     'ticket_id', 'status', 'tier', 'attendee_name', 'buyer_email', 'price_paid', 'channel', 'promoter',
     'order_ref', 'purchased_at', 'checked_in_at', 'voided_at', 'voided_reason',
+    ...(answers?.columns ?? []),
   ];
   const rows = tickets.map((t) => [
     t.id,
@@ -186,6 +192,7 @@ export function attendeesCsv(tickets: Ticket[]): string {
     t.checkInDate ? t.checkInDate.toDate() : '',
     t.voidedAt ? t.voidedAt.toDate() : '',
     t.voidedReason ?? '',
+    ...(answers ? answers.forTicket(t.id, t.orderId) : []),
   ]);
   return toCsv(header, rows);
 }

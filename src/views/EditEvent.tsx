@@ -30,6 +30,7 @@ import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
 import AddonsEditor from '../components/AddonsEditor';
+import QuestionBuilder from '../components/QuestionBuilder';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
 import EventTemplateActions from '../components/EventTemplateActions';
@@ -1666,6 +1667,8 @@ export default function EditEvent() {
 
         {/* Add-ons & Merch — self-contained CRUD (not part of the form submit). */}
         {eventId && <AddonsEditor eventId={eventId} />}
+        {/* Checkout questions (mig 20261106110000): saved ticket types only. */}
+        {eventId && <QuestionBuilder eventId={eventId} tiers={originalTiers} />}
 
         {accessSupported && (
           <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">

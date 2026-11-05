@@ -1,0 +1,1045 @@
+{
+  "file": "questions",
+  "name": "Checkout questions and answers",
+  "order": 15.8,
+  "description": "Questions an event asks buyers at checkout (\"T-shirt size?\", \"Dietary needs?\", \"Company name\", \"I agree to the venue's photo policy\") and what buyers answered: docs/checkout-questions.md. A question is asked once per order (`scope: order`) or for every ticket (`scope: ticket`; a table ticket type is asked per seat), optionally only for some ticket types (`tier_ids`). Kinds: text, long_text, single_choice, multiple_choice, checkbox, number, date, phone, email. Answers are checked at checkout (required, options, lengths, ranges, one entry per ticket), stored on the order before payment and attached to each ticket as it is issued, with the question's label as it was at purchase (`label`; `current_label` is today's). `value` is the normalised answer (text, a number, true, or a list of options in the options' order) and `display` the same as text, which is DICE's `fanSurveyAnswers { fanSurveyQuestion { title } value }` (title = `label`, value = `display`). Every ticket in GET /v1/events/:id/attendees, GET /v1/orders/:id, GET /v1/tickets and GET /v1/tickets/:id carries its `answers` (its own and its order's). Deleting a question archives it: it is no longer asked, and its answers stay. Writes need an organization API key created by an owner or manager. POST /v1/events/:id/organizer-reservations/:token/complete takes optional `answers` ({ order, tickets }) for the reservation's tickets, checked the same way but never required.",
+  "endpoints": [
+    {
+      "id": "list-event-questions",
+      "method": "GET",
+      "path": "/v1/events/:id/questions",
+      "summary": "List an event's questions",
+      "description": "Every question of the event in order, archived ones last, each with its `answer_count`.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+                "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "label": "T-shirt size",
+                "help_text": "We print on the night.",
+                "kind": "single_choice",
+                "options": [
+                  "S",
+                  "M",
+                  "L",
+                  "XL"
+                ],
+                "required": true,
+                "scope": "ticket",
+                "tier_ids": null,
+                "max_length": null,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 0,
+                "hidden": false,
+                "archived": false,
+                "archived_at": null,
+                "created_at": "2026-11-05T12:00:00+00:00",
+                "updated_at": "2026-11-05T12:00:00+00:00",
+                "answer_count": 42
+              },
+              {
+                "id": "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "label": "I agree to the venue's photo policy",
+                "help_text": null,
+                "kind": "checkbox",
+                "options": [],
+                "required": true,
+                "scope": "order",
+                "tier_ids": null,
+                "max_length": null,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 1,
+                "hidden": false,
+                "archived": false,
+                "archived_at": null,
+                "created_at": "2026-11-05T12:00:00+00:00",
+                "updated_at": "2026-11-05T12:00:00+00:00",
+                "answer_count": 21
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-event-question",
+      "method": "POST",
+      "path": "/v1/events/:id/questions",
+      "summary": "Add a question",
+      "description": "Adds a question at the end of the event's list (at most 50 questions that aren't archived). Body: the fields below, or wrapped as `{ \"question\": {...} }`. Needs a key created by an owner or manager.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The question as buyers see it, 1 to 200 characters.",
+          "example": "T-shirt size"
+        },
+        {
+          "name": "help_text",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A line under the question, up to 500 characters.",
+          "example": "We print on the night."
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The answer type.",
+          "example": "single_choice",
+          "enum": [
+            "text",
+            "long_text",
+            "single_choice",
+            "multiple_choice",
+            "checkbox",
+            "number",
+            "date",
+            "phone",
+            "email"
+          ]
+        },
+        {
+          "name": "options",
+          "location": "body",
+          "type": "array of strings",
+          "required": false,
+          "description": "single_choice / multiple_choice: 2 to 50 distinct options of 1 to 200 characters. Other kinds have none.",
+          "example": [
+            "S",
+            "M",
+            "L",
+            "XL"
+          ]
+        },
+        {
+          "name": "required",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Buyers must answer it (a checkbox must be ticked). Default false. Making a question required later changes nothing for orders already placed.",
+          "example": true
+        },
+        {
+          "name": "scope",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "order: asked once per order. ticket: asked for every ticket (a table ticket type is asked per seat). Default order. Fixed once the question has answers.",
+          "example": "ticket",
+          "enum": [
+            "order",
+            "ticket"
+          ]
+        },
+        {
+          "name": "tier_ids",
+          "location": "body",
+          "type": "array of UUIDs",
+          "required": false,
+          "description": "Ask it only for these ticket types of the event; null or [] = every type.",
+          "example": [
+            "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
+          ]
+        },
+        {
+          "name": "max_length",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "text: 1 to 2000 (default 500); long_text: 1 to 5000 (default 2000).",
+          "example": 40
+        },
+        {
+          "name": "min_choices",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "multiple_choice: at least this many picks when answered.",
+          "example": 1
+        },
+        {
+          "name": "max_choices",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "multiple_choice: at most this many picks (up to the number of options).",
+          "example": 2
+        },
+        {
+          "name": "min_value",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "number: the smallest answer allowed.",
+          "example": 0
+        },
+        {
+          "name": "max_value",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "number: the largest answer allowed.",
+          "example": 120
+        },
+        {
+          "name": "hidden",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Not asked at checkout; staff can still fill it at the door (and this API reads it). Answers are kept.",
+          "example": false
+        },
+        {
+          "name": "archived",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Archive (true) or restore (false). Archived questions are no longer asked; their answers are kept.",
+          "example": false
+        },
+        {
+          "name": "sort_order",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Position; or use PUT /v1/events/:id/questions/order.",
+          "example": 0
+        }
+      ],
+      "request_example": {
+        "label": "T-shirt size",
+        "kind": "single_choice",
+        "options": [
+          "S",
+          "M",
+          "L",
+          "XL"
+        ],
+        "required": true,
+        "scope": "ticket"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "label": "T-shirt size",
+              "help_text": "We print on the night.",
+              "kind": "single_choice",
+              "options": [
+                "S",
+                "M",
+                "L",
+                "XL"
+              ],
+              "required": true,
+              "scope": "ticket",
+              "tier_ids": null,
+              "max_length": null,
+              "min_choices": null,
+              "max_choices": null,
+              "min_value": null,
+              "max_value": null,
+              "sort_order": 0,
+              "hidden": false,
+              "archived": false,
+              "archived_at": null,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00",
+              "answer_count": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field or definition.",
+          "example": {
+            "error": "choice questions need 2 to 50 options; other types have none"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key's creator is not an owner or manager.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "reorder-event-questions",
+      "method": "PUT",
+      "path": "/v1/events/:id/questions/order",
+      "summary": "Reorder an event's questions",
+      "description": "Puts the listed questions first, in this order; the others keep their order after them. Answers the list as GET does.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "question_ids",
+          "location": "body",
+          "type": "array of UUIDs",
+          "required": true,
+          "description": "Question ids of this event, each once.",
+          "example": [
+            "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+            "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+          ]
+        }
+      ],
+      "request_example": {
+        "question_ids": [
+          "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+          "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+        ]
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "label": "I agree to the venue's photo policy",
+                "help_text": null,
+                "kind": "checkbox",
+                "options": [],
+                "required": true,
+                "scope": "order",
+                "tier_ids": null,
+                "max_length": null,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 0,
+                "hidden": false,
+                "archived": false,
+                "archived_at": null,
+                "created_at": "2026-11-05T12:00:00+00:00",
+                "updated_at": "2026-11-05T12:00:00+00:00",
+                "answer_count": 21
+              },
+              {
+                "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+                "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "label": "T-shirt size",
+                "help_text": "We print on the night.",
+                "kind": "single_choice",
+                "options": [
+                  "S",
+                  "M",
+                  "L",
+                  "XL"
+                ],
+                "required": true,
+                "scope": "ticket",
+                "tier_ids": null,
+                "max_length": null,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 1,
+                "hidden": false,
+                "archived": false,
+                "archived_at": null,
+                "created_at": "2026-11-05T12:00:00+00:00",
+                "updated_at": "2026-11-05T12:00:00+00:00",
+                "answer_count": 42
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "An id twice or of another event.",
+          "example": {
+            "error": "a question id is not one of this event's"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-question",
+      "method": "GET",
+      "path": "/v1/questions/:id",
+      "summary": "Read a question",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The question's id.",
+          "example": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "label": "T-shirt size",
+              "help_text": "We print on the night.",
+              "kind": "single_choice",
+              "options": [
+                "S",
+                "M",
+                "L",
+                "XL"
+              ],
+              "required": true,
+              "scope": "ticket",
+              "tier_ids": null,
+              "max_length": null,
+              "min_choices": null,
+              "max_choices": null,
+              "min_value": null,
+              "max_value": null,
+              "sort_order": 0,
+              "hidden": false,
+              "archived": false,
+              "archived_at": null,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00",
+              "answer_count": 42
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such question in your organization.",
+          "example": {
+            "error": "question not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-question",
+      "method": "PATCH",
+      "path": "/v1/questions/:id",
+      "summary": "Change a question",
+      "description": "Changes the given fields and leaves the rest. Renaming keeps every answer with the label it was given under. Once a question has answers its `kind` and `scope` can't change (archive it and add a new one). Removing an option keeps the answers that chose it.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The question's id.",
+          "example": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The question as buyers see it, 1 to 200 characters.",
+          "example": "T-shirt size"
+        },
+        {
+          "name": "help_text",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A line under the question, up to 500 characters.",
+          "example": "We print on the night."
+        },
+        {
+          "name": "kind",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The answer type.",
+          "example": "single_choice",
+          "enum": [
+            "text",
+            "long_text",
+            "single_choice",
+            "multiple_choice",
+            "checkbox",
+            "number",
+            "date",
+            "phone",
+            "email"
+          ]
+        },
+        {
+          "name": "options",
+          "location": "body",
+          "type": "array of strings",
+          "required": false,
+          "description": "single_choice / multiple_choice: 2 to 50 distinct options of 1 to 200 characters. Other kinds have none.",
+          "example": [
+            "S",
+            "M",
+            "L",
+            "XL"
+          ]
+        },
+        {
+          "name": "required",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Buyers must answer it (a checkbox must be ticked). Default false. Making a question required later changes nothing for orders already placed.",
+          "example": true
+        },
+        {
+          "name": "scope",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "order: asked once per order. ticket: asked for every ticket (a table ticket type is asked per seat). Default order. Fixed once the question has answers.",
+          "example": "ticket",
+          "enum": [
+            "order",
+            "ticket"
+          ]
+        },
+        {
+          "name": "tier_ids",
+          "location": "body",
+          "type": "array of UUIDs",
+          "required": false,
+          "description": "Ask it only for these ticket types of the event; null or [] = every type.",
+          "example": [
+            "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
+          ]
+        },
+        {
+          "name": "max_length",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "text: 1 to 2000 (default 500); long_text: 1 to 5000 (default 2000).",
+          "example": 40
+        },
+        {
+          "name": "min_choices",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "multiple_choice: at least this many picks when answered.",
+          "example": 1
+        },
+        {
+          "name": "max_choices",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "multiple_choice: at most this many picks (up to the number of options).",
+          "example": 2
+        },
+        {
+          "name": "min_value",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "number: the smallest answer allowed.",
+          "example": 0
+        },
+        {
+          "name": "max_value",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "number: the largest answer allowed.",
+          "example": 120
+        },
+        {
+          "name": "hidden",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Not asked at checkout; staff can still fill it at the door (and this API reads it). Answers are kept.",
+          "example": false
+        },
+        {
+          "name": "archived",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Archive (true) or restore (false). Archived questions are no longer asked; their answers are kept.",
+          "example": false
+        },
+        {
+          "name": "sort_order",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Position; or use PUT /v1/events/:id/questions/order.",
+          "example": 0
+        }
+      ],
+      "request_example": {
+        "label": "Shirt size",
+        "options": [
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL"
+        ]
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "label": "Shirt size",
+              "help_text": "We print on the night.",
+              "kind": "single_choice",
+              "options": [
+                "S",
+                "M",
+                "L",
+                "XL",
+                "XXL"
+              ],
+              "required": true,
+              "scope": "ticket",
+              "tier_ids": null,
+              "max_length": null,
+              "min_choices": null,
+              "max_choices": null,
+              "min_value": null,
+              "max_value": null,
+              "sort_order": 0,
+              "hidden": false,
+              "archived": false,
+              "archived_at": null,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00",
+              "answer_count": 42
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field, or a kind / scope change after answers.",
+          "example": {
+            "error": "this question has answers: its type can't change (archive it and add a new one)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such question in your organization.",
+          "example": {
+            "error": "question not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "archive-question",
+      "method": "DELETE",
+      "path": "/v1/questions/:id",
+      "summary": "Archive a question",
+      "description": "Archives the question: buyers are no longer asked it, and its answers are kept. PATCH with `archived: false` restores it.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The question's id.",
+          "example": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the archived question.",
+          "example": {
+            "data": {
+              "id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "label": "T-shirt size",
+              "help_text": "We print on the night.",
+              "kind": "single_choice",
+              "options": [
+                "S",
+                "M",
+                "L",
+                "XL"
+              ],
+              "required": true,
+              "scope": "ticket",
+              "tier_ids": null,
+              "max_length": null,
+              "min_choices": null,
+              "max_choices": null,
+              "min_value": null,
+              "max_value": null,
+              "sort_order": 0,
+              "hidden": false,
+              "archived": true,
+              "archived_at": "2026-11-06T09:00:00+00:00",
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00",
+              "answer_count": 42
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such question in your organization.",
+          "example": {
+            "error": "question not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-question-answers",
+      "method": "GET",
+      "path": "/v1/events/:id/question-answers",
+      "summary": "List an event's answers",
+      "description": "One row per answer of every order that has tickets (an abandoned checkout's answers are not listed), oldest first: the order, the ticket and its number in the order (per-ticket answers), the label at purchase and today's, the answer, its source (checkout, free_claim, rsvp, door, api), the attendee, ticket type and status, and the buyer's email.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, from 1.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1 to 200.",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "answer_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "question_id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+                "order_ref": "cs_live_a1B2c3D4",
+                "ticket_id": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "ticket_index": 1,
+                "scope": "ticket",
+                "label": "T-shirt size",
+                "current_label": "Shirt size",
+                "kind": "single_choice",
+                "value": "M",
+                "display": "M",
+                "source": "checkout",
+                "attendee_name": "Ada Lovelace",
+                "tier_name": "GA",
+                "ticket_status": "active",
+                "buyer_email": "ada@example.com",
+                "question_archived": false,
+                "created_at": "2026-11-05T12:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in your organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-order-answers",
+      "method": "GET",
+      "path": "/v1/orders/:id/answers",
+      "summary": "An order's answers",
+      "description": "The order's answers: its own (`scope: order`) and each ticket's (`ticket_id`, `ticket_index`). `:id` is the order id (the checkout session id), or any ticket's `order_ref`.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order id (order_ref).",
+          "example": "cs_live_a1B2c3D4"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "question_id": "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "scope": "order",
+                "ticket_id": null,
+                "ticket_index": null,
+                "label": "I agree to the venue's photo policy",
+                "kind": "checkbox",
+                "value": true,
+                "display": "Yes",
+                "source": "checkout",
+                "created_at": "2026-11-05T12:00:00+00:00"
+              },
+              {
+                "question_id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+                "scope": "ticket",
+                "ticket_id": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "ticket_index": 1,
+                "label": "T-shirt size",
+                "kind": "single_choice",
+                "value": "M",
+                "display": "M",
+                "source": "checkout",
+                "created_at": "2026-11-05T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in your organization.",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-ticket-answers",
+      "method": "GET",
+      "path": "/v1/tickets/:id/answers",
+      "summary": "A ticket's answers",
+      "description": "The ticket's answers and its order's, as in the `answers` of the ticket endpoints.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket's id.",
+          "example": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "question_id": "6d2f3e4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "scope": "order",
+                "label": "I agree to the venue's photo policy",
+                "kind": "checkbox",
+                "value": true,
+                "display": "Yes"
+              },
+              {
+                "question_id": "5c1e2d3f-4a5b-4c6d-8e7f-901a2b3c4d5e",
+                "scope": "ticket",
+                "label": "T-shirt size",
+                "kind": "single_choice",
+                "value": "M",
+                "display": "M"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks the scope.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such ticket in your organization.",
+          "example": {
+            "error": "ticket not found"
+          }
+        }
+      ]
+    }
+  ]
+}
