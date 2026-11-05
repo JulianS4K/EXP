@@ -2,7 +2,7 @@
   "file": "capacity",
   "name": "Shared capacity and price steps",
   "order": 15.8,
-  "description": "Two inventory tools on top of ticket types. **Shared limits** (capacity pools; DICE's TicketPool): one allocation across several ticket types, e.g. a 500-cap room selling GA, VIP and Student while VIP keeps its own 50. A type sells only while every limit it is in has room, so its availability everywhere (the event page, GET /v1/public/…, the Google and catalog feeds, MCP) is the smallest of its own remaining and each limit's remaining; it shows sold out as soon as one of them is full. Holds, comps, partner reservations, marketplace allocations and refunds count against a limit exactly as they count against a type's capacity. allocation is required: 0 closes sales, there is no unlimited, and it can't go below what's sold. Publishing is blocked by a limit with no ticket types, or a ticket type on sale inside a closed limit. **Price steps** (DICE's PriceTier): one ticket type moves through prices on its own, e.g. Early bird $20 for the first 100 or until Dec 1, then $25 for 200, then $30, plus an optional door price. A step ends when its count is reached (tickets sold at it plus live checkouts holding it) or at its time, whichever comes first; the last step is the final price and has no end. Once a step's count has sold it stays ended (a refund doesn't bring the lower price back). An order is priced at one step: if it asks for more than the step has left, checkout answers 409 `price_step_remaining` with how many are left at this price (the cap rule). The price is locked when checkout reserves the tickets, so the buyer pays what they were shown even if the step moves while they pay. Every price a buyer sees (the event page, the public API, the feeds, MCP, partner sales) is the current step's, and the all-in price adds the organizer's passed-on fees and tax to it the same way everywhere; there are no fee lines. The door price is charged at the door (POS) when set. The older `price_schedule` field of a ticket type is the time-only form of its steps and stays readable and writable; a type whose steps end on a count has `price_schedule: []` and refuses a schedule write. Money is integer cents here.",
+  "description": "Two inventory tools on top of ticket types. **Shared limits** (capacity pools; DICE's TicketPool): one allocation across several ticket types, e.g. a 500-cap room selling GA, VIP and Student while VIP keeps its own 50. A type sells only while every limit it is in has room, so its availability everywhere (the event page, GET /v1/public/…, the Google and catalog feeds, MCP) is the smallest of its own remaining and each limit's remaining; it shows sold out as soon as one of them is full. Holds, comps, partner reservations, marketplace allocations and refunds count against a limit exactly as they count against a type's capacity. allocation is required: 0 closes sales, there is no unlimited, and it can't go below what's sold. Publishing is blocked by a limit with no ticket types, or a ticket type on sale inside a closed limit. **Price steps** (DICE's PriceTier): one ticket type moves through prices on its own, e.g. Early bird $20 for the first 100 or until Dec 1, then $25 for 200, then $30, plus an optional door price. A step ends when its count is reached (tickets sold at it plus live checkouts holding it) or at its time, whichever comes first; the last step is the final price and has no end. Once a step's count has sold it stays ended (a refund doesn't bring the lower price back). An order is priced at one step: if it asks for more than the step has left, checkout answers 409 `price_step_remaining` with how many are left at this price (the cap rule). The price is locked when checkout reserves the tickets, so the buyer pays what they were shown even if the step moves while they pay. Every price a buyer sees (the event page, the public API, the feeds, MCP, partner sales) is the current step's, and the all-in price adds the organizer's passed-on fees and tax to it the same way everywhere; there are no fee lines. The door price is charged at the door (POS) when set. The older `price_schedule` field of a ticket type is the time-only form of its steps and stays readable and writable; a type whose steps end on a count has `price_schedule: []` and refuses a schedule write. Money is integer cents here. **Who may write:** an organization API key (sk_live_…), acting as the member who created it: pool and price-step writes (and `door_price_cents` on PATCH /v1/events/:id/ticket-types/:tier) need that member to be an owner or manager now, as any ticket-type edit does; a key created by finance, content or scanner gets 403 even with events:write. Personal and OAuth tokens read these routes only. Reads need events:read, with no role rule (as GET ticket-type).",
   "endpoints": [
     {
       "id": "list-capacity-pools",
@@ -166,6 +166,13 @@
           "example": {
             "error": "insufficient scope",
             "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
           }
         },
         {
@@ -357,6 +364,13 @@
           }
         },
         {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
           "status": 409,
           "description": "Below what it has already sold (0 is always allowed).",
           "example": {
@@ -415,6 +429,13 @@
           "example": {
             "error": "insufficient scope",
             "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
           }
         },
         {
@@ -672,6 +693,13 @@
           "example": {
             "error": "insufficient scope",
             "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
           }
         },
         {

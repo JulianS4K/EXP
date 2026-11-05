@@ -24,6 +24,8 @@
 --        partner event JSON, discovery, listing feed, partner unit price,
 --        voucher tier, all-in)
 --   PS11 API cores: org scoping, steps + door price, validation
+--   PS12 price and door-price writes: only keys created by an owner or manager
+--   PS13 door_price_cents through PATCH ticket-type; exos_current_price
 -- ============================================================================
 \set ON_ERROR_STOP on
 \if :{?fixtures}
@@ -56,10 +58,26 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   ('b5700000-0000-0000-0000-000000000001', 'B57 One', 'b57-one', 'b5700000-0000-0000-0000-0000000000a1'),
   ('b5700000-0000-0000-0000-000000000002', 'B57 Two', 'b57-two', 'b5700000-0000-0000-0000-0000000000a3');
+INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
+  ('b5700000-0000-0000-0000-0000000000a4', 'b57-manager@x.com', now()),
+  ('b5700000-0000-0000-0000-0000000000a5', 'b57-finance@x.com', now()),
+  ('b5700000-0000-0000-0000-0000000000a6', 'b57-content@x.com', now());
 INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
   ('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000a1', 'owner'),
   ('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000a2', 'scanner'),
+  ('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000a4', 'manager'),
+  ('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000a5', 'finance'),
+  ('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000a6', 'content'),
   ('b5700000-0000-0000-0000-000000000002', 'b5700000-0000-0000-0000-0000000000a3', 'owner');
+-- API keys holding events:write, each created by one member: f1 owner,
+-- f2 scanner, f4 manager, f5 finance, f6 content (org one); f3 org two's owner.
+INSERT INTO public.exos_api_keys (id, org_id, name, key_prefix, key_hash, scopes, created_by)
+SELECT ('b5700000-0000-0000-0000-0000000000f' || x.n)::uuid, x.org::uuid, 'key ' || x.n, 'sk_live_b57' || x.n,
+       encode(extensions.digest('sk_live_b57_' || x.n, 'sha256'), 'hex'), ARRAY['events:read', 'events:write'],
+       ('b5700000-0000-0000-0000-0000000000a' || x.n)::uuid
+  FROM (VALUES ('1', 'b5700000-0000-0000-0000-000000000001'), ('2', 'b5700000-0000-0000-0000-000000000001'),
+               ('4', 'b5700000-0000-0000-0000-000000000001'), ('5', 'b5700000-0000-0000-0000-000000000001'),
+               ('6', 'b5700000-0000-0000-0000-000000000001'), ('3', 'b5700000-0000-0000-0000-000000000002')) x(n, org);
 INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, total_tickets, created_by) VALUES
   ('b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-000000000001', 'B57 Show', 'b57-show', 'published',
    now() + interval '30 days', 0, 'b5700000-0000-0000-0000-0000000000a1'),
@@ -183,8 +201,9 @@ BEGIN
   ASSERT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_price_steps'::regclass), 'PS2 RLS on';
   FOREACH s IN ARRAY ARRAY['public.exos_tier_current_price(uuid,timestamptz,text)', 'public.exos_tier_price_now(uuid,text)',
       'public.exos_hold_lock_price(uuid,uuid,integer)', 'public._exos_api_price_steps(uuid,uuid,uuid)',
-      'public._exos_api_price_steps_set(uuid,uuid,uuid,jsonb)', 'public._exos_price_steps_apply(uuid,jsonb)',
-      'public._exos_price_step_used(uuid)', 'public._exos_price_steps_json(uuid)'] LOOP
+      'public._exos_api_price_steps_set(uuid,uuid,uuid,uuid,jsonb)', 'public._exos_price_steps_apply(uuid,jsonb)',
+      'public._exos_price_step_used(uuid)', 'public._exos_price_steps_json(uuid)',
+      'public.exos_current_price(public.exos_ticket_tiers)'] LOOP
     ASSERT NOT has_function_privilege('anon', s, 'EXECUTE'), 'PS2 anon can''t run ' || s;
     ASSERT NOT has_function_privilege('authenticated', s, 'EXECUTE'), 'PS2 authenticated can''t run ' || s;
   END LOOP;
@@ -443,26 +462,93 @@ BEGIN
   s := pg_temp.st($q$SELECT public._exos_api_price_steps('b5700000-0000-0000-0000-000000000002',
         'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1')$q$);
   ASSERT s LIKE 'P0002 %', 'PS11 another org''s key reads nothing: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000002',
+  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000002', 'b5700000-0000-0000-0000-0000000000f3',
         'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1', '{"steps":[]}')$q$);
   ASSERT s LIKE 'P0002 %', 'PS11 another org''s key writes nothing: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001',
+  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f1',
         'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1', '{"door":1}')$q$);
   ASSERT s LIKE '22023 unknown field door%', 'PS11 unknown field: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001',
+  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f1',
         'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1', '{"door_price_cents":-1}')$q$);
   ASSERT s LIKE '22023 door_price_cents%', 'PS11 bad door price: ' || s;
-  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000e1',
+  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f1', 'b5700000-0000-0000-0000-0000000000e1',
          'b5700000-0000-0000-0000-0000000000d9', '{"steps":[]}');
   RAISE EXCEPTION 'PS11 FAIL: org one wrote org two''s type';
 EXCEPTION WHEN no_data_found THEN
   j := public._exos_api_price_steps('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000e1',
          'b5700000-0000-0000-0000-0000000000d1');
   ASSERT jsonb_array_length(j -> 'steps') = 3 AND (j -> 'steps' -> 0 ->> 'sold')::int = 2, 'PS11 steps with counts: ' || j;
-  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000e1',
+  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f1', 'b5700000-0000-0000-0000-0000000000e1',
          'b5700000-0000-0000-0000-0000000000d1', '{"door_price_cents":null}');
   ASSERT j -> 'door_price_cents' = 'null'::jsonb, 'PS11 door price cleared: ' || j;
   RAISE NOTICE 'OK  PS11 API cores: org-scoped reads and writes, door price, validation';
+END $$;
+
+-- PS12 -----------------------------------------------------------------------
+-- A key acts as its creator (mig 20261104180000): a price change is a
+-- ticket-type edit, owner / manager only. Every lesser role's key holds
+-- events:write here and is refused (42501) in SQL; owner and manager pass.
+DO $$
+DECLARE s text; k text; j jsonb;
+BEGIN
+  FOREACH k IN ARRAY ARRAY['2', '5', '6'] LOOP
+    s := pg_temp.st(format($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001',
+          'b5700000-0000-0000-0000-0000000000f%s', 'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1',
+          '{"steps":[]}')$q$, k));
+    ASSERT s LIKE '42501 %owner or manager%', format('PS12 key of role %s sets no steps: %s', k, s);
+    s := pg_temp.st(format($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001',
+          'b5700000-0000-0000-0000-0000000000f%s', 'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1',
+          '{"door_price_cents":1}')$q$, k));
+    ASSERT s LIKE '42501 %', format('PS12 key of role %s sets no door price: %s', k, s);
+    -- Reads: no role rule (as GET ticket-type under events:read).
+    ASSERT jsonb_array_length(public._exos_api_price_steps('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000e1',
+             'b5700000-0000-0000-0000-0000000000d1') -> 'steps') = 3, 'PS12 reads';
+  END LOOP;
+  ASSERT (SELECT count(*) FROM public.exos_price_steps WHERE tier_id = 'b5700000-0000-0000-0000-0000000000d1') = 3, 'PS12 steps untouched';
+  s := pg_temp.st($q$SELECT public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001',
+        'b5700000-0000-0000-0000-0000000000f3', 'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1',
+        '{"door_price_cents":1}')$q$);
+  ASSERT s LIKE '42501 %', 'PS12 another org''s key: ' || s;
+  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f4',
+        'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1', '{"door_price_cents":3600}');
+  ASSERT (j ->> 'door_price_cents')::int = 3600, 'PS12 the manager''s key sets the door price';
+  j := public._exos_api_price_steps_set('b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000f1',
+        'b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-0000000000d1', '{"door_price_cents":3500}');
+  ASSERT (j ->> 'door_price_cents')::int = 3500, 'PS12 the owner''s key too';
+  RAISE NOTICE 'OK  PS12 price-step and door-price writes need a key whose creator is an owner or manager (scanner, finance, content: 42501)';
+END $$;
+
+-- PS13 -----------------------------------------------------------------------
+-- door_price_cents through PATCH ticket-type (exos_api_write, same rule), and
+-- exos-distribute's computed field reads the step price.
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+  SELECT coalesce(nullif(current_setting('app.uid', true), ''),
+                  nullif(current_setting('request.jwt.claim.sub', true), ''),
+                  nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')::uuid
+$$;
+SELECT set_config('app.uid', '', true);
+DO $$
+DECLARE s text; j jsonb; v numeric;
+BEGIN
+  ASSERT position('/* exos: door price */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text)'::regprocedure)) > 0,
+    'PS13 the door price patch is in exos_api_write';
+  j := public.exos_api_write('b5700000-0000-0000-0000-0000000000f1', 'ticket_type.update', 'b5700000-0000-0000-0000-0000000000d1',
+        '{"ticket_type":{"door_price_cents":4000}}');
+  ASSERT (j ->> 'door_price_cents')::int = 4000, 'PS13 the owner''s key sets the door price on the ticket type: ' || j;
+  ASSERT (public.exos_tier_current_price('b5700000-0000-0000-0000-0000000000d1', now(), 'door') ->> 'price_cents')::int = 4000,
+    'PS13 the door channel sells at it';
+  s := pg_temp.st($q$SELECT public.exos_api_write('b5700000-0000-0000-0000-0000000000f5', 'ticket_type.update',
+        'b5700000-0000-0000-0000-0000000000d1', '{"ticket_type":{"door_price_cents":1}}')$q$);
+  ASSERT s LIKE '42501 %', 'PS13 a finance key can''t: ' || s;
+  s := pg_temp.st($q$SELECT public.exos_api_write('b5700000-0000-0000-0000-0000000000f1', 'ticket_type.update',
+        'b5700000-0000-0000-0000-0000000000d1', '{"ticket_type":{"door_price_cents":-1}}')$q$);
+  ASSERT s LIKE '23514 %', 'PS13 no negative door price: ' || s;
+  SELECT public.exos_current_price(t) INTO v FROM public.exos_ticket_tiers t WHERE t.id = 'b5700000-0000-0000-0000-0000000000d1';
+  ASSERT v = (public.exos_tier_current_price('b5700000-0000-0000-0000-0000000000d1') ->> 'price_cents')::numeric / 100,
+    'PS13 the computed field is the current step price: ' || v;
+  ASSERT v <> (SELECT price FROM public.exos_ticket_tiers WHERE id = 'b5700000-0000-0000-0000-0000000000d1'),
+    'PS13 and not the raw opening price';
+  RAISE NOTICE 'OK  PS13 door price via PATCH ticket-type (owner / manager); exos_current_price for exos-distribute';
 END $$;
 
 ROLLBACK;

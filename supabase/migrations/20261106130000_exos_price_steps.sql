@@ -12,7 +12,7 @@
 --           (body only); marker patches (pg_temp.exos_patch_n) on
 --           _exos_api_public_tiers_json, _exos_api_event_json,
 --           _exos_discovery_event_json, _exos_listing_feed_event,
---           exos_voucher_tier.
+--           exos_voucher_tier, exos_api_write (door_price_cents writable).
 -- Pre-reqs: 20260703122000 (price_schedule), 20260702123000 (cart holds),
 --           20261027100000 (fee rules), 20261106120000 (shared capacity).
 --
@@ -615,6 +615,8 @@ REVOKE ALL ON FUNCTION public.exos_set_price_steps(uuid, jsonb, integer, boolean
 GRANT  EXECUTE ON FUNCTION public.exos_set_price_steps(uuid, jsonb, integer, boolean) TO authenticated;
 
 -- Partner API cores (service role; exos-api/capacity.ts names the org).
+-- The read follows events:read for a ticket type (GET ticket-type has no role
+-- rule beyond the key's scopes, which its creator's role narrows): none here.
 CREATE OR REPLACE FUNCTION public._exos_api_price_steps(p_org uuid, p_event uuid, p_tier uuid)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -631,8 +633,11 @@ REVOKE ALL ON FUNCTION public._exos_api_price_steps(uuid, uuid, uuid) FROM PUBLI
 GRANT  EXECUTE ON FUNCTION public._exos_api_price_steps(uuid, uuid, uuid) TO service_role;
 
 -- p: { steps: [...], door_price_cents?: int | null } (door price untouched
--- when the key is absent).
-CREATE OR REPLACE FUNCTION public._exos_api_price_steps_set(p_org uuid, p_event uuid, p_tier uuid, p jsonb)
+-- when the key is absent). Who: the API key acts as its creator (mig
+-- 20261104180000), and a price change is a ticket-type edit: owner or manager
+-- only, as exos_api_write's ticket_type.update. Enforced here, not only in
+-- exos-api.
+CREATE OR REPLACE FUNCTION public._exos_api_price_steps_set(p_org uuid, p_api_key uuid, p_event uuid, p_tier uuid, p jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -643,6 +648,8 @@ BEGIN
                   WHERE t.id = p_tier AND t.event_id = p_event AND e.org_id = p_org) THEN
     RAISE EXCEPTION 'ticket type not found' USING ERRCODE = 'P0002';
   END IF;
+  -- 42501 unless the key's creator is an active owner or manager of the org.
+  PERFORM public._exos_api_key_actor(p_org, p_api_key, ARRAY['owner', 'manager']);
   IF jsonb_typeof(coalesce(p, 'null'::jsonb)) <> 'object' THEN
     RAISE EXCEPTION 'send a JSON object' USING ERRCODE = '22023';
   END IF;
@@ -666,8 +673,8 @@ BEGIN
   END IF;
   RETURN public._exos_price_steps_json(p_tier);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_api_price_steps_set(uuid, uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public._exos_api_price_steps_set(uuid, uuid, uuid, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_api_price_steps_set(uuid, uuid, uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public._exos_api_price_steps_set(uuid, uuid, uuid, uuid, jsonb) TO service_role;
 
 -- ===========================================================================
 -- 5. Checkout: lock the step's price on the hold.
@@ -834,7 +841,26 @@ SELECT pg_temp.exos_patch_n('public.exos_voucher_tier(uuid,text,text)',
   $o$SELECT t.id, t.event_id, t.name, t.description, t.price, t.capacity$o$,
   $n$SELECT t.id, t.event_id, t.name, t.description, public.exos_tier_price_now(t.id) /* exos: price steps */, t.capacity$n$, 1);
 
--- 7c. Partner sales and referral rewards: the face price now (was the
+-- 7c. The partner API's ticket-type writes take the door price too (the same
+--     owner / manager rule exos_api_write already applies to ticket types).
+SELECT pg_temp.exos_patch_n('public.exos_api_write(uuid,text,text,jsonb,text)',
+  '/* exos: door price */',
+  $o$'accessible', 'accessible_note', 'market_split'];$o$,
+  $n$'accessible', 'accessible_note', 'market_split', 'door_price_cents' /* exos: door price */];$n$, 1);
+
+-- 7d. A computed field for service-role readers of the raw tier row
+--     (exos-distribute's listing plans select current_price:exos_current_price).
+CREATE OR REPLACE FUNCTION public.exos_current_price(t public.exos_ticket_tiers)
+RETURNS numeric
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT public.exos_tier_price_now(t.id);
+$$;
+REVOKE ALL ON FUNCTION public.exos_current_price(public.exos_ticket_tiers) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.exos_current_price(public.exos_ticket_tiers) TO service_role;
+
+-- 7e. Partner sales and referral rewards: the face price now (was the
 --     schedule rule, re-implemented in SQL).
 CREATE OR REPLACE FUNCTION public.exos_rr_tier_price(p_tier_id uuid)
 RETURNS numeric

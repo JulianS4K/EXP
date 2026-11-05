@@ -580,7 +580,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   // claude/exos-capacity-pricing (migs 20261106120000 / 20261106130000): shared
   // capacity pools and price steps.
   if (CAPACITY_ROUTES.has(route.id)) {
-    return await handleCapacity(route, { sb, orgId, params: c.params, body: c.body });
+    return await handleCapacity(route, {
+      sb, orgId, cred: { kind: c.cred.kind, id: c.cred.id, userId: c.cred.userId, role: c.cred.role },
+      params: c.params, body: c.body,
+    });
   }
   // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
   if (GEO_GENRE_ROUTES.has(route.id)) return await handleGeoGenre(route, { sb, orgId, params: c.params, q: c.q });

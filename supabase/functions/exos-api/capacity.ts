@@ -6,8 +6,14 @@
 // (c.orgId) and the SQL cores take it, so another org's event, pool or ticket
 // type is a 404. The SQL is the authority on every rule (no unlimited pool, 0
 // closes, never below what's sold; an end on every step but the last).
+//
+// Who may write: an organization API key (personal and OAuth tokens only read
+// these routes, _shared/api/request.ts), acting as the member who created it
+// (mig 20261104180000). Pool and price writes are inventory / ticket-type
+// edits, so the creator must be an owner or manager now: the SQL cores take
+// the key (p_api_key) and refuse anyone else with 42501, as exos_api_write
+// does for ticket types. Reads follow events:read like GET ticket-type.
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ApiRoute } from "../_shared/api/routes.ts";
 
 /** The route ids this module answers. */
@@ -18,11 +24,26 @@ export const CAPACITY_ROUTES = new Set([
 /** Routes answering 201. */
 export const CAPACITY_CREATED = new Set(["create-capacity-pool"]);
 
+/** What this module needs of the service-role client (kept narrow so vitest can load it). */
+export interface RpcClient {
+  rpc(fn: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>;
+}
+
 export interface CapacityCtx {
-  sb: SupabaseClient;
+  sb: RpcClient;
   orgId: string;
+  /** The credential (index.ts): writes need an org API key, passed to SQL as the actor. */
+  cred: { kind: "api_key" | "pat" | "oauth"; id: string; userId: string | null; role: string | null };
   params: Record<string, string>;
   body: Record<string, unknown>;
+}
+
+/** The API key a write acts as (its creator's role is checked in SQL). */
+export function writerKey(c: CapacityCtx): string {
+  if (c.cred.kind !== "api_key") {
+    throw new CapacityError(403, "this write needs an organization API key (sk_live_…) created by an owner or manager");
+  }
+  return c.cred.id;
 }
 
 /** An answer with a status (index.ts sends it as JSON). */
@@ -109,7 +130,8 @@ export async function handleCapacity(route: ApiRoute, c: CapacityCtx): Promise<u
       if (problem) throw new CapacityError(400, problem);
       return {
         data: await rpc(c, "_exos_api_capacity_pool_write", {
-          p_org: c.orgId, p_event: ev(), p_pool: create ? null : id(c.params.pool, "shared limit"), p: body, p_delete: false,
+          p_org: c.orgId, p_api_key: writerKey(c), p_event: ev(), p_pool: create ? null : id(c.params.pool, "shared limit"),
+          p: body, p_delete: false,
         }),
       };
     }
@@ -117,7 +139,7 @@ export async function handleCapacity(route: ApiRoute, c: CapacityCtx): Promise<u
     case "delete-capacity-pool":
       return {
         data: await rpc(c, "_exos_api_capacity_pool_write", {
-          p_org: c.orgId, p_event: ev(), p_pool: id(c.params.pool, "shared limit"), p: null, p_delete: true,
+          p_org: c.orgId, p_api_key: writerKey(c), p_event: ev(), p_pool: id(c.params.pool, "shared limit"), p: null, p_delete: true,
         }),
       };
 
@@ -129,7 +151,7 @@ export async function handleCapacity(route: ApiRoute, c: CapacityCtx): Promise<u
       if (!("steps" in body) && !("door_price_cents" in body)) throw new CapacityError(400, "send steps and/or door_price_cents");
       return {
         data: await rpc(c, "_exos_api_price_steps_set", {
-          p_org: c.orgId, p_event: ev(), p_tier: id(c.params.tier, "ticket type"), p: body,
+          p_org: c.orgId, p_api_key: writerKey(c), p_event: ev(), p_tier: id(c.params.tier, "ticket type"), p: body,
         }),
       };
     }

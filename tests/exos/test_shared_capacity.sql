@@ -17,6 +17,7 @@
 --   SC6 API cores: create / update / list / delete, allocation required,
 --       other events' types and other orgs refused, never below sold
 --   SC7 the lock-order patches are in place
+--   SC8 pool writes: only keys created by an owner or manager (in SQL)
 -- ============================================================================
 \set ON_ERROR_STOP on
 \if :{?fixtures}
@@ -49,9 +50,27 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   ('5c500000-0000-0000-0000-000000000001', '5C5 One', '5c5-one', '5c500000-0000-0000-0000-0000000000a1'),
   ('5c500000-0000-0000-0000-000000000002', '5C5 Two', '5c5-two', '5c500000-0000-0000-0000-0000000000a3');
+INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
+  ('5c500000-0000-0000-0000-0000000000a4', '5c5-manager@x.com', now()),
+  ('5c500000-0000-0000-0000-0000000000a5', '5c5-finance@x.com', now()),
+  ('5c500000-0000-0000-0000-0000000000a6', '5c5-content@x.com', now()),
+  ('5c500000-0000-0000-0000-0000000000a7', '5c5-scanner@x.com', now());
 INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
   ('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000a1', 'owner'),
+  ('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000a4', 'manager'),
+  ('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000a5', 'finance'),
+  ('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000a6', 'content'),
+  ('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000a7', 'scanner'),
   ('5c500000-0000-0000-0000-000000000002', '5c500000-0000-0000-0000-0000000000a3', 'owner');
+-- API keys, each holding events:write, created by one member (f1 owner, f4
+-- manager, f5 finance, f6 content, f7 scanner; f3 org two's owner).
+INSERT INTO public.exos_api_keys (id, org_id, name, key_prefix, key_hash, scopes, created_by)
+SELECT ('5c500000-0000-0000-0000-0000000000f' || x.n)::uuid, x.org::uuid, 'key ' || x.n, 'sk_live_5c5' || x.n,
+       encode(extensions.digest('sk_live_5c5_' || x.n, 'sha256'), 'hex'), ARRAY['events:read', 'events:write'],
+       ('5c500000-0000-0000-0000-0000000000a' || x.n)::uuid
+  FROM (VALUES ('1', '5c500000-0000-0000-0000-000000000001'), ('4', '5c500000-0000-0000-0000-000000000001'),
+               ('5', '5c500000-0000-0000-0000-000000000001'), ('6', '5c500000-0000-0000-0000-000000000001'),
+               ('7', '5c500000-0000-0000-0000-000000000001'), ('3', '5c500000-0000-0000-0000-000000000002')) x(n, org);
 INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, total_tickets, created_by) VALUES
   ('5c500000-0000-0000-0000-0000000000e1', '5c500000-0000-0000-0000-000000000001', '5C5 Room', '5c5-room', 'published',
    now() + interval '30 days', 0, '5c500000-0000-0000-0000-0000000000a1'),
@@ -144,7 +163,7 @@ BEGIN
   ASSERT NOT has_table_privilege('anon', 'public.exos_quota_tiers', 'SELECT'), 'SC2 anon reads no members';
   FOREACH f IN ARRAY ARRAY['public._exos_quota_used(uuid)', 'public._exos_shared_limit_blockers(uuid)',
       'public._exos_api_capacity_pool_json(uuid)', 'public._exos_api_capacity_pools(uuid,uuid)',
-      'public._exos_api_capacity_pool_write(uuid,uuid,uuid,jsonb,boolean)'] LOOP
+      'public._exos_api_capacity_pool_write(uuid,uuid,uuid,uuid,jsonb,boolean)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE'), 'SC2 anon can''t run ' || f;
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'SC2 authenticated can''t run ' || f;
     ASSERT has_function_privilege('service_role', f, 'EXECUTE'), 'SC2 service role runs ' || f;
@@ -330,39 +349,82 @@ DECLARE s text; j jsonb; v_id uuid;
 BEGIN
   s := pg_temp.st($q$SELECT public._exos_api_capacity_pools('5c500000-0000-0000-0000-000000000002', '5c500000-0000-0000-0000-0000000000e1')$q$);
   ASSERT s LIKE 'P0002 %', 'SC6 another org''s key lists nothing: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000002', '5c500000-0000-0000-0000-0000000000e1',
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000002', '5c500000-0000-0000-0000-0000000000f3', '5c500000-0000-0000-0000-0000000000e1',
         '5c500000-0000-0000-0000-0000000000c1', '{"allocation":0}')$q$);
   ASSERT s LIKE 'P0002 %', 'SC6 another org''s key closes nothing: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         NULL, '{"name":"No size"}')$q$);
   ASSERT s LIKE '22023 allocation is required%', 'SC6 allocation required: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         NULL, '{"name":"Null","allocation":null}')$q$);
   ASSERT s LIKE '22023 allocation must be%', 'SC6 no unlimited: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         NULL, '{"name":"Cross","allocation":5,"ticket_type_ids":["5c500000-0000-0000-0000-0000000000d9"]}')$q$);
   ASSERT s LIKE '22023 a ticket type%not on this event%', 'SC6 other event''s type: ' || s;
-  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         NULL, '{"name":"X","allocation":5,"size":1}')$q$);
   ASSERT s LIKE '22023 unknown field size%', 'SC6 unknown field: ' || s;
-  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         NULL, '{"name":"Floor","allocation":4,"ticket_type_ids":["5c500000-0000-0000-0000-0000000000d1","5c500000-0000-0000-0000-0000000000d3"]}');
   v_id := (j ->> 'id')::uuid;
   ASSERT (j ->> 'allocation')::int = 4 AND (j ->> 'sold')::int = 3 AND (j ->> 'remaining')::int = 1
          AND jsonb_array_length(j -> 'ticket_type_ids') = 2, 'SC6 created with counts: ' || j;
-  s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+  s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1',
         '5c500000-0000-0000-0000-0000000000e1', %L, '{"allocation":2}')$q$, v_id));
   ASSERT s LIKE '23514 this shared limit has already sold 3%', 'SC6 never below sold: ' || s;
-  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1',
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1',
         v_id, '{"allocation":0,"ticket_type_ids":["5c500000-0000-0000-0000-0000000000d1"]}');
   ASSERT (j ->> 'closed')::boolean AND (j ->> 'sold_out')::boolean AND jsonb_array_length(j -> 'ticket_type_ids') = 1,
     'SC6 closed with 0, members replaced: ' || j;
   ASSERT pg_temp.avail('5c500000-0000-0000-0000-0000000000d1') = 0, 'SC6 GA closed by the API pool';
   j := public._exos_api_capacity_pools('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1');
   ASSERT jsonb_array_length(j) = 3, 'SC6 list: ' || j;
-  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1', v_id, NULL, true);
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1', '5c500000-0000-0000-0000-0000000000e1', v_id, NULL, true);
   ASSERT (j ->> 'deleted')::boolean AND pg_temp.avail('5c500000-0000-0000-0000-0000000000d1') > 0, 'SC6 deleted, GA open again';
   RAISE NOTICE 'OK  SC6 API cores: create / update / close / list / delete, org-scoped, validated';
+END $$;
+
+-- SC8 ------------------------------------------------------------------------
+-- A key acts as its creator (mig 20261104180000): every lesser role's key holds
+-- events:write here and is still refused (42501) on pool writes; owner and
+-- manager keys pass. Reads have no role rule (as events:read on ticket types).
+DO $$
+DECLARE s text; k text; j jsonb; v_id uuid;
+BEGIN
+  FOREACH k IN ARRAY ARRAY['5', '6', '7'] LOOP
+    s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+          '5c500000-0000-0000-0000-0000000000f%s', '5c500000-0000-0000-0000-0000000000e1', NULL, '{"name":"Nope","allocation":5}')$q$, k));
+    ASSERT s LIKE '42501 %owner or manager%', format('SC8 key of role %s creates no pool: %s', k, s);
+    s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+          '5c500000-0000-0000-0000-0000000000f%s', '5c500000-0000-0000-0000-0000000000e1', '5c500000-0000-0000-0000-0000000000c1', '{"allocation":0}')$q$, k));
+    ASSERT s LIKE '42501 %', format('SC8 key of role %s closes no pool: %s', k, s);
+    s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+          '5c500000-0000-0000-0000-0000000000f%s', '5c500000-0000-0000-0000-0000000000e1', '5c500000-0000-0000-0000-0000000000c1', NULL, true)$q$, k));
+    ASSERT s LIKE '42501 %', format('SC8 key of role %s deletes no pool: %s', k, s);
+    ASSERT jsonb_array_length(public._exos_api_capacity_pools('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000e1')) >= 2,
+      'SC8 reads have no role rule';
+  END LOOP;
+  ASSERT (SELECT size FROM public.exos_quotas WHERE id = '5c500000-0000-0000-0000-0000000000c1') = 5, 'SC8 room untouched';
+  -- Another org's key on this org: refused too (its creator isn't a member here).
+  s := pg_temp.st($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+        '5c500000-0000-0000-0000-0000000000f3', '5c500000-0000-0000-0000-0000000000e1', NULL, '{"name":"X","allocation":1}')$q$);
+  ASSERT s LIKE '42501 %', 'SC8 another org''s key: ' || s;
+  -- A creator demoted to finance: the key stops writing at once.
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f4',
+        '5c500000-0000-0000-0000-0000000000e1', NULL, '{"name":"By manager","allocation":3}');
+  v_id := (j ->> 'id')::uuid;
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1',
+        '5c500000-0000-0000-0000-0000000000e1', v_id, '{"allocation":4}');
+  ASSERT (j ->> 'allocation')::int = 4, 'SC8 the owner''s key updates';
+  UPDATE public.exos_org_memberships SET role = 'finance'
+   WHERE org_id = '5c500000-0000-0000-0000-000000000001' AND user_id = '5c500000-0000-0000-0000-0000000000a4';
+  s := pg_temp.st(format($q$SELECT public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001',
+        '5c500000-0000-0000-0000-0000000000f4', '5c500000-0000-0000-0000-0000000000e1', %L, NULL, true)$q$, v_id));
+  ASSERT s LIKE '42501 %', 'SC8 a demoted manager''s key: ' || s;
+  j := public._exos_api_capacity_pool_write('5c500000-0000-0000-0000-000000000001', '5c500000-0000-0000-0000-0000000000f1',
+        '5c500000-0000-0000-0000-0000000000e1', v_id, NULL, true);
+  ASSERT (j ->> 'deleted')::boolean, 'SC8 the owner''s key deletes';
+  RAISE NOTICE 'OK  SC8 pool writes need a key whose creator is an owner or manager (finance, content, scanner: 42501)';
 END $$;
 
 -- SC7 ------------------------------------------------------------------------

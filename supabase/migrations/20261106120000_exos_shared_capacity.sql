@@ -36,7 +36,8 @@
 --   4. Publish blockers: a pool with no ticket types, a pool without a size,
 --      and a ticket type that is on sale but sits in a closed pool.
 --   5. SQL cores for the partner API's pool routes (docs/api/capacity.json),
---      service role only; exos-api checks the key's org and scope first.
+--      service role only; exos-api checks the key's org and scope first, and
+--      a write needs a key whose creator is an owner or manager (in SQL).
 --
 -- Additive, replay-safe. D4 authors; not applied.
 -- ============================================================================
@@ -238,6 +239,8 @@ $$;
 REVOKE ALL ON FUNCTION public._exos_api_capacity_pool_json(uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public._exos_api_capacity_pool_json(uuid) TO service_role;
 
+-- Reads follow events:read for ticket types (any key of the org with that
+-- scope, its creator's role narrowing the scopes): no role rule here either.
 CREATE OR REPLACE FUNCTION public._exos_api_capacity_pools(p_org uuid, p_event uuid)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -257,7 +260,10 @@ GRANT  EXECUTE ON FUNCTION public._exos_api_capacity_pools(uuid, uuid) TO servic
 -- allocation (whole number >= 0, required on create), closed, ticket_type_ids
 -- (the full list; replaces the old one). The same rules as the dashboard:
 -- never below what's sold (0 closes), only this event's types.
-CREATE OR REPLACE FUNCTION public._exos_api_capacity_pool_write(p_org uuid, p_event uuid, p_pool uuid, p jsonb, p_delete boolean DEFAULT false)
+-- Who: the API key acts as its creator (mig 20261104180000), and only an
+-- owner or manager changes inventory, as for a ticket type in exos_api_write
+-- (the exos_quotas_wr policy). Enforced here, not only in exos-api.
+CREATE OR REPLACE FUNCTION public._exos_api_capacity_pool_write(p_org uuid, p_api_key uuid, p_event uuid, p_pool uuid, p jsonb, p_delete boolean DEFAULT false)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -273,6 +279,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.exos_events WHERE id = p_event AND org_id = p_org) THEN
     RAISE EXCEPTION 'event not found' USING ERRCODE = 'P0002';
   END IF;
+  -- 42501 unless the key's creator is an active owner or manager of the org.
+  PERFORM public._exos_api_key_actor(p_org, p_api_key, ARRAY['owner', 'manager']);
   IF v_id IS NOT NULL THEN
     SELECT * INTO v_row FROM public.exos_quotas WHERE id = v_id AND event_id = p_event AND org_id = p_org FOR UPDATE;
     IF NOT FOUND THEN
@@ -349,8 +357,8 @@ BEGIN
   END IF;
   RETURN public._exos_api_capacity_pool_json(v_id);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_api_capacity_pool_write(uuid, uuid, uuid, jsonb, boolean) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public._exos_api_capacity_pool_write(uuid, uuid, uuid, jsonb, boolean) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_api_capacity_pool_write(uuid, uuid, uuid, uuid, jsonb, boolean) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public._exos_api_capacity_pool_write(uuid, uuid, uuid, uuid, jsonb, boolean) TO service_role;
 
 COMMENT ON TABLE public.exos_quotas IS
   'Shared capacity pools (DICE TicketPool; "Shared limits" in the editor). size = allocation, required, 0 closes '

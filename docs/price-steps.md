@@ -83,9 +83,17 @@ price, and `price_schedule` is its time-only form).
 API clients and templates don't break: a write of `price` / `price_schedule` rebuilds the type's time-only
 steps in place, and steps saved by the editor or the API write `price` (the first step's) and
 `price_schedule` (the time-only form) back. A type whose steps end on a count has `price_schedule: []` and
-refuses a schedule write. Readers of the raw `exos_ticket_tiers` row that compute the price themselves
-(marketplace listing plans in `exos-distribute`) see the first step for such a type; the public view and
-the APIs are right.
+refuses a schedule write. Service-role readers of the raw `exos_ticket_tiers` row select the computed
+field `exos_current_price` instead (`exos-distribute`'s marketplace listing plans do).
+
+### Who may change prices and limits
+
+The partner API writes (pools, price steps, the door price, also through PATCH ticket-type) need an
+organization API key whose creator is an owner or manager now, as any ticket-type edit
+(`exos_api_write`). The SQL cores take the key and check its creator's role (`_exos_api_key_actor`);
+finance, content and scanner keys get 403 even with `events:write`. Reads follow `events:read` with no
+role rule, like GET ticket-type. In the dashboard: `exos_set_price_steps` (owner / manager) and the
+`exos_quotas` RLS (owner / manager).
 
 ### TypeScript mirror
 
