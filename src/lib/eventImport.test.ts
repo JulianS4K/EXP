@@ -274,7 +274,9 @@ describe('storefront link-out', () => {
     expect(linkOutPriceLabel(lo)).toBe('$10.00 – $20.00');
     expect(linkOutPriceLabel({ priceMin: 0, priceMax: 0, isFree: true, currency: 'USD' })).toBe('Free');
     expect(linkOutPriceLabel({ priceMin: null, priceMax: null, isFree: false, currency: null })).toBeNull();
-    expect(parsePublicLinkOut({ platform: 'dice', url: 'https://dice.fm/x' })).toBeNull();
+    // DICE imports are link-out events too (mig 20261106100000); an unknown platform is not.
+    expect(parsePublicLinkOut({ platform: 'dice', url: 'https://dice.fm/event/x' })?.platform).toBe('dice');
+    expect(parsePublicLinkOut({ platform: 'shotgun', url: 'https://shotgun.live/x' })).toBeNull();
     expect(parsePublicLinkOut({ platform: 'luma', url: 'http://lu.ma/x' })).toBeNull();
   });
 });

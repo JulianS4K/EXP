@@ -15,7 +15,7 @@ export const LINK_OUT_PLATFORMS: readonly LinkOutPlatform[] = ['eventbrite', 'lu
 
 /** Where an event's tickets are sold, as a buyer reads it. */
 export const SALE_PLATFORM_LABEL: Record<string, string> = {
-  exos: 'Exos', eventbrite: 'Eventbrite', luma: 'Luma', posh: 'Posh', pretix: 'pretix', hievents: 'hi.events',
+  exos: 'Exos', eventbrite: 'Eventbrite', luma: 'Luma', posh: 'Posh', pretix: 'pretix', hievents: 'hi.events', dice: 'DICE',
 };
 
 export interface ParsedEventUrl {

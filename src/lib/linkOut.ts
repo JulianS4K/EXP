@@ -17,8 +17,11 @@ export type SourceStatus = 'on_sale' | 'sold_out' | 'cancelled' | 'ended' | 'unk
 
 export interface LinkOutTicketType { name: string; minPrice: number | null; maxPrice: number | null; soldOut: boolean; free: boolean }
 
+/** Where a published link-out event is sold: a pasted-link platform, or DICE (imported, mig 20261106100000). */
+export type PublicLinkOutPlatform = LinkOutPlatform | 'dice';
+
 export interface PublicLinkOut {
-  platform: LinkOutPlatform;
+  platform: PublicLinkOutPlatform;
   url: string;
   status: SourceStatus;
   priceMin: number | null;
@@ -29,7 +32,7 @@ export interface PublicLinkOut {
 }
 
 const STATUSES: readonly SourceStatus[] = ['on_sale', 'sold_out', 'cancelled', 'ended', 'unknown'];
-const PLATFORMS: readonly LinkOutPlatform[] = ['eventbrite', 'luma', 'posh'];
+const PLATFORMS: readonly PublicLinkOutPlatform[] = ['eventbrite', 'luma', 'posh', 'dice'];
 
 const num = (v: unknown): number | null => {
   const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
@@ -40,11 +43,11 @@ const num = (v: unknown): number | null => {
 export function parsePublicLinkOut(raw: unknown): PublicLinkOut | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  if (!PLATFORMS.includes(r.platform as LinkOutPlatform)) return null;
+  if (!PLATFORMS.includes(r.platform as PublicLinkOutPlatform)) return null;
   if (typeof r.url !== 'string' || !/^https:\/\/[^\s/]+\.[^\s]+$/.test(r.url)) return null;
   const types = Array.isArray(r.ticket_types) ? r.ticket_types : [];
   return {
-    platform: r.platform as LinkOutPlatform,
+    platform: r.platform as PublicLinkOutPlatform,
     url: r.url,
     status: STATUSES.includes(r.source_status as SourceStatus) ? (r.source_status as SourceStatus) : 'unknown',
     priceMin: num(r.price_min),
