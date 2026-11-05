@@ -7,7 +7,8 @@ Two inventory tools on top of ticket types, from DICE's data model (KANBAN "DICE
 
 Code and tests:
 
-- **Migrations:** `20261106120000_exos_shared_capacity.sql`, `20261106130000_exos_price_steps.sql`.
+- **Migrations:** `20261106120000_exos_shared_capacity.sql`, `20261106130000_exos_price_steps.sql`,
+  `20261107120000_exos_partner_steps.sql` (partner and organizer reservations).
 - **SQL:** `exos_quotas` / `exos_quota_tiers` (the limits, since `20260702123030`), `exos_effective_available`;
   `exos_price_steps`, `exos_tier_current_price` (the one price computation), `exos_hold_lock_price`.
 - **TypeScript:** `supabase/functions/_shared/priceSteps.ts` (the mirror of `exos_tier_current_price`),
@@ -17,7 +18,8 @@ Code and tests:
 - **API:** `docs/api/capacity.json`.
 - **Tests:** `tests/exos/test_shared_capacity.sql`, `tests/exos/test_price_steps.sql` (run by `run_p0.sh`),
   `src/lib/sharedCapacity.test.ts`, `src/lib/priceSteps.test.ts`. TS and SQL run the same cases from
-  `tests/exos/fixtures/`. Races, by hand: `tests/exos/race_shared_capacity.sh`, `tests/exos/race_price_steps.sh`.
+  `tests/exos/fixtures/`. Races, by hand: `tests/exos/race_shared_capacity.sh`, `tests/exos/race_price_steps.sh`,
+  `tests/exos/race_partner_steps.sh`; reservations: `tests/exos/test_partner_steps.sql`.
 
 ## Shared limits
 
@@ -36,7 +38,9 @@ voided or refunded ticket stops counting).
   refused. A dashboard write can't set it below what the limit has already sold, and can't add a type
   whose sales would push it over (same rule as a type's capacity, mig `20261104110000`).
 - **Race-safe.** A hold or a mint locks the type's limits by id (one order everywhere, so two buyers of
-  two types sharing two limits can't deadlock), then re-checks under the lock.
+  two types sharing two limits can't deadlock), then re-checks under the lock. A partner or organizer
+  reservation of several types locks every limit of every type by id before any type, on reserve and on
+  complete (mig `20261107120000`).
 - **Publish blockers:** a limit with no ticket types; a limit without a size (a row from before sizes were
   required); a type on sale inside a closed limit (close the type, capacity 0, or open the limit).
 
@@ -60,6 +64,10 @@ Example: Early bird $20 for the first 100 or until Dec 1, then GA $25 for 200, t
   (the event page reloads its prices). The Stripe amount is fixed at that point and the webhook mints at
   it, even if the step advanced while the buyer was on Stripe; the ticket keeps its step
   (`exos_tickets.price_step_id`, from the session).
+- **Partner and organizer reservations** (docs/partner-sales.md, mig `20261107120000`) follow the same
+  rules: the reservation locks the step's price and holds its places from the start (its cart holds carry
+  `price_step_id`), a line over the remainder is 409 `price_step_remaining` (with `remaining`), expiry or
+  cancel gives the places back, and complete mints at the locked price on that step.
 - **Door price.** The door channel (`door`, `pos`, `box_office`) sells at `door_price_cents` when set,
   else at the current step. Door sales at the door price and comps (price 0 from the box office) don't
   use a step's places. (POS walk-up ticket sales aren't wired yet: `exos-pos` answers 501.)

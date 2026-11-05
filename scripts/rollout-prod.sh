@@ -87,6 +87,7 @@ MIGRATIONS=(
   20261106120000_exos_shared_capacity
   20261106130000_exos_price_steps
   20261106140000_exos_buyer_geo_genre
+  20261107120000_exos_partner_steps
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt
