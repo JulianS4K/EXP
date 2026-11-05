@@ -578,6 +578,16 @@ signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent
   and merch in cash / comp; card tenders and walk-up ticket lines are server-only. **No live payments**: Stripe
   Terminal is an interface plus a `FakeTerminal`; `exos-pos` answers 501 for payment actions. No card data stored.
   Open operator decisions in `docs/pos.md` (fee on POS sales, tip base, POS staff role, tab pre-auth, hardware).
+- 🟡 **Walk-up sales at the door** (`claude/exos-pos-walkup`, `20261107100000_exos_pos_walkup`, authored, not applied;
+  `docs/pos.md` "Walk-up sales"): the door app's Sell tab sells a ticket for cash or as a comp (owner / manager)
+  through the online inventory rules at the door price, hands it over as a one-time QR on the staff screen, paper or
+  email, and voids (same night, before a scan) or refunds (owner / manager; override after a scan) with a ledger row
+  and the cash back out of the drawer as a paid-out; paid-outs; `GET /v1/events/:id/pos-orders` and
+  `POST …/pos-orders/:order/void`. Card stays 501. **Open:** the Exos fee on walk-up tickets is one setting
+  (`pos_walkup_fee_base`, default `card-tickets` = no fee on cash), still an operator decision.
+- ⬜ **Tap to Pay on iPhone for on-site sales** (operator ask 2026-11-05): `docs/pos.md` "Card at the door (Tap to Pay
+  / Terminal)" has the plan (server: connection tokens, Terminal locations, `card_present` PaymentIntents through
+  Connect; client: a native wrapper with the Terminal SDK, smart readers server-driven from the web).
 
 ## Net-equal marketplace pricing 2026-09-29
 
