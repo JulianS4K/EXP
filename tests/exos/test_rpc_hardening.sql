@@ -175,7 +175,10 @@ BEGIN
        'exos_order_proof_status', 'exos_order_proof_send', 'exos_order_proof_verify',
        -- public discovery (mig 20261105110000): published events, public ticket
        -- types, organizers' public profiles and series; 60 a minute per network
-       'exos_api_public');
+       'exos_api_public',
+       -- checkout questions (mig 20261106110000): a published event's questions
+       -- (labels, options, rules; never hidden / archived ones or answers)
+       'exos_public_event_questions');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

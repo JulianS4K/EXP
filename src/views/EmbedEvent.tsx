@@ -45,6 +45,11 @@ import { EMBED_COMPLETE, buildEmbedReturnUrl, buyableTiers, maxQuantity, postToH
 import { useEmbedHost, useEmbedResize } from '../hooks/useEmbedResize';
 import EmbedSignIn from '../components/EmbedSignIn';
 import EmbeddedCheckoutMount from '../components/EmbeddedCheckoutMount';
+// Checkout questions (mig 20261106110000): asked in the frame before payment.
+import CheckoutQuestionsForm from '../components/CheckoutQuestionsForm';
+import {
+  answersBody, draftProblems, EMPTY_DRAFT, getPublicQuestions, hasQuestions, ticketTiersFor, type AnswerDraft, type PublicQuestions,
+} from '../lib/checkoutQuestions';
 
 type Step = 'card' | 'pick' | 'signin' | 'starting' | 'paying' | 'done';
 
@@ -76,6 +81,20 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
   const maxQty = tier ? maxQuantity(tier, event.purchaseLimits?.maxPerOrder) : 0;
   const unit = tier ? buyerTierPrice(tier) : 0;
 
+  // Checkout questions: answered here, sent with the checkout request.
+  const [questions, setQuestions] = useState<PublicQuestions>({ questions: [], partySizes: {} });
+  const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(EMPTY_DRAFT);
+  const [showAnswerErrors, setShowAnswerErrors] = useState(false);
+  useEffect(() => {
+    let live = true;
+    getPublicQuestions(event.id).then((q) => { if (live) setQuestions(q); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [event.id]);
+  const questionTiers = tier ? ticketTiersFor(tier.id, quantity, questions.partySizes) : [];
+  const asksQuestions = !!tier && hasQuestions(questions.questions, questionTiers);
+  const answerProblems = asksQuestions ? draftProblems(questions.questions, questionTiers, answerDraft) : {};
+  const answers = asksQuestions ? answersBody(questions.questions, questionTiers, answerDraft) : undefined;
+
   useEffect(() => {
     if (quantity > maxQty && maxQty > 0) setQuantity(maxQty);
   }, [maxQty]);
@@ -83,8 +102,8 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
   const startPayment = async () => {
     if (!tier) return;
     setError('');
-    // Same tier + quantity as an open session: reuse it (its seats are held).
-    const key = `${tier.id}:${quantity}`;
+    // Same tier + quantity (+ answers) as an open session: reuse it (its seats are held).
+    const key = `${tier.id}:${quantity}:${answers ? JSON.stringify(answers) : ''}`;
     if (session?.key === key) {
       setStep('paying');
       return;
@@ -101,6 +120,7 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
         // site's third-party context, so browser ids aren't read.
         adIds: clickIdsFromSearch(typeof window !== 'undefined' ? window.location.search : ''),
         consent: checkoutConsent(),
+        answers,
       });
       setSession({ key, ...s });
       setStep('paying');
@@ -116,6 +136,11 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
   }, [step, user]);
 
   const onContinue = () => {
+    if (asksQuestions && Object.keys(answerProblems).length > 0) {
+      setShowAnswerErrors(true);
+      setError('Answer the organizer\'s questions first.');
+      return;
+    }
     if (!user) setStep('signin');
     else void startPayment();
   };
@@ -235,6 +260,10 @@ function EmbedInner({ event, org, host }: { event: Event; org: Organization | nu
               <span className="disp text-2xl">{formatCurrency(unit * quantity, currency)}</span>
             </div>
             <p className="type text-[9px] uppercase tracking-widest text-white/30">All-in price. Taxes included, no added fees.</p>
+            {asksQuestions && (
+              <CheckoutQuestionsForm questions={questions.questions} ticketTiers={questionTiers} value={answerDraft}
+                onChange={setAnswerDraft} problems={answerProblems} showErrors={showAnswerErrors} />
+            )}
             {error && <p className="text-xs text-red-400" role="alert">{error}</p>}
             <button type="button" disabled={step === 'starting' || maxQty < 1} onClick={onContinue} className={cta} style={{ background: accent, color: '#000' }}>
               {step === 'starting' ? 'HOLDING YOUR SEATS…' : 'CONTINUE'}

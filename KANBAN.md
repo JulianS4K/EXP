@@ -53,14 +53,16 @@ DICE's partner API (`partners-endpoint.dice.fm/graphql`) is read-only GraphQL, g
 tickets + holders, extras, orders, returns, transfers, genres. Exos already covers that surface and adds writes,
 webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, in build order:
 
-1. **[building] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
+1. **[built: claude/exos-dice-import] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
    dashboard. Exos then reads their events, ticket holders and fans into `/migrated-attendees`, like the
    Eventbrite import. It is read-only toward DICE (GraphQL queries only). Only fans with `optInPartners` go onto
    marketing lists. Also adds `docs/dice-coverage.md`, mapping each DICE type and field to Exos.
-2. **[building] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
+   Left: never run against a real DICE token (mocks only); deploy `exos-dice-import`, set `EXOS_DICE_IMPORT=on`, then turn on the inactive hourly cron.
+2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
    ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
-   References: pretix `Question`, hi.events `Question`.
+   References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
+   `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
 3. **[built: claude/exos-capacity-pricing] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
    across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
    Built on the existing `exos_quotas` (no second pool table); left: partner reservations across several types lock pools per type, not in one global order.

@@ -1070,6 +1070,70 @@ await run('price steps: the event page shows the step price and when it goes up;
     return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_steps', session_id: 'cs_test_steps' } };
   } },
 } });
+// ── Checkout questions (mig 20261106110000): a guest answers the organizer's
+// required questions, pays on the stubbed Stripe page, and the organizer's
+// answers table shows what they answered. ──
+const Q_SIZE = 'c0000000-0000-4000-8000-000000000001';
+const Q_AGREE = 'c0000000-0000-4000-8000-000000000002';
+const QUESTIONS = { questions: [
+  { id: Q_SIZE, label: 'T-shirt size', help_text: null, kind: 'single_choice', options: ['S', 'M', 'L'], required: true,
+    scope: 'ticket', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 0 },
+  { id: Q_AGREE, label: "I agree to the venue's photo policy", help_text: null, kind: 'checkbox', options: [], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 1 },
+], party_sizes: {} };
+const qCheckout = {};
+// The attendees tab's other panels (refunds, guest lists, ...) read RPCs this
+// test doesn't care about: answer them empty.
+const withEmptyRpcs = (m) => ({ ...m, rpcs: new Proxy(m.rpcs, { get: (t, k) => (k in t ? t[k] : () => []) }) });
+await run('checkout questions: required answers before paying, sent with the order, through Stripe and back', async (page, log) => {
+  await stubStripe(page, qCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'A few questions from the organizer');
+  // Buy without answering: inline errors, nothing sent.
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  await expectText(page, 'This answer is required.');
+  const size = page.getByRole('group', { name: 'Ticket 1' });
+  assert(await size.locator('[aria-invalid="true"]').count() > 0, 'the size field is marked invalid');
+  assert(!log.some((l) => l.startsWith('fn exos-checkout')), 'no checkout before the answers');
+  // Answer (labels are real labels: the radio by its option, the box by the question).
+  await size.getByLabel('M', { exact: true }).check();
+  await page.getByLabel("I agree to the venue's photo policy").check();
+  await until(async () => (await page.getByText('This answer is required.').count()) === 0, 'errors clear once answered');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const a = qCheckout.body?.answers;
+  assert(a && a.order?.[Q_AGREE] === true && Array.isArray(a.tickets) && a.tickets.length === 1 && a.tickets[0][Q_SIZE] === 'M',
+    'answers ride in the checkout request: ' + JSON.stringify(qCheckout.body));
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+}, { mock: { ...checkoutFn(qCheckout), rpcs: { exos_public_event_questions: () => QUESTIONS } } });
+
+await run('checkout questions: the organizer sees the buyer\'s answer in the report, with a CSV', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=attendees');
+  const panel = page.getByTestId('question-answers');
+  await panel.waitFor({ timeout: 8000 });
+  const text = (await panel.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('T-shirt size') && text.includes('M') && text.includes('Ticket 1') && text.includes('Yes'), 'answers table: ' + text);
+  assert(log.some((l) => l.startsWith('rpc exos_event_question_answers') && l.includes(EV)), 'asked the answers RPC');
+  const { text: csv } = await download(page, () => panel.getByRole('button', { name: /Answers CSV/ }).click());
+  const lines = firstLines(csv);
+  assert(lines[0].startsWith('order_ref,ticket_id,ticket_number'), 'csv header ' + lines[0]);
+  assert(lines.some((l) => l.includes('cs_test_iab') && l.includes('T-shirt size') && l.endsWith(',M,checkout,2026-11-05T12:00:00.000Z')), 'csv row: ' + lines.join(' | '));
+}, { signedIn: true, mock: withEmptyRpcs(ownerMock({ tables: { exos_tickets: [], exos_discount_codes: [] }, rpcs: {
+  // What exos_event_question_answers returns for the order above (its answers, as sent).
+  exos_event_question_answers: () => [
+    { answer_id: 'a1', question_id: Q_AGREE, order_ref: 'cs_test_iab', ticket_id: null, ticket_index: null, scope: 'order',
+      label: "I agree to the venue's photo policy", current_label: "I agree to the venue's photo policy", kind: 'checkbox',
+      value: qCheckout.body?.answers?.order?.[Q_AGREE] ?? null, display: qCheckout.body?.answers?.order?.[Q_AGREE] ? 'Yes' : '',
+      source: 'checkout', attendee_name: null, tier_name: null, ticket_status: null, buyer_email: 'fan@example.com',
+      question_archived: false, created_at: '2026-11-05T12:00:00Z' },
+    { answer_id: 'a2', question_id: Q_SIZE, order_ref: 'cs_test_iab', ticket_id: TICKET, ticket_index: 1, scope: 'ticket',
+      label: 'T-shirt size', current_label: 'T-shirt size', kind: 'single_choice',
+      value: qCheckout.body?.answers?.tickets?.[0]?.[Q_SIZE] ?? null, display: qCheckout.body?.answers?.tickets?.[0]?.[Q_SIZE] ?? '',
+      source: 'checkout', attendee_name: 'Ada', tier_name: 'GA', ticket_status: 'active', buyer_email: 'fan@example.com',
+      question_archived: false, created_at: '2026-11-05T12:00:00Z' },
+  ],
+} })) });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

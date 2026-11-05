@@ -784,6 +784,24 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'delete-capacity-pool', method: 'DELETE', auth: K, path: '/events/:id/capacity-pools/:pool', scope: 'events:write', paged: false },
   { id: 'get-price-steps', method: 'GET', auth: K, path: '/events/:id/ticket-types/:tier/price-steps', scope: 'events:read', paged: false },
   { id: 'set-price-steps', method: 'PUT', auth: K, path: '/events/:id/ticket-types/:tier/price-steps', scope: 'events:write', paged: false },
+  // claude/exos-checkout-questions (mig 20261106110000, exos-api/questions.ts,
+  // docs/api/questions.json): checkout questions and their answers (DICE's
+  // fanSurveyAnswers). Existing scopes: events:* for questions, orders:read /
+  // tickets:read for answers.
+  { id: 'list-event-questions', method: 'GET', auth: K, path: '/events/:id/questions', scope: 'events:read', paged: false },
+  { id: 'create-event-question', method: 'POST', auth: K, path: '/events/:id/questions', scope: 'events:write', paged: false },
+  { id: 'reorder-event-questions', method: 'PUT', auth: K, path: '/events/:id/questions/order', scope: 'events:write', paged: false },
+  { id: 'get-question', method: 'GET', auth: K, path: '/questions/:id', scope: 'events:read', paged: false },
+  { id: 'update-question', method: 'PATCH', auth: K, path: '/questions/:id', scope: 'events:write', paged: false },
+  { id: 'archive-question', method: 'DELETE', auth: K, path: '/questions/:id', scope: 'events:write', paged: false },
+  { id: 'list-event-question-answers', method: 'GET', auth: K, path: '/events/:id/question-answers', scope: 'orders:read', paged: true },
+  { id: 'get-order-answers', method: 'GET', auth: K, path: '/orders/:id/answers', scope: 'orders:read', paged: false },
+  { id: 'get-ticket-answers', method: 'GET', auth: K, path: '/tickets/:id/answers', scope: 'tickets:read', paged: false },
+  // claude/exos-dice-import (mig 20261106100000, exos-api/diceImport.ts,
+  // docs/dice-coverage.md): the DICE connection, its runs, and a sync now.
+  { id: 'get-dice-import', method: 'GET', auth: K, path: '/dice-import', scope: 'org:admin', paged: false, aliases: ['/dice_import'] },
+  { id: 'list-dice-import-runs', method: 'GET', auth: K, path: '/dice-import/runs', scope: 'org:admin', paged: true, aliases: ['/dice_import/runs'] },
+  { id: 'start-dice-import-sync', method: 'POST', auth: K, path: '/dice-import/sync', scope: 'org:admin', paged: false, aliases: ['/dice_import/sync'] },
   // claude/exos-buyer-geo-genre (mig 20261106140000, exos-api/buyerGeoGenre.ts):
   // where buyers are (DICE Order.ipCity / ipCountry, from the billing
   // address, never an IP) and the genres in use (DICE genreTypes).

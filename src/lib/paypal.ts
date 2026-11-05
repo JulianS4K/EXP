@@ -66,6 +66,9 @@ export interface PayPalCart {
   attribution?: Attribution;
   /** The all-in total the event page showed, for display only (the server prices it). */
   displayCents?: number;
+  /** Checkout questions' answers (mig 20261106110000): carried in the cart
+   *  (and its URL fragment), checked again by exos-checkout. */
+  answers?: unknown;
   at: number;
 }
 
@@ -124,6 +127,9 @@ function parseCart(raw: unknown, now: number): PayPalCart | null {
     voucherCode: typeof c.voucherCode === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(c.voucherCode) ? c.voucherCode : undefined,
     attribution: readAttribution((k) => attrIn[k]),
     displayCents,
+    // The server checks every answer; only the shape is kept here.
+    ...(c.answers && typeof c.answers === 'object' && !Array.isArray(c.answers) && JSON.stringify(c.answers).length <= 16_000
+      ? { answers: c.answers } : {}),
   };
 }
 
@@ -171,6 +177,7 @@ export async function createPayPalOrder(cart: PayPalCart, opts: { guestEmail?: s
       attribution: cart.attribution && Object.keys(cart.attribution).length > 0 ? cart.attribution : undefined,
       guest_email: opts.guestEmail?.trim().toLowerCase() || undefined,
       in_app_browser: currentInAppRecord(),
+      answers: cart.answers,
     },
   });
   if (error) throw await fnError(error, 'Could not start PayPal checkout.');

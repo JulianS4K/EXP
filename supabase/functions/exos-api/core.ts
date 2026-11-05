@@ -21,6 +21,7 @@ import type { ApiRoute } from "../_shared/api/routes.ts";
 import { pageEnvelope, type Page } from "../_shared/api/paging.ts";
 import { type Claim, refundClaim } from "../_shared/refundRun.ts";
 import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
+import { attachAnswers, attachAnswersPage } from "./questions.ts"; // exos: checkout questions
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
@@ -67,6 +68,8 @@ export interface CoreCtx {
   page: Page;
   body: Record<string, unknown>;
   idempotencyKey: string | null;
+  /** exos: checkout questions — may this credential read order-scope answers? (default: no) */
+  orderAnswers?: () => Promise<boolean>;
 }
 
 /** The route ids this module answers. */
@@ -203,10 +206,12 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
         if (!SESSION_RE.test(order)) throw new CoreError(400, "order_id is invalid.");
         q = q.eq("order_ref", order);
       }
-      return paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page);
+      // exos: checkout questions — each ticket's answers.
+      return await attachAnswersPage(sb, paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page),
+        (await c.orderAnswers?.()) === true);
     }
     case "get-ticket":
-      return { data: await ticketWithScans(c, uuidOr404(p.id, "ticket")) };
+      return { data: await attachAnswers(sb, await ticketWithScans(c, uuidOr404(p.id, "ticket")), (await c.orderAnswers?.()) === true) };
     case "scan-lookup": {
       // A ticket id, or the ticket id inside a rotating door code (T-<ticket>:<owner>:<window>:<mac>).
       // This only finds the ticket; check-in with the code is what verifies it.

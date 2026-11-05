@@ -50,6 +50,8 @@ import GuestListPanel from '../components/GuestListPanel';
 import PriceDisclosureExport from '../components/PriceDisclosureExport';
 import AccessRequestsPanel from '../components/AccessRequestsPanel';
 import AttendeeLookup from '../components/AttendeeLookup';
+// Checkout questions (mig 20261106110000).
+import QuestionAnswersPanel from '../components/QuestionAnswersPanel';
 import SmsPanel from '../components/SmsPanel';
 import PromoLinksPanel from '../components/PromoLinksPanel';
 // Series + timed entry (mig 20261030150000).
@@ -395,6 +397,9 @@ export default function OrganizerEventReport() {
 
         {/* Access needs guests shared (mig 20260926090000). */}
         <AccessRequestsPanel eventId={eventId!} eventTitle={event.title} />
+
+        {/* Answers to the checkout questions, with a CSV (owner / manager / finance). */}
+        <QuestionAnswersPanel eventId={eventId!} eventTitle={event.title} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Attendees + per-ticket refund/void controls. Lists every
             ticket including voided ones (greyed out, with reason).

@@ -19,6 +19,7 @@ import {
   type EventAnalytics,
 } from '../lib/analytics';
 import { csvFileName, downloadCsv } from '../lib/csv';
+import { answerColumns, listEventAnswers } from '../lib/checkoutQuestions';
 import { formatCurrency } from '../lib/utils';
 import type { Ticket } from '../types';
 
@@ -60,8 +61,11 @@ export default function EventAnalyticsPanel({ eventId, eventTitle, currency, tic
     if (!data) return;
     downloadCsv(csvFileName(['summary', eventTitle]), analyticsSummaryCsv(data, eventTitle));
   };
-  const exportAttendees = () => {
-    downloadCsv(csvFileName(['attendees', eventTitle]), attendeesCsv(tickets));
+  const exportAttendees = async () => {
+    // Checkout questions' answers as extra columns, when this role may read
+    // them (owner / manager / finance); otherwise the plain export.
+    const answers = await listEventAnswers(eventId).then(answerColumns).catch(() => undefined);
+    downloadCsv(csvFileName(['attendees', eventTitle]), attendeesCsv(tickets, answers && answers.columns.length > 0 ? answers : undefined));
   };
 
   if (loading && !data) {

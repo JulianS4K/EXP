@@ -168,6 +168,12 @@ import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffi
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
 import { CAPACITY_CREATED, CAPACITY_ROUTES, CapacityError, handleCapacity } from "./capacity.ts";
+// claude/exos-checkout-questions (mig 20261106110000): checkout questions and answers.
+import {
+  attachAnswers, attachAnswersPage, canReadOrderAnswers, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers,
+} from "./questions.ts";
+// claude/exos-dice-import (mig 20261106100000).
+import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
 // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
 import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
@@ -423,6 +429,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof CapacityError) return json({ error: e.message }, e.status);
+    if (isQuestionsError(e)) return json({ error: e.message }, e.status);
+    if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
@@ -573,6 +581,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       idempotencyKey: c.idempotencyKey,
     });
   }
+  // claude/exos-dice-import (mig 20261106100000): import from DICE.
+  if (DICE_ROUTES.has(route.id)) {
+    return await handleDice(route, { sb, orgId, cred: c.cred, page, body: c.body, env: (k) => Deno.env.get(k) });
+  }
   // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
   if (LOCATION_ROUTES.has(route.id)) {
     return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
@@ -585,6 +597,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       params: c.params, body: c.body,
     });
   }
+  // claude/exos-checkout-questions (mig 20261106110000): questions and answers.
+  if (QUESTION_ROUTES.has(route.id)) {
+    return await handleQuestions(route, { sb, orgId, keyId: c.key.id, cred: c.cred, params: c.params, page, body: c.body });
+  }
   // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
   if (GEO_GENRE_ROUTES.has(route.id)) return await handleGeoGenre(route, { sb, orgId, params: c.params, q: c.q });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
@@ -596,6 +612,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+      orderAnswers: () => canReadOrderAnswers(sb, orgId, c.cred), // exos: checkout questions
     });
   }
   // Membership products, memberships, imported attendees (mig 20261102100000).
@@ -697,14 +714,15 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       // Never barcode_secret.
       const status = c.q.get("status");
       if (status !== null && !/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
-      return paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
+      // exos: checkout questions — each attendee's answers (order answers need orders:read or an owner / manager / finance).
+      return await attachAnswersPage(sb, paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
         let q = sb.from("exos_tickets")
           .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
             "order_ref, channel_source, created_at" + extra, { count: "exact" })
           .eq("event_id", id).eq("org_id", orgId);
         if (status !== null) q = q.eq("status", status);
         return q.order("created_at", { ascending: false }).order("id").range(page.from, page.to);
-      }), page);
+      }), page), await canReadOrderAnswers(sb, orgId, c.cred));
     }
 
     case "list-seats": {
@@ -789,6 +807,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
         orderLocation(sb, orgId, sid),
       ]);
       for (const r of [tickets, addons, refunds]) if (r.error) throw r.error;
+      await attachAnswers(sb, tickets.data, true); // exos: checkout questions (this route is orders:read)
       return {
         data: {
           ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data,
@@ -1389,9 +1408,11 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
 
     case "complete-organizer-reservation": {
       const token = await ownReservation(c, null);
+      // exos: checkout questions — optional answers, stored before the mint.
+      const resBody = await reservationAnswers(sb, orgId, token, c.body);
       const out = await rpc(sb, "_exos_partner_reservation_complete", {
         p_org_id: orgId, p_partner_id: null, p_token: token,
-        p_attrs: reservationAttrs(unwrapParams(c.body, "ticket_reservation")), p_app_base: appBase(),
+        p_attrs: reservationAttrs(unwrapParams(resBody, "ticket_reservation")), p_app_base: appBase(),
       }) as Record<string, unknown>;
       if (out.status === "expired") throw new ApiError(410, "this reservation expired; nothing was sold", { reason: "expired" });
       return out.fresh ? new Created({ data: out.order }) : { data: out.order };

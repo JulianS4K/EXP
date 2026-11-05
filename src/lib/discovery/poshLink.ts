@@ -38,7 +38,7 @@ export interface PoshLinkEligibility {
 }
 
 const PLATFORM: Record<string, string> = {
-  posh: 'Posh', eventbrite: 'Eventbrite', luma: 'Luma', pretix: 'pretix', hievents: 'hi.events',
+  posh: 'Posh', eventbrite: 'Eventbrite', luma: 'Luma', pretix: 'pretix', hievents: 'hi.events', dice: 'DICE',
 };
 const platformName = (p: string | null | undefined) => (p && PLATFORM[p]) || 'another platform';
 
