@@ -470,7 +470,7 @@ async function cardAction(
         // A pending card sale: cancel it (the reader, the PaymentIntent, the places).
         if (lk.data.is_card && lk.data.order_status === "pending") {
           if (p.action !== "void_order") return json({ error: "refused", message: "this sale isn't paid" }, 409);
-          const act = await core<CardLookup>("_exos_pos_card_lookup", { p_actor: actor, p_order: order, p_need: "act", p_rate: false });
+          const act = await core<CardLookup>("_exos_pos_card_lookup", { p_actor: actor, p_order: order, p_need: "act", p_rate: true });
           if (act instanceof Response) return act;
           const r = await cancelCard(db, st(), order, act.data, reason);
           return json({ data: { ...(r.order as Record<string, unknown> ?? {}), card_state: r.state } });
