@@ -43,6 +43,10 @@ export const tables = {
 };
 
 export const rpcs = {
+  // Checkout questions (mig 20261106110000): none unless a test adds some.
+  exos_public_event_questions: () => ({ questions: [], party_sizes: {} }),
+  exos_list_event_questions: () => [],
+  exos_event_question_answers: () => [],
   exos_public_promoter: (b) => b.p_code === 'dj-kay' && b.p_org_slug === 'bk-nights'
     ? { promoter: { name: 'DJ Kay', code: 'dj-kay', socials: { instagram: 'dj.kay' } }, org: { id: ORG, name: 'Brooklyn Nights', slug: 'bk-nights' } } : null,
   exos_promoter_kit: (b) => b.p_token === TOKEN ? {

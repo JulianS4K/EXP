@@ -19,6 +19,12 @@
 // "website" field (honeypot) gets a believable answer and nothing is written.
 // Answers never say whether a number already RSVP'd.
 //
+// Checkout questions (mig 20261106110000, docs/checkout-questions.md): "info"
+// also answers the questions asked of this RSVP's ticket type, and "start"
+// takes `answers` ({ order, tickets: one per guest incl. plus-ones }), checked
+// and stored before the code goes out (a refusal expires the RSVP); the
+// tickets "verify" mints take them.
+//
 // Deploy with --no-verify-jwt. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 // EXOS_APP_URL (ticket links), EXOS_GUEST_IP_SALT, EXOS_SMS_LIVE.
 
@@ -48,8 +54,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const text = await readCapped(req, MAX_RSVP_BODY);
   if (text === null) return json({ error: "request body is too large" }, 413);
   let parsed;
+  let rawBody: Record<string, unknown> = {};
   try {
-    parsed = parseRsvpRequest(JSON.parse(text || "{}"));
+    const j = JSON.parse(text || "{}");
+    if (j && typeof j === "object" && !Array.isArray(j)) rawBody = j as Record<string, unknown>;
+    parsed = parseRsvpRequest(j);
   } catch (e) {
     return json({ ok: false, error: "bad_request", message: e instanceof RsvpInputError ? e.message : "invalid JSON" }, 400);
   }
@@ -66,8 +75,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data: info } = await sb.rpc("exos_phone_rsvp_info", { p_event_id: parsed.eventId });
       const i = (info ?? {}) as { ok?: boolean; reason?: string; org_id?: string; tier_name?: string; max_plus_ones?: number };
       const sms = i.ok && i.org_id ? smsAvailable(live(), await smsConfig(sb, i.org_id)) : false;
+      // Checkout questions of the RSVP ticket type (none before the migration).
+      const { data: rq } = i.ok ? await sb.rpc("exos_rsvp_questions", { p_event_id: parsed.eventId }) : { data: null };
+      const qs = (rq ?? {}) as { questions?: unknown; tier_id?: string | null };
       return json({ ok: !!i.ok, reason: i.reason ?? "off", tier_name: i.tier_name ?? null,
-                    max_plus_ones: i.max_plus_ones ?? 0, sms, email_fallback: true });
+                    max_plus_ones: i.max_plus_ones ?? 0, sms, email_fallback: true,
+                    tier_id: qs.tier_id ?? null, questions: Array.isArray(qs.questions) ? qs.questions : [] });
     }
 
     if (parsed.action === "start") {
@@ -89,6 +102,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       background(drainRsvpSms(sb, live(), (org) => smsConfig(sb, org)).catch((e) => console.error("exos-rsvp: drain", redactError(e))));
       // not_enough_seats carries seats_left (mig 20261105100000, SIM-BUYER-31).
       if (!r.ok) return json({ ok: false, error: r.error, max_plus_ones: r.max_plus_ones, seats_left: r.seats_left });
+      // Checkout questions: stored with the RSVP before the code goes out.
+      if (r.rsvp_id) {
+        const { data: ra, error: raErr } = await sb.rpc("exos_rsvp_record_answers", {
+          p_rsvp_id: r.rsvp_id, p_answers: rawBody.answers ?? null,
+        });
+        if (raErr && !["PGRST202", "42883"].includes(String(raErr.code))) throw raErr;
+        const a = (ra ?? { ok: true }) as { ok?: boolean; error?: string; problems?: unknown };
+        if (a.ok === false && a.error === "answers") return json({ ok: false, error: "answers", problems: a.problems ?? [] }, 400);
+      }
       if (r.channel === "sms") {
         const sent = cfg ? await sendSms(fetch, cfg, r.to!, codeText(r.event_name, r.code!)) : null;
         if (!sent || !("id" in sent)) {

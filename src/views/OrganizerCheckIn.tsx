@@ -30,6 +30,7 @@ import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
 import { verifyBarcode, type VerifyResult } from '../lib/barcode';
+import TicketAnswersCard from '../components/TicketAnswersCard';
 import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
 import {
   deviceLabel,
@@ -1993,6 +1994,13 @@ export default function OrganizerCheckIn() {
                 <div role="note" className="w-full mb-4 p-4 rounded-2xl bg-sky-50 border border-sky-200 text-left">
                   <p className="text-[11px] font-black uppercase tracking-widest text-sky-800 mb-2">Access needs</p>
                   <AccessNeedBadges needs={doorExtras!.ticketAccess![foundTicket.id]} />
+                </div>
+              )}
+
+              {/* Checkout answers (mig 20261106110000): read, add or correct at the door. */}
+              {eventId && !testScan && (
+                <div className="w-full mb-4">
+                  <TicketAnswersCard ticketId={foundTicket.id} eventId={eventId} tierId={foundTicket.tierId ?? null} />
                 </div>
               )}
 

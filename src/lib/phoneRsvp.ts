@@ -7,8 +7,15 @@ import { supabase } from './supabase';
 
 export { codeSentText, maskPhone, normalizeRsvpPhone, rsvpErrorMessage } from '../../supabase/functions/_shared/rsvp.ts';
 
-export interface RsvpInfo { ok: boolean; reason: string; tier_name: string | null; max_plus_ones: number; sms: boolean }
-export interface RsvpStart { ok: boolean; error?: string; rsvp_id?: string; channel?: 'sms' | 'email'; to?: string; max_plus_ones?: number; seats_left?: number }
+// questions / tier_id: checkout questions of the RSVP ticket type (mig 20261106110000).
+export interface RsvpInfo {
+  ok: boolean; reason: string; tier_name: string | null; max_plus_ones: number; sms: boolean;
+  tier_id?: string | null; questions?: import('../../supabase/functions/_shared/questions.ts').QuestionDef[];
+}
+export interface RsvpStart {
+  ok: boolean; error?: string; rsvp_id?: string; channel?: 'sms' | 'email'; to?: string; max_plus_ones?: number; seats_left?: number;
+  problems?: import('../../supabase/functions/_shared/questions.ts').AnswerProblem[];
+}
 export interface RsvpVerify { ok: boolean; error?: string; attempts_left?: number; event_id?: string; tickets?: { id: string; url: string | null }[] }
 
 async function call<T>(body: Record<string, unknown>): Promise<T> {
@@ -27,9 +34,12 @@ export const rsvpInfo = (eventId: string) => call<RsvpInfo>({ action: 'info', ev
 
 export const rsvpStart = (input: {
   eventId: string; name: string; phone: string; email?: string; plusOnes: number; promoter?: string | null; website?: string;
+  /** Checkout questions' answers ({ order, tickets: one per guest }). */
+  answers?: unknown;
 }) => call<RsvpStart>({
   action: 'start', event_id: input.eventId, name: input.name, phone: input.phone, email: input.email || null,
   plus_ones: input.plusOnes, promoter: input.promoter || null, website: input.website ?? '',
+  ...(input.answers ? { answers: input.answers } : {}),
 });
 
 export const rsvpVerify = (rsvpId: string, code: string) => call<RsvpVerify>({ action: 'verify', rsvp_id: rsvpId, code });

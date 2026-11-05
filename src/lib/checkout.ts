@@ -64,6 +64,8 @@ export async function startCheckout(input: {
   giftCardCode?: string;
   /** Add-a-donation to a giving campaign (its own line after tax). */
   donation?: { campaign_id: string; amount_cents: number };
+  /** Checkout questions' answers ({ order, tickets }, lib/checkoutQuestions.ts). */
+  answers?: unknown;
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -80,6 +82,7 @@ export async function startCheckout(input: {
       slot_id: input.slotId || undefined,
       gift_card_code: input.giftCardCode || undefined,
       donation: input.donation,
+      answers: input.answers,
       ...recordBody(input),
     },
   });
@@ -123,6 +126,8 @@ export async function claimFreeAsGuest(input: {
   /** Timed entry: the chosen slot. Signed-in buyers of a free timed ticket
    *  come this way too (the account wins over guestEmail server-side). */
   slotId?: string | null;
+  /** Checkout questions' answers ({ order, tickets }). */
+  answers?: unknown;
 } & CheckoutRecordInput): Promise<{ issued: number; email: string; sessionId: string | null }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -136,6 +141,7 @@ export async function claimFreeAsGuest(input: {
       guest_email: input.guestEmail.trim().toLowerCase(),
       seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
       slot_id: input.slotId || undefined,
+      answers: input.answers,
       ...recordBody(input),
     },
   });
@@ -154,6 +160,8 @@ export async function startEmbeddedCheckout(input: {
   quantity: number;
   returnUrl: string;
   attribution?: Attribution;
+  /** Checkout questions' answers ({ order, tickets }). */
+  answers?: unknown;
 } & CheckoutRecordInput): Promise<{ clientSecret: string; sessionId: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -163,6 +171,7 @@ export async function startEmbeddedCheckout(input: {
       quantity: input.quantity,
       return_url: input.returnUrl,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+      answers: input.answers,
       ...recordBody(input),
     },
   });

@@ -114,6 +114,14 @@
 // the session (exos_record_commission_plan); an order charged a new way whose
 // plan can't be recorded is expired, never left without one. With both
 // switches off no plan is asked for and nothing here changes.
+
+// Checkout questions (mig 20261106110000, docs/checkout-questions.md): a body
+// `answers` ({ order: {...}, tickets: [{...}] }) is checked against the event's
+// questions with _shared/questions.ts before any hold or payment (400, reason
+// "answers"), then stored on the pending order (exos_record_checkout_answers)
+// on every path: Stripe, PayPal, a full gift card, a guest's free claim. The
+// tickets take them as they're minted (a trigger), so nothing waits on the
+// browser. An event without questions changes nothing.
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
@@ -144,6 +152,7 @@ import {
   checkoutChargeMetadata, commissionEnv, needsCommissionPlan, parsePlan, paymentIntentData, planChangesCharge,
   type CommissionPlan,
 } from "../_shared/payouts/commissionMethods.ts";
+import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -187,6 +196,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     paypal_flow?: string;
     // The page's own answer to "which in-app browser is this?" (mig 20261105140000).
     in_app_browser?: string;
+    // exos: checkout questions (mig 20261106110000): { order: {...}, tickets: [{...}] }.
+    answers?: unknown;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -398,6 +409,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       member = { membership_id: m.membership_id, discount_percent: Number(m.discount_percent) };
     }
   }
+
+  // exos: checkout questions (mig 20261106110000, docs/checkout-questions.md):
+  // the buyer's answers are checked with the shared rules (_shared/questions.ts)
+  // before any hold or payment exists, stored on the pending order right after
+  // its row is written (recordAnswers, below), and attached to the tickets as
+  // they're minted. Never kept only in the browser.
+  const qCheck = await checkAnswers(sb, event_id!, tier_id!, quantity, p.answers);
+  if ("error" in qCheck) return json(qCheck.error, qCheck.status);
+  const orderAnswers = qCheck.answers;
 
   // Availability is enforced by a cart HOLD created just before the Stripe
   // session (exos_create_hold — atomically reserves against tier capacity AND
@@ -916,6 +936,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
       if (linkErr) console.error("exos-checkout: free hold link failed (non-fatal)", linkErr.message);
     }
+    // exos: checkout questions — before the tickets are minted.
+    const fAnsErr = await recordAnswers(sb, sessionId, orderAnswers);
+    if (fAnsErr) {
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: fAnsErr, reason: "answers" }, 400);
+    }
     const { data: ids, error: fulErr } = await sb.rpc("exos_fulfill_checkout", { p_session_id: sessionId });
     if (fulErr) {
       console.error("exos-checkout: free guest fulfilment failed", fulErr.message);
@@ -952,6 +979,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: "could not record the order" }, 500);
     }
     if (holdId) await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
+    // exos: checkout questions — before the card is held and the tickets minted.
+    const gAnsErr = await recordAnswers(sb, sessionId, orderAnswers);
+    if (gAnsErr) {
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: gAnsErr, reason: "answers" }, 400);
+    }
     const { error: ghErr } = await sb.rpc("exos_gift_card_hold", {
       p_code: giftCode, p_session_id: sessionId, p_amount_cents: giftCents, p_bucket: giftBucket,
       p_org_id: ev.org_id, p_currency: currency,
@@ -1025,6 +1059,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.error("exos-checkout: paypal session not recorded", ppErr);
       await releaseHold(sb, holdId);
       return json({ error: "could not record session" }, 500);
+    }
+    // exos: checkout questions — on the order before the buyer approves.
+    const pAnsErr = await recordAnswers(sb, sessionId, orderAnswers);
+    if (pAnsErr) {
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", sessionId).eq("status", "pending");
+      return json({ error: pAnsErr, reason: "answers" }, 400);
     }
     if (holdId) {
       const { error: linkErr } = await sb.from("exos_cart_holds").update({ checkout_session_id: sessionId }).eq("id", holdId);
@@ -1144,6 +1185,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     await releaseHold(sb, holdId);
     return json({ error: "could not record session" }, 500);
   }
+  // exos: checkout questions — on the pending order before the buyer pays, so a
+  // buyer who pays and comes back later (or a late webhook) loses nothing.
+  const sAnsErr = await recordAnswers(sb, session.id, orderAnswers);
+  if (sAnsErr) {
+    try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+    await releaseHold(sb, holdId);
+    await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", session.id).eq("status", "pending");
+    return json({ error: sAnsErr, reason: "answers" }, 400);
+  }
 
   // The commission plan sits next to the session. An order charged a new way
   // (split, or a commission in the fee) must have it: otherwise expire it.
@@ -1245,6 +1295,58 @@ async function insertSessionRow(
     if (snapErr) console.error("exos-checkout: fee snapshot not recorded (non-fatal)", snapErr.message);
   }
   return error;
+}
+
+// exos: checkout questions (mig 20261106110000). The event's questions for this
+// tier, and the body's answers checked against them (_shared/questions.ts, the
+// same rules as the SQL). { answers: undefined } when the event asks nothing
+// (or the migration isn't applied yet).
+async function checkAnswers(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>, eventId: string, tierId: string, quantity: number, raw: unknown,
+): Promise<{ answers: NormalizedAnswers | undefined } | { error: Record<string, unknown>; status: number }> {
+  const { data, error } = await sb.rpc("_exos_checkout_question_ctx", {
+    p_event_id: eventId, p_tier_id: tierId, p_quantity: quantity,
+  });
+  if (error) {
+    if (["PGRST202", "42883"].includes(String(error.code))) return { answers: undefined };
+    console.error("exos-checkout: questions read failed", error.message);
+    return { error: { error: "could not check your answers, try again" }, status: 503 };
+  }
+  const ctx = (data ?? {}) as { questions?: QuestionDef[]; ticket_tiers?: string[] };
+  const questions = Array.isArray(ctx.questions) ? ctx.questions : [];
+  if (questions.length === 0) return { answers: undefined };
+  const r = validateAnswers(questions, raw ?? null, { ticketTiers: ctx.ticket_tiers ?? [tierId], require: true });
+  if (!r.ok) {
+    const first = r.problems[0];
+    const q = questions.find((x) => x.id === first?.question_id);
+    return {
+      error: {
+        error: q ? `"${q.label}"${first.ticket ? ` (ticket ${first.ticket})` : ""}: ${problemWords(first.code)}` : "check your answers",
+        reason: "answers", problems: r.problems,
+      },
+      status: 400,
+    };
+  }
+  return { answers: r.answers };
+}
+
+function problemWords(code: string): string {
+  return code === "required" ? "an answer is required" : code.replace(/_/g, " ");
+}
+
+// Store the checked answers on the pending order (exos_record_checkout_answers
+// checks them again). Returns null when stored (or nothing to store), else a
+// message for the buyer.
+async function recordAnswers(
+  // deno-lint-ignore no-explicit-any
+  sb: SupabaseClient<any, any, any>, sessionId: string, answers: NormalizedAnswers | undefined,
+): Promise<string | null> {
+  if (answers === undefined) return null;
+  const { error } = await sb.rpc("exos_record_checkout_answers", { p_session_id: sessionId, p_answers: answers });
+  if (!error) return null;
+  console.error("exos-checkout: answers not recorded", error.message);
+  return error.code === "22023" ? String(error.message ?? "check your answers") : "could not save your answers, try again";
 }
 
 // Best-effort release of a reservation when checkout can't complete (Stripe

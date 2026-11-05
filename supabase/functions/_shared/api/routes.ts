@@ -774,6 +774,19 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-event-location', method: 'GET', auth: K, path: '/events/:id/location', scope: 'events:read', paged: false },
   { id: 'set-event-location', method: 'PUT', auth: K, path: '/events/:id/location', scope: 'events:write', paged: false },
   { id: 'list-venue-matches', method: 'GET', auth: K, path: '/venue-matches', scope: 'events:read', paged: false },
+  // claude/exos-checkout-questions (mig 20261106110000, exos-api/questions.ts,
+  // docs/api/questions.json): checkout questions and their answers (DICE's
+  // fanSurveyAnswers). Existing scopes: events:* for questions, orders:read /
+  // tickets:read for answers.
+  { id: 'list-event-questions', method: 'GET', auth: K, path: '/events/:id/questions', scope: 'events:read', paged: false },
+  { id: 'create-event-question', method: 'POST', auth: K, path: '/events/:id/questions', scope: 'events:write', paged: false },
+  { id: 'reorder-event-questions', method: 'PUT', auth: K, path: '/events/:id/questions/order', scope: 'events:write', paged: false },
+  { id: 'get-question', method: 'GET', auth: K, path: '/questions/:id', scope: 'events:read', paged: false },
+  { id: 'update-question', method: 'PATCH', auth: K, path: '/questions/:id', scope: 'events:write', paged: false },
+  { id: 'archive-question', method: 'DELETE', auth: K, path: '/questions/:id', scope: 'events:write', paged: false },
+  { id: 'list-event-question-answers', method: 'GET', auth: K, path: '/events/:id/question-answers', scope: 'orders:read', paged: true },
+  { id: 'get-order-answers', method: 'GET', auth: K, path: '/orders/:id/answers', scope: 'orders:read', paged: false },
+  { id: 'get-ticket-answers', method: 'GET', auth: K, path: '/tickets/:id/answers', scope: 'tickets:read', paged: false },
   // claude/exos-dice-import (mig 20261106100000, exos-api/diceImport.ts,
   // docs/dice-coverage.md): the DICE connection, its runs, and a sync now.
   { id: 'get-dice-import', method: 'GET', auth: K, path: '/dice-import', scope: 'org:admin', paged: false, aliases: ['/dice_import'] },

@@ -5,6 +5,9 @@
 // Sold out: the waitlist. The hidden "website" field is a honeypot.
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+// Checkout questions (mig 20261106110000), asked of every guest incl. plus-ones.
+import CheckoutQuestionsForm from '../components/CheckoutQuestionsForm';
+import { answersBody, draftProblems, EMPTY_DRAFT, hasQuestions, type AnswerDraft } from '../lib/checkoutQuestions';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Smartphone } from 'lucide-react';
 import { getPublicEvent } from '../lib/events';
@@ -37,6 +40,8 @@ export default function PhoneRsvp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tickets, setTickets] = useState<string[]>([]);
+  const [answerDraft, setAnswerDraft] = useState<AnswerDraft>(EMPTY_DRAFT);
+  const [showAnswerErrors, setShowAnswerErrors] = useState(false);
   const promoter = useMemo(() => {
     const p = params.get('promoter') ?? '';
     return /^[A-Za-z0-9_-]{1,64}$/.test(p) ? p : null;
@@ -49,16 +54,35 @@ export default function PhoneRsvp() {
     rsvpInfo(eventId).then((i) => { setInfo(i); if (i.reason === 'sold_out') setStep('full'); }).catch(() => setInfo(null));
   }, [eventId]);
 
+  // The RSVP's ticket type, once per guest (the guest and each plus-one).
+  const rsvpQuestions = info?.questions ?? [];
+  const rsvpTiers = info?.tier_id ? Array.from({ length: plus + 1 }, () => info.tier_id as string) : [];
+  const asksQuestions = rsvpTiers.length > 0 && hasQuestions(rsvpQuestions, rsvpTiers);
+  const answerProblems = asksQuestions ? draftProblems(rsvpQuestions, rsvpTiers, answerDraft) : {};
+
   const start = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (asksQuestions && Object.keys(answerProblems).length > 0) {
+      setShowAnswerErrors(true);
+      setError('Answer the organizer\'s questions first.');
+      return;
+    }
     if (!name.trim()) { setError(rsvpErrorMessage('bad_name')); return; }
     if (nameLooksLikeEmail(name)) { setError(rsvpErrorMessage('name_is_email')); return; }
     if (!normalizeRsvpPhone(phone)) { setError(rsvpErrorMessage('bad_phone')); return; }
     if (info && !info.sms && !email.trim()) { setError(rsvpErrorMessage('no_channel')); return; }
     setBusy(true);
     try {
-      const r = await rsvpStart({ eventId, name: name.trim(), phone, email: email.trim() || undefined, plusOnes: plus, promoter, website });
+      const r = await rsvpStart({
+        eventId, name: name.trim(), phone, email: email.trim() || undefined, plusOnes: plus, promoter, website,
+        answers: asksQuestions ? answersBody(rsvpQuestions, rsvpTiers, answerDraft) : undefined,
+      });
+      if (!r.ok && r.error === 'answers') {
+        setShowAnswerErrors(true);
+        setError('Check your answers to the organizer\'s questions.');
+        return;
+      }
       if (!r.ok) {
         if (r.error === 'sold_out') setStep('full');
         setError(rsvpErrorMessage(r.error, { max_plus_ones: r.max_plus_ones, seats_left: r.seats_left }));
@@ -123,6 +147,10 @@ export default function PhoneRsvp() {
                 {Array.from({ length: (info?.max_plus_ones ?? 0) + 1 }, (_, i) => <option key={i} value={i}>{i === 0 ? 'just me' : `+${i}`}</option>)}
               </select>
             </label>
+          )}
+          {asksQuestions && (
+            <CheckoutQuestionsForm questions={rsvpQuestions} ticketTiers={rsvpTiers} value={answerDraft} onChange={setAnswerDraft}
+              problems={answerProblems} showErrors={showAnswerErrors} ticketNames={[name]} />
           )}
           {/* Honeypot: hidden from people, filled by bots. */}
           <input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website}
