@@ -370,7 +370,7 @@ export interface Event {
   noindex?: boolean;
   // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
   // organizer's own shop on another platform, linked from the buy button.
-  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh';
+  ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh' | 'dice';
   // Location mode (mig 20261105130000, docs/promoter-events.md); undefined
   // until the column exists. A secret_location event's address is never here.
   locationMode?: import('./lib/eventLocation').LocationMode;

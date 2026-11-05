@@ -787,6 +787,11 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'list-event-question-answers', method: 'GET', auth: K, path: '/events/:id/question-answers', scope: 'orders:read', paged: true },
   { id: 'get-order-answers', method: 'GET', auth: K, path: '/orders/:id/answers', scope: 'orders:read', paged: false },
   { id: 'get-ticket-answers', method: 'GET', auth: K, path: '/tickets/:id/answers', scope: 'tickets:read', paged: false },
+  // claude/exos-dice-import (mig 20261106100000, exos-api/diceImport.ts,
+  // docs/dice-coverage.md): the DICE connection, its runs, and a sync now.
+  { id: 'get-dice-import', method: 'GET', auth: K, path: '/dice-import', scope: 'org:admin', paged: false, aliases: ['/dice_import'] },
+  { id: 'list-dice-import-runs', method: 'GET', auth: K, path: '/dice-import/runs', scope: 'org:admin', paged: true, aliases: ['/dice_import/runs'] },
+  { id: 'start-dice-import-sync', method: 'POST', auth: K, path: '/dice-import/sync', scope: 'org:admin', paged: false, aliases: ['/dice_import/sync'] },
   // claude/exos-buyer-geo-genre (mig 20261106140000, exos-api/buyerGeoGenre.ts):
   // where buyers are (DICE Order.ipCity / ipCountry, from the billing
   // address, never an IP) and the genres in use (DICE genreTypes).

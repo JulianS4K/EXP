@@ -171,6 +171,8 @@ import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents
 import {
   attachAnswers, attachAnswersPage, canReadOrderAnswers, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers,
 } from "./questions.ts";
+// claude/exos-dice-import (mig 20261106100000).
+import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
 // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
 import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
@@ -426,6 +428,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
     if (isQuestionsError(e)) return json({ error: e.message }, e.status);
+    if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
@@ -575,6 +578,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       sb, orgId, keyId: c.cred.id, credKind: c.cred.kind, params: c.params, q: c.q, body: c.body,
       idempotencyKey: c.idempotencyKey,
     });
+  }
+  // claude/exos-dice-import (mig 20261106100000): import from DICE.
+  if (DICE_ROUTES.has(route.id)) {
+    return await handleDice(route, { sb, orgId, cred: c.cred, page, body: c.body, env: (k) => Deno.env.get(k) });
   }
   // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
   if (LOCATION_ROUTES.has(route.id)) {

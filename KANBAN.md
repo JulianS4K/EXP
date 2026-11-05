@@ -53,10 +53,11 @@ DICE's partner API (`partners-endpoint.dice.fm/graphql`) is read-only GraphQL, g
 tickets + holders, extras, orders, returns, transfers, genres. Exos already covers that surface and adds writes,
 webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, in build order:
 
-1. **[building] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
+1. **[built: claude/exos-dice-import] DICE import** (mig `20261106100000`). A promoter pastes the token from MIO, DICE's partner
    dashboard. Exos then reads their events, ticket holders and fans into `/migrated-attendees`, like the
    Eventbrite import. It is read-only toward DICE (GraphQL queries only). Only fans with `optInPartners` go onto
    marketing lists. Also adds `docs/dice-coverage.md`, mapping each DICE type and field to Exos.
+   Left: never run against a real DICE token (mocks only); deploy `exos-dice-import`, set `EXOS_DICE_IMPORT=on`, then turn on the inactive hourly cron.
 2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
    ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.

@@ -6,6 +6,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Plug } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import EventbriteConnect from './EventbriteConnect';
+import DiceImportCard from './DiceImportCard';
 import {
   PROVIDERS, cleanConfig, configError, listIntegrations, removeIntegration, saveIntegration, testIntegration,
   type IntegrationRow, type ProviderGroup, type ProviderInfo,
@@ -179,6 +180,7 @@ export default function IntegrationsPanel({ orgId, canEdit }: { orgId: string; c
               <p className="text-[11px] text-slate-400 mb-2">{g.note}</p>
               <ul className="space-y-3">
                 {g.id === 'backend' && <EventbriteConnect orgId={orgId} />}
+                {g.id === 'backend' && <DiceImportCard orgId={orgId} />}
                 {PROVIDERS.filter((p) => p.group === g.id).map((p) => (
                   <Fragment key={p.id}>
                     <ProviderCard p={p} row={rows?.find((r) => r.provider === p.id)} orgId={orgId} canEdit={canEdit} onChanged={load} />
