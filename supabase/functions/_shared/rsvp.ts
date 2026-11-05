@@ -2,6 +2,8 @@
 // RSVP"): the pure parts of exos-rsvp, shared with the SPA tests. No Deno or
 // Node APIs, so vitest imports it too.
 
+import { NAME_IS_EMAIL, nameLooksLikeEmail } from './nameGuard.ts';
+
 export const MAX_RSVP_BODY = 8 * 1024;
 const E164 = /^\+[1-9][0-9]{7,14}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -61,6 +63,7 @@ export function parseRsvpRequest(raw: unknown): RsvpRequest {
   if (action === 'info') return { action, eventId, honeypot };
   const name = str(b.name, 80);
   if (!name) throw new RsvpInputError('enter your name');
+  if (nameLooksLikeEmail(name)) throw new RsvpInputError(NAME_IS_EMAIL);
   const phone = str(b.phone, 40);
   if (!phone) throw new RsvpInputError('enter your mobile number');
   const email = str(b.email, 254) || null;
@@ -112,8 +115,13 @@ export function codeSentText(channel: 'sms' | 'email', to: string): string {
 }
 
 /** What the page says for each error the SQL can answer. */
-export function rsvpErrorMessage(error: string | undefined, extra: { max_plus_ones?: number; attempts_left?: number } = {}): string {
+export function rsvpErrorMessage(error: string | undefined, extra: { max_plus_ones?: number; attempts_left?: number; seats_left?: number } = {}): string {
   switch (error) {
+    case 'name_is_email': return 'That looks like an email. Enter your name in the name box.';
+    case 'not_enough_seats':
+      return extra.seats_left
+        ? `Only ${extra.seats_left} spot${extra.seats_left === 1 ? '' : 's'} left. Bring fewer guests, or come alone.`
+        : 'Not enough spots left for your group.';
     case 'bad_phone': return 'Enter a mobile number, e.g. (212) 555-0100 or +44 7700 900123.';
     case 'bad_name': return 'Enter your name.';
     case 'bad_email': return 'That email doesn\'t look right.';

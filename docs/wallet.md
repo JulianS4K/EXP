@@ -129,6 +129,65 @@ offline. The upload (`exos_check_in_offline`) then re-verifies at the scan time 
 the live epoch, and a stale code comes back as a **conflict** in the scan report, the same
 as a ticket transferred after the roster download (test W10).
 
+## Printed tickets
+
+Mig `20261105120000`. Exos has no static, copyable barcode, so a printed ticket doesn't
+print the ticket's own code: it prints a **one-time print code**,
+`P-{ticket}:{22 random characters}` (128 random bits, base64url). The code is in the
+answer of the call that prints it and nowhere else: `exos_ticket_print_codes` keeps only
+its SHA-256.
+
+| Rule | How |
+|---|---|
+| Single use | The door checks it in `exos_check_in_ticket` (both overloads), like a `T-` or `W-` code, and spends it (`_exos_print_code_use`, an `UPDATE … WHERE status = 'active'`) in the same transaction that uses the ticket. A second scan: `print-code-used`. |
+| One at a time | A partial unique index allows one live code per ticket; printing again voids the last one (`reprinted`). |
+| Never beside another code | While a print code is live, the ticket's app (`T-`) and wallet (`W-`) codes are refused `printed`. Voiding the paper gives them back. |
+| Voided on transfer, refund, reissue | `exos_tg_print_ticket_changed` voids the live code when a transfer starts or is claimed, the ticket is refunded / released / voided, or its barcode secret changes; a reprint voids it too. |
+| Spent by any admission | A check-in by name or a typed override uses the ticket, and the trigger spends the paper with it, so it can't get a second person in. Undoing a check-in doesn't bring the paper back: reprint. |
+| Re-entry lists | The first entry spends the paper; the same paper at another list is refused. An exit with it is accepted (they're inside), re-entering with it isn't. Use the phone, or a manager by name. |
+| Test window | A pre-doors test scan proves the scanner and leaves the paper live. |
+
+Who prints: owners and managers (the box office). In the dashboard, the Orders page's **Print** button
+(`exos_order_print(session_id)`, then the PDF is drawn in the browser and saved; `src/lib/printOrder.ts`) and
+`exos_ticket_print(ticket_ids)`; in the API, `POST /v1/tickets/:id/print` and
+`POST /v1/orders/:id/print` (`tickets:write`, a key whose creator is an owner or manager now;
+Opendate's `/confirms/:confirm_id/…/print` paths are aliases). An order prints every
+ticket that can be printed and lists the rest under `skipped` (used, voided, in transfer).
+`?format=json` (default) returns the codes; `?format=html` a printable page (one ticket a
+page, the QR drawn inline as SVG, no scripts, no remote assets, `Content-Security-Policy:
+default-src 'none'`); `?format=pdf` a PDF, one 4 × 8 in page per ticket (common box-office
+ticket stock; a letter printer prints it at the top of the sheet). Every print answer is
+`Cache-Control: no-store`. Any ticket printer, a Boca included, prints the PDF through
+its own driver, so Exos sends no printer language (FGL). A print is never replayed from an
+`Idempotency-Key`: a retry prints again and voids the paper the lost answer carried.
+`exos_api_writes` logs each print without the codes. Voiding: the holder (to go back to
+their phone) or an owner / manager, `exos_ticket_print_void(ticket)` or
+`DELETE /v1/tickets/:id/print`. The holder's ticket page asks `exos_ticket_print_state(ticket)` and, while the
+ticket is printed, says "This ticket was printed. Use the paper ticket, or void it to use your phone." with a
+button that voids the paper (`src/components/TicketPrintedNotice.tsx`).
+
+The QR is drawn by `_shared/print/qr.ts` (byte mode, level M, versions 1-6), so no image
+service ever sees a door code; `src/lib/printTickets.test.ts` decodes its output with
+zxing to prove it scans. The PDF writer is `_shared/print/tickets.ts`.
+
+Offline doors: the door keys carry `p`, the live code's SHA-256 (as `wa` is the Apple
+code's), so a door phone checks a `P-` code without being able to make one, and refuses a
+printed ticket's app or wallet code locally. Online, a `printed` refusal from the saved
+keys still asks the server (the paper may have been voided since the download). The
+upload (`exos_check_in_offline`) spends the paper; another phone that admitted the same
+paper gets a `used` conflict in the scan report.
+
+| Threat | Printed (`P-`) |
+|---|---|
+| Photocopy / photo of the paper | first scan wins, the copy is refused `print-code-used` |
+| Paper and phone used by two people | the phone's code is refused `printed` while the paper is live |
+| Paper lost or stolen | void it (holder or box office) or reprint; the old one is refused |
+| After a transfer or refund | dead |
+| Same paper at two doors at once | the code row lock: one entry (`tests/exos/race_print_codes.sh`) |
+
+Tests: `tests/exos/test_na_build.sql` NA2-NA8, `tests/exos/race_print_codes.sh` (by hand),
+`src/lib/printTickets.test.ts`.
+
 ## How it flows
 
 ```

@@ -1,0 +1,346 @@
+{
+  "file": "event-location",
+  "name": "Event location: venues not on Exos, secret locations, TBA",
+  "order": 15.7,
+  "description": "Where an event happens, for promoters and collectives with no venue organization on Exos (docs/promoter-events.md). **location_mode**: `venue_record` (the default and every older event: a venue record of yours and/or free-text labels), `unlisted_venue` (a venue that isn't on Exos: free-text name and address, public), `secret_location` (the public, partners, feeds and the API's event answers see only the area in `venue_location`; ticket holders get the exact address at `location_reveal_at`, never later than the start, on their ticket, by email / SMS and in their wallet pass) and `tba` (to be announced; `tba_allow_sales` is your explicit choice to sell before then). Events in the last three need at least one ticket type with a capacity of 1 or more to publish; 0 closes sales on a type (there is no unlimited). None of them is ever linked to a venue record, so the venue gate (403 `venue_approval_required`) never applies; a free-text venue whose name and city match a venue another organization runs on Exos is only suggested (`venue_suggestions`, then POST /v1/venue-requests if you want to book it). The three public fields are also writable on POST /v1/events and PATCH /v1/events/:id, with `secret_location` as an object there too.",
+  "endpoints": [
+    {
+      "id": "get-event-location",
+      "method": "GET",
+      "path": "/v1/events/:id/location",
+      "summary": "Read an event's location",
+      "description": "The location mode, the public fields, the reveal time (`reveal_at`: the effective one, by the start at the latest; `revealed`: it has passed) and whether Exos sells it now (`sales_open`, false for a tba event not selling yet). With events:write the answer also has `secret_location` (the exact address of a secret_location event) and `venue_suggestions`; an events:read-only credential gets `has_secret` only.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK (an events:write credential).",
+          "example": {
+            "data": {
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "location_mode": "secret_location",
+              "venue_name": null,
+              "venue_location": "Bushwick, Brooklyn",
+              "venue_address": null,
+              "exos_venue_id": null,
+              "location_reveal_at": "2026-12-11T23:00:00+00:00",
+              "reveal_at": "2026-12-11T23:00:00+00:00",
+              "revealed": false,
+              "tba_allow_sales": null,
+              "sales_open": true,
+              "has_secret": true,
+              "secret_location": {
+                "venue_name": "Warehouse 9",
+                "address": {
+                  "street": "77 Kent Ave",
+                  "city": "Brooklyn",
+                  "region": "NY"
+                },
+                "directions": "Blue door, ring twice",
+                "version": 1,
+                "notified_version": 0,
+                "notified_at": null,
+                "updated_at": "2026-11-05T12:00:00+00:00"
+              },
+              "venue_suggestions": [
+                {
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Warehouse 9",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": false,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Warehouse 9 LLC"
+                  },
+                  "request_endpoint": "POST /v1/venue-requests"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-event-location",
+      "method": "PUT",
+      "path": "/v1/events/:id/location",
+      "summary": "Set an event's location",
+      "description": "Changes the given fields and leaves the rest, in one transaction. `secret_location` and `tba` events keep `venue_name` and `venue_address` empty (they are public): sending one is a 400, and a switch to those modes clears what the previous mode had. None of the promoter modes takes a venue record. A live event refuses a change that would break a location rule (400 starting `location:`), e.g. a reveal at or after the start, or removing a live secret event's address. Changing the exact address after the reveal mails ticket holders the new one. Needs a key created by an owner or manager. Body: the fields below, or wrapped as `{ \"location\": {...} }`.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "location_mode",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "venue_record, unlisted_venue, secret_location or tba.",
+          "example": "secret_location",
+          "enum": [
+            "venue_record",
+            "unlisted_venue",
+            "secret_location",
+            "tba"
+          ]
+        },
+        {
+          "name": "venue_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "venue_record / unlisted_venue: the venue's public name.",
+          "example": "Warehouse 9"
+        },
+        {
+          "name": "venue_location",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The public area or city (alias: `area`). For secret_location it is all the public sees; required to publish.",
+          "example": "Bushwick, Brooklyn"
+        },
+        {
+          "name": "venue_address",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "venue_record / unlisted_venue: { street, city, region, postal, country }, public. An unlisted venue needs a street or city to publish.",
+          "example": {
+            "street": "9 Dock St",
+            "city": "Brooklyn"
+          }
+        },
+        {
+          "name": "location_reveal_at",
+          "location": "body",
+          "type": "string (date-time)",
+          "required": false,
+          "description": "secret_location: when ticket holders get the address; before the start. Or send reveal_hours_before.",
+          "example": "2026-12-11T23:00:00Z"
+        },
+        {
+          "name": "reveal_hours_before",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "secret_location: the reveal as hours before the start (0-720).",
+          "example": 24
+        },
+        {
+          "name": "tba_allow_sales",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "tba: sell before the location is announced (true) or not yet (false). Required to publish a tba event.",
+          "example": true
+        },
+        {
+          "name": "secret_location",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "secret_location: { venue_name?, address: { street (required), city, region, postal, country }, directions? }; null removes it (not while a live event is secret).",
+          "example": {
+            "venue_name": "Warehouse 9",
+            "address": {
+              "street": "77 Kent Ave",
+              "city": "Brooklyn",
+              "region": "NY"
+            },
+            "directions": "Blue door, ring twice"
+          }
+        }
+      ],
+      "request_example": {
+        "location_mode": "secret_location",
+        "area": "Bushwick, Brooklyn",
+        "reveal_hours_before": 24,
+        "secret_location": {
+          "venue_name": "Warehouse 9",
+          "address": {
+            "street": "77 Kent Ave",
+            "city": "Brooklyn",
+            "region": "NY"
+          },
+          "directions": "Blue door, ring twice"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the location as GET answers it to an editor.",
+          "example": {
+            "data": {
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "location_mode": "secret_location",
+              "venue_name": null,
+              "venue_location": "Bushwick, Brooklyn",
+              "venue_address": null,
+              "exos_venue_id": null,
+              "location_reveal_at": "2026-12-11T23:00:00+00:00",
+              "reveal_at": "2026-12-11T23:00:00+00:00",
+              "revealed": false,
+              "tba_allow_sales": null,
+              "sales_open": true,
+              "has_secret": true,
+              "secret_location": {
+                "venue_name": "Warehouse 9",
+                "address": {
+                  "street": "77 Kent Ave",
+                  "city": "Brooklyn",
+                  "region": "NY"
+                },
+                "directions": "Blue door, ring twice",
+                "version": 1,
+                "notified_version": 0,
+                "notified_at": null,
+                "updated_at": "2026-11-05T12:00:00+00:00"
+              },
+              "venue_suggestions": [
+                {
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Warehouse 9",
+                  "city": "Brooklyn",
+                  "region": "NY",
+                  "verified": false,
+                  "org": {
+                    "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Warehouse 9 LLC"
+                  },
+                  "request_endpoint": "POST /v1/venue-requests"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field, a public field on a secret / tba event, or a live event that would break a rule.",
+          "example": {
+            "error": "location: a secret_location event keeps venue_address empty (it is public); the exact address goes in secret_location"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write, or its creator isn't an owner or manager now.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-venue-matches",
+      "method": "GET",
+      "path": "/v1/venue-matches",
+      "summary": "Is this venue on Exos?",
+      "description": "Owned venues of other organizations that take booking requests and have exactly this name and city (case and spaces aside), each with `verified`. A suggestion only: an unlisted or secret event with that name is never linked or refused. To book one, POST /v1/venue-requests.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "The venue's name.",
+          "example": "Warehouse 9"
+        },
+        {
+          "name": "city",
+          "location": "query",
+          "type": "string",
+          "required": true,
+          "description": "Its city.",
+          "example": "Brooklyn"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Warehouse 9",
+                "city": "Brooklyn",
+                "region": "NY",
+                "verified": false,
+                "org": {
+                  "id": "a1b2c3d4-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Warehouse 9 LLC"
+                },
+                "request_endpoint": "POST /v1/venue-requests"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "name or city missing.",
+          "example": {
+            "error": "name and city are required"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,10 +2,13 @@
 // role in the org itself; the page only hides what a role can't do.
 
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import {
   orderQuery, parseOrderEdit, parseOrderRow, type OrderEditRow, type OrderRow, type OrderTableState, type PreviewRow,
 } from './orderDesk';
 import { parseRecEvent, parseRecFan, type RecEvent, type RecFan } from './recommendations';
+import type { PrintedOrder } from './printOrder';
+import { printPdf, type PrintTicket } from '../../supabase/functions/_shared/print/tickets';
 
 const msg = (e: { message?: string }) => new Error((e.message ?? 'Failed.').replace(/^_?exos_\w+: /, ''));
 const int = (v: unknown) => Math.max(0, Math.trunc(Number(v) || 0));
@@ -22,6 +25,8 @@ export async function listOrders(orgId: string, s: OrderTableState): Promise<{ t
 }
 
 export async function updateOrder(sessionId: string, fields: Record<string, string | null>) {
+  assertNotEmailName(fields.first_name);
+  assertNotEmailName(fields.last_name);
   return parseOrderRow(await call('exos_order_update', { p_session_id: sessionId, p_fields: fields }));
 }
 
@@ -30,12 +35,21 @@ export async function sendReceipt(sessionId: string, email: string | null): Prom
   return { to: String(d?.to ?? ''), resendsLeft: int(d?.resends_left_this_hour) };
 }
 
+/** Paper tickets for an order (mig 20261105120000): one-time print codes, drawn into a PDF here. */
+export async function printOrder(sessionId: string): Promise<PrintedOrder> {
+  const d = await call('exos_order_print', { p_session_id: sessionId });
+  const tickets = (Array.isArray(d?.tickets) ? d.tickets : []) as PrintTicket[];
+  const skipped = (Array.isArray(d?.skipped) ? d.skipped : []) as PrintedOrder['skipped'];
+  return { pdf: tickets.length ? printPdf(tickets, 'Tickets') : new Uint8Array(), printed: tickets.length, skipped };
+}
+
 export async function checkOutOrder(sessionId: string, reason: string | null) {
   return await call<{ checked_out: number; results: Array<{ reason?: string }> }>(
     'exos_order_check_out', { p_session_id: sessionId, p_list_id: null, p_reason: reason, p_device: 'dashboard' });
 }
 
 export async function updateTicketAttendee(ticketId: string, attendeeName: string | null) {
+  assertNotEmailName(attendeeName);
   return await call('exos_ticket_update', { p_ticket_id: ticketId, p_fields: { attendee_name: attendeeName } });
 }
 

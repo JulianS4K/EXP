@@ -8,6 +8,7 @@
 import { supabase } from './supabase';
 import { parseUnitFees, type UnitFee } from './fees';
 import { listPublicFeeRules, withAddonFees } from './feeRules';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 export interface PublicAddon {
   id: string;
@@ -15,7 +16,7 @@ export interface PublicAddon {
   name: string;
   description: string | null;
   price: number;
-  capacity: number;       // 0 = unlimited
+  capacity: number;       // 0 = closed (mig 20261105100000); never unlimited
   sold: number;
   maxPerOrder: number | null;
   imageUrl: string | null;
@@ -78,6 +79,9 @@ export async function listEventAddons(eventId: string): Promise<(PublicAddon & {
 
 /** Organizer: create or update an add-on. Staff RLS gates the write. */
 export async function saveAddon(eventId: string, input: AddonInput): Promise<string> {
+  // A new add-on needs a capacity (0 = closed, there is no unlimited); an
+  // existing one may be set to 0 to stop selling it.
+  if (!input.id && !isSellableCapacity(Number(input.capacity))) throw new Error(`An add-on ${CAPACITY_REQUIRED}.`);
   const row = {
     event_id: eventId,
     name: input.name.trim(),

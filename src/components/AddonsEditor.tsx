@@ -90,7 +90,7 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
                 <p className="font-bold text-slate-900 text-sm truncate">{r.name}</p>
                 <p className="text-slate-400 text-xs font-bold">
                   ${Number(r.price).toFixed(2)}
-                  {r.capacity ? ` · ${r.sold ?? 0}/${r.capacity} sold` : ' · unlimited'}
+                  {r.capacity ? ` · ${r.sold ?? 0}/${r.capacity} sold` : ' · closed (capacity 0)'}
                   {r.visibility === 'hidden' ? ' · hidden' : ''}
                 </p>
               </div>
@@ -129,7 +129,7 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
           />
         </label>
         <label className="space-y-1">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacity (0 = ∞)</span>
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacity (0 = closed)</span>
           <input
             type="number" min={0} value={draft.capacity ?? 0}
             onChange={(e) => setDraft({ ...draft, capacity: parseInt(e.target.value, 10) || 0 })}

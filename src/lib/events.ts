@@ -13,6 +13,7 @@ import { parseAccessibility, type EventAccessibility } from './accessibility';
 import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseEventFormat } from './onlineEvents';
+import { parseLocationMode } from './eventLocation';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
 import { parseUnitFees } from './fees';
@@ -22,6 +23,7 @@ import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
 import { eventTypeForCategory } from './eventTaxonomy';
 import { Event } from '../types';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 const toTs = (iso?: string | null): Timestamp => Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
 
@@ -140,6 +142,14 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
           ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma', 'posh'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
           externalTicketUrl: typeof row.external_ticket_url === 'string' && row.external_ticket_url.startsWith('https://')
             ? row.external_ticket_url : undefined,
+        }
+      : {}),
+    // Location mode (mig 20261105130000); likewise.
+    ...('location_mode' in row
+      ? {
+          locationMode: parseLocationMode(row.location_mode),
+          locationRevealAt: row.location_reveal_at ?? null,
+          tbaAllowSales: typeof row.tba_allow_sales === 'boolean' ? row.tba_allow_sales : null,
         }
       : {}),
   };
@@ -372,6 +382,9 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {
+  // A new ticket type needs a capacity: there is no unlimited, and 0 is closed
+  // (mig 20261105100000). Closing an existing one is an update, not this.
+  if (!isSellableCapacity(t.capacity)) throw new Error(`Ticket type "${t.name}" ${CAPACITY_REQUIRED}.`);
   return {
     event_id: eventId,
     name: t.name,

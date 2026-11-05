@@ -31,7 +31,7 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('a8000000-0000-0000-0000-000000000001','a8000000-0000-0000-0000-0000000000a0','owner');
 -- e1: 200 (100 + 100). e2: 260 (200 + 60). e3: cap 300 over types of 120.
--- e4: cap 300 with an uncapped type. e5: no cap, 100 + an uncapped type.
+-- e4: cap 300 over types of 300. e5: no cap, 100 + a closed type (capacity 0, mig 20261105100000).
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
   ('a8000000-0000-0000-0000-0000000000e1','a8000000-0000-0000-0000-000000000001','Small Room','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
   ('a8000000-0000-0000-0000-0000000000e2','a8000000-0000-0000-0000-000000000001','Big Room','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
@@ -45,7 +45,7 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibi
   ('a8000000-0000-0000-0000-0000000000d4','a8000000-0000-0000-0000-0000000000e2','VIP',90,60,0,'public',2),
   ('a8000000-0000-0000-0000-0000000000d5','a8000000-0000-0000-0000-0000000000e3','GA',40,120,0,'public',1),
   ('a8000000-0000-0000-0000-0000000000d6','a8000000-0000-0000-0000-0000000000e4','GA',40,100,0,'public',1),
-  ('a8000000-0000-0000-0000-0000000000d7','a8000000-0000-0000-0000-0000000000e4','RSVP',0,0,0,'public',2),
+  ('a8000000-0000-0000-0000-0000000000d7','a8000000-0000-0000-0000-0000000000e4','RSVP',0,200,0,'public',2),
   ('a8000000-0000-0000-0000-0000000000d8','a8000000-0000-0000-0000-0000000000e5','GA',40,100,0,'public',1),
   ('a8000000-0000-0000-0000-0000000000d9','a8000000-0000-0000-0000-0000000000e5','RSVP',0,0,0,'public',2);
 
@@ -73,8 +73,8 @@ BEGIN
   ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 200, 'R1: e1';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e2')) = 260, 'R1: e2';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 120, 'R1: e3 cap above its types';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 300, 'R1: e4 cap with an uncapped type';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e5')) = 100, 'R1: e5 uncapped type adds nothing';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 300, 'R1: e4 cap over its types';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e5')) = 100, 'R1: e5 a closed type adds nothing';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e1')) AND public.exos_resale_unlocked(pg_temp.u('e2'))
      AND NOT public.exos_resale_unlocked(pg_temp.u('e3')) AND public.exos_resale_unlocked(pg_temp.u('e4'))
      AND NOT public.exos_resale_unlocked(pg_temp.u('e5')), 'R1: unlocked';

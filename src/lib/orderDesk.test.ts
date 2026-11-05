@@ -82,7 +82,7 @@ describe('guest-list preview input', () => {
     const r = previewInput({ csv: 'Attendee first name,Attendee last name,Email,Barcode #\nMaya,Chen,maya@x.com,123 456\nMaya,Chen,maya@x.com,123456\n,,z@x.com,' });
     expect(r.source).toBe('csv');
     expect(r.rows).toEqual([{ name: 'Maya Chen', email: 'maya@x.com', code: '123456', source: 'Import' }]);
-    expect(r.plan).toEqual({ noName: 1, repeatedCodes: 1, sharedCodes: 0, overLimit: 0 });
+    expect(r.plan).toEqual({ noName: 1, nameIsEmail: 0, repeatedCodes: 1, sharedCodes: 0, overLimit: 0 });
   });
 
   it('normalizes JSON rows', () => {

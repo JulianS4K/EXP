@@ -13,6 +13,7 @@ import type { Event } from '../types';
 import {
   codeSentText, normalizeRsvpPhone, rsvpErrorMessage, rsvpInfo, rsvpStart, rsvpVerify, ticketPathFromUrl, type RsvpInfo,
 } from '../lib/phoneRsvp';
+import { nameLooksLikeEmail } from '../../supabase/functions/_shared/nameGuard.ts';
 import WaitlistCTA from '../components/WaitlistCTA';
 
 const field = 'w-full bg-black border border-white/20 px-3 py-3 text-base text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary';
@@ -52,6 +53,7 @@ export default function PhoneRsvp() {
     e.preventDefault();
     setError(null);
     if (!name.trim()) { setError(rsvpErrorMessage('bad_name')); return; }
+    if (nameLooksLikeEmail(name)) { setError(rsvpErrorMessage('name_is_email')); return; }
     if (!normalizeRsvpPhone(phone)) { setError(rsvpErrorMessage('bad_phone')); return; }
     if (info && !info.sms && !email.trim()) { setError(rsvpErrorMessage('no_channel')); return; }
     setBusy(true);
@@ -59,7 +61,7 @@ export default function PhoneRsvp() {
       const r = await rsvpStart({ eventId, name: name.trim(), phone, email: email.trim() || undefined, plusOnes: plus, promoter, website });
       if (!r.ok) {
         if (r.error === 'sold_out') setStep('full');
-        setError(rsvpErrorMessage(r.error, { max_plus_ones: r.max_plus_ones }));
+        setError(rsvpErrorMessage(r.error, { max_plus_ones: r.max_plus_ones, seats_left: r.seats_left }));
         return;
       }
       setRsvpId(r.rsvp_id!); setSentTo(r.to ?? ''); setChannel(r.channel ?? 'sms'); setCode(''); setStep('code');

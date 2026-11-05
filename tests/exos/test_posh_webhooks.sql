@@ -4,7 +4,7 @@
 --      once and stored hashed; a rotated (or disabled) URL is refused;
 --      finance sees the status without the token
 --   P2 the cap: holds its unsold seats off Exos (tier + house); growing it
---      needs free seats; a scanner / outsider can't set it; table, uncapped
+--      needs free seats; a scanner / outsider can't set it; table, closed (capacity 0)
 --      and shared-capacity ticket types refused
 --   P3 a confirmed order takes its seats from the cap (Exos's free count
 --      doesn't move) and lands on the door list with its codes, source Posh
@@ -145,7 +145,7 @@ BEGIN
   PERFORM pg_temp.act('b5000000-0000-0000-0000-0000000000a6');
   ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d1'), 10)$$, 'owner or manager only'), 'P2: outsider';
   PERFORM pg_temp.act('b5000000-0000-0000-0000-0000000000a1');
-  ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d2'), 10)$$, 'capacity first'), 'P2: uncapped';
+  ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d2'), 10)$$, 'capacity first'), 'P2: closed (capacity 0)';
   ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d4'), 1)$$, 'table'), 'P2: table';
   ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d3'), 1)$$, 'not found for this event'), 'P2: other event''s tier';
   ASSERT pg_temp.refused($$SELECT public.exos_posh_set_cap(pg_temp.u('e1'), pg_temp.u('d1'), 101)$$, 'only 100 more'), 'P2: more than is free';

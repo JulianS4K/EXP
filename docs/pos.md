@@ -21,6 +21,20 @@ PAN, expiry, CVC, cardholder name or track data, and `test_pos_scaffold.sql` P1 
 | Cash drawers: opening float, denomination counts, expected vs counted | Accounting exports (QuickBooks and similar) |
 | Settlement per event: tickets + bar + merch, cash vs card, the Exos fee, promoter and artist splits | Payouts over Stripe Connect (these come after the terminal is wired) |
 
+## Staff shifts (clock in / out)
+
+Mig `20261105120000` (`exos_staff_shifts`). Staff clock in on the phone they're signed in on (the door app's
+device), not on a shared kiosk: `exos_staff_clock_in(org, event?, device?, note?)` and `exos_staff_clock_out(org,
+note?)`. Any active member may clock in; one open shift per member per organization; the event and device, when
+given, must be the organization's (a device that is pending or active). The role at clock-in is kept on the shift.
+Owners and managers close a shift somebody forgot (`exos_staff_shift_close(shift, clock_out_at, reason)`: between
+the clock-in and now, with a reason kept on the row) and read the hours report (`exos_staff_shift_report(org, from?,
+to?)`, shifts that started in the window, at most 92 days, default the last 7, with each member's minutes; an open
+shift counts up to now). RLS: members read their own shifts, owners and managers all. Tips and pay stay out of
+scope. API (`docs/api/box-office.json`): `POST /v1/staff-shifts/clock-in` and `/clock-out` with the member's own
+personal or OAuth token (`checkin:write`; an org API key is not a person), `GET /v1/staff-shifts` (`events:read`,
+an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own token) map here.
+
 ## What's built vs later
 
 | Piece | Status | Where |

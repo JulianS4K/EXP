@@ -154,6 +154,35 @@ name and notes always; status and end date only when Stripe doesn't bill it, it 
 `ended_reason` (a refund is never revived). Cancel / expire end the benefits now. `staff_notes` and `issued_by` have no
 client column grant (staff read them through `exos_org_memberships_page`); `member_name` is readable by the holder.
 
+### Capacity and box-office reservations (mig 20261105120000)
+
+A product may have a `capacity` (`NULL`: unlimited): the most memberships that are pending or live plus open
+box-office reservations. `exos_membership_set_capacity(product, n | null)` (owner / manager); lowering it below what
+is taken stops new sales and takes nobody's membership. Online, `buy_membership` (exos-commerce) answers 409
+"sold out" when no place is left; a checkout already open when the last place goes still completes (it was paid).
+
+The box office sells with a reservation, as Opendate's do (`exos_membership_reservations`, the partner-reservation
+pattern): reserve holds one place for 10 minutes, complete issues the membership, cancel frees it, and an unfinished
+reservation expires (it stops counting at `expires_at`). Payment is taken at the counter, outside Stripe: `cash`,
+`check` or `external` (a card on another terminal) with an optional `payment_reference`; the reservation row,
+immutable once completed, is the record of that money. No card reader and no gifts here (`use_card_reader` and
+`gift` are refused, not ignored).
+
+- `exos_membership_reserve(product, { email, first_name?, last_name?, payment_method?, payment_reference?,
+  device_name? })`: the product must be published and active; refused (409) when the email already holds a live
+  or pending membership of it or an open reservation, and when the product is sold out. Serialised per product (a
+  row lock), so two reservations for the last place can't both succeed (`tests/exos/race_print_codes.sh`).
+- `exos_membership_reservation_complete(product, token)`: an `active` membership, source `purchase`, billing
+  `once`, one term of the product, the account matched by confirmed email; `membership.created` webhook. Completing
+  again answers the same membership (`replay: true`); a cancelled or expired reservation is refused.
+- `exos_membership_reservation_cancel(product, token)`: before completion only (refund a completed one instead).
+
+All three are owner / manager. API: `POST /v1/membership-products/:id/reservations`,
+`DELETE …/reservations/:token`, `POST …/reservations/:token/complete`, `GET` / `PUT
+/v1/membership-products/:id/capacity` (`commerce:write`, reads `commerce:read`; a key whose creator is an owner or
+manager now; `docs/api/box-office.json`). Opendate's `/membership_products/{id}/membership_reservations…` paths are
+aliases, and its wrapped bodies (`membership_reservation[email]`) are read too. Finance can read the reservations.
+
 ### Imported attendees (door imports)
 
 Attendees imported from another platform are guest entries with a `source`, an external code or an `external_ref`
@@ -191,7 +220,7 @@ Read routes with `commerce:read` (`docs/api/commerce.json`, `/developers`). Mapp
 | `POST /admin/memberships`, `PATCH /admin/memberships/:id` | `POST /v1/memberships`, `PATCH /v1/memberships/:id` (per organization) |
 | `PATCH` / `DELETE /admin/migrated_attendees/:id` | `PATCH` / `DELETE /v1/migrated-attendees/:id` |
 | `GET /users/current/season_passes/:id/pkpass`, `…/google_wallet_url` | exos-wallet `POST /season-pass` (`docs/wallet.md`) |
-| `POST /membership_products/:id/membership_reservations`, `DELETE …/:token`, `POST …/:token/complete` | Doesn't apply: memberships aren't capacity-limited, so there's nothing to reserve; Exos's flow is one Stripe Checkout session (`buy_membership`) completed by the webhook, and an abandoned one simply expires |
+| `POST /membership_products/:id/membership_reservations`, `DELETE …/:token`, `POST …/:token/complete` | `POST /v1/membership-products/:id/reservations`, `DELETE …/reservations/:token`, `POST …/reservations/:token/complete` (box office, paid at the counter; "Capacity and box-office reservations" above). Online, one Stripe Checkout session (`buy_membership`) completed by the webhook |
 | `POST /membership_scans` | `exos_membership_scan(org, membership id)` (door staff; Org settings lookup). No partner route: door scans are a signed-in staff action |
 | `GET /gift_card_products` | `GET /v1/gift-card-products` |
 | `GET /gift_card_products/:id/quote` | `exos_gift_card_quote` inside exos-checkout / exos-commerce; amounts are fixed or a min–max range, so a quote is the amount itself |

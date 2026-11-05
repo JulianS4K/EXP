@@ -2,7 +2,9 @@
 // is which, and the rows the import uploads. Moved here unchanged from
 // src/lib/door/imports.ts so exos-api's guest-list preview (POST
 // /v1/events/:id/guest-list-preview) parses exactly like the dashboard.
-// Pure, no imports.
+// Pure; its one import (nameGuard) is pure too.
+
+import { nameLooksLikeEmail } from './nameGuard.ts';
 
 export const MAX_IMPORT_ROWS = 5000;
 
@@ -14,7 +16,15 @@ export function normalizeDoorCode(raw: unknown): string | null {
   return c.length >= 1 && c.length <= 128 ? c : null;
 }
 
-
+/** A door code with its punctuation dropped too (EB-1234 5678 and
+ *  EB12345678 match): the fallback when a typed code has no exact hit (mig
+ *  20261105100000, SIM-DOOR-9). Same rule as the database's
+ *  _exos_door_code_loose; null when nothing is left. */
+export function looseDoorCode(raw: unknown): string | null {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+  const c = String(raw).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  return c.length >= 1 ? c : null;
+}
 
 export type ImportField = 'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'code' | 'ticket' | 'note';
 
@@ -90,6 +100,9 @@ export interface ImportPlan {
   rows: ImportRow[];
   /** Data rows with no name (skipped before upload). */
   noName: number;
+  /** Rows whose name is an email (columns swapped?): skipped before upload
+   *  (mig 20261105100000; the database refuses them too). */
+  nameIsEmail: number;
   /** Rows repeating an earlier row (same code, same name): kept once. */
   repeatedCodes: number;
   /** Different people sharing one code (e.g. an order number): kept,
@@ -104,6 +117,7 @@ export function planImport(table: string[][], map: ColumnMap, source: string): I
   const out: ImportRow[] = [];
   const seen = new Map<string, string>();
   let noName = 0;
+  let nameIsEmail = 0;
   let sharedCodes = 0;
   let repeatedCodes = 0;
   let overLimit = 0;
@@ -115,6 +129,10 @@ export function planImport(table: string[][], map: ColumnMap, source: string): I
     const name = cell(r, 'name') || [cell(r, 'firstName'), cell(r, 'lastName')].filter(Boolean).join(' ');
     if (!name) {
       noName++;
+      continue;
+    }
+    if (nameLooksLikeEmail(name)) {
+      nameIsEmail++;
       continue;
     }
     let code = normalizeDoorCode(cell(r, 'code')) ?? undefined;
@@ -148,5 +166,5 @@ export function planImport(table: string[][], map: ColumnMap, source: string): I
     if (note) row.note = note.slice(0, 200);
     out.push(row);
   }
-  return { rows: out, noName, repeatedCodes, sharedCodes, overLimit };
+  return { rows: out, noName, nameIsEmail, repeatedCodes, sharedCodes, overLimit };
 }

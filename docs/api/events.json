@@ -298,7 +298,7 @@
       "method": "GET",
       "path": "/v1/events/:id/add-ons",
       "summary": "List an event's add-ons",
-      "description": "Extras sold with tickets (parking, merch), in display order. `capacity` 0 means unlimited.",
+      "description": "Extras sold with tickets (parking, merch), in display order. `capacity` 0 means closed (nothing sells); there is no unlimited.",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [

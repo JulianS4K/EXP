@@ -123,6 +123,8 @@ import {
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
 import { isEmptyAttribution, readAttribution } from "../_shared/attribution.ts";
 import { clientIp, hashIp, normalizeGuestEmail } from "../_shared/guest.ts";
+import { capacityLeft } from "../_shared/capacity.ts";
+import { newProofToken, proofTokenHash } from "../_shared/orderProof.ts";
 import { isCheckoutCurrency } from "../_shared/currency.ts";
 import {
   EXOS_FEE_BPS, FREE_TIER_FEE_BPS, FREE_TIER_MAX_CAPACITY, STRIPE_CARD_FEE, checkoutApplicationFeeCents, checkoutFeeSplit,
@@ -530,8 +532,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const a = byId.get(id);
         if (!a || a.visibility !== "public") return json({ error: "add-on not available" }, 409);
         // Hard upper bound mirroring the exos_order_addons CHECK (quantity BETWEEN
-        // 1 AND 50). Without this, an add-on with no max_per_order and unlimited
-        // capacity (both defaults) accepts any quantity here, the buyer pays, then
+        // 1 AND 50). Without this, an add-on with no max_per_order and a large
+        // capacity accepts any quantity here, the buyer pays, then
         // fulfillment's INSERT violates the CHECK and rolls back — charged, no
         // tickets, infinite webhook retry. Reject over-cap before charging.
         if (qty > 50) {
@@ -540,7 +542,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if (a.max_per_order && qty > a.max_per_order) {
           return json({ error: `add-on "${a.name}" limited to ${a.max_per_order} per order` }, 409);
         }
-        if (a.capacity > 0 && a.sold + qty > a.capacity) {
+        // Capacity 0 is closed, never unlimited (mig 20261105100000).
+        if (capacityLeft(a.capacity, a.sold) < qty) {
           return json({ error: `add-on "${a.name}" is sold out` }, 409);
         }
         const unitCents = Math.round(Number(a.price) * 100);
@@ -802,12 +805,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     clientIp((h) => req.headers.get(h)),
     Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+  // Proof of email (mig 20261105100000): a guest's tickets (or those of an
+  // account whose email isn't confirmed) are released only once the buyer
+  // proves the email (a mailed code) or a phone (an SMS code) on this page.
+  // The browser keeps the token; the order keeps only its SHA-256, so the
+  // code alone (in a mistyped inbox) does nothing.
+  const needsProof = !buyerUid || !user?.email_confirmed_at;
+  const proofToken = needsProof ? newProofToken() : null;
   const checkoutRecord: Record<string, unknown> = {
     ad_ids: isEmptyAdIds(adIds) ? null : adIds,
     consent_marketing: consentMarketing,
     client_ip_hash: ipHash,
     user_agent: userAgent,
+    ...(proofToken ? { proof_token_hash: await proofTokenHash(proofToken) } : {}),
   };
+  const proofOut = proofToken ? { proof_token: proofToken } : {};
 
   // Reserve inventory with a cart hold BEFORE creating the Stripe session, so a
   // buyer who is about to pay actually holds the seats (closes the read-then-
@@ -902,7 +914,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const { data: row } = await sb.from("exos_checkout_sessions").select("failure_reason").eq("session_id", sessionId).maybeSingle();
       return json({ error: row?.failure_reason || "those tickets are no longer available" }, 409);
     }
-    return json({ free: true, issued, email: buyerEmail });
+    return json({ free: true, issued, email: buyerEmail, session_id: sessionId, ...proofOut });
   }
 
   // exos: gift cards — the card covers the whole order: no Stripe. Record the
@@ -950,7 +962,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: row?.failure_reason || "those tickets are no longer available" }, 409);
     }
     await sb.rpc("exos_record_price_charged", { p_session_id: sessionId, p_amount_cents: 0, p_currency: currency });
-    return json({ paid_with_gift_card: true, session_id: sessionId, issued, gift_card_cents: giftCents });
+    return json({ paid_with_gift_card: true, session_id: sessionId, issued, gift_card_cents: giftCents, ...proofOut });
   }
 
   // PayPal / Venmo: the same priced order, as a PayPal order.
@@ -1007,7 +1019,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     await recordDisclosure(sessionId);
     return json({
-      processor: "paypal", session_id: sessionId, paypal_order_id: orderId,
+      processor: "paypal", session_id: sessionId, paypal_order_id: orderId, ...proofOut,
       ...(redirect ? { approve_url: approveUrl(order as { links?: { rel?: string; href?: string }[] }) } : {}),
     });
   }
@@ -1048,6 +1060,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
+  // The hold lasts until this moment + 10 minutes (mig 20261105100000): a
+  // payment Stripe accepts just before the page closes, whose webhook is
+  // late, still lands on a seat held for it. Recorded on the session row.
+  const stripeExpiresAt = Math.floor(Date.now() / 1000) + 30 * 60;
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create({
@@ -1069,9 +1085,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ...(embedded
         ? { ui_mode: "embedded" as const, return_url: returnUrl, redirect_on_completion: "if_required" as const }
         : { success_url, cancel_url }),
-      // Match the 30-minute seat hold (Stripe's minimum) so nobody can pay after
-      // their seats went back to the pool and trigger a refund.
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      // Stripe's minimum (30 minutes), set explicitly: the seat hold runs to
+      // this + 10 minutes, so nobody pays after their seats went back to the
+      // pool, and a late webhook still finds its seat.
+      expires_at: stripeExpiresAt,
       customer_email: buyerEmail || undefined,
       metadata: {
         exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
@@ -1090,6 +1107,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const ledgerRow: Record<string, unknown> = {
     session_id: session.id,
+    provider_expires_at: new Date((session.expires_at || stripeExpiresAt) * 1000).toISOString(),
     event_id, tier_id, org_id: ev.org_id,
     buyer_uid: buyerUid, buyer_email: buyerEmail,
     ...(buyerUid ? {} : { guest: true }),
@@ -1155,8 +1173,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   await recordDisclosure(session.id);
 
-  if (embedded) return json({ client_secret: session.client_secret, session_id: session.id });
-  return json({ url: session.url, session_id: session.id });
+  if (embedded) return json({ client_secret: session.client_secret, session_id: session.id, ...proofOut });
+  return json({ url: session.url, session_id: session.id, ...proofOut });
 });
 
 // Columns added by mig 20260929131000 (checkout records). Nice to have, never
@@ -1164,6 +1182,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 const RECORD_COLUMNS = [
   "ad_ids", "consent_marketing", "client_ip_hash", "user_agent",
   "application_fee_cents", "exos_fee_cents", "card_fee_est_cents", "fee_bps", "fee_free",
+  // mig 20261105100000 (hold timing, proof of email)
+  "provider_expires_at", "proof_token_hash",
 ];
 
 // Insert the checkout session row. Deployed before a migration that adds

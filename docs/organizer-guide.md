@@ -43,7 +43,7 @@ paid events can't be sold.**
 
 - Date, doors, start and end times, and the venue.
 - Performers and artist links.
-- **Tiers:** price, capacity (0 = unlimited), sales window, hidden or public.
+- **Tiers:** price, capacity (required; there is no unlimited, and setting an existing tier to 0 closes it: stop sales), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
   *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee.
   **Free tier:** an event with a max capacity of 150 or less (its overall cap, else its capped
@@ -230,7 +230,13 @@ tiers and discount codes, into a series of dates.
     no amounts.
 - **Comps:** tickets to a list of emails, with an optional org-wide **comp budget**. People without
   an account get a claim-by-email link. Comps respect capacity, shared quotas and seats held in
-  other people's carts; a full tier shows up as "sold-out" for that recipient.
+  other people's carts; a full tier shows up as "sold-out" for that recipient. Sending the same batch
+  twice (a double click, a retry) issues it once: the same list, tier and quantity from the same person
+  within 10 minutes returns the first result. The API's `Idempotency-Key` does the same.
+- **Guest orders waiting for email confirmation:** a guest's tickets are released once they confirm the
+  email they typed (a code we mail them) or a phone. On **Orders**, pick the event to see who hasn't; if
+  someone mistyped their email, **Send to another email** mails them fresh claim links (the old ones stop
+  working).
 - **Waitlist:**
   - When seats free up, the next people in line automatically get a code valid for 48 hours.
   - A group of 3 waits until 3 seats are free, and nobody behind them jumps ahead.
@@ -478,6 +484,10 @@ Open **Exos Door** at `/door` (it installs as its own app on your phone's home s
   - If the code is on an imported list, the guest is checked in.
   - In the **Tickets** tab, a code from another platform is handed to the guest list automatically.
 - **It works offline** like the rest of the door: download the lists first.
+- **Codes typed by hand:** spaces and case don't matter, and a code typed without its dashes or dots
+  (EB12345678 for EB-1234-5678) still matches when only one imported code is the same without them; two
+  such matches find nobody, so the door asks for the name. A file whose name and email columns are swapped
+  is caught: rows named like an email are skipped with "are your columns swapped?".
 - **Live sync from Eventbrite** (instead of re-importing): in `/door`, open **Eventbrite sync** on the event.
   - An owner or manager clicks **Connect Eventbrite**, signs in on Eventbrite and allows Exos, then picks
     the Eventbrite event (also in **Org settings → Integrations**). Where this Exos server has no Eventbrite

@@ -1,0 +1,539 @@
+{
+ "file": "public-discovery",
+ "name": "Public: discovery and signups (no credential)",
+ "order": 14.5,
+ "description": "What a fan app or a venue's own site shows anyone, with no key: published events (ticket types priced all-in, as everywhere a buyer sees a price), organizers with upcoming shows, search, an organizer's series, and signup forms. Rate limited per network. For a listing partner's feed with its own key, use the listing feed (/v1/public/events).",
+ "endpoints": [
+  {
+   "id": "public-discovery-events",
+   "method": "GET",
+   "path": "/v1/public/discovery/events",
+   "summary": "Discover events",
+   "description": "Published events from now on, soonest first: the public event, its organizer and from_price_cents, the lowest all-in ticket price on sale (fees and exclusive tax included; buyers never see a fee line). Opendate GET /public/discovery/confirms. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Page number, 1-10000 (default 1).",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    },
+    {
+     "name": "q",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Words in the name or venue (2-80 letters or digits).",
+     "example": "jazz"
+    },
+    {
+     "name": "venue_id",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only this organizer (id or slug).",
+     "example": "blue-room"
+    },
+    {
+     "name": "starts_after",
+     "location": "query",
+     "type": "string (ISO 8601)",
+     "required": false,
+     "description": "From this time (default now).",
+     "example": "2026-12-01T00:00:00Z"
+    },
+    {
+     "name": "starts_before",
+     "location": "query",
+     "type": "string (ISO 8601)",
+     "required": false,
+     "description": "Before this time.",
+     "example": "2027-01-01T00:00:00Z"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Late Show",
+        "slug": "late-show",
+        "starts_at": "2026-12-12T02:00:00.000Z",
+        "doors_at": "2026-12-12T01:00:00.000Z",
+        "ends_at": null,
+        "timezone": "America/New_York",
+        "currency": "usd",
+        "venue_name": "Blue Room",
+        "venue_location": "New York, NY",
+        "image_url": null,
+        "category": "music",
+        "sold_out": false,
+        "org": {
+         "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Blue Room",
+         "slug": "blue-room"
+        },
+        "from_price_cents": 2800
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-discovery-event",
+   "method": "GET",
+   "path": "/v1/public/discovery/events/:id",
+   "summary": "One event",
+   "description": "A published event with its public ticket types, each priced all-in (price_cents) with whether it is on sale. Never counts or capacity. Opendate GET /public/discovery/confirms/{id}. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Late Show",
+       "slug": "late-show",
+       "starts_at": "2026-12-12T02:00:00.000Z",
+       "doors_at": "2026-12-12T01:00:00.000Z",
+       "ends_at": null,
+       "timezone": "America/New_York",
+       "currency": "usd",
+       "venue_name": "Blue Room",
+       "venue_location": "New York, NY",
+       "image_url": null,
+       "category": "music",
+       "sold_out": false,
+       "org": {
+        "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Blue Room",
+        "slug": "blue-room"
+       },
+       "from_price_cents": 2800,
+       "ticket_types": [
+        {
+         "id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "GA",
+         "description": null,
+         "price_cents": 2800,
+         "on_sale": true,
+         "sold_out": false,
+         "sales_start": null,
+         "sales_end": null
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 404,
+     "description": "Not a published event.",
+     "example": {
+      "error": "event not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-venues",
+   "method": "GET",
+   "path": "/v1/public/venues",
+   "summary": "Discover venues",
+   "description": "Organizers with an upcoming published event, by name: their public profile (Opendate GET /public/venues). No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Page number, 1-10000 (default 1).",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    },
+    {
+     "name": "q",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Words in the name.",
+     "example": "blue"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Blue Room",
+        "slug": "blue-room",
+        "description": "A 300-cap room.",
+        "upcoming_events_count": 4
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-venue",
+   "method": "GET",
+   "path": "/v1/public/venues/:id",
+   "summary": "One venue",
+   "description": "An organizer by id or slug, with its next 50 published events. Opendate GET /public/venues/{id}. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The organizer's id or slug.",
+     "example": "blue-room"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Blue Room",
+       "slug": "blue-room",
+       "description": "A 300-cap room.",
+       "upcoming_events_count": 4,
+       "upcoming_events": [
+        {
+         "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Late Show",
+         "slug": "late-show",
+         "starts_at": "2026-12-12T02:00:00.000Z",
+         "doors_at": "2026-12-12T01:00:00.000Z",
+         "ends_at": null,
+         "timezone": "America/New_York",
+         "currency": "usd",
+         "venue_name": "Blue Room",
+         "venue_location": "New York, NY",
+         "image_url": null,
+         "category": "music",
+         "sold_out": false
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-search",
+   "method": "GET",
+   "path": "/v1/public/search",
+   "summary": "Search",
+   "description": "Up to 20 upcoming published events and 20 organizers whose names match. Opendate GET /public/search. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "q",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "2-80 letters or digits (query is accepted too).",
+     "example": "jazz"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "events": [
+        {
+         "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Late Show",
+         "slug": "late-show",
+         "starts_at": "2026-12-12T02:00:00.000Z",
+         "doors_at": "2026-12-12T01:00:00.000Z",
+         "ends_at": null,
+         "timezone": "America/New_York",
+         "currency": "usd",
+         "venue_name": "Blue Room",
+         "venue_location": "New York, NY",
+         "image_url": null,
+         "category": "music",
+         "sold_out": false
+        }
+       ],
+       "venues": [
+        {
+         "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Blue Room",
+         "slug": "blue-room",
+         "description": "A 300-cap room.",
+         "upcoming_events_count": 4
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 400,
+     "description": "q too short.",
+     "example": {
+      "error": "q must be at least 2 letters or digits"
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-event-series-list",
+   "method": "GET",
+   "path": "/v1/public/event-series",
+   "summary": "An organizer's series",
+   "description": "Active series of an organizer with upcoming published dates, each with its next 10 (the venue website list). Opendate GET /public/website_event_series. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "venue_id",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "The organizer (id or slug); required.",
+     "example": "blue-room"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "description": "Every Friday.",
+        "image_url": null,
+        "upcoming_count": 6,
+        "events": []
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-event-series",
+   "method": "GET",
+   "path": "/v1/public/event-series/:id",
+   "summary": "One series",
+   "description": "A public series with its next 100 upcoming published dates. Opendate GET /public/website_event_series/{id}. No credential; CORS-open; 60 requests a minute per network (429 with Retry-After over it).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Jazz Fridays",
+       "description": "Every Friday.",
+       "image_url": null,
+       "org": {
+        "name": "Blue Room",
+        "slug": "blue-room"
+       },
+       "upcoming_count": 6,
+       "page": 1,
+       "per_page": 100,
+       "total_pages": 1,
+       "events": []
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "public-create-fan",
+   "method": "POST",
+   "path": "/v1/public/fans",
+   "summary": "Sign up to a list",
+   "description": "A signup to an organizer's signup form (form_id in the body), exactly as the embed's: double opt-in (the address gets a confirm mail; only its link puts them on the list), texts confirmed signed in, the optional captcha. Always answers { ok, status: check_email }, so it never tells whether an address is on a list. 10 a minute per network, 120 per form. Opendate POST /public/fans; the fan[...] wrapper is accepted.",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "form_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The signup form (signup_form_id is accepted too).",
+     "example": "f0f0f0f0-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "email",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The address.",
+     "example": "sam@example.com"
+    },
+    {
+     "name": "first_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 60 characters.",
+     "example": "Sam"
+    },
+    {
+     "name": "subscribe_to_marketing_sms",
+     "location": "body",
+     "type": "boolean",
+     "required": false,
+     "description": "Ask for texts too (confirmed signed in).",
+     "example": false
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "ok": true,
+      "status": "check_email"
+     }
+    },
+    {
+     "status": 422,
+     "description": "A missing or bad field.",
+     "example": {
+      "error": "email is required."
+     }
+    },
+    {
+     "status": 429,
+     "description": "Too many signups from this network or to this form.",
+     "example": {
+      "error": "too many signups, try again in a minute"
+     }
+    }
+   ],
+   "request_example": {
+    "form_id": "f0f0f0f0-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+    "email": "sam@example.com"
+   }
+  },
+  {
+   "id": "public-create-form-submission",
+   "method": "POST",
+   "path": "/v1/public/forms/:id/submissions",
+   "summary": "Submit a signup form",
+   "description": "The same as POST /v1/public/fans with the form in the path (Opendate's embed path POST /forms/{uuid}/submissions).",
+   "auth": "public",
+   "scope": null,
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The signup form id.",
+     "example": "f0f0f0f0-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "email",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The address.",
+     "example": "sam@example.com"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "ok": true,
+      "status": "check_email"
+     }
+    },
+    {
+     "status": 404,
+     "description": "A form that isn't taking signups.",
+     "example": {
+      "error": "this form isn't taking signups"
+     }
+    }
+   ],
+   "request_example": {
+    "email": "sam@example.com"
+   }
+  }
+ ]
+}

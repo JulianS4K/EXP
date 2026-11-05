@@ -142,6 +142,8 @@ BEGIN
        'exos_offer_public', 'exos_offer_respond', 'exos_settlement_public', 'exos_ticket_counts_optout',
        -- a partner ticket's live link: 256-bit link key (mig 20261031130000)
        'exos_ticket_link_view',
+       -- the same link key: that ticket's event location, the secret address once revealed (mig 20261105130000)
+       'exos_ticket_link_location',
        -- the public tier / add-on views call these as the reader (mig 20261008100000)
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
@@ -164,7 +166,13 @@ BEGIN
        'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',
        -- inbound booking requests (mig 20261102130000): an org's form text
        -- when it is on, and the rate-limited, honeypotted, 16 KB-capped submit
-       'exos_inbound_form_public', 'exos_inbound_submit');
+       'exos_inbound_form_public', 'exos_inbound_submit',
+       -- a guest order's proof of email / phone (mig 20261105100000): a 256-bit
+       -- browser token from exos-checkout gates all three; 5 tries per code
+       'exos_order_proof_status', 'exos_order_proof_send', 'exos_order_proof_verify',
+       -- public discovery (mig 20261105110000): published events, public ticket
+       -- types, organizers' public profiles and series; 60 a minute per network
+       'exos_api_public');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

@@ -50,6 +50,7 @@ import {
   displayTypes, isLinkOut, linkOutGone, linkOutSoldOut, platformLabel, priceRange, sellsElsewhere, trackedBuyUrl,
   type WhereToBuy,
 } from '../eventImport/linkOut.ts';
+import { capacityLeft } from '../capacity.ts';
 
 export const GOOGLE_FEED_VERSION = 1;
 
@@ -293,7 +294,7 @@ function offerFor(t: FeedTierRow, e: FeedEventRow, currency: string, appBase: st
   buy?: WhereToBuy | null): SchemaOffer {
   const scheduled = effectiveTierPrice(Number(t.price), t.price_schedule, now);
   const cents = allInCents(Math.round(scheduled * 100), Number(t.exclusive_tax_percent) || 0, parseUnitFees(t.passed_on_fees));
-  const left = t.capacity > 0 ? t.capacity - t.sold : Infinity;
+  const left = capacityLeft(t.capacity, t.sold);  // 0 = closed, never unlimited
   const notYet = !!t.sales_start && Date.parse(t.sales_start) > now.getTime();
   const ended = !!t.sales_end && Date.parse(t.sales_end) < now.getTime();
   const availability: SchemaOffer['availability'] = cancelled || ended

@@ -61,7 +61,7 @@ export default function PayPalCheckout() {
 
   const done = (sessionId?: string) => {
     // A full page load leaves PayPal's SDK (and this page's CSP) behind.
-    window.location.replace(publicUrl(`my-tickets?checkout=success&processor=paypal${user ? '' : '&guest=1'}${sessionId ? `&order=${encodeURIComponent(sessionId)}` : ''}`));
+    window.location.replace(publicUrl(`my-tickets?checkout=success&processor=paypal${user ? '' : '&guest=1'}${sessionId ? `&order=${encodeURIComponent(sessionId)}${user ? '' : `&session_id=${encodeURIComponent(sessionId)}`}` : ''}`));
   };
 
   const capture = async (orderId: string) => {

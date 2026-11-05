@@ -27,7 +27,7 @@ export interface PreviewInput {
   rows: PreviewRow[];
   skipped: SkippedLine[];
   /** CSV only: what the Door import's planner dropped before upload. */
-  plan?: { noName: number; repeatedCodes: number; sharedCodes: number; overLimit: number };
+  plan?: { noName: number; nameIsEmail: number; repeatedCodes: number; sharedCodes: number; overLimit: number };
 }
 
 export class PreviewError extends Error {}
@@ -113,6 +113,6 @@ export function previewInput(body: Record<string, unknown>): PreviewInput {
   const plan = planImport(table, detectColumns(header), typeof body.source === 'string' ? body.source.slice(0, 40) : 'Import');
   return {
     source: 'csv', rows: plan.rows, skipped: [],
-    plan: { noName: plan.noName, repeatedCodes: plan.repeatedCodes, sharedCodes: plan.sharedCodes, overLimit: plan.overLimit },
+    plan: { noName: plan.noName, nameIsEmail: plan.nameIsEmail, repeatedCodes: plan.repeatedCodes, sharedCodes: plan.sharedCodes, overLimit: plan.overLimit },
   };
 }

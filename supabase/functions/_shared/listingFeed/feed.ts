@@ -23,6 +23,7 @@ import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { parseUnitFees, type UnitFee } from '../fees.ts';
 import { eventPageUrl, zonedIso } from '../googleEvents/feed.ts';
 import { orderedLineup, parseLineup, spotifyLinks, type LineupSlot } from '../artists.ts';
+import { capacityLeft } from '../capacity.ts';
 
 export const PER_PAGE_DEFAULT = 30;
 export const PER_PAGE_MAX = 250;
@@ -314,7 +315,7 @@ export function feedEntry(e: SourceEvent, opts: EntryOptions): FeedEntry {
   const zoned = (s: string | null) => (s ? zonedIso(s, tz) ?? iso(s) : null);
   const tiers = Array.isArray(e.tiers) ? e.tiers : [];
   const prices = tiers.map((t) => tierAllIn(t, now)).filter((p) => Number.isFinite(p) && p >= 0);
-  const left = (t: SourceTier) => (t.capacity > 0 ? t.capacity - t.sold : Infinity);
+  const left = (t: SourceTier) => capacityLeft(t.capacity, t.sold);  // 0 = closed, never unlimited
   const total = Number(e.total_tickets) || 0;
   const soldOut = (total > 0 && (Number(e.tickets_sold) || 0) >= total) || (tiers.length > 0 && tiers.every((t) => left(t) <= 0));
   const inWindow = tiers.some((t) =>

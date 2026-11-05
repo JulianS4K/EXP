@@ -181,19 +181,39 @@ BEGIN
 END $$;
 
 -- SIM-ORG-3 -------------------------------------------------------------------
--- "Set capacity to 0 to stop sales": 0 means uncapped, so the tier sells on.
+-- "Set capacity to 0 to stop sales". Was KNOWN (0 meant uncapped, so the
+-- tier sold on). Product call (mig 20261105100000): 0 is CLOSED, never
+-- unlimited, so this is now the real "stop sales".
 SET ROLE authenticated;
 SELECT pg_temp.act('5a000000-0000-0000-0000-0000000000a2');
 SELECT pg_temp.put('3', pg_temp.err($$UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = pg_temp.u('d1')$$));
 RESET ROLE;
 DO $$
+DECLARE e text; j jsonb;
 BEGIN
-  IF pg_temp.g('3') = '' AND public.exos_tier_available(pg_temp.u('d1')) IS NULL THEN
-    RAISE NOTICE 'KNOWN SIM-ORG-3 capacity 0 on a tier that has sold means "uncapped": an organizer stopping sales opens them wide (product call: 0 = unlimited)';
-  ELSE
-    RAISE NOTICE 'OK  SIM-ORG-3 capacity 0 after sales: %', pg_temp.g('3');
-  END IF;
+  ASSERT pg_temp.g('3') = '', 'SIM-ORG-3: capacity 0 after sales refused: ' || pg_temp.g('3');
+  ASSERT public.exos_tier_available(pg_temp.u('d1')) = 0 AND public.exos_effective_available(pg_temp.u('d1')) = 0,
+         'SIM-ORG-3: a closed tier has 0 left';
+  ASSERT coalesce((SELECT available FROM public.exos_public_tiers WHERE id = pg_temp.u('d1')), 0) = 0,
+         'SIM-ORG-3: the public view says 0, not unlimited';
+  -- A buyer can't hold, the box office can't mint, a comp can't land.
+  PERFORM pg_temp.act('5a000000-0000-0000-0000-0000000000b1', 'sim-buyer@x.com');
+  e := pg_temp.err($q$SELECT public.exos_create_hold(pg_temp.u('e1'), pg_temp.u('d1'), 1)$q$);
+  ASSERT e LIKE '%not enough tickets%', 'SIM-ORG-3: a hold on a closed tier: ' || e;
+  PERFORM pg_temp.act('5a000000-0000-0000-0000-0000000000a2', 'sim-manager@x.com');
+  e := pg_temp.err($q$SELECT public.exos_mint_tickets(pg_temp.u('e1'), pg_temp.u('d1'), 1, NULL, 0)$q$);
+  ASSERT e LIKE '%sold out%', 'SIM-ORG-3: a box-office mint on a closed tier: ' || e;
+  SELECT to_jsonb(r) INTO j FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d1'), ARRAY['closed-comp@x.com'], 1) r;
+  ASSERT j ->> 'outcome' = 'sold-out', 'SIM-ORG-3: a comp on a closed tier: ' || j::text;
+  -- The backstop: even a raw sold++ (a path that forgot the rule) is refused.
+  e := pg_temp.err($q$UPDATE public.exos_ticket_tiers SET sold = sold + 1 WHERE id = pg_temp.u('d1')$q$);
+  ASSERT e LIKE '%closed%', 'SIM-ORG-3: the closed-tier trigger: ' || e;
+  ASSERT pg_temp.sold('d1') = 4, 'SIM-ORG-3: nothing sold while closed';
+  -- Reopen: the organizer sets a capacity again.
   UPDATE public.exos_ticket_tiers SET capacity = 100 WHERE id = pg_temp.u('d1');
+  ASSERT public.exos_tier_available(pg_temp.u('d1')) = 96, 'SIM-ORG-3: reopened';
+  PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK  SIM-ORG-3 capacity 0 closes a tier: no holds, mints or comps; 0 never means unlimited (fixed)';
 END $$;
 
 -- SIM-ORG-4 -------------------------------------------------------------------
@@ -342,21 +362,36 @@ BEGIN
 END $$;
 
 -- SIM-ORG-10 ------------------------------------------------------------------
--- The same comp batch submitted twice (double click / retry).
+-- The same comp batch submitted twice (double click / retry). Was KNOWN
+-- (issued twice); mig 20261105100000 adds a request key and, without one, a
+-- 10-minute identical-batch guard.
 DO $$
-DECLARE n int;
+DECLARE n int; m int; a jsonb; b jsonb; e text;
 BEGIN
   PERFORM pg_temp.act('5a000000-0000-0000-0000-0000000000a2', 'sim-manager@x.com');
-  PERFORM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip1@x.com', 'vip2@x.com'], 1);
-  PERFORM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip1@x.com', 'vip2@x.com'], 1);
+  -- No key (an old client): the same caller, event, tier and recipients.
+  SELECT jsonb_agg(to_jsonb(r) ORDER BY r.email) INTO a FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip1@x.com', 'vip2@x.com'], 1) r;
+  m := (SELECT count(*) FROM public.exos_mail WHERE to_email IN ('vip1@x.com', 'vip2@x.com'));
+  SELECT jsonb_agg(to_jsonb(r) ORDER BY r.email) INTO b FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['VIP2@x.com', ' vip1@x.com'], 1) r;
   SELECT count(*) INTO n FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND buyer_email IN ('vip1@x.com', 'vip2@x.com');
-  IF n = 4 THEN
-    RAISE NOTICE 'KNOWN SIM-ORG-10 a comp batch sent twice issues twice (4 tickets, 4 claim mails); no idempotency key on exos_issue_comp_batch';
-  ELSE
-    ASSERT n = 2, 'SIM-ORG-10: ' || n;
-    RAISE NOTICE 'OK  SIM-ORG-10 a repeated comp batch issues once';
-  END IF;
+  ASSERT n = 2, 'SIM-ORG-10: no key, issued ' || n;
+  ASSERT a = b, 'SIM-ORG-10: the repeat returns the first result';
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE to_email IN ('vip1@x.com', 'vip2@x.com')) = m, 'SIM-ORG-10: no second mail';
+  -- A keyed submit (the dashboard): same key = same result, even after 10 minutes.
+  SELECT jsonb_agg(to_jsonb(r)) INTO a FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip3@x.com'], 1, NULL, 'dash:sim-org-10:aaaa') r;
+  UPDATE public.exos_comp_batch_requests SET created_at = now() - interval '1 hour' WHERE request_key = 'dash:sim-org-10:aaaa';
+  SELECT jsonb_agg(to_jsonb(r)) INTO b FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip3@x.com'], 1, NULL, 'dash:sim-org-10:aaaa') r;
+  ASSERT a = b AND (SELECT count(*) FROM public.exos_tickets WHERE buyer_email = 'vip3@x.com') = 1, 'SIM-ORG-10: keyed repeat';
+  e := pg_temp.err($q$SELECT * FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip4@x.com'], 1, NULL, 'dash:sim-org-10:aaaa')$q$);
+  ASSERT e LIKE '%already used for a different batch%', 'SIM-ORG-10: a key reused for another batch: ' || e;
+  -- A new key, or the same recipients later, is a new batch on purpose.
+  PERFORM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip3@x.com'], 1, NULL, 'dash:sim-org-10:bbbb');
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE buyer_email = 'vip3@x.com') = 2, 'SIM-ORG-10: a new key issues';
+  UPDATE public.exos_comp_batch_requests SET created_at = now() - interval '11 minutes' WHERE request_key IS NULL AND caller = pg_temp.u('a2');
+  PERFORM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('d2'), ARRAY['vip1@x.com', 'vip2@x.com'], 1);
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE buyer_email IN ('vip1@x.com', 'vip2@x.com')) = 4, 'SIM-ORG-10: after 10 minutes it is a new batch';
   PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK  SIM-ORG-10 a repeated comp batch issues once: request key, else the same batch within 10 minutes (fixed)';
 END $$;
 
 -- SIM-ORG-11 ------------------------------------------------------------------
@@ -429,14 +464,25 @@ DO $$
 DECLARE l uuid := pg_temp.g('list')::uuid; r jsonb; n int;
 BEGIN
   PERFORM pg_temp.act('5a000000-0000-0000-0000-0000000000a2');
-  r := public.exos_import_guests(l, '[{"name":"dee@x.com","email":"Dee"},{"name":"eve@x.com","email":"Eve"}]');
+  r := public.exos_import_guests(l, '[{"name":"dee@x.com","email":"Dee"},{"name":"Eve <eve@x.com>","email":"Eve"},{"name":"Fay","email":"fay@x.com"}]');
   SELECT count(*) INTO n FROM public.exos_guest_list_entries WHERE list_id = l AND guest_name LIKE '%@%';
-  IF (r->>'inserted')::int = 2 AND n = 2 THEN
-    RAISE NOTICE 'KNOWN SIM-ORG-14 swapped name/email columns import as guests named by email (no email kept), reported as inserted; undo = delete them by hand';
-  ELSE
-    RAISE NOTICE 'OK  SIM-ORG-14 swapped columns flagged: %', r::text;
-  END IF;
+  -- Was KNOWN (imported as guests named by email). Mig 20261105100000.
+  ASSERT (r->>'inserted')::int = 1 AND (r->>'invalid')::int = 2 AND n = 0, 'SIM-ORG-14: ' || r::text;
+  ASSERT r->'errors'->0->>'reason' = 'name looks like an email; are your columns swapped?'
+     AND (r->'errors'->0->>'row')::int = 1 AND (r->'errors'->1->>'row')::int = 2, 'SIM-ORG-14: the reason ' || r::text;
+  -- The preview says the same before anything is written.
+  ASSERT (SELECT x->>'reason' FROM jsonb_array_elements(public._exos_guest_list_preview(pg_temp.u('01'), pg_temp.u('e1'), l,
+            '[{"name":"gus@x.com","email":"Gus"}]') -> 'rows') x) = 'name looks like an email; are your columns swapped?', 'SIM-ORG-14: preview';
+  -- One by one, the other name fields refuse it too.
+  ASSERT pg_temp.err(format($q$SELECT public.exos_add_guest(%L, 'hal@x.com', NULL, NULL, 0, NULL)$q$, l)) LIKE '%looks like an email%', 'SIM-ORG-14: add guest';
+  ASSERT pg_temp.err(format($q$SELECT public.exos_update_guest((SELECT id FROM public.exos_guest_list_entries WHERE list_id = %L AND guest_name = 'Fay'),
+            'Fay <fay@x.com>', 'fay@x.com', NULL, 0, NULL)$q$, l)) LIKE '%looks like an email%', 'SIM-ORG-14: edit guest';
+  ASSERT pg_temp.err($q$SELECT * FROM public.exos_join_waitlist(pg_temp.u('e1'), 'ivy@x.com', NULL, 'ivy@x.com', 1, NULL)$q$) LIKE '%looks like an email%',
+         'SIM-ORG-14: waitlist';
+  -- A real name with an @ that isn't an email is fine.
+  ASSERT NOT public.exos_name_has_email('Ana @ the door') AND public.exos_name_has_email('ANA.Lee+vip@Mail.Example.org'), 'SIM-ORG-14: the rule';
   PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK  SIM-ORG-14 a name that is an email is refused (import + preview with the reason, add / edit guest, waitlist; order / ticket names at SIM-ORG-22) (fixed)';
 END $$;
 
 -- SIM-ORG-15 ------------------------------------------------------------------
@@ -649,6 +695,11 @@ DO $$
 DECLARE r jsonb;
 BEGIN
   PERFORM pg_temp.act('5a000000-0000-0000-0000-0000000000a2');
+  -- SIM-ORG-14 (order and ticket names): an email in a name is refused.
+  ASSERT pg_temp.err($q$SELECT public.exos_order_update('cs_5a_p1', '{"first_name":"sim-buyer@x.com"}')$q$) LIKE '%looks like an email%',
+         'SIM-ORG-14: order buyer name';
+  ASSERT pg_temp.err($q$SELECT public.exos_ticket_update((SELECT ticket_ids[1] FROM public.exos_checkout_sessions WHERE session_id = 'cs_5a_p1'),
+            '{"attendee_name":"sim-buyer@x.com"}')$q$) LIKE '%looks like an email%', 'SIM-ORG-14: ticket attendee name';
   r := public.exos_order_update('cs_5a_p1', '{"email":"sim-buyer@x.cm"}');           -- typo
   -- Override off (default): the resend still goes to the address the order was placed with.
   r := public.exos_order_send_receipt('cs_5a_p1');

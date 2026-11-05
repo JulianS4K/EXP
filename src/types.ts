@@ -98,6 +98,9 @@ export interface Organization {
   // pages behind the consent gate (lib/consent.ts + lib/pixels.ts).
   // Venue site sections for the storefront (mig 20261016130000).
   site?: import('./lib/site').Site | null;
+  // organizer | promoter | collective (mig 20261105130000): a label and UI
+  // defaults only. Undefined until the column exists.
+  orgType?: import('./lib/eventLocation').OrgType;
   marketing?: {
     socials?: { instagram?: string; facebook?: string; tiktok?: string; x?: string; website?: string };
     /** Public pixel ids (formats: lib/pixelIds.ts). x* are X event ids (tw-<pixel>-<event>). */
@@ -368,6 +371,11 @@ export interface Event {
   // Where tickets are sold (mig 20261016100000): 'exos' (default) or the
   // organizer's own shop on another platform, linked from the buy button.
   ticketBackend?: 'exos' | 'eventbrite' | 'pretix' | 'hievents' | 'luma' | 'posh';
+  // Location mode (mig 20261105130000, docs/promoter-events.md); undefined
+  // until the column exists. A secret_location event's address is never here.
+  locationMode?: import('./lib/eventLocation').LocationMode;
+  locationRevealAt?: string | null;
+  tbaAllowSales?: boolean | null;
   externalTicketUrl?: string;
   // Link-out (mig 20261029170500): listed by Exos, sold only on the
   // organizer's own checkout. The source's status and display-only prices

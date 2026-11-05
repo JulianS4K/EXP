@@ -48,7 +48,7 @@ interface SpecEndpoint {
   path: string;
   summary: string;
   description?: string;
-  auth: 'api_key' | 'shared_key';
+  auth: 'api_key' | 'shared_key' | 'partner_key' | 'public';
   scope: string | null;
   parameters: SpecParam[];
   responses: SpecResponse[];
@@ -130,6 +130,15 @@ function curlFor(e: SpecEndpoint, base: string): string {
   if (e.auth === 'shared_key') {
     const q = ['shared_key=$EXOS_SHARED_KEY', query].filter(Boolean).join('&');
     return `curl "${base}${samplePath(e)}?${q}"`;
+  }
+  // Public discovery and signup forms take no credential.
+  if (e.auth === 'public') {
+    return [
+      `curl${e.method === 'GET' ? '' : ` -X ${e.method}`} "${base}${samplePath(e)}${query ? `?${query}` : ''}"`,
+      ...(e.request_example !== undefined
+        ? ['  -H "Content-Type: application/json"', `  -d '${JSON.stringify(e.request_example).replace(/'/g, "'\\''")}'`]
+        : []),
+    ].join(' \\\n');
   }
   return [
     `curl${e.method === 'GET' ? '' : ` -X ${e.method}`} "${base}${samplePath(e)}${query ? `?${query}` : ''}"`,
@@ -243,6 +252,7 @@ function ParamTable({ params }: { params: SpecParam[] }) {
 
 function ScopeBadge({ scope, auth }: { scope: string | null; auth?: SpecEndpoint['auth'] }) {
   if (auth === 'shared_key') return <span className="text-xs text-white/60">Listing-feed shared key (no API key)</span>;
+  if (auth === 'public') return <span className="text-xs text-white/60">No credential (rate limited per network)</span>;
   return scope
     ? <span className="text-xs text-white/60">Scope <Code>{scope}</Code></span>
     : <span className="text-xs text-white/60">Any valid key (no scope needed)</span>;

@@ -9,6 +9,7 @@ import { Plus, Minus } from 'lucide-react';
 import { listPublicAddons, type PublicAddon } from '../lib/addons';
 import { formatCurrency } from '../lib/utils';
 import { allInPrice } from '../lib/pricing';
+import { capacityLeft } from '../../supabase/functions/_shared/capacity.ts';
 import { useT } from '../context/LanguageContext';
 
 export interface AddonSelection {
@@ -42,7 +43,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange, ini
   }, [eventId]);
 
   const clampFor = (a: PublicAddon, next: number) => {
-    const remaining = a.capacity > 0 ? Math.max(0, a.capacity - a.sold) : Infinity;
+    const remaining = capacityLeft(a.capacity, a.sold);  // 0 = closed, never unlimited
     const ceiling = Math.min(a.maxPerOrder ?? Infinity, remaining);
     return Math.max(0, Math.min(next, ceiling));
   };
@@ -83,7 +84,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange, ini
     <div className="mb-6 space-y-3">
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{t('addon.title')}</p>
       {addons.map((a) => {
-        const remaining = a.capacity > 0 ? Math.max(0, a.capacity - a.sold) : Infinity;
+        const remaining = capacityLeft(a.capacity, a.sold);  // 0 = closed, never unlimited
         const soldOut = remaining <= 0;
         const current = qty[a.id] ?? 0;
         return (
