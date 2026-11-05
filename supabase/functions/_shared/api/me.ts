@@ -227,9 +227,13 @@ export function meWriteArgs(routeId: string, raw: Record<string, unknown>): Reco
         throw new MeBodyError('scopes must be a list of scope names');
       }
       const out: Record<string, unknown> = { name: optText(b.name, 'name', 80) ?? 'Token', scopes: [...new Set(scopes as string[])] };
+      // A token minted through the API always expires (mig 20261105160000):
+      // 30, 90 (the default when omitted) or 365 days, never null.
       if (b.expires_days !== undefined) {
-        const d = b.expires_days === null || b.expires_days === '' ? null : Number(b.expires_days);
-        if (d !== null && ![30, 90, 365].includes(d)) throw new MeBodyError('expires_days must be 30, 90, 365 or null');
+        const d = Number(b.expires_days);
+        if (b.expires_days === null || b.expires_days === '' || ![30, 90, 365].includes(d)) {
+          throw new MeBodyError('expires_days must be 30, 90 or 365 (a token minted through the API always expires)');
+        }
         out.expires_days = d;
       }
       return out;

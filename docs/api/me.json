@@ -2040,7 +2040,7 @@
    "method": "POST",
    "path": "/v1/me/personal-access-tokens",
    "summary": "Create a token",
-   "description": "Mints a token for yourself (Opendate POST /personal_access_tokens). A personal access token makes a personal token for the same organization (your role's rules apply); an account token makes an account token (me:read / me:write only). The new token gets at most the scopes of the token that makes it and never outlives it. It is shown once. Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
+   "description": "Mints a token for yourself (Opendate POST /personal_access_tokens). A personal access token makes a personal token for the same organization (your role's rules apply); an account token makes an account token (me:read / me:write only). The new token gets at most the scopes of the token that makes it and never outlives it. It always expires (30, 90 or 365 days), is revoked with the token that made it, and can't mint tokens itself (make those in Profile → Developer). It is shown once. Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
    "auth": "api_key",
    "scope": "me:write",
    "parameters": [
@@ -2065,9 +2065,9 @@
     {
      "name": "expires_days",
      "location": "body",
-     "type": "integer or null",
+     "type": "integer",
      "required": false,
-     "description": "30, 90 (default) or 365; null for none (only when your token has none).",
+     "description": "30, 90 (default) or 365, cut to your token's own expiry. Never null: a minted token always expires.",
      "example": 90
     }
    ],
@@ -2113,6 +2113,20 @@
      "example": {
       "error": "this token can't grant events:write (a new token gets at most the scopes of the token that makes it)"
      }
+    },
+    {
+     "status": 400,
+     "description": "expires_days is null or not 30, 90 or 365.",
+     "example": {
+      "error": "expires_days must be 30, 90 or 365 (a token minted through the API always expires)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The calling token was itself minted through the API: only a token made in Profile → Developer mints.",
+     "example": {
+      "error": "a token minted through the API can't mint tokens; make one in Profile → Developer"
+     }
     }
    ],
    "request_example": {
@@ -2128,7 +2142,7 @@
    "method": "DELETE",
    "path": "/v1/me/personal-access-tokens/:id",
    "summary": "Revoke a token",
-   "description": "Revokes one of your personal or account tokens at once (404 for anyone else's). Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
+   "description": "Revokes one of your personal or account tokens at once (404 for anyone else's), and with it every token it minted through the API. Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
    "auth": "api_key",
    "scope": "me:write",
    "parameters": [

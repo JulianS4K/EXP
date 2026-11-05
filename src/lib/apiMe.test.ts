@@ -147,8 +147,12 @@ describe('request bodies', () => {
   it('tokens: scopes, a known lifetime, nothing else', () => {
     expect(meWriteArgs('create-my-token', { scopes: 'me:read me:read', expires_days: '30' }))
       .toEqual({ name: 'Token', scopes: ['me:read'], expires_days: 30 });
-    expect(meWriteArgs('create-my-token', { personal_access_token: { name: 'ci', scopes: ['me:read'], expires_days: null } }))
-      .toEqual({ name: 'ci', scopes: ['me:read'], expires_days: null });
+    expect(meWriteArgs('create-my-token', { personal_access_token: { name: 'ci', scopes: ['me:read'], expires_days: 365 } }))
+      .toEqual({ name: 'ci', scopes: ['me:read'], expires_days: 365 });
+    expect(meWriteArgs('create-my-token', { scopes: ['me:read'] })).toEqual({ name: 'Token', scopes: ['me:read'] });
+    // Minted through the API: always expires (mig 20261105160000).
+    expect(() => meWriteArgs('create-my-token', { scopes: ['me:read'], expires_days: null })).toThrow(/always expires/);
+    expect(() => meWriteArgs('create-my-token', { scopes: ['me:read'], expires_days: '' })).toThrow(/always expires/);
     expect(() => meWriteArgs('create-my-token', { scopes: ['me:read'], expires_days: 7 })).toThrow(/expires_days/);
     expect(() => meWriteArgs('create-my-token', { scopes: [] })).toThrow(/scopes/);
     expect(() => meWriteArgs('create-my-token', { scopes: ['me:read'], org_id: 'x' })).toThrow(/read-only/);

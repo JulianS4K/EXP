@@ -90,6 +90,9 @@ hold exactly as in the app.
   `POST /personal_access_tokens`): a personal or account token mints another
   for its user, with at most its own scopes and never outliving it. OAuth apps
   can't.
+  A minted token always expires (30, 90 or 365 days; never null), is revoked
+  with the token that made it (`revoked_reason` `parent`), and can't mint in
+  turn: only a token made in Profile → Developer mints (mig 20261105160000).
 
 ## OAuth apps
 

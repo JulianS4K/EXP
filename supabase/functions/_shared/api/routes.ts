@@ -652,6 +652,8 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'create-my-refund-request', method: 'POST', auth: K, path: '/me/refund-requests', scope: 'me:write', paged: false },
   { id: 'withdraw-my-refund-request', method: 'DELETE', auth: K, path: '/me/refund-requests/:id', scope: 'me:write', paged: false },
   { id: 'list-my-tokens', method: 'GET', auth: K, path: '/me/personal-access-tokens', scope: 'me:read', paged: false },
+  // Minted tokens always expire (30 / 90 / 365 days, never past the maker),
+  // die with the token that made them, and can't mint (mig 20261105160000).
   {
     id: 'create-my-token', method: 'POST', auth: K, path: '/me/personal-access-tokens', scope: 'me:write', paged: false,
     aliases: ['/personal-access-tokens', '/personal_access_tokens'],
