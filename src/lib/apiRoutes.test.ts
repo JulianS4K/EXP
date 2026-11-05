@@ -147,8 +147,8 @@ describe('booking routes', () => {
 });
 
 describe('scopes', () => {
-  it('legacy read covers every :read scope and nothing else', () => {
-    for (const s of SCOPES) expect(hasScope(['read'], s)).toBe(s.endsWith(':read'));
+  it('legacy read covers every org :read scope and nothing else (not the user scope me:read)', () => {
+    for (const s of SCOPES) expect(hasScope(['read'], s)).toBe(s.endsWith(':read') && !s.startsWith('me:'));
     expect(effectiveScopes(['read'])).toEqual(READ_SCOPES);
   });
 

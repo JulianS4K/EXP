@@ -72,6 +72,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_signup_unsubscribe` (mig 20261031120000) | OK | 64-hex per-fan unsubscribe token; only sets the opt-out on that fan's org list. Answers ok and the org name |
 | `exos_inbound_form_public` (mig 20261102130000) | OK | An org's booking-request form text (`/book/<org slug>`), only while an owner or manager has switched it on (off by default): org name and slug, title, intro, and the id and name of the venues it offers. No org id, no submissions |
 | `exos_inbound_submit` (mig 20261102130000) | OK (rate limited) | An artist's or agent's booking request to an org whose form is on. The body is capped at 16 KB and checked field by field (unknown fields refused; links must be https); a filled hidden `homepage` field (honeypot) answers `{ ok: true }` and stores nothing. Limits, counted under advisory locks so parallel requests can't slip past: per network 5 an hour per org and 20 a day across orgs (SHA-256 of `exos-inbound:` + the IP from `_exos_request_ip()`: `cf-connecting-ip`, else the LAST X-Forwarded-For entry, the one the platform's proxy appended, never the client-written first one (`request_ip_source` `xff_last` drops `cf-connecting-ip` for installs not behind Cloudflare, docs/self-hosting.md); IPv6 by /64; requests with no valid trusted IP share one `unknown` bucket with the same caps. The IP itself is never stored, and the hash has no client column grant), per email 3 a day per org, 300 a day per org; over a limit is 54000. Answers only `{ ok: true }`: nothing about the org's other requests, holds or staff. Writes only `exos_inbound_submissions` with status `new` |
+| `exos_api_public` (mig 20261105110000) | OK (rate limited) | Public discovery, the SQL behind exos-api's no-credential `/v1/public/discovery/events`, `/public/venues`, `/public/search` and `/public/event-series` (Opendate's fan app and website series). Read-only and only what the storefront shows anyone: **published** events through `_exos_public_event_json`'s fixed column list, their **public** ticket types (name, price, price schedule, sales window, exclusive tax and a sold-out flag; never capacity, sold counts or hidden types), an organizer's public profile (id, name, slug, description, theme, follower count, upcoming event count; never the owner or settings), and the existing public series RPCs. Search words are reduced to letters, digits and `' & . -` before any ILIKE, so `%` / `_` can't widen a match. 60 calls a minute per network (`exos_rate_hit`, 54000 over it): for an anon caller the bucket is `_exos_request_ip_bucket()` (the platform-set IP, never one the caller names); exos-api calls the core `_exos_api_public` (service role only) with its own salted hash of the client IP. In the H3 allowlist |
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 
 ### Callable by authenticated
@@ -271,6 +272,61 @@ policy and write only whitelisted columns; server-owned columns are refused.
 Each write is logged in `exos_api_writes` (owner / manager can read their
 org's rows); refunds and comps are flagged `money_moving`. Tests:
 `tests/exos/test_core_api.sql` (C1-C16), races: `tests/exos/race_core_api.sh`.
+
+### The fan API and account tokens (mig 20261105110000)
+
+`exos-api` `/v1/me/…` (docs/api/me.json) acts for the token's own user. One
+service-role function, `exos_api_me(token_hash, kind, action, target, args)`,
+re-resolves the bearer from its hash (`exos_api_token_auth`, then
+`exos_api_account_token_auth`), so only a personal access token, an account
+token or an OAuth token has a user; an org API key's hash, a revoked or
+expired token or a member who left is 42501. It checks `me:read` / `me:write`
+(a `:write` covers its `:read`; the legacy `read` never covers `me:read`), sets
+the request claims to that user, calls the app's own signed-in RPC
+(`exos_bulk_create_transfers`, `exos_cancel_transfer`, `exos_claim_transfer`,
+`exos_ask_refund`, `exos_my_*`, `exos_wallet_*`, `exos_set_marketing_emails`,
+`exos_create_personal_token`, …) and puts the claims back. Points to review:
+
+- **User scopes.** `me:read` / `me:write` are in every role's token default
+  (`exos_role_token_scopes`) and never an org API key's: trigger
+  `exos_api_keys_no_user_scopes` refuses them on `exos_api_keys`, and
+  `_exos_tg_org_role_scopes` drops them from a role's org-configured set (they
+  are the user's, not the org's to set).
+- **Isolation.** Every row is filtered by the token's user id in SQL: tickets
+  by `owner_id`, orders by `buyer_uid`, transfers by sender (or a pending one
+  addressed to the user's confirmed email), refund requests and memberships
+  through the user's own RPCs. Another user's id answers 404, as one that
+  doesn't exist. An order's default transfer / refund set is the tickets the
+  user still holds.
+- **Barcodes.** Ticket detail carries the live 30-second code
+  (`T-<ticket>:<owner>:<bucket>:<mac>`, `_exos_door_code_mac` with the day key,
+  as the app and `exos_ticket_link_view`), only for an active ticket the user
+  holds, of an event not cancelled, not in a pending transfer. Lists never
+  carry a code; nothing returns `barcode_secret`. Wallet passes go through
+  `exos_wallet_issue_pass` / `exos_wallet_season_pass` (same transfer lock).
+- **Tokens from tokens.** Only a personal or account token (never an OAuth
+  app) lists, mints or revokes the user's tokens; a new one gets at most the
+  maker's effective scopes and never outlives it (its `expires_at` is clamped
+  to the maker's), a personal token mints only for its own org (and
+  `exos_create_personal_token`'s role rules hold), an account token only
+  account tokens.
+- **Account tokens** (`exos_account_tokens`): `exos_pat_…`, SHA-256 at rest,
+  shown once, for a user with no organization, `me:*` only (CHECK and the
+  create RPC), at most 10 active, 30 / 90 / 365 days or none, email confirmed
+  first. RLS: the user reads their own rows; no column grant on `key_hash`;
+  writes through `exos_create_account_token` / `exos_revoke_account_token`
+  (authenticated, `auth.uid()`) and `_exos_account_token_revoke_self`
+  (service role: `DELETE /v1/personal-access-tokens/current`). exos-api lets
+  an account token call `/v1/me/…`, `GET /v1/me` and that revoke only.
+
+The same migration's org writes (`exos_api_gap_write`: series, fee rules, API
+keys, orphaned seats, imported attendees, membership scans and gifts, gift
+card issue, offline donations) follow `exos_api_write`'s pattern below, with
+the key's effective scopes (`_exos_api_key_scopes`) and its creator's live
+role per action (`_exos_api_gap_action_roles` → `_exos_api_key_actor`; API
+keys: owner only, never above the making key's scopes, never a user scope,
+the new key's plaintext returned once and never logged). Every target is
+pinned to the key's org first. Tests: `tests/exos/test_fan_api.sql` (FA1-FA10).
 
 ### Organizer-controlled access (mig 20261104180000)
 

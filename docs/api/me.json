@@ -1,0 +1,2176 @@
+{
+ "file": "me",
+ "name": "Fan API: your account (/v1/me)",
+ "order": 70,
+ "description": "The signed-in user's own tickets (with the live rotating barcode), orders, transfers, memberships, season passes and flex packs, refund requests, wallet passes, tokens and profile, for fan apps and assistants. Authenticate with a user token holding me:read / me:write: a personal access token (Profile → Developer), an account token (a user with no organization, or minted by another of your tokens) or an OAuth token an app got with your consent. An organization API key has no user and is refused. Every call runs as you through the app's own rules (transfer locks, claim keys, refund windows), and nothing here ever answers another user's data or a barcode secret.",
+ "endpoints": [
+  {
+   "id": "get-my-profile",
+   "method": "GET",
+   "path": "/v1/me/profile",
+   "summary": "Your profile",
+   "description": "The token's own user: id, email, whether it is confirmed, display name and photo, and whether they get marketing email (Opendate GET /users/current). Never another user's.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "4d50f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "email": "sam@example.com",
+       "email_confirmed": true,
+       "display_name": "Sam Lee",
+       "photo_url": null,
+       "marketing_emails": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "update-my-profile",
+   "method": "PATCH",
+   "path": "/v1/me/profile",
+   "summary": "Change your display name",
+   "description": "Only display_name (or name) can change here; email and password change in the app (Supabase Auth). An Opendate user wrapper ({ user: { … } }) is accepted.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "display_name",
+     "location": "body",
+     "type": "string or null",
+     "required": false,
+     "description": "At most 80 characters; null clears it.",
+     "example": "Sam L."
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "4d50f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "email": "sam@example.com",
+       "email_confirmed": true,
+       "display_name": "Sam L.",
+       "photo_url": null,
+       "marketing_emails": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "display_name": "Sam L."
+   }
+  },
+  {
+   "id": "get-my-marketing-preferences",
+   "method": "GET",
+   "path": "/v1/me/marketing-preferences",
+   "summary": "Your email preferences",
+   "description": "Whether you get organizers' marketing email. Transactional mail (tickets, transfers, refunds) always goes.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "marketing_emails": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "set-my-marketing-preferences",
+   "method": "PUT",
+   "path": "/v1/me/marketing-preferences",
+   "summary": "Set your email preferences",
+   "description": "Opt in or out of marketing email everywhere (the same switch as the app's settings). Accepts marketing_emails, or Opendate's subscribe_to_marketing_email.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "marketing_emails",
+     "location": "body",
+     "type": "boolean",
+     "required": true,
+     "description": "true to get marketing email, false to stop it.",
+     "example": false
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "marketing_emails": false
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "marketing_emails": false
+   }
+  },
+  {
+   "id": "list-my-tickets",
+   "method": "GET",
+   "path": "/v1/me/tickets",
+   "summary": "Your tickets",
+   "description": "Tickets you hold now, soonest event first (then by purchase, id). A ticket you transferred is the receiver's. Lists never carry a barcode: GET /v1/me/tickets/:id has the live one. Opendate GET /users/current/tickets.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Page number, 1-10000 (default 1).",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    },
+    {
+     "name": "event_id",
+     "location": "query",
+     "type": "string (UUID)",
+     "required": false,
+     "description": "Only this event's tickets.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "status",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only tickets in this state.",
+     "example": "active",
+     "enum": [
+      "active",
+      "used",
+      "voided",
+      "refunded",
+      "transferred"
+     ]
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "tier_name": "GA",
+        "status": "active",
+        "attendee_name": "Sam Lee",
+        "price_paid": 25,
+        "order_id": "cs_live_a1B2c3D4e5F6",
+        "seat": null,
+        "checked_in_at": null,
+        "in_transfer": false,
+        "pending_transfer_id": null,
+        "created_at": "2026-11-01T18:00:00.000+00:00",
+        "event": {
+         "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Late Show",
+         "slug": "late-show",
+         "status": "published",
+         "starts_at": "2026-12-12T02:00:00.000Z",
+         "doors_at": "2026-12-12T01:00:00.000Z",
+         "timezone": "America/New_York",
+         "venue_name": "Blue Room",
+         "venue_location": "New York, NY"
+        },
+        "org": {
+         "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Blue Room",
+         "slug": "blue-room"
+        }
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-ticket",
+   "method": "GET",
+   "path": "/v1/me/tickets/:id",
+   "summary": "One of your tickets, with its live barcode",
+   "description": "The ticket and, while it is active, its event is not cancelled and it is not in a pending transfer, the current rotating door code: the app's own format, valid for 30 seconds (refetch after valid_until). The barcode secret never leaves Exos, so a screenshot stops working within a minute. Otherwise barcode is null and barcode_unavailable says why (not_active, in_transfer, event_cancelled). Opendate GET /users/current/tickets/{barcode}.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The ticket id.",
+     "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "tier_name": "GA",
+       "status": "active",
+       "attendee_name": "Sam Lee",
+       "price_paid": 25,
+       "order_id": "cs_live_a1B2c3D4e5F6",
+       "seat": null,
+       "checked_in_at": null,
+       "in_transfer": false,
+       "pending_transfer_id": null,
+       "created_at": "2026-11-01T18:00:00.000+00:00",
+       "event": {
+        "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Late Show",
+        "slug": "late-show",
+        "status": "published",
+        "starts_at": "2026-12-12T02:00:00.000Z",
+        "doors_at": "2026-12-12T01:00:00.000Z",
+        "timezone": "America/New_York",
+        "venue_name": "Blue Room",
+        "venue_location": "New York, NY"
+       },
+       "org": {
+        "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Blue Room",
+        "slug": "blue-room"
+       },
+       "barcode": {
+        "format": "qr",
+        "value": "T-7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b:4d50f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b:59416320:q3Z0eY1uYk7Gm0vQ1c2V9w",
+        "rotates_every_seconds": 30,
+        "valid_until": "2026-11-05T12:00:30+00:00"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "Not your ticket, or no such ticket.",
+     "example": {
+      "error": "ticket not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-ticket-pkpass",
+   "method": "GET",
+   "path": "/v1/me/tickets/:id/pkpass",
+   "summary": "Apple Wallet pass for a ticket",
+   "description": "A signed .pkpass for the ticket (the same pass the app issues; its web service is exos-wallet, so updates and a transfer reach the phone). Refused while the ticket is in a pending transfer or not active (409). 503 when Apple Wallet is not configured.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The ticket id.",
+     "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "The pass.",
+     "example": "PK\u0003\u0004 …",
+     "content_type": "application/vnd.apple.pkpass"
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    },
+    {
+     "status": 409,
+     "description": "The ticket can't get a pass now (in a transfer, used, voided).",
+     "example": {
+      "error": "in-transfer"
+     }
+    },
+    {
+     "status": 503,
+     "description": "Apple Wallet is not configured on this install.",
+     "example": {
+      "error": "wallet not configured"
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-ticket-google-wallet",
+   "method": "GET",
+   "path": "/v1/me/tickets/:id/google-wallet-url",
+   "summary": "Google Wallet link for a ticket",
+   "description": "A Save to Google Wallet URL for the ticket (same rules as the Apple pass). 503 when Google Wallet is not configured.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The ticket id.",
+     "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "save_url": "https://pay.google.com/gp/v/save/eyJhbGciOi…",
+       "serial": "exos-7a10c3e1"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    },
+    {
+     "status": 503,
+     "description": "Google Wallet is not configured on this install.",
+     "example": {
+      "error": "wallet not configured"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-ticket-bundles",
+   "method": "GET",
+   "path": "/v1/me/ticket-bundles",
+   "summary": "Your tickets by event",
+   "description": "One entry per event you hold tickets for, with the count and the tickets (the app's wallet view). Opendate GET /users/current/ticket_bundles.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "event_name": "Late Show",
+        "starts_at": "2026-12-12T02:00:00.000Z",
+        "tickets": 2
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-ticket-bundle",
+   "method": "GET",
+   "path": "/v1/me/ticket-bundles/:id",
+   "summary": "Your tickets for one event",
+   "description": "The bundle for one event (404 when you hold none). Opendate GET /users/current/ticket_bundles/{calendar_event_id}.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "event_name": "Late Show",
+       "starts_at": "2026-12-12T02:00:00.000Z",
+       "tickets": 2
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-orders",
+   "method": "GET",
+   "path": "/v1/me/orders",
+   "summary": "Your orders",
+   "description": "Orders you paid for, newest first, each with the tickets of it you still hold (tickets_count is how many it bought). Opendate GET /users/current/orders.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Page number, 1-10000 (default 1).",
+     "example": 1
+    },
+    {
+     "name": "per_page",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "Rows per page, 1-200 (default 50).",
+     "example": 50
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "cs_live_a1B2c3D4e5F6",
+        "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "status": "fulfilled",
+        "quantity": 2,
+        "amount_cents": 5600,
+        "tax_cents": 0,
+        "currency": "usd",
+        "created_at": "2026-11-01T17:58:00.000+00:00",
+        "fulfilled_at": "2026-11-01T18:00:00.000+00:00",
+        "event": {
+         "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "name": "Late Show",
+         "slug": "late-show",
+         "starts_at": "2026-12-12T02:00:00.000Z",
+         "timezone": "America/New_York",
+         "venue_name": "Blue Room"
+        },
+        "tickets_count": 2,
+        "tickets_held": [
+         {
+          "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "tier_name": "GA",
+          "status": "active",
+          "attendee_name": "Sam Lee",
+          "price_paid": 25,
+          "order_id": "cs_live_a1B2c3D4e5F6",
+          "seat": null,
+          "checked_in_at": null,
+          "in_transfer": false,
+          "pending_transfer_id": null,
+          "created_at": "2026-11-01T18:00:00.000+00:00",
+          "event": {
+           "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+           "name": "Late Show",
+           "slug": "late-show",
+           "status": "published",
+           "starts_at": "2026-12-12T02:00:00.000Z",
+           "doors_at": "2026-12-12T01:00:00.000Z",
+           "timezone": "America/New_York",
+           "venue_name": "Blue Room",
+           "venue_location": "New York, NY"
+          },
+          "org": {
+           "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+           "name": "Blue Room",
+           "slug": "blue-room"
+          }
+         }
+        ]
+       }
+      ],
+      "meta": {
+       "page": 1,
+       "per_page": 50,
+       "total": 1,
+       "total_pages": 1
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-order",
+   "method": "GET",
+   "path": "/v1/me/orders/:id",
+   "summary": "One of your orders",
+   "description": "An order you paid for (404 for anyone else's).",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order id (checkout session).",
+     "example": "cs_live_a1B2c3D4e5F6"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "cs_live_a1B2c3D4e5F6",
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "status": "fulfilled",
+       "quantity": 2,
+       "amount_cents": 5600,
+       "tax_cents": 0,
+       "currency": "usd",
+       "created_at": "2026-11-01T17:58:00.000+00:00",
+       "fulfilled_at": "2026-11-01T18:00:00.000+00:00",
+       "event": {
+        "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Late Show",
+        "slug": "late-show",
+        "starts_at": "2026-12-12T02:00:00.000Z",
+        "timezone": "America/New_York",
+        "venue_name": "Blue Room"
+       },
+       "tickets_count": 2,
+       "tickets_held": [
+        {
+         "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "tier_name": "GA",
+         "status": "active",
+         "attendee_name": "Sam Lee",
+         "price_paid": 25,
+         "order_id": "cs_live_a1B2c3D4e5F6",
+         "seat": null,
+         "checked_in_at": null,
+         "in_transfer": false,
+         "pending_transfer_id": null,
+         "created_at": "2026-11-01T18:00:00.000+00:00",
+         "event": {
+          "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "name": "Late Show",
+          "slug": "late-show",
+          "status": "published",
+          "starts_at": "2026-12-12T02:00:00.000Z",
+          "doors_at": "2026-12-12T01:00:00.000Z",
+          "timezone": "America/New_York",
+          "venue_name": "Blue Room",
+          "venue_location": "New York, NY"
+         },
+         "org": {
+          "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "name": "Blue Room",
+          "slug": "blue-room"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    },
+    {
+     "status": 404,
+     "description": "Not your order.",
+     "example": {
+      "error": "order not found"
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-order-transferable",
+   "method": "GET",
+   "path": "/v1/me/orders/:id/ticket-transfers/new",
+   "summary": "Tickets of an order you can transfer",
+   "description": "The order's tickets you hold that are active and not already in a transfer (Opendate GET /orders/{order_id}/ticket_transfers/new).",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order id.",
+     "example": "cs_live_a1B2c3D4e5F6"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "order_id": "cs_live_a1B2c3D4e5F6",
+       "tickets": [
+        {
+         "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "tier_name": "GA",
+         "status": "active",
+         "attendee_name": "Sam Lee",
+         "price_paid": 25,
+         "order_id": "cs_live_a1B2c3D4e5F6",
+         "seat": null,
+         "checked_in_at": null,
+         "in_transfer": false,
+         "pending_transfer_id": null,
+         "created_at": "2026-11-01T18:00:00.000+00:00",
+         "event": {
+          "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "name": "Late Show",
+          "slug": "late-show",
+          "status": "published",
+          "starts_at": "2026-12-12T02:00:00.000Z",
+          "doors_at": "2026-12-12T01:00:00.000Z",
+          "timezone": "America/New_York",
+          "venue_name": "Blue Room",
+          "venue_location": "New York, NY"
+         },
+         "org": {
+          "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+          "name": "Blue Room",
+          "slug": "blue-room"
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-my-order-transfers",
+   "method": "POST",
+   "path": "/v1/me/orders/:id/ticket-transfers",
+   "summary": "Transfer tickets of an order",
+   "description": "Sends tickets of one of your orders to someone by email: by default every ticket of it you can transfer, or the ticket_ids you name (they must be the order's). Each ticket is locked while the transfer is pending (no barcode, no second transfer, no wallet pass), exactly as in the app; the receiver claims it with the link mailed to them, and you can cancel until then. Answers each transfer and its claim_key (the link's key, for sharing it yourself). Opendate POST /orders/{order_id}/ticket_transfers.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order id.",
+     "example": "cs_live_a1B2c3D4e5F6"
+    },
+    {
+     "name": "email",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The receiver's email.",
+     "example": "alex@example.com"
+    },
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "The receiver's name, at most 100 characters.",
+     "example": "Alex"
+    },
+    {
+     "name": "ticket_ids",
+     "location": "body",
+     "type": "array of string (UUID)",
+     "required": false,
+     "description": "1-50 tickets of this order (default: all you can transfer).",
+     "example": [
+      "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+     ]
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "transfers": [
+        {
+         "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "transfer_id": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "claim_key": "kq2V0x8vTn4b6rP1sYdZ3wA9"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    },
+    {
+     "status": 400,
+     "description": "A ticket that is not part of this order.",
+     "example": {
+      "error": "a ticket is not part of this order"
+     }
+    }
+   ],
+   "request_example": {
+    "email": "alex@example.com",
+    "name": "Alex"
+   }
+  },
+  {
+   "id": "get-my-order-refund-request",
+   "method": "GET",
+   "path": "/v1/me/orders/:id/refund-request",
+   "summary": "Refund requests for an order",
+   "description": "Your refund requests for the order's tickets, with their status (open, refunded, declined, withdrawn). Opendate GET /public/orders/{order_id}/refund_request.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order id.",
+     "example": "cs_live_a1B2c3D4e5F6"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "status": "open",
+        "amount_cents": 2800,
+        "currency": "usd",
+        "reason": "Can't make it",
+        "created_at": "2026-11-05T12:00:00.000+00:00"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-my-order-refund-request",
+   "method": "POST",
+   "path": "/v1/me/orders/:id/refund-request",
+   "summary": "Ask for a refund of an order",
+   "description": "Asks the organizer to refund tickets of one of your orders: by default those you still hold, or the ticket_ids you name. The event's refund policy and window decide (each ticket answers ok, or a reason: closed, all-sales-final, not-buyer, …); a ticket with an open request answers existing. The organizer refunds or declines; the money goes back to how it was paid. Opendate POST /public/orders/{order_id}/refund_request.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string",
+     "required": true,
+     "description": "The order id.",
+     "example": "cs_live_a1B2c3D4e5F6"
+    },
+    {
+     "name": "reason",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 500 characters (Opendate's notes is accepted too).",
+     "example": "Can't make it"
+    },
+    {
+     "name": "ticket_ids",
+     "location": "body",
+     "type": "array of string (UUID)",
+     "required": false,
+     "description": "1-50 tickets of this order.",
+     "example": [
+      "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+     ]
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": [
+       {
+        "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "ok": true,
+        "ask_id": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "amount_cents": 2800,
+        "existing": false
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "reason": "Can't make it"
+   }
+  },
+  {
+   "id": "list-my-transfers",
+   "method": "GET",
+   "path": "/v1/me/transfers",
+   "summary": "Your transfers",
+   "description": "Transfers you sent (any status) and pending ones addressed to your confirmed email (direction received), newest first, at most 500. Never a claim key.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "direction": "sent",
+        "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "status": "pending",
+        "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "event_title": "Late Show",
+        "tier_name": "GA",
+        "to_email": "alex@example.com",
+        "to_name": "Alex",
+        "created_at": "2026-11-05T12:00:00.000+00:00"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-my-transfers",
+   "method": "POST",
+   "path": "/v1/me/transfers",
+   "summary": "Transfer tickets",
+   "description": "Starts a transfer for each ticket you hold: items [{ ticket_id, email, name }] (1-50), or ticket_ids with one email. Same rules as the app: you must hold the ticket, it must be active and not already in a transfer, and it is locked until claimed or cancelled.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "items",
+     "location": "body",
+     "type": "array of object",
+     "required": false,
+     "description": "[{ ticket_id, email, name? }], 1-50.",
+     "example": [
+      {
+       "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "email": "alex@example.com"
+      }
+     ]
+    },
+    {
+     "name": "ticket_ids",
+     "location": "body",
+     "type": "array of string (UUID)",
+     "required": false,
+     "description": "Instead of items: tickets to send to one email.",
+     "example": [
+      "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+     ]
+    },
+    {
+     "name": "email",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "With ticket_ids: the receiver's email.",
+     "example": "alex@example.com"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "transfers": [
+        {
+         "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "transfer_id": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+         "claim_key": "kq2V0x8vTn4b6rP1sYdZ3wA9"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    },
+    {
+     "status": 409,
+     "description": "The ticket is already in a transfer, or can't be transferred.",
+     "example": {
+      "error": "ticket already has a pending transfer"
+     }
+    }
+   ],
+   "request_example": {
+    "items": [
+     {
+      "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+      "email": "alex@example.com",
+      "name": "Alex"
+     }
+    ]
+   }
+  },
+  {
+   "id": "cancel-my-transfer",
+   "method": "DELETE",
+   "path": "/v1/me/transfers/:id",
+   "summary": "Cancel a transfer",
+   "description": "Cancels a pending transfer you sent; the ticket is yours again and unlocked. 404 for one you didn't send.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The transfer id.",
+     "example": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "status": "cancelled"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "claim-transfer",
+   "method": "POST",
+   "path": "/v1/me/transfers/:id/claim",
+   "summary": "Claim a ticket sent to you",
+   "description": "Claims a pending transfer with the key from its link (any account holding the key may claim, as in the app). The ticket becomes yours, with a fresh barcode; the sender's copy stops working.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The transfer id.",
+     "example": "5e60a7c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "key",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The claim key from the transfer link (claim_key is accepted too).",
+     "example": "kq2V0x8vTn4b6rP1sYdZ3wA9"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "tier_id": "11112222-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "tier_name": "GA",
+       "status": "active",
+       "attendee_name": "Sam Lee",
+       "price_paid": 25,
+       "order_id": "cs_live_a1B2c3D4e5F6",
+       "seat": null,
+       "checked_in_at": null,
+       "in_transfer": false,
+       "pending_transfer_id": null,
+       "created_at": "2026-11-01T18:00:00.000+00:00",
+       "event": {
+        "id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Late Show",
+        "slug": "late-show",
+        "status": "published",
+        "starts_at": "2026-12-12T02:00:00.000Z",
+        "doors_at": "2026-12-12T01:00:00.000Z",
+        "timezone": "America/New_York",
+        "venue_name": "Blue Room",
+        "venue_location": "New York, NY"
+       },
+       "org": {
+        "id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Blue Room",
+        "slug": "blue-room"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    },
+    {
+     "status": 409,
+     "description": "A wrong or used key, or a transfer that is no longer pending.",
+     "example": {
+      "error": "this claim link is not valid"
+     }
+    }
+   ],
+   "request_example": {
+    "key": "kq2V0x8vTn4b6rP1sYdZ3wA9"
+   }
+  },
+  {
+   "id": "list-my-fan-memberships",
+   "method": "GET",
+   "path": "/v1/me/fan-memberships",
+   "summary": "Your memberships",
+   "description": "Memberships you hold with any organizer (status, period, benefits). Opendate GET /users/current/memberships. Never a gift claim token.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "product_name": "Friends of the Room",
+        "status": "active",
+        "current_period_end": "2027-11-01T00:00:00.000+00:00"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-fan-membership",
+   "method": "GET",
+   "path": "/v1/me/fan-memberships/:id",
+   "summary": "One of your memberships",
+   "description": "Opendate GET /users/current/memberships/{token}.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The membership id.",
+     "example": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "product_name": "Friends of the Room",
+       "status": "active",
+       "current_period_end": "2027-11-01T00:00:00.000+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-season-passes",
+   "method": "GET",
+   "path": "/v1/me/season-passes",
+   "summary": "Your season passes",
+   "description": "Your passes of kind season (flex packs are under /v1/me/passes). Opendate GET /users/current/season_passes.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "kind": "season",
+        "product_name": "2027 Season",
+        "status": "active"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-season-pass",
+   "method": "GET",
+   "path": "/v1/me/season-passes/:id",
+   "summary": "One of your season passes",
+   "description": "Opendate GET /users/current/season_passes/{id}.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The pass id.",
+     "example": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "kind": "season",
+       "product_name": "2027 Season",
+       "status": "active"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-season-pass-pkpass",
+   "method": "GET",
+   "path": "/v1/me/season-passes/:id/pkpass",
+   "summary": "Apple Wallet pass for a season pass",
+   "description": "A signed .pkpass for the season pass. 503 when Apple Wallet is not configured.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The pass id.",
+     "example": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "The pass.",
+     "example": "PK\u0003\u0004 …",
+     "content_type": "application/vnd.apple.pkpass"
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-season-pass-google-wallet",
+   "method": "GET",
+   "path": "/v1/me/season-passes/:id/google-wallet-url",
+   "summary": "Google Wallet link for a season pass",
+   "description": "A Save to Google Wallet URL. Opendate GET /users/current/season_passes/{id}/google_wallet_url.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The pass id.",
+     "example": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "save_url": "https://pay.google.com/gp/v/save/eyJhbGciOi…",
+       "serial": "exos-sp-9b90daf1"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-passes",
+   "method": "GET",
+   "path": "/v1/me/passes",
+   "summary": "Your passes",
+   "description": "Season passes and flex packs (?kind=season or flex). Opendate GET /users/current/passes.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "kind",
+     "location": "query",
+     "type": "string",
+     "required": false,
+     "description": "Only this kind.",
+     "example": "flex",
+     "enum": [
+      "season",
+      "flex"
+     ]
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "kind": "flex",
+        "product_name": "5-show pack",
+        "status": "active",
+        "uses_left": 3
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "get-my-pass",
+   "method": "GET",
+   "path": "/v1/me/passes/:id",
+   "summary": "One of your passes",
+   "description": "Opendate GET /users/current/passes/{id}.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The pass id.",
+     "example": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "9b90daf1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "kind": "flex",
+       "product_name": "5-show pack",
+       "status": "active",
+       "uses_left": 3
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-refund-requests",
+   "method": "GET",
+   "path": "/v1/me/refund-requests",
+   "summary": "Your refund requests",
+   "description": "Every refund request you made, any status.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "status": "open",
+        "amount_cents": 2800,
+        "currency": "usd"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-my-refund-request",
+   "method": "POST",
+   "path": "/v1/me/refund-requests",
+   "summary": "Ask for a refund",
+   "description": "Asks for a refund of tickets you paid for (ticket_ids, 1-50). Same rules as the app's refund request: the event's policy and window, one open request per ticket.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "ticket_ids",
+     "location": "body",
+     "type": "array of string (UUID)",
+     "required": true,
+     "description": "The tickets.",
+     "example": [
+      "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+     ]
+    },
+    {
+     "name": "reason",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 500 characters.",
+     "example": "Can't make it"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": [
+       {
+        "ticket_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "ok": true,
+        "ask_id": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "amount_cents": 2800,
+        "existing": false
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "ticket_ids": [
+     "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    ],
+    "reason": "Can't make it"
+   }
+  },
+  {
+   "id": "withdraw-my-refund-request",
+   "method": "DELETE",
+   "path": "/v1/me/refund-requests/:id",
+   "summary": "Withdraw a refund request",
+   "description": "Takes back an open request (withdrawn false when it was already decided). 404 for anyone else's.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The refund request id.",
+     "example": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "6f70b8d1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "withdrawn": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-my-tokens",
+   "method": "GET",
+   "path": "/v1/me/personal-access-tokens",
+   "summary": "Your tokens",
+   "description": "Your active personal access tokens (each pinned to an organization) and account tokens: name, 13-character prefix, scopes, expiry, last use, and current for the one making the request. Never a token or its hash.",
+   "auth": "api_key",
+   "scope": "me:read",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "aca0ebb1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "kind": "account",
+        "org_id": null,
+        "name": "phone",
+        "key_prefix": "exos_pat_AbC1",
+        "scopes": [
+         "me:read",
+         "me:write"
+        ],
+        "expires_at": "2027-02-03T12:00:00+00:00",
+        "last_used_at": null,
+        "created_at": "2026-11-05T12:00:00+00:00",
+        "current": true
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-my-token",
+   "method": "POST",
+   "path": "/v1/me/personal-access-tokens",
+   "summary": "Create a token",
+   "description": "Mints a token for yourself (Opendate POST /personal_access_tokens). A personal access token makes a personal token for the same organization (your role's rules apply); an account token makes an account token (me:read / me:write only). The new token gets at most the scopes of the token that makes it and never outlives it. It is shown once. Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 80 characters (default Token).",
+     "example": "ci"
+    },
+    {
+     "name": "scopes",
+     "location": "body",
+     "type": "array of string",
+     "required": true,
+     "description": "Scope names, within your token's.",
+     "example": [
+      "me:read"
+     ]
+    },
+    {
+     "name": "expires_days",
+     "location": "body",
+     "type": "integer or null",
+     "required": false,
+     "description": "30, 90 (default) or 365; null for none (only when your token has none).",
+     "example": 90
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "aca0ebb1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "token": "exos_pat_AbC1dEf2gHi3jKl4mNo5pQr6sTu7vWx8yZa9bCd0eFg",
+       "key_prefix": "exos_pat_AbC1",
+       "scopes": [
+        "me:read"
+       ],
+       "kind": "account",
+       "org_id": null,
+       "expires_at": "2027-02-03T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    },
+    {
+     "status": 403,
+     "description": "A scope your token lacks, or an OAuth token.",
+     "example": {
+      "error": "this token can't grant events:write (a new token gets at most the scopes of the token that makes it)"
+     }
+    }
+   ],
+   "request_example": {
+    "name": "ci",
+    "scopes": [
+     "me:read"
+    ],
+    "expires_days": 90
+   }
+  },
+  {
+   "id": "revoke-my-token",
+   "method": "DELETE",
+   "path": "/v1/me/personal-access-tokens/:id",
+   "summary": "Revoke a token",
+   "description": "Revokes one of your personal or account tokens at once (404 for anyone else's). Needs a personal access token or an account token: an OAuth app never manages its user's tokens.",
+   "auth": "api_key",
+   "scope": "me:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The token id.",
+     "example": "aca0ebb1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "aca0ebb1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "revoked": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "An organization API key (no user), or an account token on a route that is not /v1/me/….",
+     "example": {
+      "error": "this route acts as a user: use a personal access token, an account token or an OAuth token (an organization API key has no user)"
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks me:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "me:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"me:write\""
+     }
+    }
+   ]
+  }
+ ]
+}

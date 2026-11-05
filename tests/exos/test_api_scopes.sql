@@ -35,12 +35,14 @@ DECLARE
 BEGIN
   -- S1
   -- 18 since the build-phase integration (mig 20261101000000): + refunds:write
-  -- (mig 20261031110000) and fans:read / fans:write (mig 20261031120000).
-  IF cardinality(public.exos_api_scope_names()) <> 18
+  -- (mig 20261031110000) and fans:read / fans:write (mig 20261031120000);
+  -- 20 since the fan API (mig 20261105110000): + me:read / me:write.
+  IF cardinality(public.exos_api_scope_names()) <> 20
      OR (public.exos_api_scope_names())[1] <> 'events:read'
      OR (public.exos_api_scope_names())[4] <> 'refunds:write'
      OR (public.exos_api_scope_names())[5] <> 'fans:read'
-     OR (public.exos_api_scope_names())[18] <> 'org:admin' THEN
+     OR (public.exos_api_scope_names())[18] <> 'me:read'
+     OR (public.exos_api_scope_names())[20] <> 'org:admin' THEN
     RAISE EXCEPTION 'S1 FAIL: %', public.exos_api_scope_names();
   END IF;
   RAISE NOTICE 'S1 ok: % scopes', cardinality(public.exos_api_scope_names());

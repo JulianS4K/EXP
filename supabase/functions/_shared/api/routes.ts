@@ -37,7 +37,11 @@
 import type { Scope } from './scopes.ts';
 
 export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-export type ApiAuth = 'api_key' | 'shared_key' | 'partner_key';
+// `public` (claude/exos-fan-api, mig 20261105110000): no credential at all,
+// under /public/… like the two key families: public discovery (events,
+// venues, search, series) and signup forms, rate-limited per network
+// (exos-api/publicApi.ts).
+export type ApiAuth = 'api_key' | 'shared_key' | 'partner_key' | 'public';
 
 export interface ApiRoute {
   id: string;
@@ -54,6 +58,7 @@ export interface ApiRoute {
 
 const K = 'api_key' as const;
 const P = 'partner_key' as const;
+const A = 'public' as const;
 
 export const ROUTES: readonly ApiRoute[] = [
   { id: 'me', method: 'GET', auth: K, path: '/me', scope: null, paged: false },
@@ -568,6 +573,170 @@ export const ROUTES: readonly ApiRoute[] = [
   // (docs/partner-sales.md "Caps").
   { id: 'get-event-partner-caps', method: 'GET', auth: K, path: '/events/:id/partner-caps', scope: 'events:read', paged: false },
   { id: 'set-event-partner-caps', method: 'PUT', auth: K, path: '/events/:id/partner-caps', scope: 'events:write', paged: false },
+
+  // -- claude/exos-fan-api (mig 20261105110000, exos-api/me.ts, docs/api/me.json):
+  // the token's own user. User tokens only (personal access, account and
+  // OAuth tokens); an org API key has no user and is refused. Opendate's
+  // /users/current/… paths are aliases.
+  { id: 'get-my-profile', method: 'GET', auth: K, path: '/me/profile', scope: 'me:read', paged: false, aliases: ['/users/current'] },
+  { id: 'update-my-profile', method: 'PATCH', auth: K, path: '/me/profile', scope: 'me:write', paged: false, aliases: ['/users/current'] },
+  { id: 'get-my-marketing-preferences', method: 'GET', auth: K, path: '/me/marketing-preferences', scope: 'me:read', paged: false },
+  { id: 'set-my-marketing-preferences', method: 'PUT', auth: K, path: '/me/marketing-preferences', scope: 'me:write', paged: false },
+  { id: 'list-my-tickets', method: 'GET', auth: K, path: '/me/tickets', scope: 'me:read', paged: true, aliases: ['/users/current/tickets'] },
+  { id: 'get-my-ticket', method: 'GET', auth: K, path: '/me/tickets/:id', scope: 'me:read', paged: false, aliases: ['/users/current/tickets/:id'] },
+  {
+    id: 'get-my-ticket-pkpass', method: 'GET', auth: K, path: '/me/tickets/:id/pkpass', scope: 'me:read', paged: false,
+    aliases: ['/users/current/tickets/:id/pkpass'],
+  },
+  {
+    id: 'get-my-ticket-google-wallet', method: 'GET', auth: K, path: '/me/tickets/:id/google-wallet-url', scope: 'me:read', paged: false,
+    aliases: ['/users/current/tickets/:id/google_wallet_url'],
+  },
+  {
+    id: 'list-my-ticket-bundles', method: 'GET', auth: K, path: '/me/ticket-bundles', scope: 'me:read', paged: false,
+    aliases: ['/users/current/ticket_bundles'],
+  },
+  {
+    id: 'get-my-ticket-bundle', method: 'GET', auth: K, path: '/me/ticket-bundles/:id', scope: 'me:read', paged: false,
+    aliases: ['/users/current/ticket_bundles/:id'],
+  },
+  { id: 'list-my-orders', method: 'GET', auth: K, path: '/me/orders', scope: 'me:read', paged: true, aliases: ['/users/current/orders'] },
+  { id: 'get-my-order', method: 'GET', auth: K, path: '/me/orders/:id', scope: 'me:read', paged: false, aliases: ['/users/current/orders/:id'] },
+  {
+    id: 'list-my-order-transferable', method: 'GET', auth: K, path: '/me/orders/:id/ticket-transfers/new', scope: 'me:read', paged: false,
+    aliases: ['/me/orders/:id/ticket_transfers/new'],
+  },
+  {
+    id: 'create-my-order-transfers', method: 'POST', auth: K, path: '/me/orders/:id/ticket-transfers', scope: 'me:write', paged: false,
+    aliases: ['/me/orders/:id/ticket_transfers'],
+  },
+  {
+    id: 'get-my-order-refund-request', method: 'GET', auth: K, path: '/me/orders/:id/refund-request', scope: 'me:read', paged: false,
+    aliases: ['/me/orders/:id/refund_request'],
+  },
+  {
+    id: 'create-my-order-refund-request', method: 'POST', auth: K, path: '/me/orders/:id/refund-request', scope: 'me:write', paged: false,
+    aliases: ['/me/orders/:id/refund_request'],
+  },
+  { id: 'list-my-transfers', method: 'GET', auth: K, path: '/me/transfers', scope: 'me:read', paged: false },
+  { id: 'create-my-transfers', method: 'POST', auth: K, path: '/me/transfers', scope: 'me:write', paged: false },
+  { id: 'cancel-my-transfer', method: 'DELETE', auth: K, path: '/me/transfers/:id', scope: 'me:write', paged: false },
+  { id: 'claim-transfer', method: 'POST', auth: K, path: '/me/transfers/:id/claim', scope: 'me:write', paged: false },
+  {
+    id: 'list-my-fan-memberships', method: 'GET', auth: K, path: '/me/fan-memberships', scope: 'me:read', paged: false,
+    aliases: ['/users/current/memberships'],
+  },
+  {
+    id: 'get-my-fan-membership', method: 'GET', auth: K, path: '/me/fan-memberships/:id', scope: 'me:read', paged: false,
+    aliases: ['/users/current/memberships/:id'],
+  },
+  {
+    id: 'list-my-season-passes', method: 'GET', auth: K, path: '/me/season-passes', scope: 'me:read', paged: false,
+    aliases: ['/users/current/season_passes'],
+  },
+  {
+    id: 'get-my-season-pass', method: 'GET', auth: K, path: '/me/season-passes/:id', scope: 'me:read', paged: false,
+    aliases: ['/users/current/season_passes/:id'],
+  },
+  {
+    id: 'get-my-season-pass-pkpass', method: 'GET', auth: K, path: '/me/season-passes/:id/pkpass', scope: 'me:read', paged: false,
+    aliases: ['/users/current/season_passes/:id/pkpass'],
+  },
+  {
+    id: 'get-my-season-pass-google-wallet', method: 'GET', auth: K, path: '/me/season-passes/:id/google-wallet-url', scope: 'me:read',
+    paged: false, aliases: ['/users/current/season_passes/:id/google_wallet_url'],
+  },
+  { id: 'list-my-passes', method: 'GET', auth: K, path: '/me/passes', scope: 'me:read', paged: false, aliases: ['/users/current/passes'] },
+  { id: 'get-my-pass', method: 'GET', auth: K, path: '/me/passes/:id', scope: 'me:read', paged: false, aliases: ['/users/current/passes/:id'] },
+  { id: 'list-my-refund-requests', method: 'GET', auth: K, path: '/me/refund-requests', scope: 'me:read', paged: false },
+  { id: 'create-my-refund-request', method: 'POST', auth: K, path: '/me/refund-requests', scope: 'me:write', paged: false },
+  { id: 'withdraw-my-refund-request', method: 'DELETE', auth: K, path: '/me/refund-requests/:id', scope: 'me:write', paged: false },
+  { id: 'list-my-tokens', method: 'GET', auth: K, path: '/me/personal-access-tokens', scope: 'me:read', paged: false },
+  {
+    id: 'create-my-token', method: 'POST', auth: K, path: '/me/personal-access-tokens', scope: 'me:write', paged: false,
+    aliases: ['/personal-access-tokens', '/personal_access_tokens'],
+  },
+  { id: 'revoke-my-token', method: 'DELETE', auth: K, path: '/me/personal-access-tokens/:id', scope: 'me:write', paged: false },
+  // claude/exos-fan-api: organization writes the Opendate gap list still
+  // pointed at the dashboard. One exos_api_gap_write call each (runs as the
+  // key's creator, Idempotency-Key, logged; exos-api/gapWrites.ts).
+  { id: 'list-api-keys', method: 'GET', auth: K, path: '/api-keys', scope: 'org:admin', paged: false, aliases: ['/api_keys'] },
+  { id: 'create-api-key', method: 'POST', auth: K, path: '/api-keys', scope: 'org:admin', paged: false, aliases: ['/api_keys'] },
+  { id: 'revoke-api-key', method: 'DELETE', auth: K, path: '/api-keys/:id', scope: 'org:admin', paged: false, aliases: ['/api_keys/:id'] },
+  { id: 'create-series', method: 'POST', auth: K, path: '/series', scope: 'events:write', paged: false, aliases: ['/event_series'] },
+  { id: 'update-series', method: 'PATCH', auth: K, path: '/series/:id', scope: 'events:write', paged: false, aliases: ['/event_series/:id'] },
+  { id: 'cancel-series', method: 'POST', auth: K, path: '/series/:id/cancel', scope: 'events:write', paged: false, aliases: ['/event_series/:id/cancel'] },
+  { id: 'delete-series', method: 'DELETE', auth: K, path: '/series/:id', scope: 'events:write', paged: false, aliases: ['/event_series/:id'] },
+  {
+    id: 'attach-series-event', method: 'POST', auth: K, path: '/series/:id/events', scope: 'events:write', paged: false,
+    aliases: ['/event_series/:id/event_series_events'],
+  },
+  {
+    id: 'detach-series-event', method: 'DELETE', auth: K, path: '/series/:id/events/:eid', scope: 'events:write', paged: false,
+    aliases: ['/event_series/:id/event_series_events/:eid'],
+  },
+  { id: 'generate-series-dates', method: 'POST', auth: K, path: '/series/:id/generate', scope: 'events:write', paged: false },
+  { id: 'cancel-series-date', method: 'POST', auth: K, path: '/series/:id/cancel-date', scope: 'events:write', paged: false },
+  {
+    id: 'create-event-fee-rule', method: 'POST', auth: K, path: '/events/:id/fee-rules', scope: 'events:write', paged: false,
+    aliases: ['/confirms/:id/organizer_fee_components'],
+  },
+  {
+    id: 'update-event-fee-rule', method: 'PATCH', auth: K, path: '/events/:id/fee-rules/:rid', scope: 'events:write', paged: false,
+    aliases: ['/confirms/:id/organizer_fee_components/:rid'],
+  },
+  {
+    id: 'delete-event-fee-rule', method: 'DELETE', auth: K, path: '/events/:id/fee-rules/:rid', scope: 'events:write', paged: false,
+    aliases: ['/confirms/:id/organizer_fee_components/:rid'],
+  },
+  {
+    id: 'release-orphan-seats', method: 'POST', auth: K, path: '/events/:id/seat-reconciliation/release-orphans', scope: 'tickets:write',
+    paged: false, aliases: ['/confirms/:id/seat_reconciliation/release_orphans'],
+  },
+  {
+    id: 'import-migrated-attendees', method: 'POST', auth: K, path: '/migrated-attendees/bulk', scope: 'tickets:write', paged: false,
+    aliases: ['/migrated_attendees/bulk'],
+  },
+  { id: 'create-membership-scan', method: 'POST', auth: K, path: '/membership-scans', scope: 'checkin:write', paged: false, aliases: ['/membership_scans'] },
+  { id: 'gift-membership', method: 'POST', auth: K, path: '/membership-products/:id/gifts', scope: 'commerce:write', paged: false },
+  { id: 'cancel-membership-gift', method: 'DELETE', auth: K, path: '/memberships/:id/gift', scope: 'commerce:write', paged: false },
+  { id: 'cancel-membership', method: 'POST', auth: K, path: '/memberships/:id/cancel', scope: 'commerce:write', paged: false },
+  {
+    id: 'quote-gift-card-product', method: 'GET', auth: K, path: '/gift-card-products/:id/quote', scope: 'commerce:read', paged: false,
+    aliases: ['/gift_card_products/:id/quote'],
+  },
+  {
+    id: 'issue-gift-card', method: 'POST', auth: K, path: '/gift-card-products/:id/gift-card-orders', scope: 'commerce:write',
+    paged: false, aliases: ['/gift_card_products/:id/gift_card_orders'],
+  },
+  {
+    id: 'create-offline-donation', method: 'POST', auth: K, path: '/giving-campaigns/:id/offline-donations', scope: 'commerce:write',
+    paged: false, aliases: ['/giving_campaigns/:id/offline_donations'],
+  },
+  { id: 'create-donation', method: 'POST', auth: K, path: '/donations', scope: 'commerce:write', paged: false },
+  // claude/exos-fan-api: public discovery and signup forms, no credential
+  // (auth `public`, exos-api/publicApi.ts). Opendate's names are aliases.
+  {
+    id: 'public-discovery-events', method: 'GET', auth: A, path: '/public/discovery/events', scope: null, paged: true,
+    aliases: ['/public/discovery/confirms'],
+  },
+  {
+    id: 'public-discovery-event', method: 'GET', auth: A, path: '/public/discovery/events/:id', scope: null, paged: false,
+    aliases: ['/public/discovery/confirms/:id'],
+  },
+  { id: 'public-venues', method: 'GET', auth: A, path: '/public/venues', scope: null, paged: true },
+  { id: 'public-venue', method: 'GET', auth: A, path: '/public/venues/:id', scope: null, paged: false },
+  { id: 'public-search', method: 'GET', auth: A, path: '/public/search', scope: null, paged: false },
+  {
+    id: 'public-event-series-list', method: 'GET', auth: A, path: '/public/event-series', scope: null, paged: false,
+    aliases: ['/public/website_event_series'],
+  },
+  {
+    id: 'public-event-series', method: 'GET', auth: A, path: '/public/event-series/:id', scope: null, paged: false,
+    aliases: ['/public/website_event_series/:id'],
+  },
+  { id: 'public-create-fan', method: 'POST', auth: A, path: '/public/fans', scope: null, paged: false },
+  { id: 'public-create-form-submission', method: 'POST', auth: A, path: '/public/forms/:id/submissions', scope: null, paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

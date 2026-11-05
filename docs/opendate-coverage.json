@@ -13,7 +13,7 @@
    "path": "/oauth/authorize",
    "status": "equivalent",
    "exos": "exos-oauth GET /authorize",
-   "reason": "OAuth 2.1 code + PKCE on the exos-oauth function, not exos-api"
+   "reason": "An interactive consent page in the browser (the user approves the app signed in); a bearer-token API route can't host it. exos-oauth is Exos's OAuth 2.1 authorization server (code + PKCE), advertised in its RFC 8414 metadata"
   },
   {
    "category": "authorization",
@@ -28,8 +28,8 @@
    "method": "POST",
    "path": "/oauth/revoke",
    "status": "equivalent",
-   "exos": "exos-oauth POST /revoke",
-   "reason": "Token revocation on the exos-oauth function (+ /introspect)"
+   "exos": "exos-oauth POST /revoke; DELETE /v1/personal-access-tokens/current",
+   "reason": "RFC 7009 revocation at the authorization server (exos-oauth, + /introspect), where the app authenticates; a token can revoke itself through the API too: DELETE /v1/personal-access-tokens/current (personal and account tokens)"
   },
   {
    "category": "authorization",
@@ -37,7 +37,7 @@
    "path": "/oauth/token",
    "status": "equivalent",
    "exos": "exos-oauth POST /token (grant_type=refresh_token)",
-   "reason": "Refresh tokens rotate, with reuse detection"
+   "reason": "Refresh tokens rotate, with reuse detection, at the authorization server's single token endpoint (RFC 8414 metadata); a second copy on exos-api would split the rate limit and the audit trail"
   },
   {
    "category": "users",
@@ -75,9 +75,9 @@
    "category": "users",
    "method": "GET",
    "path": "/api/v2/users/current",
-   "status": "equivalent",
-   "exos": "GET /v1/me",
-   "reason": "Names the credential and, for a user token, its user and live role"
+   "status": "route",
+   "exos": "GET /v1/me/profile",
+   "reason": "A user token (GET /v1/me describes the credential)"
   },
   {
    "category": "users",
@@ -187,9 +187,9 @@
    "category": "personal_access_tokens",
    "method": "POST",
    "path": "/api/v2/personal_access_tokens",
-   "status": "equivalent",
-   "exos": "Profile → Developer (exos_create_personal_token)",
-   "reason": "Signed in only: a token can't mint tokens"
+   "status": "route",
+   "exos": "POST /v1/me/personal-access-tokens",
+   "reason": "A user token mints another for its user (also at POST /v1/personal-access-tokens): at most its own scopes, never outliving it; the app's Profile → Developer page makes the first one"
   },
   {
    "category": "personal_access_tokens",
@@ -851,17 +851,17 @@
    "category": "ticket_transfers",
    "method": "GET",
    "path": "/api/v2/orders/{order_id}/ticket_transfers/new",
-   "status": "equivalent",
-   "exos": "exos_transfer_* (buyer, signed in)",
-   "reason": "Transfers are the holder's action in the app, not a partner API"
+   "status": "route",
+   "exos": "GET /v1/me/orders/:id/ticket-transfers/new",
+   "reason": "A user token: the order's tickets the user can transfer"
   },
   {
    "category": "ticket_transfers",
    "method": "POST",
    "path": "/api/v2/orders/{order_id}/ticket_transfers",
-   "status": "equivalent",
-   "exos": "exos_transfer_* (buyer, signed in)",
-   "reason": "Transfers are the holder's action in the app"
+   "status": "route",
+   "exos": "POST /v1/me/orders/:id/ticket-transfers",
+   "reason": "A user token; the app's transfer rules (lock, claim key, cancel) hold"
   },
   {
    "category": "scan_lookups",
@@ -931,9 +931,9 @@
    "category": "membership_scans",
    "method": "POST",
    "path": "/api/v2/membership_scans",
-   "status": "equivalent",
-   "exos": "exos_membership_scan (door staff, signed in)",
-   "reason": "Door scans are a signed-in staff action, not a partner route"
+   "status": "route",
+   "exos": "POST /v1/membership-scans",
+   "reason": "An org key whose creator is an owner, manager or scanner (checkin:write)"
   },
   {
    "category": "memberships",
@@ -947,17 +947,17 @@
    "category": "memberships",
    "method": "POST",
    "path": "/api/v2/memberships/:membership_id/gift",
-   "status": "equivalent",
-   "exos": "exos_membership_gift (dashboard); buy_membership with gift_to_email",
-   "reason": "No partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/membership-products/:id/gifts",
+   "reason": "A gift is of a membership product (commerce:write); the recipient claims it from the mail"
   },
   {
    "category": "memberships",
    "method": "DELETE",
    "path": "/api/v2/memberships/:membership_id/gift",
-   "status": "equivalent",
-   "exos": "exos_membership_cancel_gift",
-   "reason": "No partner write route yet"
+   "status": "route",
+   "exos": "DELETE /v1/memberships/:id/gift",
+   "reason": "An unclaimed gift (commerce:write)"
   },
   {
    "category": "membership_reservations",
@@ -1051,17 +1051,17 @@
    "category": "gift_card_sales",
    "method": "GET",
    "path": "/api/v2/gift_card_products/{gift_card_product_id}/quote",
-   "status": "equivalent",
-   "exos": "exos_gift_card_quote (exos-checkout / exos-commerce)",
-   "reason": "Amounts are fixed or a range: the quote is the amount"
+   "status": "route",
+   "exos": "GET /v1/gift-card-products/:id/quote",
+   "reason": "The price is the amount: no fee on top"
   },
   {
    "category": "gift_card_sales",
    "method": "POST",
    "path": "/api/v2/gift_card_products/{gift_card_product_id}/gift_card_orders",
-   "status": "equivalent",
-   "exos": "buy_gift_card (exos-commerce); exos_gift_card_issue (box office)",
-   "reason": "No partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/gift-card-products/:id/gift-card-orders",
+   "reason": "Issued by an org key (box office: comp, cash, check, card taken elsewhere); the code is emailed, never returned. Fans buy cards at exos-commerce checkout"
   },
   {
    "category": "gift_card_sales",
@@ -1092,16 +1092,16 @@
    "method": "POST",
    "path": "/api/v2/giving_campaigns/{giving_campaign_id}/donations",
    "status": "equivalent",
-   "exos": "donate (exos-commerce); add-a-donation on exos-checkout",
-   "reason": "Stripe Checkout"
+   "exos": "POST /v1/giving-campaigns/:id/offline-donations; card gifts: exos-commerce donate (Stripe Checkout)",
+   "reason": "A card donation is paid by the donor at Stripe Checkout (exos-commerce, or an add-on at ticket checkout); an API key records gifts taken elsewhere. Monthly card gifts: POST /v1/giving-campaigns/:id/recurring-donations"
   },
   {
    "category": "giving_campaigns",
    "method": "POST",
    "path": "/api/v2/giving_campaigns/{giving_campaign_id}/offline_donations",
-   "status": "equivalent",
-   "exos": "exos_record_offline_donation (dashboard)",
-   "reason": "No partner write route yet"
+   "status": "route",
+   "exos": "POST /v1/giving-campaigns/:id/offline-donations",
+   "reason": "Cash, check or other, by an org key whose creator is an owner, manager or finance"
   },
   {
    "category": "giving_campaigns",
@@ -1979,17 +1979,17 @@
    "category": "public_website_event_series",
    "method": "GET",
    "path": "/api/v2/public/website_event_series",
-   "status": "equivalent",
-   "exos": "exos_public_series / exos_public_org_series",
-   "reason": "Public series pages (docs/series-timed-entry.md); GET /v1/series with a key"
+   "status": "route",
+   "exos": "GET /v1/public/event-series",
+   "reason": "No credential; ?venue_id= the organizer (id or slug)"
   },
   {
    "category": "public_website_event_series",
    "method": "GET",
    "path": "/api/v2/public/website_event_series/{id}",
-   "status": "equivalent",
-   "exos": "exos_public_series",
-   "reason": "Public series page"
+   "status": "route",
+   "exos": "GET /v1/public/event-series/:id",
+   "reason": "No credential"
   },
   {
    "category": "public_ticket_types",
@@ -2075,17 +2075,17 @@
    "category": "public_fans",
    "method": "POST",
    "path": "/api/v2/public/fans",
-   "status": "equivalent",
-   "exos": "POST /functions/v1/exos-signup",
-   "reason": "With a signup form id"
+   "status": "route",
+   "exos": "POST /v1/public/fans",
+   "reason": "No credential; a signup to a form (form_id), double opt-in, the same answer whatever happened"
   },
   {
    "category": "public_signup_form_submissions",
    "method": "POST",
    "path": "/forms/{uuid}/submissions",
-   "status": "equivalent",
-   "exos": "POST /functions/v1/exos-signup/forms/{uuid}/submissions",
-   "reason": "Same field names; custom answers not built"
+   "status": "route",
+   "exos": "POST /v1/public/forms/:id/submissions",
+   "reason": "No credential; exos-signup's rules (also POST /functions/v1/exos-signup/forms/{uuid}/submissions)"
   },
   {
    "category": "public_tixel_waitlist_signups",
@@ -2099,17 +2099,17 @@
    "category": "public_refund_requests",
    "method": "GET",
    "path": "/api/v2/public/orders/{order_id}/refund_request",
-   "status": "equivalent",
-   "exos": "exos_my_refund_asks (signed in)",
-   "reason": "The payer signed in, not shared key + typed email"
+   "status": "route",
+   "exos": "GET /v1/me/orders/:id/refund-request",
+   "reason": "A user token (the payer): a refund request is never anonymous, or anyone with an order id could void its tickets"
   },
   {
    "category": "public_refund_requests",
    "method": "POST",
    "path": "/api/v2/public/orders/{order_id}/refund_request",
-   "status": "equivalent",
-   "exos": "exos_ask_refund (signed in)",
-   "reason": "Per ticket, within the refund policy"
+   "status": "route",
+   "exos": "POST /v1/me/orders/:id/refund-request",
+   "reason": "A user token (the payer); the event's refund policy and window decide"
   },
   {
    "category": "public_confirm_fan_infos",
@@ -2123,145 +2123,145 @@
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/public/discovery/confirms",
-   "status": "equivalent",
-   "exos": "exos_public_events; GET /v1/public/events",
-   "reason": "Public view / listing feed"
+   "status": "route",
+   "exos": "GET /v1/public/discovery/events",
+   "reason": "No credential; ticket prices all-in"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/public/discovery/confirms/{id}",
-   "status": "equivalent",
-   "exos": "exos_public_events + exos_public_tiers",
-   "reason": "Public view"
+   "status": "route",
+   "exos": "GET /v1/public/discovery/events/:id",
+   "reason": "No credential; public ticket types priced all-in"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/public/venues",
-   "status": "equivalent",
-   "exos": "exos_public_orgs",
-   "reason": "Exos organizers are the venues"
+   "status": "route",
+   "exos": "GET /v1/public/venues",
+   "reason": "No credential; organizers with an upcoming published event"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/public/venues/{id}",
-   "status": "equivalent",
-   "exos": "exos_public_orgs + public events",
-   "reason": "Same operation"
+   "status": "route",
+   "exos": "GET /v1/public/venues/:id",
+   "reason": "No credential; by id or slug"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/public/search",
-   "status": "equivalent",
-   "exos": "exos_public_events / exos_public_orgs (ilike)",
-   "reason": "No search RPC needed"
+   "status": "route",
+   "exos": "GET /v1/public/search",
+   "reason": "No credential"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/tickets",
-   "status": "equivalent",
-   "exos": "exos_tickets (RLS: the holder)",
-   "reason": "The signed-in fan's tickets"
+   "status": "route",
+   "exos": "GET /v1/me/tickets",
+   "reason": "A user token (me:read)"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/tickets/{barcode}",
-   "status": "equivalent",
-   "exos": "exos_tickets by id + exos_ticket_barcode_secrets",
-   "reason": "Keyed by id: codes rotate"
+   "status": "route",
+   "exos": "GET /v1/me/tickets/:id",
+   "reason": "By ticket id (a barcode rotates every 30 seconds); answers the live code, never its secret"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/tickets/{barcode}/pkpass",
-   "status": "equivalent",
-   "exos": "exos-wallet POST /pass { kind: \"apple\" }",
-   "reason": "Same operation"
+   "status": "route",
+   "exos": "GET /v1/me/tickets/:id/pkpass",
+   "reason": "By ticket id; Google Wallet: GET /v1/me/tickets/:id/google-wallet-url"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/ticket_bundles",
-   "status": "equivalent",
-   "exos": "exos_my_ticket_bundles()",
-   "reason": "Tickets grouped by event"
+   "status": "route",
+   "exos": "GET /v1/me/ticket-bundles",
+   "reason": "A user token"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/ticket_bundles/{calendar_event_id}",
-   "status": "equivalent",
-   "exos": "exos_my_ticket_bundles(event_id)",
-   "reason": "Same operation"
+   "status": "route",
+   "exos": "GET /v1/me/ticket-bundles/:id",
+   "reason": "By event id"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/memberships",
-   "status": "equivalent",
-   "exos": "exos_my_memberships()",
-   "reason": "Signed-in RPC (docs/memberships.md)"
+   "status": "route",
+   "exos": "GET /v1/me/fan-memberships",
+   "reason": "A user token (/v1/me/memberships is the user's organizations)"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/memberships/{token}",
-   "status": "equivalent",
-   "exos": "exos_my_memberships()",
-   "reason": "Signed-in RPC"
+   "status": "route",
+   "exos": "GET /v1/me/fan-memberships/:id",
+   "reason": "By membership id"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes",
-   "status": "equivalent",
-   "exos": "exos_my_passes()",
-   "reason": "Season passes and flex packs are passes (mig 20261030130500)"
+   "status": "route",
+   "exos": "GET /v1/me/season-passes",
+   "reason": "A user token"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes/{id}",
-   "status": "equivalent",
-   "exos": "exos_my_passes()",
-   "reason": "Same operation"
+   "status": "route",
+   "exos": "GET /v1/me/season-passes/:id",
+   "reason": "A user token"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes/{id}/pkpass",
-   "status": "equivalent",
-   "exos": "exos-wallet POST /season-pass { pass_id, kind: \"apple\" }",
-   "reason": "Signed-in holder; 503 until the Apple Wallet certificates are configured"
+   "status": "route",
+   "exos": "GET /v1/me/season-passes/:id/pkpass",
+   "reason": "A user token"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/season_passes/{id}/google_wallet_url",
-   "status": "equivalent",
-   "exos": "exos-wallet POST /season-pass { pass_id, kind: \"google\" } → { save_url }",
-   "reason": "Signed-in holder; 503 until the Google Wallet issuer is configured"
+   "status": "route",
+   "exos": "GET /v1/me/season-passes/:id/google-wallet-url",
+   "reason": "A user token"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/passes",
-   "status": "equivalent",
-   "exos": "exos_my_passes()",
-   "reason": "Flex packs"
+   "status": "route",
+   "exos": "GET /v1/me/passes",
+   "reason": "A user token; ?kind=season or flex"
   },
   {
    "category": "fan_app",
    "method": "GET",
    "path": "/api/v2/users/current/passes/{id}",
-   "status": "equivalent",
-   "exos": "exos_my_passes()",
-   "reason": "Same operation"
+   "status": "route",
+   "exos": "GET /v1/me/passes/:id",
+   "reason": "A user token"
   },
   {
    "category": "admin_events",
@@ -2764,24 +2764,24 @@
    "method": "GET",
    "path": "/api/v2/admin/teams/{team_id}/api_keys",
    "status": "equivalent",
-   "exos": "Org settings → Developer (exos_list_api_keys)",
-   "reason": "Not over the API, so a key can't mint keys"
+   "exos": "GET /v1/api-keys",
+   "reason": "The key's own organization (no team id); org:admin"
   },
   {
    "category": "admin_api_keys",
    "method": "POST",
    "path": "/api/v2/admin/teams/{team_id}/api_keys",
    "status": "equivalent",
-   "exos": "Org settings → Developer (exos_create_api_key)",
-   "reason": "Not over the API"
+   "exos": "POST /v1/api-keys",
+   "reason": "An owner's key (org:admin): never above its own scopes; the new key is shown once"
   },
   {
    "category": "admin_api_keys",
    "method": "DELETE",
    "path": "/api/v2/admin/teams/{team_id}/api_keys/{id}",
    "status": "equivalent",
-   "exos": "Org settings → Developer (exos_revoke_api_key)",
-   "reason": "Not over the API"
+   "exos": "DELETE /v1/api-keys/:id",
+   "reason": "An owner's key (org:admin)"
   },
   {
    "category": "admin_fans",
@@ -2940,8 +2940,8 @@
    "method": "POST",
    "path": "/api/v2/admin/donations",
    "status": "equivalent",
-   "exos": "exos_record_offline_donation",
-   "reason": "Dashboard; no partner write route yet"
+   "exos": "POST /v1/donations",
+   "reason": "A gift taken elsewhere, campaign_id in the body (also POST /v1/giving-campaigns/:id/offline-donations)"
   },
   {
    "category": "admin_donations",
@@ -3020,48 +3020,48 @@
    "method": "POST",
    "path": "/api/v2/admin/event_series",
    "status": "equivalent",
-   "exos": "exos_series_create (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "POST /v1/series",
+   "reason": "From a template event and a rule; owner or manager"
   },
   {
    "category": "admin_event_series",
    "method": "PATCH",
    "path": "/api/v2/admin/event_series/:id",
    "status": "equivalent",
-   "exos": "exos_series_update (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "PATCH /v1/series/:id",
+   "reason": "Owner or manager"
   },
   {
    "category": "admin_event_series",
    "method": "POST",
    "path": "/api/v2/admin/event_series/:id/cancel",
    "status": "equivalent",
-   "exos": "exos_series_cancel (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "POST /v1/series/:id/cancel",
+   "reason": "series_only, all_shows or selected"
   },
   {
    "category": "admin_event_series",
    "method": "DELETE",
    "path": "/api/v2/admin/event_series/:id",
    "status": "equivalent",
-   "exos": "exos_series_delete (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "DELETE /v1/series/:id",
+   "reason": "A series with no sold dates"
   },
   {
    "category": "admin_event_series",
    "method": "POST",
    "path": "/api/v2/admin/event_series/:event_series_id/event_series_events",
    "status": "equivalent",
-   "exos": "exos_series_attach_event / exos_series_generate (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "POST /v1/series/:id/events; POST /v1/series/:id/generate",
+   "reason": "Attach an existing event, or generate dates from the template"
   },
   {
    "category": "admin_event_series",
    "method": "DELETE",
    "path": "/api/v2/admin/event_series/:event_series_id/event_series_events/:id",
    "status": "equivalent",
-   "exos": "exos_series_detach_event / exos_series_cancel_date (dashboard)",
-   "reason": "Series writes are signed-in RPCs; no partner write route yet (docs/series-timed-entry.md)"
+   "exos": "DELETE /v1/series/:id/events/:eid; POST /v1/series/:id/cancel-date",
+   "reason": "Detach a date, or cancel the date on one day"
   },
   {
    "category": "admin_gift_up_giftcards",
@@ -3180,8 +3180,8 @@
    "method": "POST",
    "path": "/api/v2/admin/memberships/:id/cancel",
    "status": "equivalent",
-   "exos": "exos-commerce cancel / Stripe customer portal",
-   "reason": "Cancelling a subscription goes through Stripe"
+   "exos": "POST /v1/memberships/:id/cancel",
+   "reason": "Owner or manager (also PATCH /v1/memberships/:id with status cancelled)"
   },
   {
    "category": "admin_external_identities",
@@ -3252,8 +3252,8 @@
    "method": "POST",
    "path": "/api/v2/admin/migrated_attendees/bulk",
    "status": "equivalent",
-   "exos": "door imports (CSV, dashboard)",
-   "reason": "One event at a time, like Opendate"
+   "exos": "POST /v1/migrated-attendees/bulk",
+   "reason": "Into one of the org's guest lists (the door's import), 1-5000 rows"
   },
   {
    "category": "admin_migrated_attendees",
@@ -3300,8 +3300,8 @@
    "method": "POST",
    "path": "/api/v2/admin/confirms/:confirm_id/seat_reconciliation/release_orphans",
    "status": "equivalent",
-   "exos": "exos_release_orphan_seats (dashboard)",
-   "reason": "Owners / managers; not over the API"
+   "exos": "POST /v1/events/:id/seat-reconciliation/release-orphans",
+   "reason": "The seats GET /v1/events/:id/seat-reconciliation reports as orphaned"
   },
   {
    "category": "admin_offers",
@@ -3516,24 +3516,24 @@
    "method": "POST",
    "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components",
    "status": "equivalent",
-   "exos": "Event fee rules (Edit event → Fees)",
-   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+   "exos": "POST /v1/events/:id/fee-rules",
+   "reason": "An event fee rule, passed on inside the all-in price or absorbed (docs/fees.md)"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "PATCH",
    "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components/{id}",
    "status": "equivalent",
-   "exos": "Event fee rules (Edit event → Fees)",
-   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+   "exos": "PATCH /v1/events/:id/fee-rules/:rid",
+   "reason": "Owner or manager"
   },
   {
    "category": "admin_general_ledger_codes",
    "method": "DELETE",
    "path": "/api/v2/admin/confirms/{confirm_id}/organizer_fee_components/{id}",
    "status": "equivalent",
-   "exos": "Event fee rules (Edit event → Fees)",
-   "reason": "Organizer fee components are fee rules (docs/fees.md); writes in the dashboard"
+   "exos": "DELETE /v1/events/:id/fee-rules/:rid",
+   "reason": "Owner or manager"
   },
   {
    "category": "admin_template_inventory",

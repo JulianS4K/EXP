@@ -379,7 +379,8 @@ END $$;
 DO $$
 DECLARE s text;
 BEGIN
-  ASSERT cardinality(public.exos_api_scope_names()) = 18
+  -- 20 since the fan API (mig 20261105110000) added me:read / me:write.
+  ASSERT cardinality(public.exos_api_scope_names()) = 20
      AND 'refunds:write' = ANY (public.exos_api_scope_names()) AND 'fans:read' = ANY (public.exos_api_scope_names()),
     'I6: the scope list is the union';
   ASSERT public.exos_role_token_scopes('owner') = public.exos_api_scope_names(), 'I6: an owner''s token may hold every scope';

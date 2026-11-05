@@ -164,7 +164,10 @@ BEGIN
        'exos_signup_form_public', 'exos_signup_confirm', 'exos_signup_unsubscribe',
        -- inbound booking requests (mig 20261102130000): an org's form text
        -- when it is on, and the rate-limited, honeypotted, 16 KB-capped submit
-       'exos_inbound_form_public', 'exos_inbound_submit');
+       'exos_inbound_form_public', 'exos_inbound_submit',
+       -- public discovery (mig 20261105110000): published events, public ticket
+       -- types, organizers' public profiles and series; 60 a minute per network
+       'exos_api_public');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

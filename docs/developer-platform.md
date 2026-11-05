@@ -51,6 +51,30 @@ expiry 30 / 90 / 365 days or none. Shown once (`exos_pat_` + 43 characters); onl
 13-character prefix are kept. A confirmed email is required; at most 25 live tokens per user. Revoke in the same
 panel, or with the token itself: `DELETE /v1/personal-access-tokens/current`.
 
+## The fan API and account tokens
+
+`/v1/me/…` (docs/api/me.json, mig 20261105110000) is the token's own user:
+their tickets (ticket detail carries the live 30-second barcode, never its
+secret), orders, transfers (start, cancel, claim), memberships, season passes
+and flex packs, refund requests, Apple / Google wallet passes, tokens, profile
+and marketing preference. It takes the user scopes `me:read` / `me:write`,
+which every role may give its own tokens and no organization API key can
+carry (an org key has no user and is refused). Each call runs the app's own
+signed-in RPC as that user, so transfer locks, claim keys and refund windows
+hold exactly as in the app.
+
+- **Personal access tokens** and **OAuth tokens** reach `/v1/me` when they
+  hold `me:*`.
+- **Account tokens** are for a user with no organization (any fan): Profile →
+  Developer → Account token, `me:read` or `me:read` + `me:write`, 30 / 90 /
+  365 days or none, at most 10 active. Same `exos_pat_…` format, SHA-256 at
+  rest, shown once. They call `/v1/me/…`, `GET /v1/me` and
+  `DELETE /v1/personal-access-tokens/current`, nothing else.
+- **Tokens from tokens** (`POST /v1/me/personal-access-tokens`, Opendate's
+  `POST /personal_access_tokens`): a personal or account token mints another
+  for its user, with at most its own scopes and never outliving it. OAuth apps
+  can't.
+
 ## OAuth apps
 
 Register at `/developers/apps`: name, homepage, redirect URIs, the scopes the app may ask for, and the type.

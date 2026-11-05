@@ -16,14 +16,14 @@ exists and is documented in `docs/api`.
 
 | | Endpoints | Share |
 |---|---:|---:|
-| route | 161 | 35.4% |
-| equivalent | 236 | 51.9% |
+| route | 195 | 42.9% |
+| equivalent | 202 | 44.4% |
 | **covered (route + equivalent)** | **397** | **87.3%** |
 | not_applicable | 58 | 12.7% |
 | planned | 0 | 0% |
 | **Opendate endpoints** | **455** | |
 
-Exos routes beyond Opendate: **115** of the 367 rows in the route table
+Exos routes beyond Opendate: **132** of the 434 rows in the route table
 aren't named by any entry (Exos-only features, or finer-grained routes than Opendate's).
 
 ## Partner and public API
@@ -31,13 +31,13 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | Category | Endpoints | route | equivalent | not_applicable | planned |
 |---|---:|---:|---:|---:|---:|
 | authorization | 4 | 0 | 3 | 1 | 0 |
-| users | 7 | 0 | 1 | 6 | 0 |
+| users | 7 | 1 | 0 | 6 | 0 |
 | team_memberships | 2 | 0 | 1 | 1 | 0 |
 | teams | 2 | 0 | 2 | 0 | 0 |
 | team_members | 3 | 0 | 3 | 0 | 0 |
 | team_invitations | 3 | 0 | 3 | 0 | 0 |
 | team_roles | 1 | 0 | 1 | 0 | 0 |
-| personal_access_tokens | 2 | 1 | 1 | 0 | 0 |
+| personal_access_tokens | 2 | 2 | 0 | 0 | 0 |
 | staffing_kiosk_devices | 2 | 0 | 0 | 2 | 0 |
 | events | 12 | 10 | 1 | 1 | 0 |
 | events_database | 2 | 0 | 0 | 2 | 0 |
@@ -56,15 +56,15 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | organizer_orders | 2 | 0 | 2 | 0 | 0 |
 | guest_lists | 5 | 1 | 4 | 0 | 0 |
 | ticket_reservations | 2 | 2 | 0 | 0 | 0 |
-| ticket_transfers | 2 | 0 | 2 | 0 | 0 |
+| ticket_transfers | 2 | 2 | 0 | 0 | 0 |
 | scan_lookups | 1 | 1 | 0 | 0 | 0 |
 | fans | 7 | 5 | 1 | 1 | 0 |
-| membership_scans | 1 | 0 | 1 | 0 | 0 |
-| memberships | 3 | 1 | 2 | 0 | 0 |
+| membership_scans | 1 | 1 | 0 | 0 | 0 |
+| memberships | 3 | 3 | 0 | 0 | 0 |
 | membership_reservations | 3 | 0 | 0 | 3 | 0 |
 | membership_products | 7 | 7 | 0 | 0 | 0 |
-| gift_card_sales | 4 | 1 | 3 | 0 | 0 |
-| giving_campaigns | 5 | 3 | 2 | 0 | 0 |
+| gift_card_sales | 4 | 3 | 1 | 0 | 0 |
+| giving_campaigns | 5 | 4 | 1 | 0 | 0 |
 | refunds | 2 | 0 | 2 | 0 | 0 |
 | settlements | 1 | 1 | 0 | 0 | 0 |
 | finance_items | 4 | 3 | 1 | 0 | 0 |
@@ -89,17 +89,17 @@ aren't named by any entry (Exos-only features, or finer-grained routes than Open
 | inbound_submissions | 4 | 4 | 0 | 0 | 0 |
 | eventbrite_events | 1 | 1 | 0 | 0 | 0 |
 | public_events | 2 | 2 | 0 | 0 | 0 |
-| public_website_event_series | 2 | 0 | 2 | 0 | 0 |
+| public_website_event_series | 2 | 2 | 0 | 0 | 0 |
 | public_ticket_types | 1 | 1 | 0 | 0 | 0 |
 | public_ticket_reservations | 4 | 4 | 0 | 0 | 0 |
 | public_orders | 4 | 4 | 0 | 0 | 0 |
 | public_comps | 1 | 1 | 0 | 0 | 0 |
-| public_fans | 1 | 0 | 1 | 0 | 0 |
-| public_signup_form_submissions | 1 | 0 | 1 | 0 | 0 |
+| public_fans | 1 | 1 | 0 | 0 | 0 |
+| public_signup_form_submissions | 1 | 1 | 0 | 0 | 0 |
 | public_tixel_waitlist_signups | 1 | 0 | 0 | 1 | 0 |
-| public_refund_requests | 2 | 0 | 2 | 0 | 0 |
+| public_refund_requests | 2 | 2 | 0 | 0 | 0 |
 | public_confirm_fan_infos | 1 | 0 | 1 | 0 | 0 |
-| fan_app | 18 | 0 | 18 | 0 | 0 |
+| fan_app | 18 | 18 | 0 | 0 | 0 |
 
 ## Opendate's back office (admin)
 
