@@ -43,9 +43,16 @@ Partner sales" (`docs/api/partner-sales.json`); this page is how it works.
 - **Channel namespace.** `channel_source` is always `partner:<partner_type>` for partner sales and `api` for
   organizer reservations, set only by the definer functions, never from the request (as `link:<slug>` is for
   free claims).
-- **All-in prices.** The price per ticket is what Exos checkout charges: the scheduled price, the organizer's
-  passed-on fees and exclusive tax (`exos_all_in_unit_cents`). Partners see `price`, `calculated_fees`,
-  `taxes_total` and `final_cost` per ticket type; they charge their buyer `final_cost`.
+- **All-in prices.** The price per ticket is what Exos checkout charges: the current price step's price
+  (docs/price-steps.md), the organizer's passed-on fees and exclusive tax (`exos_all_in_unit_cents`). Partners
+  see `price`, `calculated_fees`, `taxes_total` and `final_cost` per ticket type; they charge their buyer
+  `final_cost`.
+- **Price steps** (mig `20261107120000`). A reservation is priced like a checkout: each line at one step, the
+  step's price locked when the seats are held. A line over what the step has left is refused with 409
+  `reason: "price_step_remaining"`, `remaining`, `price_cents` and `ticket_type_id` (nothing is held; `/build`
+  answers the same): reserve `remaining`, then the rest at the next price. The reservation's holds count against
+  the step until it completes, is cancelled or expires, and complete mints at the quoted price on that step even
+  if the step moved meanwhile. Comps take no step place.
 
 ## Caps
 
@@ -80,11 +87,14 @@ reserve ──201 token, expires_at──▶ charge your buyer ──▶ PUT att
   at most 10 seats a row), taken under the same locks as `exos_create_hold` (quotas, then ticket types). Every
   availability check in Exos already subtracts live holds, so the seats are gone from the storefront, the feeds,
   the marketplaces and the other partners at once, and two partners racing for the last seats can't both get
-  them: the loser gets 409 before charging anyone. Up to 10 ticket types and 100 tickets.
+  them: the loser gets 409 before charging anyone. Up to 10 ticket types and 100 tickets. On a type with price
+  steps the holds also carry the step and its price, taken under the lock checkout's `exos_hold_lock_price`
+  uses, so a partner and a buyer can't both get the last early birds (`tests/exos/race_partner_steps.sh`).
 - **Update** sets the attendee name and email, whether we email the tickets, and the partner's transaction id.
   It doesn't extend the hold.
 - **Complete** consumes the holds and mints the tickets in one transaction, the way `exos_fulfill_checkout`
-  does. It is idempotent: a repeat call answers 200 with the same order. After `expires_at` it answers 410 and
+  does. It first locks every shared limit of every line by id, then the ticket types by id (the order holds
+  use), so a multi-type reservation can't deadlock against a checkout. It is idempotent: a repeat call answers 200 with the same order. After `expires_at` it answers 410 and
   the seats are released.
 - **Cancel** releases the holds. A completed reservation can't be cancelled.
 - **Comps** (`POST /v1/public/confirms/:id/comps`, keys with the comps scope) are a free reservation completed

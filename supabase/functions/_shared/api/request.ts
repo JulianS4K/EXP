@@ -57,13 +57,17 @@ export function idempotencyKeyOf(v: string | null): string | null {
  * SQLSTATEs the service-role SQL functions raise, as HTTP statuses (rpcError
  * and the partner contract's errorResponse in exos-api/index.ts). The EX*
  * codes are the partner-sales core's (mig 20261031130000): EXSLD sold out,
- * EX422 not on sale through this channel, EX409 a finished reservation.
+ * EX422 not on sale through this channel, EX409 a finished reservation;
+ * XP410 is a line over its price step's remainder (mig 20261107120000).
  */
 export const RPC_STATUS: Record<string, number> = {
   '22023': 400, '42501': 403, P0002: 404, '23505': 409, '55000': 409, '54000': 409,
   EX409: 409, EX422: 422, EXSLD: 409,
   // A partner over its cap (mig 20261104200000): 409 partner_cap_reached.
   EXCAP: 409,
+  // A reservation line over its price step's remainder (mig 20261107120000):
+  // 409 price_step_remaining, as exos-checkout answers it.
+  XP410: 409,
 };
 
 /** A raised SQL error as an HTTP answer, or null for anything unmapped (a 500). */
@@ -75,7 +79,35 @@ export function rpcAnswer(e: unknown): { status: number; body: Record<string, un
   if (code === 'EXSLD') body.reason = 'sold_out';
   if (code === 'EX422') body.reason = 'not_available';
   if (code === 'EXCAP') Object.assign(body, partnerCapBody(err));
+  if (code === 'XP410') Object.assign(body, priceStepBody(err));
   return { status: RPC_STATUS[code], body };
+}
+
+/**
+ * The 409 body of a reservation line over its price step's remainder (CAP,
+ * mig 20261107120000): the SQL puts {"remaining", "price_cents", "tier_id"}
+ * in the error's DETAIL. The partner reserves `remaining` at `price_cents`
+ * and the rest in a second reservation at the next price.
+ */
+export function priceStepBody(e: unknown): {
+  reason: 'price_step_remaining'; remaining: number | null; price_cents: number | null; ticket_type_id: string | null;
+} {
+  const raw = (e as { details?: unknown } | null)?.details;
+  const whole = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
+  let remaining: number | null = null;
+  let price: number | null = null;
+  let tier: string | null = null;
+  if (typeof raw === 'string') {
+    try {
+      const d = JSON.parse(raw) as { remaining?: unknown; price_cents?: unknown; tier_id?: unknown };
+      remaining = whole(d.remaining);
+      price = whole(d.price_cents);
+      if (typeof d.tier_id === 'string') tier = d.tier_id;
+    } catch {
+      // Not ours: keep the nulls.
+    }
+  }
+  return { reason: 'price_step_remaining', remaining, price_cents: price, ticket_type_id: tier };
 }
 
 /**
