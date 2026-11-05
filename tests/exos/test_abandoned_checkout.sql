@@ -28,9 +28,9 @@ INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold,
   ('af000000-0000-0000-0000-0000000000d5', 'af000000-0000-0000-0000-0000000000e2', 'GA', 20, 100, 0, 'public', NULL),
   ('af000000-0000-0000-0000-0000000000d6', 'af000000-0000-0000-0000-0000000000e3', 'GA', 20, 100, 0, 'public', NULL),
   ('af000000-0000-0000-0000-0000000000d7', 'af000000-0000-0000-0000-0000000000e4', 'GA', 20, 100, 0, 'public', NULL);
-INSERT INTO public.exos_event_addons (id, event_id, name, price, visibility) VALUES
-  ('af000000-0000-0000-0000-0000000000c1', 'af000000-0000-0000-0000-0000000000e1', 'Parking', 15, 'public'),
-  ('af000000-0000-0000-0000-0000000000c2', 'af000000-0000-0000-0000-0000000000e1', 'Backstage', 99, 'hidden');
+INSERT INTO public.exos_event_addons (id, event_id, name, price, visibility, capacity) VALUES
+  ('af000000-0000-0000-0000-0000000000c1', 'af000000-0000-0000-0000-0000000000e1', 'Parking', 15, 'public', 100),
+  ('af000000-0000-0000-0000-0000000000c2', 'af000000-0000-0000-0000-0000000000e1', 'Backstage', 99, 'hidden', 100);
 
 -- Buyers 01..16. 02 has no confirmed email.
 INSERT INTO auth.users (id, email, email_confirmed_at)

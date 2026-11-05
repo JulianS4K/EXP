@@ -206,13 +206,13 @@ BEGIN
   r := pg_temp.w('f1', 'event.create', NULL,
     jsonb_build_object('event', jsonb_build_object('name', 'C7 API Show', 'starts_at', (now() + interval '10 days')::text,
                        'timezone', 'America/New_York', 'venue_name', 'Club', 'status', 'published'),
-                       'ticket_types', '[{"name":"GA","price":25,"capacity":50},{"name":"Free","price":0,"ticket_type":"free"}]'::jsonb));
+                       'ticket_types', '[{"name":"GA","price":25,"capacity":50},{"name":"Free","price":0,"ticket_type":"free","capacity":100}]'::jsonb));
   RAISE EXCEPTION 'C4 FAIL: status was accepted';
 EXCEPTION WHEN SQLSTATE '22023' THEN
   r := pg_temp.w('f1', 'event.create', NULL,
     jsonb_build_object('event', jsonb_build_object('name', 'C7 API Show', 'starts_at', (now() + interval '10 days')::text,
                        'timezone', 'America/New_York', 'venue_name', 'Club'),
-                       'ticket_types', '[{"name":"GA","price":25,"capacity":50},{"name":"Free","price":0,"ticket_type":"free"}]'::jsonb));
+                       'ticket_types', '[{"name":"GA","price":25,"capacity":50},{"name":"Free","price":0,"ticket_type":"free","capacity":100}]'::jsonb));
   SELECT * INTO e FROM public.exos_events WHERE id = (r ->> 'id')::uuid;
   IF e.org_id <> 'c7000000-0000-0000-0000-000000000001' OR e.status <> 'draft'
      OR e.created_by <> 'c7000000-0000-0000-0000-0000000000a1' OR e.occurs_at_local IS NULL THEN
@@ -224,6 +224,11 @@ EXCEPTION WHEN SQLSTATE '22023' THEN
   IF pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":"x","tickets_sold":5}}') <> '22023'
      OR pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":"x","org_id":"c7000000-0000-0000-0000-000000000002"}}') <> '22023'
      OR pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":" "}}') <> '22023'
+     -- mig 20261105100000: a ticket type needs a capacity (0 = closed, no unlimited)
+     OR pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":"x"},"ticket_types":[{"name":"GA","price":5}]}') <> '22023'
+     OR pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":"x"},"ticket_types":[{"name":"GA","price":5,"capacity":0}]}') <> '22023'
+     OR pg_temp.st('f1', 'ticket_type.create', 'c7000000-0000-0000-0000-0000000000e1', '{"ticket_type":{"name":"Open","price":5}}') <> '22023'
+     OR pg_temp.st('f1', 'add_on.create', 'c7000000-0000-0000-0000-0000000000e1', '{"add_on":{"name":"Open","price":5}}') <> '22023'
      OR pg_temp.st('f1', 'event.create', NULL, '{"event":{"name":"x","starts_at":"not a date"}}') NOT IN ('22007', '22008') THEN
     RAISE EXCEPTION 'C4 FAIL: bad fields accepted';
   END IF;

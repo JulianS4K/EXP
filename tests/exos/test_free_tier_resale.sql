@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Free tier and the resale opt-in (mig 20261029090000):
 --   T1 the cutoff: 150 is the free tier, 151 isn't; a table counts its party
---      size; an event with no max (uncapped type, no overall cap) isn't free tier
+--      size; a closed type (capacity 0) adds nothing to the max
 --   T2 over 150 without an opt-in: every resale path refused / planned out,
 --      with the opt-in reason
 --   T3 the opt-in: refused at 150 (the reason), for finance / scanner /
@@ -45,7 +45,7 @@ INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('c9000000-0000-0000-0000-000000000001','c9000000-0000-0000-0000-0000000000a2','finance'),
   ('c9000000-0000-0000-0000-000000000001','c9000000-0000-0000-0000-0000000000a3','scanner');
 -- e1: 150 (100 + 50). e2: 151 (100 + 51). e3: tables 75 x 2 = 150.
--- e4: no max (100 + an uncapped paid type). e5: cap 300 over 300 of types.
+-- e4: 100 + a closed paid type (capacity 0 is closed, never unlimited: mig 20261105100000). e5: cap 300 over 300 of types.
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
   ('c9000000-0000-0000-0000-0000000000e1','c9000000-0000-0000-0000-000000000001','Room 150','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
   ('c9000000-0000-0000-0000-0000000000e2','c9000000-0000-0000-0000-000000000001','Room 151','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
@@ -92,8 +92,8 @@ BEGIN
   ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 150 AND public.exos_event_is_free_tier(pg_temp.u('e1')), 'T1: 150 is free tier';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e2')) = 151 AND NOT public.exos_event_is_free_tier(pg_temp.u('e2')), 'T1: 151 is not';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 150 AND public.exos_event_is_free_tier(pg_temp.u('e3')), 'T1: 75 tables of 2';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 100 AND NOT public.exos_event_capacity_bounded(pg_temp.u('e4'))
-     AND NOT public.exos_event_is_free_tier(pg_temp.u('e4')), 'T1: no max is not the free tier';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 100 AND public.exos_event_capacity_bounded(pg_temp.u('e4'))
+     AND public.exos_event_is_free_tier(pg_temp.u('e4')), 'T1: a closed type adds nothing: 100 is free tier';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e4')), 'T1: but its capped 100 cannot resell';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e1')) AND NOT public.exos_resale_unlocked(pg_temp.u('e3')), 'T1: free tier locked';
 END $$;
@@ -268,7 +268,7 @@ BEGIN
   UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day' WHERE org_id = 'c9000000-0000-0000-0000-000000000001';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 0, 'T8: free tier 0';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 300, 'T8: 151 pays 3%';
-  ASSERT public.exos_event_fee_bps(pg_temp.u('e4'), now()) = 300, 'T8: no max pays 3%';
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e4'), now()) = 0, 'T8: 100 + a closed type is free tier';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_fee_bps', '50');
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 50, 'T8: the free tier''s rate is a setting';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now() - interval '2 days') = 0, 'T8: free months still win';
@@ -277,7 +277,7 @@ BEGIN
   ASSERT (j ->> 'max_capacity')::int = 150 AND (j ->> 'free_tier_max_capacity')::int = 150 AND (j ->> 'free_tier_fee_bps')::int = 0
      AND (j ->> 'free_tier')::boolean, 'T8: terms ' || j::text;
   j := public.exos_event_fee_terms(pg_temp.u('e4'));
-  ASSERT (j -> 'max_capacity') = 'null'::jsonb AND NOT (j ->> 'free_tier')::boolean, 'T8: no max ' || j::text;
+  ASSERT (j ->> 'max_capacity')::int = 100 AND (j ->> 'free_tier')::boolean, 'T8: a closed type is bounded ' || j::text;
   -- A marketplace sale on a free-tier event (a listing still shrinking).
   INSERT INTO public.exos_marketplace_orders (channel, external_order_id, event_id, org_id, quantity, proceeds, sold_at, sale_status)
   VALUES ('stubhub', 'c9-1', pg_temp.u('e1'), 'c9000000-0000-0000-0000-000000000001', 2, 100, now(), 'confirmed') RETURNING id INTO o;

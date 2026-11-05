@@ -52,8 +52,8 @@ INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,doors_at,end
   ('d7d00000-0000-0000-0000-0000000000e9','d7d00000-0000-0000-0000-000000000002','Sim Door Else','sim-door-else','published',
    now() + interval '1 hour', now() - interval '1 hour', NULL, 0, 'd7d00000-0000-0000-0000-0000000000a6');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity) VALUES
-  ('d7d00000-0000-0000-0000-0000000000f1','d7d00000-0000-0000-0000-0000000000e1','GA',50,0),
-  ('d7d00000-0000-0000-0000-0000000000f2','d7d00000-0000-0000-0000-0000000000e1','VIP',150,0);
+  ('d7d00000-0000-0000-0000-0000000000f1','d7d00000-0000-0000-0000-0000000000e1','GA',50,500),
+  ('d7d00000-0000-0000-0000-0000000000f2','d7d00000-0000-0000-0000-0000000000e1','VIP',150,500);
 -- a4 is assigned to e1 only.
 INSERT INTO public.exos_event_staff(event_id, user_id, org_id) VALUES
   ('d7d00000-0000-0000-0000-0000000000e1','d7d00000-0000-0000-0000-0000000000a4','d7d00000-0000-0000-0000-000000000001');
@@ -400,13 +400,19 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_guest_list_entries
                       WHERE event_id = pg_temp.u('e1') AND external_code = public._exos_door_code('EB-12345679')),
          'SIM-DOOR-9: a one-digit typo matches nobody';
-  -- Dropped hyphen: also no match. The door's typed search could ignore
-  -- punctuation; it doesn't today.
-  PERFORM pg_temp.known('9', EXISTS (SELECT 1 FROM public.exos_guest_list_entries
-                      WHERE event_id = pg_temp.u('e1') AND external_code = public._exos_door_code('EB12345678')),
-    'an imported code typed without its hyphen (EB12345678 for EB-1234 5678) matches nobody: normalization '
-    'drops whitespace and case only. Proposal: also compare with punctuation removed when there is no exact hit.');
-  RAISE NOTICE 'OK SIM-DOOR-9 imported codes: spaces / case / tabs normalized, typos refused';
+  -- Dropped hyphen (was KNOWN; mig 20261105100000): no exact hit, so the
+  -- lookup compares with punctuation removed and finds the one guest.
+  ASSERT public.exos_door_code_lookup(pg_temp.u('e1'), 'EB12345678')
+         = (SELECT id FROM public.exos_guest_list_entries WHERE event_id = pg_temp.u('e1') AND external_code = 'EB-12345678'),
+         'SIM-DOOR-9: EB12345678 finds EB-1234 5678';
+  ASSERT public.exos_door_code_lookup(pg_temp.u('e1'), 'eb-1234 5678') IS NOT NULL, 'SIM-DOOR-9: the exact form still works';
+  ASSERT public.exos_door_code_lookup(pg_temp.u('e1'), 'EB12345679') IS NULL, 'SIM-DOOR-9: a typo is still nobody';
+  -- Two imported codes that differ only by punctuation: ambiguous, no loose match.
+  r := public.exos_import_guests(v_list, jsonb_build_array(
+         jsonb_build_object('name', 'Ab One', 'code', 'AB-12'), jsonb_build_object('name', 'Ab Two', 'code', 'A-B12')));
+  ASSERT public.exos_door_code_lookup(pg_temp.u('e1'), 'AB12') IS NULL, 'SIM-DOOR-9: two loose matches answer nobody';
+  ASSERT public.exos_door_code_lookup(pg_temp.u('e1'), 'ab-12') IS NOT NULL, 'SIM-DOOR-9: an exact hit wins over ambiguity';
+  RAISE NOTICE 'OK SIM-DOOR-9 imported codes: spaces / case / tabs normalized, a dropped hyphen matches when unambiguous (fixed), typos refused';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -606,12 +612,12 @@ BEGIN
   ASSERT r ->> 'reason' = 'wrong-list' AND (r ->> 'forced')::boolean, 'SIM-DOOR-16: forced, got ' || r::text;
   -- Same ticket at the main door, online, later.
   r := pg_temp.scan(22, 'Door B', 'aa01');
-  PERFORM pg_temp.known('16', r ->> 'reason' = 'used',
-    'an entry the server refused but forced (wrong-list, invalid-time, doors-not-open, too-old) never uses the '
-    'ticket (mig 20260929140000 "a forced row never changes the ticket"), so the same ticket gets in again: '
-    'second scan answered ' || coalesce(r ->> 'reason', '?') || '. Proposal: for those four conflicts on an '
-    'active ticket with no pending transfer, also set status used (keep voided / transfer conflicts as they are).');
-  RAISE NOTICE 'OK SIM-DOOR-16 checked (see KNOWN above)';
+  -- Was KNOWN (mig 20261105100000): the forced entry used the ticket.
+  ASSERT r ->> 'reason' = 'used', 'SIM-DOOR-16: the same ticket at the next door, got ' || r::text;
+  ASSERT pg_temp.status(22) = 'used'
+     AND EXISTS (SELECT 1 FROM public.exos_event_checkins WHERE ticket_id = pg_temp.tk(22) AND forced AND conflict = 'wrong-list'),
+         'SIM-DOOR-16: used, and the conflict row kept';
+  RAISE NOTICE 'OK SIM-DOOR-16 a forced offline admission (wrong list) uses the ticket; the conflict is kept (fixed)';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -695,17 +701,21 @@ BEGIN
   b := public.exos_mint_tickets(pg_temp.u('e1'), pg_temp.u('f1'), 1, NULL, 0);
   ASSERT a <> b, 'SIM-DOOR-19: no ref, two mints';
 
-  -- The email comp batch has no request key: sending the same guest twice
-  -- issues twice.
+  -- The email comp batch sent twice for the same guest (was KNOWN; mig
+  -- 20261105100000): the same caller's identical batch within 10 minutes
+  -- returns the first result.
   FOR r IN SELECT * FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('f1'), ARRAY['sdhold@x.com'], 1) LOOP END LOOP;
   FOR r IN SELECT * FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('f1'), ARRAY['SDHold@x.com '], 1) LOOP END LOOP;
   c := (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND channel_source = 'comp'
           AND buyer_email = 'sdhold@x.com');
-  PERFORM pg_temp.known('19', c = 1,
-    'exos_issue_comp_batch run twice for the same guest (a retry, or two staff) issues ' || c || ' comps: no '
-    'request key and no "already comped" check across calls. Proposal: an optional p_request_key (same key '
-    '= same result), or an "already-comped" outcome when the email already holds a live comp for the event.');
-  RAISE NOTICE 'OK SIM-DOOR-19 box-office mint retried with the same ref: one comp (fixed)';
+  ASSERT c = 1, 'SIM-DOOR-19: the repeated comp batch issued ' || c;
+  -- Two different staff members comping the same guest are two requests
+  -- (an "already comped" check is not part of this fix).
+  PERFORM pg_temp.act('d7d00000-0000-0000-0000-0000000000a1');
+  FOR r IN SELECT * FROM public.exos_issue_comp_batch(pg_temp.u('e1'), pg_temp.u('f1'), ARRAY['sdhold@x.com'], 1) LOOP END LOOP;
+  ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND channel_source = 'comp'
+            AND buyer_email = 'sdhold@x.com') = 2, 'SIM-DOOR-19: another staff member''s batch is its own';
+  RAISE NOTICE 'OK SIM-DOOR-19 box-office mint retried with the same ref: one comp; the same comp batch twice: one comp (fixed)';
 END $$;
 
 -- ---------------------------------------------------------------------------
