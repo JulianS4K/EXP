@@ -111,6 +111,6 @@ docs/api/questions.json: questions CRUD on `/v1/events/:id/questions` and `/v1/q
 events:write; DELETE archives), `PUT /v1/events/:id/questions/order`, the answers table on
 `GET /v1/events/:id/question-answers` (orders:read, paged), `GET /v1/orders/:id/answers` (orders:read) and
 `GET /v1/tickets/:id/answers` (tickets:read). Every ticket in the attendees, order and ticket answers carries
-`answers`: its own per-ticket answers, and its order's only for a credential with orders:read or of an owner, manager
-or finance (an org API key: its creator's role; `_shared/api/questionAnswers.ts`). A tickets:read-only door or
+`answers`: its own per-ticket answers, and its order's only for a credential with orders:read. The credential's scopes
+decide, never its user's or creator's role (`_shared/api/questionAnswers.ts`). A tickets:read-only door or
 check-in integration sees per-ticket answers only. DICE mapping: `fanSurveyQuestion.title` = `label`, `value` = `display`.

@@ -1,11 +1,12 @@
 // Which checkout answers a partner API credential sees on a ticket
 // (claude/exos-checkout-questions, mig 20261106110000; exos-api/questions.ts).
 // A ticket's own (per-ticket) answers come with tickets:read. Its order's
-// answers are order data: only with orders:read (or a scope that covers it),
-// or for a credential of an owner, manager or finance (a user token by its
-// live role, an org API key by its creator's role, _exos_api_key_actor). So a
-// door or check-in integration holding only tickets:read gets per-ticket
-// answers only. Pure apart from the client handed in; vitest imports it.
+// answers are order data: only with orders:read (or a scope that covers it).
+// The credential's scopes decide, never the role of its user or creator: an
+// owner who mints a tickets:read-only key for a door integration means it to
+// see per-ticket answers only (security review 2026-11-05). Scopes are already
+// capped by the role (exos_role_token_scopes), so this never widens anything.
+// Pure apart from the client handed in; vitest imports it.
 
 import { hasScope } from './scopes.ts';
 
@@ -25,25 +26,18 @@ export interface AnswerCred {
   role: string | null;
 }
 
-/** Roles that see order data without orders:read. */
-export const ORDER_ANSWER_ROLES = ["owner", "manager", "finance"] as const;
-
-/**
- * May this credential read order-scope answers? true / false, or 'creator'
- * when it depends on the role of an org API key's creator (checked in SQL).
- */
-export function orderAnswersDecision(cred: Pick<AnswerCred, "kind" | "scopes" | "role">): boolean | "creator" {
-  if (hasScope(cred.scopes, "orders:read")) return true;
-  if (cred.kind === "api_key") return "creator";
-  return (ORDER_ANSWER_ROLES as readonly string[]).includes(cred.role ?? "");
+/** May this credential read order-scope answers? Only with orders:read (or a scope covering it). */
+export function orderAnswersDecision(cred: Pick<AnswerCred, "scopes">): boolean {
+  return hasScope(cred.scopes, "orders:read");
 }
 
-/** orderAnswersDecision, resolving an API key's creator role (_exos_api_key_actor). */
-export async function canReadOrderAnswers(sb: RpcClient, orgId: string, cred: AnswerCred): Promise<boolean> {
-  const d = orderAnswersDecision(cred);
-  if (d !== "creator") return d;
-  const { error } = await sb.rpc("_exos_api_key_actor", { p_org: orgId, p_api_key: cred.id, p_roles: [...ORDER_ANSWER_ROLES] });
-  return !error;
+/**
+ * orderAnswersDecision for exos-api's call sites (async, same signature as
+ * before; no role lookup: a role never stands in for the scope).
+ */
+// deno-lint-ignore require-await
+export async function canReadOrderAnswers(_sb: RpcClient, _orgId: string, cred: AnswerCred): Promise<boolean> {
+  return orderAnswersDecision(cred);
 }
 
 /**

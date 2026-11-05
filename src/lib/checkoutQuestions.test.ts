@@ -215,37 +215,40 @@ describe('display, text, parsing, CSV', () => {
 describe('order-scope answers in the API (_shared/api/questionAnswers.ts)', async () => {
   const { orderAnswersDecision, canReadOrderAnswers, attachAnswers, attachAnswersPage } = await import('../../supabase/functions/_shared/api/questionAnswers.ts');
   it('orders:read (or a :write that covers it, or legacy read) sees them', () => {
-    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['orders:read'], role: null })).toBe(true);
-    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['read'], role: null })).toBe(true);
-    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read', 'orders:read'], role: 'scanner' })).toBe(true);
+    expect(orderAnswersDecision({ scopes: ['orders:read'] })).toBe(true);
+    expect(orderAnswersDecision({ scopes: ['read'] })).toBe(true);
+    expect(orderAnswersDecision({ scopes: ['tickets:read', 'orders:read'] })).toBe(true);
   });
-  it('tickets:read only: a user token by its role, an org key by its creator\'s role', () => {
-    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read'], role: 'scanner' })).toBe(false);
-    expect(orderAnswersDecision({ kind: 'oauth', scopes: ['tickets:read'], role: 'content' })).toBe(false);
-    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read'], role: 'finance' })).toBe(true);
-    expect(orderAnswersDecision({ kind: 'oauth', scopes: ['tickets:read', 'checkin:write'], role: 'manager' })).toBe(true);
-    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['tickets:read', 'checkin:write'], role: null })).toBe('creator');
+  it('tickets:read only never sees them, whatever the role of its user or creator', () => {
+    expect(orderAnswersDecision({ scopes: ['tickets:read'] })).toBe(false);
+    expect(orderAnswersDecision({ scopes: ['tickets:read', 'checkin:write'] })).toBe(false);
   });
-  const sbWith = (actorOk: boolean) => {
+  const sbWith = () => {
     const calls: { fn: string; args: Record<string, unknown> }[] = [];
     const sb = {
       rpc: async (fn: string, args: Record<string, unknown>) => {
         calls.push({ fn, args });
-        if (fn === '_exos_api_key_actor') return actorOk ? { data: 'uid', error: null } : { data: null, error: { code: '42501', message: 'no' } };
         return { data: { 'aaaaaaaa-0000-4000-8000-000000000001': [{ scope: 'ticket', label: 'Size', value: 'M' }] }, error: null };
       },
     };
     return { sb: sb as never, calls };
   };
-  it('an org key of a scanner (tickets:read) is refused order answers; of an owner, allowed', async () => {
-    const no = sbWith(false);
-    expect(await canReadOrderAnswers(no.sb, 'org', { kind: 'api_key', id: 'k', scopes: ['tickets:read'], role: null })).toBe(false);
-    expect(no.calls[0]).toEqual({ fn: '_exos_api_key_actor', args: { p_org: 'org', p_api_key: 'k', p_roles: ['owner', 'manager', 'finance'] } });
-    const yes = sbWith(true);
-    expect(await canReadOrderAnswers(yes.sb, 'org', { kind: 'api_key', id: 'k', scopes: ['tickets:read'], role: null })).toBe(true);
+  it('the scope decides: an owner\'s or finance tickets:read-only credential is refused order answers, with no role lookup', async () => {
+    for (const cred of [
+      { kind: 'api_key' as const, id: 'k', scopes: ['tickets:read'], role: null },
+      { kind: 'pat' as const, id: 'p', scopes: ['tickets:read'], role: 'owner' },
+      { kind: 'oauth' as const, id: 'o', scopes: ['tickets:read', 'checkin:write'], role: 'finance' },
+    ]) {
+      const t = sbWith();
+      expect(await canReadOrderAnswers(t.sb, 'org', cred)).toBe(false);
+      expect(t.calls).toEqual([]);
+    }
+    const t = sbWith();
+    expect(await canReadOrderAnswers(t.sb, 'org', { kind: 'api_key', id: 'k', scopes: ['tickets:read', 'orders:read'], role: null })).toBe(true);
+    expect(t.calls).toEqual([]);
   });
   it('attachAnswers passes the flag to _exos_answers_for', async () => {
-    const t = sbWith(true);
+    const t = sbWith();
     const rows = [{ id: 'aaaaaaaa-0000-4000-8000-000000000001' }] as Record<string, unknown>[];
     await attachAnswers(t.sb, rows, false);
     expect(t.calls.at(-1)).toEqual({ fn: '_exos_answers_for', args: { p_ticket_ids: ['aaaaaaaa-0000-4000-8000-000000000001'], p_include_order: false } });
