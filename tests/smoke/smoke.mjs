@@ -992,6 +992,40 @@ await run('ticket holds the join link back until the reveal time', async (page) 
 }, { signedIn: true, mock: onlineTicketMock({ state: 'later', join_url: null, join_note: null,
   available_at: new Date(Date.now() + 2 * 864e5).toISOString() }) });
 
+// ── Price steps (mig 20261106130000): the event page shows the current step's
+// price (exos_public_tiers.price already is it) and when it goes up; the mocked
+// exos-checkout charges exos_tier_current_price x quantity, as the real one does,
+// and that matches what the page showed. ──
+const STEP = { price_cents: 2000, source: 'step', step_id: 'step-eb', step_name: 'Early bird', step_index: 1, step_count: 3,
+  step_remaining: 37, step_ends_at: new Date(Date.now() + 10 * 864e5).toISOString(), next_price_cents: 2500, next_step_name: 'GA',
+  door_price_cents: 3500 };
+const stepCheckout = {};
+await run('price steps: the event page shows the step price and when it goes up; the charge matches it', async (page) => {
+  await stubStripe(page, stepCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  const nudge = page.getByTestId('price-step-nudge');
+  await nudge.waitFor({ timeout: 8000 });
+  const line = (await nudge.innerText()).replace(/\s+/g, ' ');
+  assert(/goes up to \$25\.00/i.test(line) && /after 37 more are sold/i.test(line), 'the next price and when: ' + line);
+  const shown = (await page.locator('p.disp.neon').first().innerText()).trim();
+  const shownCents = Math.round(parseFloat(shown.replace(/[^0-9.]/g, '')) * 100);
+  assert(shownCents === 2000, 'the event page shows the step price: ' + shown);
+  assert(!/fee/i.test(await page.locator('p.disp.neon').first().innerText()), 'no fee line in the price');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(stepCheckout.amount === shownCents * Number(stepCheckout.body.quantity),
+    `the Stripe amount ${stepCheckout.amount} = shown ${shownCents} x ${stepCheckout.body.quantity}`);
+}, { mock: {
+  tables: { exos_public_price_steps: [{ tier_id: baseTables.exos_public_tiers[0].id, event_id: EV, price_step: STEP, door_price_cents: 3500 }] },
+  fns: { 'exos-checkout': (body) => {
+    stepCheckout.body = body;
+    // The server's price: the current step (exos_tier_current_price), all-in (no fee rules here).
+    stepCheckout.amount = STEP.price_cents * Number(body.quantity);
+    return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_steps', session_id: 'cs_test_steps' } };
+  } },
+} });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

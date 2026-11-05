@@ -774,6 +774,16 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-event-location', method: 'GET', auth: K, path: '/events/:id/location', scope: 'events:read', paged: false },
   { id: 'set-event-location', method: 'PUT', auth: K, path: '/events/:id/location', scope: 'events:write', paged: false },
   { id: 'list-venue-matches', method: 'GET', auth: K, path: '/venue-matches', scope: 'events:read', paged: false },
+  // claude/exos-capacity-pricing (migs 20261106120000 / 20261106130000,
+  // exos-api/capacity.ts, docs/api/capacity.json): shared capacity pools
+  // (DICE TicketPool) and a ticket type's price steps (DICE PriceTier).
+  { id: 'list-capacity-pools', method: 'GET', auth: K, path: '/events/:id/capacity-pools', scope: 'events:read', paged: false },
+  { id: 'create-capacity-pool', method: 'POST', auth: K, path: '/events/:id/capacity-pools', scope: 'events:write', paged: false },
+  { id: 'get-capacity-pool', method: 'GET', auth: K, path: '/events/:id/capacity-pools/:pool', scope: 'events:read', paged: false },
+  { id: 'update-capacity-pool', method: 'PATCH', auth: K, path: '/events/:id/capacity-pools/:pool', scope: 'events:write', paged: false },
+  { id: 'delete-capacity-pool', method: 'DELETE', auth: K, path: '/events/:id/capacity-pools/:pool', scope: 'events:write', paged: false },
+  { id: 'get-price-steps', method: 'GET', auth: K, path: '/events/:id/ticket-types/:tier/price-steps', scope: 'events:read', paged: false },
+  { id: 'set-price-steps', method: 'PUT', auth: K, path: '/events/:id/ticket-types/:tier/price-steps', scope: 'events:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

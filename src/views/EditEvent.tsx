@@ -32,6 +32,7 @@ import { EventPartnerPresale } from '../components/PartnerPresalePanel';
 import AddonsEditor from '../components/AddonsEditor';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
+import PriceStepsEditor from '../components/PriceStepsEditor';
 import EventTemplateActions from '../components/EventTemplateActions';
 import PaymentsOffNotice from '../components/PaymentsOffNotice';
 import TaxRulesEditor from '../components/TaxRulesEditor';
@@ -1684,8 +1685,18 @@ export default function EditEvent() {
         {/* Vouchers — self-contained CRUD (not part of the form submit). */}
         {eventId && <VouchersEditor eventId={eventId} tiers={(eventData.ticketTiers || []).map((t) => ({ id: t.id, name: t.name, visibility: t.visibility }))} />}
 
-        {/* Shared capacity across ticket types (quotas) — self-contained CRUD. */}
+        {/* Shared limits across ticket types (quotas, DICE TicketPool) — self-contained CRUD. */}
         {eventId && <QuotasEditor eventId={eventId} tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))} />}
+
+        {/* Price steps per ticket type + door price (mig 20261106130000, DICE PriceTier) — self-contained. */}
+        {eventId && (
+          <PriceStepsEditor
+            tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))}
+            timezone={eventData.timezone}
+            currency={eventData.currency}
+            canManage={isAdmin || ['owner', 'manager'].includes(orgs.find((o) => o.org.id === eventData.orgId)?.membership.role ?? '')}
+          />
+        )}
 
         {/* Tax / VAT rules — self-contained CRUD (not part of the form submit). */}
         {eventId && <TaxRulesEditor eventId={eventId} />}

@@ -168,7 +168,9 @@ for m in \
          20261105130000_exos_promoter_events \
          20261105140000_exos_ig_checkout \
          20261105150000_exos_wave3_integration \
-         20261105160000_exos_token_lineage; do
+         20261105160000_exos_token_lineage \
+         20261106120000_exos_shared_capacity \
+         20261106130000_exos_price_steps; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -377,7 +379,9 @@ for m in \
          20261105130000_exos_promoter_events \
          20261105140000_exos_ig_checkout \
          20261105150000_exos_wave3_integration \
-         20261105160000_exos_token_lineage; do
+         20261105160000_exos_token_lineage \
+         20261106120000_exos_shared_capacity \
+         20261106130000_exos_price_steps; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -471,3 +475,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ig_checko
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wave3_integration.sql"
 # Token lineage (mig 20261105160000): API-minted tokens record their parent, die with it, always expire, can't mint
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_token_lineage.sql"
+# claude/exos-capacity-pricing: shared capacity (DICE TicketPool, mig 20261106120000; race: race_shared_capacity.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_shared_capacity.sql"
+# claude/exos-capacity-pricing: price steps (DICE PriceTier, mig 20261106130000; race: race_price_steps.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_price_steps.sql"

@@ -167,6 +167,7 @@ import { gapSqlError, meRefusal } from "../_shared/api/me.ts";
 import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffice.ts";
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
+import { CAPACITY_CREATED, CAPACITY_ROUTES, CapacityError, handleCapacity } from "./capacity.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -409,13 +410,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (out instanceof Response) return out; // PDFs and CSV exports
     if (out instanceof Answer) return json(out.body, out.status);
     if (out instanceof Created) return json(out.body, 201);
-    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) ? 201 : 200);
+    return json(out, CREATED.has(match.route.id) || ORG_ACCESS_CREATED.has(match.route.id) || CAPACITY_CREATED.has(match.route.id) ? 201 : 200);
   } catch (e) {
     // A venue another org runs (mig 20261104180000): from any route.
     const approval = venueApprovalAnswer(e);
     if (approval) return json(approval, 403);
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
+    if (e instanceof CapacityError) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -568,6 +570,11 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   // claude/exos-promoter-events (mig 20261105130000): an event's location mode.
   if (LOCATION_ROUTES.has(route.id)) {
     return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
+  }
+  // claude/exos-capacity-pricing (migs 20261106120000 / 20261106130000): shared
+  // capacity pools and price steps.
+  if (CAPACITY_ROUTES.has(route.id)) {
+    return await handleCapacity(route, { sb, orgId, params: c.params, body: c.body });
   }
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {

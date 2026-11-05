@@ -148,6 +148,9 @@ BEGIN
        'exos_tier_exclusive_tax_percent', 'exos_addon_exclusive_tax_percent',
        -- public tiers of published events only; backs exos_public_tiers.available (mig 20261027080000)
        'exos_public_tier_available',
+       -- claude/exos-capacity-pricing: public tiers of published events only;
+       -- the current price step, backs exos_public_tiers.price (mig 20261106130000)
+       'exos_public_tier_price',
        -- the public event-sales view calls it as the reader: published events'
        -- last call and where to buy, nothing else (mig 20261029100000)
        'exos_public_event_sale',

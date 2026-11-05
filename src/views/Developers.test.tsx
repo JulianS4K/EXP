@@ -76,7 +76,8 @@ describe('Developers', () => {
     expect(feed.textContent).not.toContain('Authorization: Bearer');
     // Writes show their JSON body.
     expect(container.querySelector('article#create-artist')!.textContent).toContain('-X POST');
-  });
+    // ~3 s alone; past the default 5 s under a full parallel run with 44 categories.
+  }, 20_000);
 
   it('says so when the spec cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));

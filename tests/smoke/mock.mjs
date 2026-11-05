@@ -85,6 +85,8 @@ export const ownerTables = {
 // forgiving mock. Tables not listed here aren't checked.
 const cols = (s) => s.split(/\s+/).filter(Boolean);
 export const schema = {
+  // View, 20261106130000 (price steps).
+  exos_public_price_steps: cols('tier_id event_id price_step door_price_cents'),
   // 20260523170000 + addons, vouchers, tax, attribution, webhook claim, guest, checkout records.
   exos_checkout_sessions: cols(`session_id event_id tier_id org_id buyer_uid buyer_email quantity amount_cents currency status
     ticket_ids payment_intent failure_reason created_at fulfilled_at addons voucher_id tax_cents promoter_id attribution

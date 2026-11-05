@@ -48,6 +48,7 @@ import PhoneRsvpLink from '../components/PhoneRsvpLink';
 import SaveEventButton from '../components/SaveEventButton';
 import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
+import { listPublicPriceSteps, priceStepNudge } from '../lib/priceSteps';
 import { fetchPublicSale, PLATFORM_LABEL, sellsElsewhere, type PublicSale } from '../lib/marketplace/lastCall';
 import LinkOutBuyCard from '../components/LinkOutBuyCard';
 import { isPrivateMode, parseLocationMode, publicLocation, salesOpen } from '../lib/eventLocation';
@@ -116,6 +117,15 @@ export default function EventDetails() {
     return () => { live = false; };
   }, [event?.id, event?.seriesId]);
   const slotTier = !!timed && !!selectedTierId && timed.tierIds.includes(selectedTierId);
+  // Price steps (mig 20261106130000): each type's current step, for the
+  // "price goes up" line. The price itself already is the step's (exos_public_tiers).
+  const [priceSteps, setPriceSteps] = useState<Awaited<ReturnType<typeof listPublicPriceSteps>>>({});
+  useEffect(() => {
+    if (!event?.id) return undefined;
+    let live = true;
+    listPublicPriceSteps(event.id).then((m) => { if (live) setPriceSteps(m); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [event?.id]);
   // Matched seats: which tiers are matched, and the buyer's quiz answers.
   const [matchedTiers, setMatchedTiers] = useState<PublicMatchedTier[]>([]);
   const [quiz, setQuiz] = useState<QuizAnswers>(EMPTY_ANSWERS);
@@ -330,6 +340,13 @@ export default function EventDetails() {
     if (!/taken|seat/i.test(String(err?.message ?? ''))) return;
     setSeatSel([]);
     setSeatReload((n) => n + 1);
+  };
+  // Price steps: checkout refused because the price just moved, or the step
+  // has fewer left than asked (mig 20261106130000). Show the new price.
+  const priceMoved = (err: any) => {
+    if (!event?.id || !/price/i.test(String(err?.message ?? ''))) return;
+    getPublicEvent(event.id).then((d) => { if (d) setEvent(d); }).catch(() => undefined);
+    listPublicPriceSteps(event.id).then(setPriceSteps).catch(() => undefined);
   };
 
   /** Returns null if the tier is currently on sale, otherwise an
@@ -546,6 +563,7 @@ export default function EventDetails() {
     } catch (err: any) {
       console.error('Checkout failed:', err);
       seatTaken(err);
+      priceMoved(err);
       toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
       setPurchasing(false);
     }
@@ -1207,6 +1225,18 @@ export default function EventDetails() {
                       </p>
                     )}
                     {selectedTier && (() => {
+                      // Price steps: "Price goes up to $25 on Dec 1 or after 37
+                      // more are sold", the next price all-in (no fee lines).
+                      const step = priceSteps[selectedTier.id]?.step ?? null;
+                      if (step?.source === 'step') {
+                        const line = priceStepNudge(step,
+                          (c) => formatCurrency(c / 100, event.currency),
+                          (iso) => formatInTz(new Date(iso), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+                          step.nextPriceCents == null ? null : Math.round(tierAllInPrice(selectedTier, step.nextPriceCents / 100) * 100));
+                        return line ? (
+                          <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent" data-testid="price-step-nudge">⏱ {line}</p>
+                        ) : null;
+                      }
                       // Scheduled-pricing urgency nudge: surface the next upward
                       // step so buyers see "price rises to $X on <date>".
                       const cur = effectiveTierPrice(selectedTier.price, selectedTier.priceSchedule);

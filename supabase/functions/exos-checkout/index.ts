@@ -462,13 +462,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ticketFees: UnitFee[] = tierPassedOnFees(feeRules, tier_id);
   const addonFees: UnitFee[] = addonPassedOnFees(feeRules);
 
-  // The tier's scheduled price as of now, the same price the storefront shows
+  // The tier's price as of now, the same price the storefront shows
   // (early-bird → regular → last-minute), then the voucher's rule: a pinned
   // price, a percent off or an amount off (voucherUnitPrice, shared with the SPA).
-  const scheduled = effectiveTierPrice(
-    Number(tier.price),
-    (tier as unknown as { price_schedule?: unknown }).price_schedule,
-  );
+  // exos: price steps (mig 20261106130000, docs/price-steps.md): the current
+  // step comes from the one SQL function the storefront, the feeds and the
+  // APIs read (exos_tier_current_price); it is locked on the hold below.
+  // Boundary rule: CAP, an order can't take more than the step has left.
+  // Before the migration (no function): the old schedule rule.
+  let priceStep: { step_id?: string | null; price_cents?: number; step_remaining?: number | null } | null = null;
+  {
+    const { data: cp, error: cpErr } = await sb.rpc("exos_tier_current_price", { p_tier_id: tier_id });
+    if (cpErr && !["PGRST202", "42883"].includes(String(cpErr.code))) {
+      console.error("exos-checkout: price step read failed", cpErr.message);
+      return json({ error: "could not price the order, try again" }, 503);
+    }
+    if (!cpErr && cp && typeof cp === "object") priceStep = cp as typeof priceStep;
+  }
+  if (priceStep?.step_id && priceStep.step_remaining != null && quantity > priceStep.step_remaining) {
+    const left = Math.max(priceStep.step_remaining, 0);
+    return json({
+      error: `only ${left} left at this price: buy ${left} now and the rest at the next price`,
+      reason: "price_step_remaining", remaining: left, price_cents: priceStep.price_cents ?? null,
+    }, 409);
+  }
+  const scheduled = priceStep && Number.isInteger(priceStep.price_cents)
+    ? Number(priceStep.price_cents) / 100
+    : effectiveTierPrice(
+      Number(tier.price),
+      (tier as unknown as { price_schedule?: unknown }).price_schedule,
+    );
   const codeUnitAmount = Math.round(voucherUnitPrice(scheduled, { overridePrice, discountPercent, discountAmount }) * 100);
   // exos: memberships — promo first, then the member discount (half up once); fees and tax follow on it.
   const unitAmount = member ? memberUnitCents(codeUnitAmount, member.discount_percent) : codeUnitAmount;
@@ -819,6 +842,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const needsProof = !buyerUid || !user?.email_confirmed_at;
   const proofToken = needsProof ? newProofToken() : null;
   const checkoutRecord: Record<string, unknown> = {
+    // exos: price steps — the step this order is priced at (its tickets count against it).
+    ...(priceStep?.step_id ? { price_step_id: priceStep.step_id } : {}),
     ad_ids: isEmptyAdIds(adIds) ? null : adIds,
     consent_marketing: consentMarketing,
     client_ip_hash: ipHash,
@@ -867,6 +892,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const msg = String(slotErr.message ?? "").replace(/^exos_attach_hold_slot: /, "");
         return json({ error: msg || "that time slot is full", reason: "slot_unavailable" }, 409);
       }
+    }
+  }
+
+  // exos: price steps — lock the step's price on the hold, under a lock on the
+  // type's steps: the step must still be the current one at this price with
+  // room for the order; otherwise the buyer is told the new price (nothing is
+  // charged). The Stripe amount below is this price; the webhook mints at it.
+  if (holdId && priceStep?.step_id) {
+    const { error: lockErr } = await sb.rpc("exos_hold_lock_price", {
+      p_hold_id: holdId, p_step_id: priceStep.step_id, p_price_cents: priceStep.price_cents,
+    });
+    if (lockErr) {
+      await releaseHold(sb, holdId);
+      const changed = lockErr.code === "XP409";
+      const msg = String(lockErr.message ?? "");
+      return json({
+        error: changed ? "the price just changed: check the new price and try again" : msg.replace(/^price_step_remaining: /, ""),
+        reason: changed ? "price_changed" : lockErr.code === "XP410" ? "price_step_remaining" : "price_lock_failed",
+      }, 409);
     }
   }
 
