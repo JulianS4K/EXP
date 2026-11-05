@@ -8,7 +8,7 @@ import { supabase } from './supabase';
 export { codeSentText, maskPhone, normalizeRsvpPhone, rsvpErrorMessage } from '../../supabase/functions/_shared/rsvp.ts';
 
 export interface RsvpInfo { ok: boolean; reason: string; tier_name: string | null; max_plus_ones: number; sms: boolean }
-export interface RsvpStart { ok: boolean; error?: string; rsvp_id?: string; channel?: 'sms' | 'email'; to?: string; max_plus_ones?: number }
+export interface RsvpStart { ok: boolean; error?: string; rsvp_id?: string; channel?: 'sms' | 'email'; to?: string; max_plus_ones?: number; seats_left?: number }
 export interface RsvpVerify { ok: boolean; error?: string; attempts_left?: number; event_id?: string; tickets?: { id: string; url: string | null }[] }
 
 async function call<T>(body: Record<string, unknown>): Promise<T> {

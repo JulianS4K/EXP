@@ -82,12 +82,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       if (error) throw error;
       const r = data as { ok: boolean; error?: string; rsvp_id?: string; channel?: string; to?: string; code?: string;
-                          event_name?: string; max_plus_ones?: number };
+                          event_name?: string; max_plus_ones?: number; seats_left?: number };
       // Every start schedules the resend drain the same way and never waits
       // for it: a re-text for a number that already RSVP'd (queued by the
       // SQL when the event is full) goes out off the request path.
       background(drainRsvpSms(sb, live(), (org) => smsConfig(sb, org)).catch((e) => console.error("exos-rsvp: drain", redactError(e))));
-      if (!r.ok) return json({ ok: false, error: r.error, max_plus_ones: r.max_plus_ones });
+      // not_enough_seats carries seats_left (mig 20261105100000, SIM-BUYER-31).
+      if (!r.ok) return json({ ok: false, error: r.error, max_plus_ones: r.max_plus_ones, seats_left: r.seats_left });
       if (r.channel === "sms") {
         const sent = cfg ? await sendSms(fetch, cfg, r.to!, codeText(r.event_name, r.code!)) : null;
         if (!sent || !("id" in sent)) {

@@ -239,9 +239,20 @@ describe('SIM-DOOR-9 imported codes typed badly', () => {
     expect(matchImported('GST-abc9', index)?.name).toBe('Luma Two');
     expect(matchImported('https://www.eventbrite.com/checkin?code=EB-12345678', index)?.name).toBe('Eb One');
   });
-  it('a typo matches nobody (KNOWN: a dropped hyphen does not either)', () => {
+  it('a typo matches nobody', () => {
     expect(matchImported('EB-12345679', index)).toBeNull();
-    expect(matchImported('EB12345678', index)).toBeNull();
+    expect(matchImported('EB1234567', index)).toBeNull();
+  });
+  it('a dropped hyphen / space matches (was KNOWN; mig 20261105100000): the punctuation-stripped fallback', () => {
+    expect(matchImported('EB12345678', index)?.name).toBe('Eb One');
+    expect(matchImported('eb 1234-5678', index)?.name).toBe('Eb One');
+    expect(matchImported('GSTABC9', index)?.name).toBe('Luma Two');
+  });
+  it('the fallback never guesses between two guests', () => {
+    const two = codeIndex([{ code: 'AB-12', name: 'One' }, { code: 'A-B12', name: 'Two' }, { code: 'AB12', name: 'Exact' }]);
+    expect(matchImported('AB12', two)?.name).toBe('Exact');  // an exact hit wins
+    const amb = codeIndex([{ code: 'AB-12', name: 'One' }, { code: 'A-B12', name: 'Two' }]);
+    expect(matchImported('AB12', amb)).toBeNull();
   });
   it('Exos codes are never looked up among imported codes', () => {
     expect(isExosCode(' T-abc:def:1:x')).toBe(true);

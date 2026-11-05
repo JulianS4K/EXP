@@ -8,6 +8,7 @@
 // these and redirects to the returned Stripe-hosted URL.
 
 import { supabase } from './supabase';
+import { rememberProofToken } from './orderProof';
 import type { Attribution } from './attribution';
 import type { AdIds, MarketingConsent } from './adIds';
 
@@ -78,9 +79,17 @@ export async function startCheckout(input: {
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
+  // A guest's order waits for proof of the email (mig 20261105100000): keep
+  // the browser token for the page they come back to.
+  const proof = data as { session_id?: string; proof_token?: string } | null;
+  rememberProofToken(proof?.session_id, proof?.proof_token);
   // Free seats are issued straight away (no Stripe): go to My Tickets.
   const free = data as { free?: boolean; issued?: number } | null;
-  if (free?.free && free.issued) return `/my-tickets?claimed=${free.issued}`;
+  if (free?.free && free.issued) {
+    return proof?.proof_token && proof.session_id
+      ? `/my-tickets?checkout=success&guest=1&session_id=${encodeURIComponent(proof.session_id)}`
+      : `/my-tickets?claimed=${free.issued}`;
+  }
   // The gift card covered everything: no Stripe page, the tickets are issued.
   const paid = data as { paid_with_gift_card?: boolean; session_id?: string } | null;
   if (paid?.paid_with_gift_card) {
@@ -107,7 +116,7 @@ export async function claimFreeAsGuest(input: {
   /** Timed entry: the chosen slot. Signed-in buyers of a free timed ticket
    *  come this way too (the account wins over guestEmail server-side). */
   slotId?: string | null;
-} & CheckoutRecordInput): Promise<{ issued: number; email: string }> {
+} & CheckoutRecordInput): Promise<{ issued: number; email: string; sessionId: string | null }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
       event_id: input.eventId,
@@ -124,9 +133,10 @@ export async function claimFreeAsGuest(input: {
     },
   });
   if (error) throw await functionError(error, 'Could not send your tickets.');
-  const d = data as { free?: boolean; issued?: number; email?: string } | null;
+  const d = data as { free?: boolean; issued?: number; email?: string; session_id?: string; proof_token?: string } | null;
   if (!d?.free || !d.issued) throw new Error('Could not send your tickets.');
-  return { issued: d.issued, email: d.email ?? input.guestEmail };
+  rememberProofToken(d.session_id, d.proof_token);
+  return { issued: d.issued, email: d.email ?? input.guestEmail, sessionId: d.proof_token ? d.session_id ?? null : null };
 }
 
 /** Create an Embedded Checkout Session (the venue-site iframe mounts it in

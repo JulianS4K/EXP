@@ -22,6 +22,7 @@ import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
 import { eventTypeForCategory } from './eventTaxonomy';
 import { Event } from '../types';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 const toTs = (iso?: string | null): Timestamp => Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
 
@@ -372,6 +373,9 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {
+  // A new ticket type needs a capacity: there is no unlimited, and 0 is closed
+  // (mig 20261105100000). Closing an existing one is an update, not this.
+  if (!isSellableCapacity(t.capacity)) throw new Error(`Ticket type "${t.name}" ${CAPACITY_REQUIRED}.`);
   return {
     event_id: eventId,
     name: t.name,

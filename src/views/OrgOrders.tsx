@@ -38,6 +38,7 @@ import {
   viewRecEvents, viewRecFans, type RecEvent, type RecEventFilter, type RecEventSort, type RecFan, type RecFanSort,
 } from '../lib/recommendations';
 import type { Event } from '../types';
+import OrderProofQueue from '../components/OrderProofQueue';
 
 type Tab = 'orders' | 'history' | 'recs' | 'preview' | 'settings';
 
@@ -186,6 +187,7 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
           {ORDER_STATUSES.map((x) => <option key={x} value={x}>{statusLabel(x)}</option>)}
         </select>
       </div>
+      {s.eventId && perm.edit && <OrderProofQueue eventId={s.eventId} />}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr>

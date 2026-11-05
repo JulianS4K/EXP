@@ -114,6 +114,7 @@ import FeeRulesEditor from '../components/FeeRulesEditor';
 import EventBookingPanels from '../components/booking/EventBookingPanels';
 import { useOrganization } from '../context/OrganizationContext';
 import { blockersSentence, getPublishBlockers, publishEvent, type PublishBlocker } from '../lib/publishBlockers';
+import { CAPACITY_REQUIRED } from '../../supabase/functions/_shared/capacity.ts';
 
 export default function EditEvent() {
   const { eventId } = useParams();
@@ -360,8 +361,11 @@ export default function EditEvent() {
       if (!Number.isFinite(tp) || tp < 0) {
         return `Tier "${tier.name}" has an invalid price.`;
       }
-      if (!Number.isInteger(tc) || tc < 1) {
-        return `Tier "${tier.name}" has an invalid capacity.`;
+      // There is no unlimited (mig 20261105100000): a ticket type sells up to
+      // its capacity. 0 closes an existing type (stop sales); a new one needs 1+.
+      const isNewTier = tierSalesState[tier.id] === undefined;
+      if (!Number.isInteger(tc) || tc < 0 || (tc === 0 && isNewTier)) {
+        return `Tier "${tier.name}" ${CAPACITY_REQUIRED}.`;
       }
       const tableErr = validateTableDraft(tableCfg[tier.id] ?? BLANK_TABLE_DRAFT, tier.name);
       if (tableErr) return tableErr;
@@ -372,7 +376,7 @@ export default function EditEvent() {
       // here means the organizer gets a real explanation instead of
       // permission-denied.
       const liveSold = tierSalesState[tier.id]?.sold ?? 0;
-      if (liveSold > tc) {
+      if (tc > 0 && liveSold > tc) {
         return `Can't reduce "${tier.name}" capacity to ${tc} — ${liveSold} ticket(s) already sold.`;
       }
 
@@ -1449,11 +1453,11 @@ export default function EditEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{tableCfg[tier.id]?.isTable ? 'Tables Available' : 'Inventory Allocation'}</label>
+                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{tableCfg[tier.id]?.isTable ? 'Tables Available' : 'Inventory Allocation'} <span className="text-white/25 normal-case tracking-normal">(0 closes sales)</span></label>
                          <input 
                            required 
                            type="number"
-                           min="1"
+                           min={tierSalesState[tier.id] === undefined ? 1 : 0}
                            className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                            value={tier.capacity}
                            onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)}

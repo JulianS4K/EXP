@@ -7,7 +7,7 @@
 // The column detection and the import plan live in
 // supabase/functions/_shared/guestImport.ts (shared with exos-api).
 export * from '../../../supabase/functions/_shared/guestImport.ts';
-import { normalizeDoorCode } from '../../../supabase/functions/_shared/guestImport.ts';
+import { looseDoorCode, normalizeDoorCode } from '../../../supabase/functions/_shared/guestImport.ts';
 
 // The CSV reader is shared with the sales-count import (src/lib/salesCounts.ts)
 // and exos-api, so it lives in supabase/functions/_shared/csvParse.ts.
@@ -47,12 +47,31 @@ export function codeIndex<T extends { code?: string | null }>(guests: T[]): Map<
   return m;
 }
 
-/** The imported guest a scan belongs to, or null. */
+/** The imported guest a scan belongs to, or null. An exact code wins; with
+ *  none, a code typed without its punctuation (EB12345678 for EB-1234-5678)
+ *  matches when exactly one imported code is the same once punctuation is
+ *  dropped (mig 20261105100000, SIM-DOOR-9; exos_door_code_lookup online).
+ *  Two loose matches: no match, the door asks for the name. */
 export function matchImported<T>(scanned: string, index: Map<string, T>): T | null {
   if (index.size === 0) return null;
-  for (const c of scanCandidates(scanned)) {
+  const candidates = scanCandidates(scanned);
+  for (const c of candidates) {
     const g = index.get(c);
     if (g) return g;
+  }
+  for (const c of candidates) {
+    const loose = looseDoorCode(c);
+    if (!loose) continue;
+    let hit: T | null = null;
+    let hits = 0;
+    for (const [code, g] of index) {
+      if (looseDoorCode(code) === loose && g !== hit) {
+        hits++;
+        hit = g;
+        if (hits > 1) break;
+      }
+    }
+    if (hits === 1) return hit;
   }
   return null;
 }

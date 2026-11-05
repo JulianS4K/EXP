@@ -10,6 +10,7 @@
 
 import { supabase } from './supabase';
 import type { Attribution } from './attribution';
+import { rememberProofToken } from './orderProof';
 
 export function paypalClientId(): string | null {
   const id = (import.meta as { env?: { VITE_PAYPAL_CLIENT_ID?: string } }).env?.VITE_PAYPAL_CLIENT_ID;
@@ -112,8 +113,10 @@ export async function createPayPalOrder(cart: PayPalCart, opts: { guestEmail?: s
     },
   });
   if (error) throw await fnError(error, 'Could not start PayPal checkout.');
-  const d = data as { paypal_order_id?: string; session_id?: string; approve_url?: string | null } | null;
+  const d = data as { paypal_order_id?: string; session_id?: string; approve_url?: string | null; proof_token?: string } | null;
   if (!d?.paypal_order_id || !d.session_id) throw new Error('Could not start PayPal checkout.');
+  // A guest's tickets wait for proof of the email (mig 20261105100000).
+  rememberProofToken(d.session_id, d.proof_token);
   return { orderId: d.paypal_order_id, sessionId: d.session_id, approveUrl: d.approve_url ?? null };
 }
 

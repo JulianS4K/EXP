@@ -153,7 +153,7 @@ for each case.
 | 3 | Refund $10 of it in the Stripe dashboard | Session `partially_refunded`, tickets **still active**, one refund row with Stripe's `re_…` id |
 | 4 | Refund the rest | Session `refunded`, **both tickets voided**, tier `sold` back down by 2 |
 | 5 | Buy 1 ticket, then open a dispute (test card `4000 0000 0000 0259`) | Session keeps its status and gets `dispute_status`; tickets stay valid. Lose it (submit losing evidence in test mode) → tickets voided |
-| 6 | On a tier with nothing sold, start checkout for 2, then set the tier's `capacity` to 1 in SQL and pay. (`capacity = 0` means *unlimited*, so don't use 0) | Session `failed`, automatic refund with `reverse_transfer` (the connected account's balance goes down, not the platform's) |
+| 6 | On a tier with nothing sold, start checkout for 2, then set the tier's `capacity` to 1 in SQL and pay. (`capacity = 0` means *closed*, so 0 would refuse the sale outright rather than test the refund path) | Session `failed`, automatic refund with `reverse_transfer` (the connected account's balance goes down, not the platform's) |
 | 7 | Start checkout and leave it for 30 minutes | Session `expired`, hold released. Stripe sessions expire at 30 minutes |
 | 8 | Hidden tier: buy by UUID with no voucher | 409 from exos-checkout, no Stripe session |
 | 9 | Tier with a `price_schedule` step already started | The Stripe line item shows the scheduled price, which is also what the storefront shows |
@@ -227,6 +227,26 @@ counted per email; five guest holds per network per 10 minutes (salted IP hash, 
 capped at a quarter of what's left for the event (at least 10 seats). Organizers switch guests off per event with
 **Guest checkout** in Edit event (`purchase_limits.guestCheckout = false`). Capacity-bypass codes and free claims
 still need an account. The embedded (venue-site iframe) checkout still signs in first.
+
+**Proof of email before the tickets are released (mig 20261105100000).** A typo in the guest's email used to
+send the claim links to a stranger, or straight into a stranger's account when the typo was a real address. Now
+the order is paid and the seats are kept, but the tickets stay parked on the org owner until the buyer proves the
+email (the 6-digit code mailed to it, or its "confirm here" link) or a phone (an SMS code), on the page they paid
+on: `exos-checkout` returns a random `proof_token` that the browser keeps (localStorage) and the session stores only
+its SHA-256 (`exos_checkout_sessions.proof_token_hash`). The code without that browser does nothing, so a mistyped
+inbox that belongs to someone else gets nothing. Until proven the tickets don't scan, can't be claimed (link or the
+email's own account) and aren't attached to any account; the door can still check the buyer in by name. Proven by
+email: an account with that email gets the tickets, else the claim links are mailed; proven by phone: the claim
+links are on the page. Limits: 5 wrong codes lock the code until a new one is sent; 5 code mails and 3 SMS per
+order, 60 s apart on each channel; 3 SMS per number per 10 minutes. The organizer sees the orders still waiting on
+**Orders** (pick the event) and can **Send to another email** (`exos_order_proof_resend`: the old links die, the
+original email is kept). A signed-in account whose email isn't confirmed proves it the same way (its own account
+then gets the tickets); a confirmed one skips it. SMS codes need the org's texting set up (the RSVP outbox).
+
+**Hold timing (mig 20261105100000).** `exos-checkout` sets the Stripe session's `expires_at` (30 minutes, Stripe's
+minimum) and records it (`provider_expires_at`); the seat hold lasts until then + 10 minutes, so a payment made just
+before the page closed whose webhook is late still finds its seat, and the next buyer waits instead of paying and
+being refunded. `checkout.session.expired` releases the hold at once.
 
 ## Venmo / PayPal and Cash App Pay (mig 20261031220000)
 

@@ -2,6 +2,7 @@
 // role in the org itself; the page only hides what a role can't do.
 
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import {
   orderQuery, parseOrderEdit, parseOrderRow, type OrderEditRow, type OrderRow, type OrderTableState, type PreviewRow,
 } from './orderDesk';
@@ -22,6 +23,8 @@ export async function listOrders(orgId: string, s: OrderTableState): Promise<{ t
 }
 
 export async function updateOrder(sessionId: string, fields: Record<string, string | null>) {
+  assertNotEmailName(fields.first_name);
+  assertNotEmailName(fields.last_name);
   return parseOrderRow(await call('exos_order_update', { p_session_id: sessionId, p_fields: fields }));
 }
 
@@ -36,6 +39,7 @@ export async function checkOutOrder(sessionId: string, reason: string | null) {
 }
 
 export async function updateTicketAttendee(ticketId: string, attendeeName: string | null) {
+  assertNotEmailName(attendeeName);
   return await call('exos_ticket_update', { p_ticket_id: ticketId, p_fields: { attendee_name: attendeeName } });
 }
 
