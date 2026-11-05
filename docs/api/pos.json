@@ -2,7 +2,7 @@
   "file": "pos",
   "name": "Food and beverage",
   "order": 45,
-  "description": "The point-of-sale catalog (bar, merch, ticket items) and the registered POS devices. Items belong to the organization, or to one event when event_id is set. Card payments at the bar are not wired yet (docs/pos.md), so there are no sales routes.",
+  "description": "The point-of-sale catalog (bar, merch, ticket items) and the registered POS devices. Items belong to the organization, or to one event when event_id is set. Card payments at the bar are not wired yet (docs/pos.md). Door sales (walk-up tickets) are listed and voided under Door sales (walk-up).",
   "endpoints": [
     {
       "auth": "api_key",

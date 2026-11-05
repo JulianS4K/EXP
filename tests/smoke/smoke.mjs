@@ -801,6 +801,66 @@ await run('door: a ticket refunded on Eventbrite is refused at the door', async 
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
+// --- Walk-up sales at the door (mig 20261107100000) -------------------------
+const WALKUP_TIER = '88888888-8888-4888-8888-888888888888';
+const WALKUP_ORDER = '99999999-9999-4999-8999-999999999999';
+const WALKUP_DRAWER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const WALKUP_TICKET = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+let walkupSold = false;
+const walkupOrder = () => ({
+  id: WALKUP_ORDER, event_id: EV, status: 'paid', payment_method: 'cash', currency: 'usd', total_cents: 2500, tax_cents: 0,
+  tenders: { cash: 2500, comp: 0, card: 0 }, tier_id: WALKUP_TIER, tier_name: 'Door GA', quantity: 1, comp_quantity: 0,
+  ticket_ids: [WALKUP_TICKET], tickets_scanned: 0, buyer_name: null, buyer_email: null, rung_by_me: true,
+  created_at: new Date().toISOString(), can_void: true, can_refund: true, replay: false,
+});
+const walkupPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': return { body: { data: {
+      event: { id: EV, name: 'Fall Party', status: 'published', currency: 'USD' }, role: 'owner', can_comp: true,
+      card: { connected: false, message: "Card at the door isn't connected yet." }, fee_base: 'card-tickets',
+      tiers: [{ tier_id: WALKUP_TIER, name: 'Door GA', price_cents: 2500, price_source: 'door', step_name: null, step_remaining: null,
+        tax: null, unit_total_cents: 2500, remaining: walkupSold ? 41 : 42 }],
+      questions: [],
+      drawers: [{ id: WALKUP_DRAWER, device_id: null, mine: true, opened_at: new Date().toISOString(), open_float_cents: 10000,
+        cash_cents: walkupSold ? 12500 : 10000 }] } } };
+    case 'recent_sales': return { body: { data: walkupSold ? [walkupOrder()] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'cash' || b.tier_id !== WALKUP_TIER || b.quantity !== 1 || b.drawer_id !== WALKUP_DRAWER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected sale ' + JSON.stringify(b) } };
+      }
+      walkupSold = true;
+      return { body: { data: walkupOrder() } };
+    case 'order_codes': return { body: { data: { tickets: [{ ticket_id: WALKUP_TICKET,
+      print_code: 'P-' + WALKUP_TICKET + ':AbCdEfGhIjKlMnOpQrStUv', event_name: 'Fall Party', starts_at: null, tier_name: 'Door GA' }], skipped: [] } } };
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: the Sell tab sells one cash ticket and shows the QR', async (page, log) => {
+  walkupSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  await expectText(page, '42 left');
+  await page.getByRole('button', { name: '$25.00', exact: true }).first().click();  // quick cash: exact
+  await page.getByRole('button', { name: '$50.00', exact: true }).click();
+  await expectText(page, 'Change $25.00');
+  assert(await page.getByRole('radio', { name: /Card/ }).isDisabled(), 'card is disabled');
+  await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).click();
+  await expectText(page, 'Sold 1 × Door GA');
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && !/card_number|cvc|"pan"/.test(sale), 'the sale went to exos-pos without card data: ' + sale);
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  assert((await qr.getAttribute('src')).startsWith('data:image/svg+xml'), 'the QR is drawn locally');
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"order_codes"')), 'asked for the print code');
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupPos } }) });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });
