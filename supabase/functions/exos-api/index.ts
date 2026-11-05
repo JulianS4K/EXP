@@ -168,7 +168,9 @@ import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffi
 // claude/exos-promoter-events (mig 20261105130000).
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
 // claude/exos-checkout-questions (mig 20261106110000): checkout questions and answers.
-import { attachAnswers, attachAnswersPage, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers } from "./questions.ts";
+import {
+  attachAnswers, attachAnswersPage, canReadOrderAnswers, handleQuestions, isQuestionsError, QUESTION_ROUTES, reservationAnswers,
+} from "./questions.ts";
 // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
 import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
@@ -580,7 +582,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-checkout-questions (mig 20261106110000): questions and answers.
   if (QUESTION_ROUTES.has(route.id)) {
-    return await handleQuestions(route, { sb, orgId, keyId: c.key.id, params: c.params, page, body: c.body });
+    return await handleQuestions(route, { sb, orgId, keyId: c.key.id, cred: c.cred, params: c.params, page, body: c.body });
   }
   // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
   if (GEO_GENRE_ROUTES.has(route.id)) return await handleGeoGenre(route, { sb, orgId, params: c.params, q: c.q });
@@ -593,6 +595,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   if (CORE_ROUTES.has(route.id)) {
     return await handleCore(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
+      orderAnswers: () => canReadOrderAnswers(sb, orgId, c.cred), // exos: checkout questions
     });
   }
   // Membership products, memberships, imported attendees (mig 20261102100000).
@@ -694,7 +697,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       // Never barcode_secret.
       const status = c.q.get("status");
       if (status !== null && !/^[a-z_]{1,32}$/.test(status)) throw new ApiError(400, "status is invalid.");
-      // exos: checkout questions — each attendee's answers (attachAnswersPage).
+      // exos: checkout questions — each attendee's answers (order answers need orders:read or an owner / manager / finance).
       return await attachAnswersPage(sb, paged(await withoutMissing(TICKET_SEAT_COLS, (extra) => {
         let q = sb.from("exos_tickets")
           .select("id, tier_id, tier_name, attendee_name, owner_email, status, check_in_at, price_paid, " +
@@ -702,7 +705,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           .eq("event_id", id).eq("org_id", orgId);
         if (status !== null) q = q.eq("status", status);
         return q.order("created_at", { ascending: false }).order("id").range(page.from, page.to);
-      }), page));
+      }), page), await canReadOrderAnswers(sb, orgId, c.cred));
     }
 
     case "list-seats": {
@@ -787,7 +790,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
         orderLocation(sb, orgId, sid),
       ]);
       for (const r of [tickets, addons, refunds]) if (r.error) throw r.error;
-      await attachAnswers(sb, tickets.data); // exos: checkout questions
+      await attachAnswers(sb, tickets.data, true); // exos: checkout questions (this route is orders:read)
       return {
         data: {
           ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data,

@@ -15,6 +15,10 @@
 // And `answers` on every ticket the API returns (list-attendees, get-order,
 // list-tickets, get-ticket: attachAnswers), the shape of DICE's
 // Ticket.fanSurveyAnswers (label = fanSurveyQuestion.title, display = value).
+// A ticket's own (per-ticket) answers come with tickets:read; its order's
+// answers are order data and come only with orders:read, or to a credential
+// of an owner / manager / finance (canReadOrderAnswers). A door or check-in
+// integration holding only tickets:read sees per-ticket answers only.
 //
 // The function runs with the service role: every call names the key's org
 // and the SQL cores take it, so another org's event or question is a 404.
@@ -25,6 +29,8 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ApiRoute } from "../_shared/api/routes.ts";
 import { pageEnvelope, type Page } from "../_shared/api/paging.ts";
+import { canReadOrderAnswers, type AnswerCred } from "../_shared/api/questionAnswers.ts";
+export { attachAnswers, attachAnswersPage, canReadOrderAnswers, orderAnswersDecision } from "../_shared/api/questionAnswers.ts";
 
 /** The route ids this module answers. */
 export const QUESTION_ROUTES = new Set([
@@ -36,6 +42,7 @@ export interface QuestionsCtx {
   sb: SupabaseClient;
   orgId: string;
   keyId: string;
+  cred: AnswerCred;
   params: Record<string, string>;
   page: Page;
   body: Record<string, unknown>;
@@ -201,36 +208,13 @@ async function dispatch(route: ApiRoute, c: QuestionsCtx): Promise<Response> {
       const { data: t, error } = await c.sb.from("exos_tickets").select("id").eq("id", id).eq("org_id", c.orgId).maybeSingle();
       if (error) throw dbError(error);
       if (!t) throw new QErr(404, "ticket not found");
-      const all = await rpc(c, "_exos_answers_for", { p_ticket_ids: [id] }) as Record<string, unknown>;
+      const all = await rpc(c, "_exos_answers_for", {
+        p_ticket_ids: [id], p_include_order: await canReadOrderAnswers(c.sb, c.orgId, c.cred),
+      }) as Record<string, unknown>;
       return answer({ data: all?.[id] ?? [] });
     }
   }
   throw new QErr(404, "not found");
-}
-
-/**
- * Every ticket row gets `answers` (its own and its order's, DICE's
- * fanSurveyAnswers). Rows without an `id`, or a database without the
- * migration, are returned as they are.
- */
-export async function attachAnswers<T>(sb: SupabaseClient, rows: T): Promise<T> {
-  const list = (Array.isArray(rows) ? rows : [rows]) as Record<string, unknown>[];
-  const ids = list.map((r) => r?.id).filter((x): x is string => typeof x === "string" && UUID_RE.test(x));
-  if (ids.length === 0) return rows;
-  const { data, error } = await sb.rpc("_exos_answers_for", { p_ticket_ids: ids });
-  if (error) {
-    if (!["PGRST202", "42883"].includes(String(error.code))) console.error("exos-api: answers read failed", error.message);
-    return rows;
-  }
-  const by = (data ?? {}) as Record<string, unknown>;
-  for (const r of list) if (r && typeof r.id === "string") r.answers = by[r.id] ?? [];
-  return rows;
-}
-
-/** attachAnswers on a { data: [...] } envelope. */
-export async function attachAnswersPage<T extends { data: unknown }>(sb: SupabaseClient, page: T): Promise<T> {
-  await attachAnswers(sb, page.data);
-  return page;
 }
 
 /**

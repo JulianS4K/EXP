@@ -68,6 +68,8 @@ export interface CoreCtx {
   page: Page;
   body: Record<string, unknown>;
   idempotencyKey: string | null;
+  /** exos: checkout questions — may this credential read order-scope answers? (default: no) */
+  orderAnswers?: () => Promise<boolean>;
 }
 
 /** The route ids this module answers. */
@@ -199,10 +201,11 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
         q = q.eq("order_ref", order);
       }
       // exos: checkout questions — each ticket's answers.
-      return await attachAnswersPage(sb, paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page));
+      return await attachAnswersPage(sb, paged(await q.order("created_at", { ascending: false }).order("id").range(page.from, page.to), page),
+        (await c.orderAnswers?.()) === true);
     }
     case "get-ticket":
-      return { data: await attachAnswers(sb, await ticketWithScans(c, uuidOr404(p.id, "ticket"))) };
+      return { data: await attachAnswers(sb, await ticketWithScans(c, uuidOr404(p.id, "ticket")), (await c.orderAnswers?.()) === true) };
     case "scan-lookup": {
       // A ticket id, or the ticket id inside a rotating door code (T-<ticket>:<owner>:<window>:<mac>).
       // This only finds the ticket; check-in with the code is what verifies it.

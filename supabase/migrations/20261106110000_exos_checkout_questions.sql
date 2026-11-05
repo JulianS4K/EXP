@@ -536,14 +536,21 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_
 $$;
 
 -- A validation result's first problem as a 22023 error a buyer can read.
-CREATE OR REPLACE FUNCTION public._exos_raise_answer_problem(p_result jsonb)
+-- The label named is only ever one of p_event's own questions, and never for
+-- an unknown question (whatever id a caller sends, another event's or another
+-- org's label can't be echoed back).
+CREATE OR REPLACE FUNCTION public._exos_raise_answer_problem(p_result jsonb, p_event_id uuid)
 RETURNS void LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   p jsonb := p_result->'problems'->0;
   v_label text;
 BEGIN
   IF p IS NULL THEN RETURN; END IF;
-  SELECT label INTO v_label FROM public.exos_event_questions WHERE id::text = p->>'question_id';
+  IF p->>'code' IS DISTINCT FROM 'unknown_question' AND p_event_id IS NOT NULL THEN
+    SELECT q.label INTO v_label FROM public.exos_event_questions q
+      JOIN public.exos_events e ON e.id = q.event_id AND e.org_id = q.org_id
+     WHERE q.event_id = p_event_id AND q.id::text = p->>'question_id';
+  END IF;
   RAISE EXCEPTION '%', left(
     CASE WHEN v_label IS NOT NULL THEN 'checkout question "' || v_label || '"' ELSE 'checkout questions' END ||
     CASE WHEN p->>'ticket' IS NOT NULL THEN ' (ticket ' || (p->>'ticket') || ')' ELSE '' END || ': ' ||
@@ -620,7 +627,7 @@ BEGIN
 
   v_res := public._exos_validate_answers(p_event, p_ticket_tiers, p_answers, p_require, p_include_hidden);
   IF (v_res->>'ok')::boolean IS NOT TRUE THEN
-    PERFORM public._exos_raise_answer_problem(v_res);
+    PERFORM public._exos_raise_answer_problem(v_res, p_event);
   END IF;
   IF v_res->'answers'->'order' = '{}'::jsonb
      AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_res->'answers'->'tickets') x WHERE x <> '{}'::jsonb) THEN
@@ -805,7 +812,7 @@ BEGIN
   v_res := public._exos_validate_answers(t.event_id, ARRAY[coalesce(t.tier_id, '00000000-0000-0000-0000-000000000000'::uuid)],
                                          jsonb_build_object('tickets', jsonb_build_array(p_answers)), false, true);
   IF (v_res->>'ok')::boolean IS NOT TRUE THEN
-    PERFORM public._exos_raise_answer_problem(v_res);
+    PERFORM public._exos_raise_answer_problem(v_res, t.event_id);
   END IF;
   FOR k IN SELECT jsonb_object_keys(p_answers) LOOP
     SELECT * INTO q FROM public.exos_event_questions WHERE id = k::uuid;
@@ -826,7 +833,8 @@ BEGIN
               now());
     END IF;
   END LOOP;
-  RETURN public._exos_answers_for(ARRAY[t.id]) -> (t.id::text);
+  -- The door's own view: per-ticket answers only (as its RLS read).
+  RETURN public._exos_answers_for(ARRAY[t.id], false) -> (t.id::text);
 END $$;
 
 -- Door staff (owner / manager, or a scanner of this event): answers taken at
@@ -846,7 +854,13 @@ END $$;
 -- 6. Triggers on exos_tickets
 -- ===========================================================================
 -- The n-th ticket minted for an order takes the answers of ticket n (and the
--- first one marks the order's own answers as attached).
+-- first one marks the order's own answers as attached). Only a ticket of the
+-- order's buyer does: the ticket's buyer is the cursor's buyer, or the ticket
+-- is parked on the org owner (as exos_fulfill_checkout parks a guest's or an
+-- unconfirmed account's tickets until proof of email, and phone RSVPs and
+-- organizer reservations are issued) for an order with no buyer, or for the
+-- checkout session of that buyer. Anyone else minting with the same
+-- order_ref takes nothing and moves nothing.
 CREATE OR REPLACE FUNCTION public._exos_tg_ticket_answers_attach()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v_i int;
@@ -856,6 +870,11 @@ BEGIN
    WHERE c.order_ref = NEW.order_ref AND c.event_id = NEW.event_id
      AND (c.tier_id IS NULL OR c.tier_id = NEW.tier_id)
      AND c.next_index <= c.ticket_count
+     AND (c.buyer_uid IS NOT DISTINCT FROM NEW.buyer_id
+          OR (NEW.buyer_id IS NOT DISTINCT FROM (SELECT o.owner_uid FROM public.exos_orgs o WHERE o.id = NEW.org_id)
+              AND (c.buyer_uid IS NULL
+                   OR EXISTS (SELECT 1 FROM public.exos_checkout_sessions s
+                               WHERE s.session_id = NEW.order_ref AND s.buyer_uid = c.buyer_uid))))
   RETURNING c.next_index - 1 INTO v_i;
   IF v_i IS NULL THEN RETURN NULL; END IF;
   UPDATE public.exos_question_answers
@@ -895,8 +914,14 @@ SELECT pg_temp.exos_patch_n('public.exos_claim_free_tickets(uuid,uuid,integer,te
   '/* exos: checkout questions */',
   $o$  -- Per-person limit (cumulative; no admin bypass on the self-serve path).
 $o$,
-  $n$  /* exos: checkout questions */ -- mig 20261106110000: required questions are
-  -- answered through exos_claim_free_tickets_answered (it sets exos.answers_ok).
+  $n$  /* exos: checkout questions */ -- mig 20261106110000: an order ref whose
+  -- answers belong to another buyer (or to a guest / RSVP / reservation order)
+  -- is refused; required questions are answered through
+  -- exos_claim_free_tickets_answered (it sets exos.answers_ok).
+  IF EXISTS (SELECT 1 FROM public.exos_question_answer_cursors c
+              WHERE c.order_ref = nullif(p_order_ref, '') AND c.buyer_uid IS DISTINCT FROM v_uid) THEN
+    RAISE EXCEPTION 'exos_claim_free_tickets: this order reference is already in use' USING ERRCODE = '42501';
+  END IF;
   IF coalesce(current_setting('exos.answers_ok', true), '') IS DISTINCT FROM coalesce(nullif(p_order_ref, ''), '-')
      AND public._exos_required_questions_for(p_event_id, ARRAY[p_tier_id]) THEN
     RAISE EXCEPTION 'exos_claim_free_tickets: answer the checkout questions first' USING ERRCODE = '22023';
@@ -1104,8 +1129,11 @@ BEGIN
 END $$;
 
 -- The answers of a set of tickets: { <ticket id>: [ { question_id, label,
--- kind, value, display } ] } (the ticket's own answers and its order's).
-CREATE OR REPLACE FUNCTION public._exos_answers_for(p_ticket_ids uuid[])
+-- kind, value, display } ] }: the ticket's own answers, and its order's only
+-- when p_include_order (order answers are order data: exos-api passes true
+-- for orders:read, or a credential of an owner / manager / finance; a
+-- tickets:read-only door integration gets per-ticket answers only).
+CREATE OR REPLACE FUNCTION public._exos_answers_for(p_ticket_ids uuid[], p_include_order boolean)
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT coalesce(jsonb_object_agg(x.tid, x.answers), '{}'::jsonb) FROM (
     SELECT t.id::text AS tid, coalesce((
@@ -1115,7 +1143,7 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_
         FROM public.exos_question_answers a
         JOIN public.exos_event_questions q ON q.id = a.question_id
        WHERE a.ticket_id = t.id
-          OR (a.scope = 'order' AND a.order_ref = t.order_ref AND a.event_id = t.event_id)), '[]'::jsonb) AS answers
+          OR (p_include_order IS TRUE AND a.scope = 'order' AND a.order_ref = t.order_ref AND a.event_id = t.event_id)), '[]'::jsonb) AS answers
       FROM public.exos_tickets t WHERE t.id = ANY (p_ticket_ids)) x
 $$;
 
@@ -1234,7 +1262,7 @@ REVOKE ALL ON FUNCTION public._exos_validate_answers_core(jsonb, uuid[], jsonb, 
 REVOKE ALL ON FUNCTION public._exos_question_def(public.exos_event_questions) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_question_defs(uuid, boolean) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_validate_answers(uuid, uuid[], jsonb, boolean, boolean) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public._exos_raise_answer_problem(jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_raise_answer_problem(jsonb, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_required_questions_for(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_record_answers(uuid, uuid, text, uuid[], jsonb, boolean, boolean, text, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.exos_record_checkout_answers(text, jsonb) FROM PUBLIC, anon, authenticated;
@@ -1251,7 +1279,7 @@ REVOKE ALL ON FUNCTION public._exos_api_questions(uuid, uuid) FROM PUBLIC, anon,
 REVOKE ALL ON FUNCTION public._exos_question_upsert(uuid, uuid, uuid, jsonb, uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_question_archive(uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_questions_reorder(uuid, uuid, uuid[]) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public._exos_answers_for(uuid[]) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_answers_for(uuid[], boolean) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._exos_event_answer_rows(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.exos_list_event_questions(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.exos_save_event_question(uuid, jsonb, uuid) FROM PUBLIC, anon, authenticated;
@@ -1279,7 +1307,7 @@ GRANT EXECUTE ON FUNCTION public._exos_api_questions(uuid, uuid) TO service_role
 GRANT EXECUTE ON FUNCTION public._exos_question_upsert(uuid, uuid, uuid, jsonb, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public._exos_question_archive(uuid, uuid, boolean) TO service_role;
 GRANT EXECUTE ON FUNCTION public._exos_questions_reorder(uuid, uuid, uuid[]) TO service_role;
-GRANT EXECUTE ON FUNCTION public._exos_answers_for(uuid[]) TO service_role;
+GRANT EXECUTE ON FUNCTION public._exos_answers_for(uuid[], boolean) TO service_role;
 GRANT EXECUTE ON FUNCTION public._exos_event_answer_rows(uuid) TO service_role;
 
 GRANT EXECUTE ON FUNCTION public.exos_claim_free_tickets_answered(uuid, uuid, integer, text, text, text, jsonb) TO authenticated;

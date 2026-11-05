@@ -77,7 +77,7 @@ describe('the migration agrees with the TS constants', () => {
     expect(sqlCodes.size).toBeGreaterThan(10);
     for (const c of sqlCodes) expect(ANSWER_PROBLEMS as readonly string[]).toContain(c);
     // And the buyer-facing SQL message knows every code.
-    const raise = /_exos_raise_answer_problem\(p_result jsonb\)[\s\S]*?END \$\$;/.exec(migration)![0];
+    const raise = /_exos_raise_answer_problem\(p_result jsonb, p_event_id uuid\)[\s\S]*?END \$\$;/.exec(migration)![0];
     for (const c of ANSWER_PROBLEMS) if (c !== 'invalid_value') expect(raise).toContain(`WHEN '${c}' THEN`);
   });
 });
@@ -207,5 +207,50 @@ describe('display, text, parsing, CSV', () => {
     expect(a.columns).toEqual(['Company name', 'Size']);
     expect(a.forTicket('t1', 'cs_1')).toEqual(['=cmd', 'M']);
     expect(a.forTicket('t9', null)).toEqual(['', '']);
+  });
+});
+
+// Security review (2026-11-05): a credential with only tickets:read (a door or
+// check-in integration) gets per-ticket answers, never the order's.
+describe('order-scope answers in the API (_shared/api/questionAnswers.ts)', async () => {
+  const { orderAnswersDecision, canReadOrderAnswers, attachAnswers, attachAnswersPage } = await import('../../supabase/functions/_shared/api/questionAnswers.ts');
+  it('orders:read (or a :write that covers it, or legacy read) sees them', () => {
+    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['orders:read'], role: null })).toBe(true);
+    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['read'], role: null })).toBe(true);
+    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read', 'orders:read'], role: 'scanner' })).toBe(true);
+  });
+  it('tickets:read only: a user token by its role, an org key by its creator\'s role', () => {
+    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read'], role: 'scanner' })).toBe(false);
+    expect(orderAnswersDecision({ kind: 'oauth', scopes: ['tickets:read'], role: 'content' })).toBe(false);
+    expect(orderAnswersDecision({ kind: 'pat', scopes: ['tickets:read'], role: 'finance' })).toBe(true);
+    expect(orderAnswersDecision({ kind: 'oauth', scopes: ['tickets:read', 'checkin:write'], role: 'manager' })).toBe(true);
+    expect(orderAnswersDecision({ kind: 'api_key', scopes: ['tickets:read', 'checkin:write'], role: null })).toBe('creator');
+  });
+  const sbWith = (actorOk: boolean) => {
+    const calls: { fn: string; args: Record<string, unknown> }[] = [];
+    const sb = {
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        calls.push({ fn, args });
+        if (fn === '_exos_api_key_actor') return actorOk ? { data: 'uid', error: null } : { data: null, error: { code: '42501', message: 'no' } };
+        return { data: { 'aaaaaaaa-0000-4000-8000-000000000001': [{ scope: 'ticket', label: 'Size', value: 'M' }] }, error: null };
+      },
+    };
+    return { sb: sb as never, calls };
+  };
+  it('an org key of a scanner (tickets:read) is refused order answers; of an owner, allowed', async () => {
+    const no = sbWith(false);
+    expect(await canReadOrderAnswers(no.sb, 'org', { kind: 'api_key', id: 'k', scopes: ['tickets:read'], role: null })).toBe(false);
+    expect(no.calls[0]).toEqual({ fn: '_exos_api_key_actor', args: { p_org: 'org', p_api_key: 'k', p_roles: ['owner', 'manager', 'finance'] } });
+    const yes = sbWith(true);
+    expect(await canReadOrderAnswers(yes.sb, 'org', { kind: 'api_key', id: 'k', scopes: ['tickets:read'], role: null })).toBe(true);
+  });
+  it('attachAnswers passes the flag to _exos_answers_for', async () => {
+    const t = sbWith(true);
+    const rows = [{ id: 'aaaaaaaa-0000-4000-8000-000000000001' }] as Record<string, unknown>[];
+    await attachAnswers(t.sb, rows, false);
+    expect(t.calls.at(-1)).toEqual({ fn: '_exos_answers_for', args: { p_ticket_ids: ['aaaaaaaa-0000-4000-8000-000000000001'], p_include_order: false } });
+    expect(rows[0].answers).toEqual([{ scope: 'ticket', label: 'Size', value: 'M' }]);
+    await attachAnswersPage(t.sb, { data: rows }, true);
+    expect(t.calls.at(-1)!.args.p_include_order).toBe(true);
   });
 });

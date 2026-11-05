@@ -31,6 +31,12 @@
 --   CQ11 the public questions: no hidden / archived ones, nothing of a draft
 --   CQ12 TS/SQL parity: the cases between the CQ-CASES markers, which
 --        src/lib/checkoutQuestions.test.ts runs through _shared/questions.ts
+--   CQ13 no hijack through order_ref: buyer B minting (free claim, answered
+--        claim, any other insert) with buyer A's order ref is refused or
+--        takes none of A's answers; A's tickets still get them; parked
+--        tickets (guest, unconfirmed account) still do
+--   CQ14 no cross-tenant label leak: a validation error names only the
+--        event's own questions, never an unknown question's label
 -- Self-contained (BEGIN / ROLLBACK), prefix c9e0.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -46,7 +52,8 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
   ('c9e00000-0000-0000-0000-0000000000b1', 'cq-other@x.com', now()),
   ('c9e00000-0000-0000-0000-0000000000f1', 'cq-fan@x.com', now()),
   ('c9e00000-0000-0000-0000-0000000000f2', 'cq-fan2@x.com', now()),
-  ('c9e00000-0000-0000-0000-0000000000f3', 'cq-guest@x.com', now());
+  ('c9e00000-0000-0000-0000-0000000000f3', 'cq-guest@x.com', now()),
+  ('c9e00000-0000-0000-0000-0000000000f4', 'cq-unconfirmed@x.com', NULL);
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   ('c9e00000-0000-0000-0000-000000000001', 'CQ Org', 'cq-org', 'c9e00000-0000-0000-0000-0000000000a1'),
   ('c9e00000-0000-0000-0000-000000000002', 'CQ Other', 'cq-other', 'c9e00000-0000-0000-0000-0000000000b1');
@@ -68,6 +75,7 @@ INSERT INTO public.exos_events (id, org_id, name, slug, status, total_tickets, t
 INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold) VALUES
   ('c9e00000-0000-0000-0000-0000000000d1', 'c9e00000-0000-0000-0000-0000000000e1', 'GA', 20, 100, 0),
   ('c9e00000-0000-0000-0000-0000000000d2', 'c9e00000-0000-0000-0000-0000000000e1', 'VIP', 50, 50, 0),
+  ('c9e00000-0000-0000-0000-0000000000d6', 'c9e00000-0000-0000-0000-0000000000e1', 'Free list', 0, 50, 0),
   ('c9e00000-0000-0000-0000-0000000000d3', 'c9e00000-0000-0000-0000-0000000000e2', 'Free', 0, 100, 0),
   ('c9e00000-0000-0000-0000-0000000000d4', 'c9e00000-0000-0000-0000-0000000000e3', 'Free', 0, 100, 0),
   ('c9e00000-0000-0000-0000-0000000000d5', 'c9e00000-0000-0000-0000-0000000000e4', 'GA', 10, 100, 0),
@@ -144,7 +152,7 @@ BEGIN
     'public._exos_api_reservation_answers(uuid,text,jsonb)', 'public._exos_set_ticket_answers(uuid,jsonb,text)',
     'public._exos_api_questions(uuid,uuid)', 'public._exos_question_upsert(uuid,uuid,uuid,jsonb,uuid)',
     'public._exos_question_archive(uuid,uuid,boolean)', 'public._exos_questions_reorder(uuid,uuid,uuid[])',
-    'public._exos_answers_for(uuid[])', 'public._exos_event_answer_rows(uuid)', 'public._exos_question_defs(uuid,boolean)',
+    'public._exos_answers_for(uuid[],boolean)', 'public._exos_event_answer_rows(uuid)', 'public._exos_raise_answer_problem(jsonb,uuid)', 'public._exos_question_defs(uuid,boolean)',
     'public._exos_tg_ticket_answers_attach()', 'public._exos_tg_ticket_answers_buyer()', 'public._exos_required_questions_for(uuid,uuid[])'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'),
       'CQ1: no client grant on ' || f;
@@ -282,8 +290,10 @@ BEGIN
   ASSERT (SELECT label FROM public.exos_question_answers WHERE question_id = qs AND ticket_id = ids[1]) = 'T-shirt size'
      AND (SELECT buyer_uid FROM public.exos_question_answers WHERE question_id = qs AND ticket_id = ids[1]) = 'c9e00000-0000-0000-0000-0000000000f1',
     'CQ3: label snapshot and buyer';
-  ASSERT (public._exos_answers_for(ARRAY[ids[2]]) -> (ids[2]::text)) @> format('[{"question_id":"%s","value":"L"},{"question_id":"%s","value":"Acme Inc"}]', qs, qc)::jsonb,
-    'CQ3: a ticket''s answers include its order''s';
+  ASSERT (public._exos_answers_for(ARRAY[ids[2]], true) -> (ids[2]::text)) @> format('[{"question_id":"%s","value":"L"},{"question_id":"%s","value":"Acme Inc"}]', qs, qc)::jsonb,
+    'CQ3: with order access, a ticket''s answers include its order''s';
+  ASSERT (public._exos_answers_for(ARRAY[ids[2]], false) -> (ids[2]::text)) = format('[{"question_id":"%s","scope":"ticket","label":"T-shirt size","kind":"single_choice","value":"L","display":"L"}]', qs)::jsonb,
+    'CQ3: without it (tickets:read only), per-ticket answers only: ' || (public._exos_answers_for(ARRAY[ids[2]], false) -> (ids[2]::text))::text;
   ASSERT pg_temp.err($q$SELECT public.exos_record_checkout_answers('cs_cq_paid_1', '{}')$q$) LIKE '22023%fulfilled%', 'CQ3: a fulfilled order takes no new answers';
 
   -- VIP: the VIP-only per-ticket question is required there.
@@ -527,7 +537,7 @@ BEGIN
   ASSERT v->0->>'id' = qa::text AND v->1->>'id' = qs::text, 'CQ10: reordered';
   ASSERT (SELECT array_agg(sort_order ORDER BY sort_order) FROM public.exos_event_questions WHERE event_id = e) = ARRAY[0, 1, 2, 3, 4, 5], 'CQ10: the rest follow';
   ids := (SELECT ticket_ids FROM public.exos_checkout_sessions WHERE session_id = 'cs_cq_paid_1');
-  v := public._exos_answers_for(ids);
+  v := public._exos_answers_for(ids, true);
   ASSERT jsonb_array_length(v->(ids[1]::text)) >= 2 AND v->(ids[1]::text)->0 ? 'display', 'CQ10: answers per ticket with display text';
   ASSERT (SELECT count(*) FROM public._exos_event_answer_rows(e)) = (SELECT count(*) FROM public.exos_question_answers WHERE event_id = e AND attached_at IS NOT NULL),
     'CQ10: the table lists the minted orders'' answers';
@@ -553,6 +563,96 @@ BEGIN
     $q$SELECT public.exos_public_event_questions('c9e00000-0000-0000-0000-0000000000e4')::text$q$)::jsonb->'questions') = 1,
     'CQ11: the event''s editors preview it';
   RAISE NOTICE 'OK  CQ11 public questions: no hidden / archived, no staff fields, drafts only to editors';
+END $$;
+
+-- CQ13 -----------------------------------------------------------------------
+DO $$
+DECLARE
+  e uuid := 'c9e00000-0000-0000-0000-0000000000e1';
+  qs uuid := pg_temp.qid('c9e00000-0000-0000-0000-0000000000e1', 'Shirt size');
+  qa uuid := pg_temp.qid('c9e00000-0000-0000-0000-0000000000e1', 'I agree to the photo policy');
+  qn uuid := pg_temp.qid('c9e00000-0000-0000-0000-0000000000e1', 'Emergency contact');
+  body jsonb;
+  ids uuid[]; r text; tid uuid; n int;
+BEGIN
+  body := format('{"order":{"%s":true,"%s":"+15550100099"},"tickets":[{"%s":"S"},{"%s":"XL"}]}', qa, qn, qs, qs)::jsonb;
+  -- Buyer A's pending order with answers.
+  PERFORM pg_temp.session('cs_cq_hijack', e, 'c9e00000-0000-0000-0000-0000000000d1', 2, 'c9e00000-0000-0000-0000-0000000000f1', 'cq-fan@x.com');
+  PERFORM public.exos_record_checkout_answers('cs_cq_hijack', body);
+  -- B: the plain free claim with A's ref is refused.
+  r := pg_temp.as_user('c9e00000-0000-0000-0000-0000000000f2', $q$SELECT public.exos_claim_free_tickets('c9e00000-0000-0000-0000-0000000000e1',
+    'c9e00000-0000-0000-0000-0000000000d6', 1, NULL, NULL, 'cs_cq_hijack')::text$q$);
+  ASSERT r LIKE 'ERR 42501%already in use%', 'CQ13: the free claim refuses another buyer''s order ref: ' || r;
+  -- B: the answered claim too.
+  r := pg_temp.as_user('c9e00000-0000-0000-0000-0000000000f2', format($q$SELECT public.exos_claim_free_tickets_answered('c9e00000-0000-0000-0000-0000000000e1',
+    'c9e00000-0000-0000-0000-0000000000d6', 1, NULL, NULL, 'cs_cq_hijack', '{"order":{"%s":true,"%s":"+15550100098"},"tickets":[{"%s":"M"}]}')::text$q$, qa, qn, qs));
+  ASSERT r LIKE 'ERR 42501%already in use%', 'CQ13: the answered claim refuses it: ' || r;
+  -- Any other mint path: B's ticket with A's ref (same event and type) takes nothing.
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, status, barcode_secret, price_paid, order_ref)
+  VALUES (e, 'c9e00000-0000-0000-0000-000000000001', 'c9e00000-0000-0000-0000-0000000000d1', 'GA',
+          'c9e00000-0000-0000-0000-0000000000f2', 'c9e00000-0000-0000-0000-0000000000f2', 'active', gen_random_uuid()::text, 0, 'cs_cq_hijack')
+  RETURNING id INTO tid;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_question_answers WHERE ticket_id = tid), 'CQ13: B''s ticket took none of A''s answers';
+  ASSERT (SELECT next_index FROM public.exos_question_answer_cursors WHERE order_ref = 'cs_cq_hijack') = 1, 'CQ13: and moved nothing';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_question_answers WHERE order_ref = 'cs_cq_hijack' AND attached_at IS NOT NULL),
+    'CQ13: A''s order answers stay unattached';
+  ASSERT pg_temp.as_user('c9e00000-0000-0000-0000-0000000000f2',
+    $q$SELECT count(*)::text FROM public.exos_question_answers WHERE order_ref = 'cs_cq_hijack'$q$) = '0', 'CQ13: B reads none of them';
+  DELETE FROM public.exos_tickets WHERE id = tid;
+  -- A pays: A's tickets get A's answers, in order.
+  ids := public.exos_fulfill_checkout('cs_cq_hijack');
+  ASSERT cardinality(ids) = 2
+     AND (SELECT value FROM public.exos_question_answers WHERE question_id = qs AND ticket_id = ids[1]) = '"S"'::jsonb
+     AND (SELECT value FROM public.exos_question_answers WHERE question_id = qs AND ticket_id = ids[2]) = '"XL"'::jsonb,
+    'CQ13: A''s tickets take A''s answers';
+  -- Parked tickets still attach: an unconfirmed account's order is parked on the org owner.
+  PERFORM pg_temp.session('cs_cq_unconf', e, 'c9e00000-0000-0000-0000-0000000000d1', 1, 'c9e00000-0000-0000-0000-0000000000f4', 'cq-unconfirmed@x.com');
+  PERFORM public.exos_record_checkout_answers('cs_cq_unconf', format('{"order":{"%s":true,"%s":"+15550100097"},"tickets":[{"%s":"M"}]}', qa, qn, qs)::jsonb);
+  ids := public.exos_fulfill_checkout('cs_cq_unconf');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = 'c9e00000-0000-0000-0000-0000000000a1', 'CQ13: parked on the org owner';
+  ASSERT (SELECT value FROM public.exos_question_answers WHERE question_id = qs AND ticket_id = ids[1]) = '"M"'::jsonb,
+    'CQ13: the parked ticket of that buyer''s own session takes its answers';
+  -- The org owner can't take a guest order's answers with its ref either.
+  r := pg_temp.as_user('c9e00000-0000-0000-0000-0000000000a1', $q$SELECT public.exos_claim_free_tickets('c9e00000-0000-0000-0000-0000000000e1',
+    'c9e00000-0000-0000-0000-0000000000d6', 1, NULL, NULL, 'cs_cq_guest_1')::text$q$);
+  ASSERT r LIKE 'ERR 42501%already in use%', 'CQ13: a guest order''s ref is refused to the owner too: ' || r;
+  -- exos_record_checkout_answers: a session whose ref another buyer's answers hold is refused.
+  INSERT INTO public.exos_question_answer_cursors (order_ref, org_id, event_id, tier_id, buyer_uid, ticket_count)
+  VALUES ('cs_cq_taken', 'c9e00000-0000-0000-0000-000000000001', e, 'c9e00000-0000-0000-0000-0000000000d1', 'c9e00000-0000-0000-0000-0000000000f2', 1);
+  PERFORM pg_temp.session('cs_cq_taken', e, 'c9e00000-0000-0000-0000-0000000000d1', 1, 'c9e00000-0000-0000-0000-0000000000f1', 'cq-fan@x.com');
+  r := pg_temp.err(format($q$SELECT public.exos_record_checkout_answers('cs_cq_taken', '{"order":{"%s":true,"%s":"+15550100096"},"tickets":[{"%s":"M"}]}')$q$, qa, qn, qs));
+  ASSERT r LIKE '42501%already in use%', 'CQ13: checkout refuses a ref another buyer holds: ' || coalesce(r, 'accepted');
+  RAISE NOTICE 'OK  CQ13 order_ref: another buyer''s ref is refused or takes nothing; the buyer''s own (and parked) tickets still take their answers';
+END $$;
+
+-- CQ14 -----------------------------------------------------------------------
+DO $$
+DECLARE
+  e uuid := 'c9e00000-0000-0000-0000-0000000000e1';
+  qs uuid := pg_temp.qid('c9e00000-0000-0000-0000-0000000000e1', 'Shirt size');
+  qa uuid := pg_temp.qid('c9e00000-0000-0000-0000-0000000000e1', 'I agree to the photo policy');
+  qb uuid;
+  t uuid := (SELECT ticket_ids[1] FROM public.exos_checkout_sessions WHERE session_id = 'cs_cq_paid_1');
+  r text;
+BEGIN
+  qb := (public._exos_question_upsert('c9e00000-0000-0000-0000-000000000002', 'c9e00000-0000-0000-0000-0000000000e9', NULL,
+    '{"label":"Org B secret label","kind":"text","required":true,"scope":"ticket"}', NULL)->>'id')::uuid;
+  PERFORM pg_temp.session('cs_cq_leak', e, 'c9e00000-0000-0000-0000-0000000000d1', 1, 'c9e00000-0000-0000-0000-0000000000f2', 'cq-fan2@x.com');
+  -- Another org's question id at checkout (per ticket and per order).
+  r := pg_temp.err(format($q$SELECT public.exos_record_checkout_answers('cs_cq_leak', '{"order":{"%s":true},"tickets":[{"%s":"M","%s":"x"}]}')$q$, qa, qs, qb));
+  ASSERT r LIKE '22023%not asked%' AND r NOT LIKE '%Org B secret label%' AND r NOT LIKE '%checkout question "%', 'CQ14: no label for an unknown question: ' || coalesce(r, 'accepted');
+  r := pg_temp.err(format($q$SELECT public.exos_record_checkout_answers('cs_cq_leak', '{"order":{"%s":true,"%s":"x"},"tickets":[{"%s":"M"}]}')$q$, qa, qb, qs));
+  ASSERT r LIKE '22023%' AND r NOT LIKE '%Org B secret label%', 'CQ14: nor as an order key: ' || coalesce(r, 'accepted');
+  -- At the door.
+  r := pg_temp.as_user('c9e00000-0000-0000-0000-0000000000a3', format($q$SELECT public.exos_door_set_ticket_answers('%s', '{"%s":"x"}')::text$q$, t, qb));
+  ASSERT r LIKE 'ERR 22023%' AND r NOT LIKE '%Org B secret label%', 'CQ14: the door gets no label either: ' || r;
+  -- Even a forged problem naming another event's question gets no label.
+  r := pg_temp.err(format($q$SELECT public._exos_raise_answer_problem('{"problems":[{"code":"required","question_id":"%s","ticket":null}]}', 'c9e00000-0000-0000-0000-0000000000e1')$q$, qb));
+  ASSERT r LIKE '22023%checkout questions: an answer is required%' AND r NOT LIKE '%Org B%', 'CQ14: labels only from the event validated: ' || coalesce(r, 'none');
+  -- The event's own question is still named.
+  r := pg_temp.err(format($q$SELECT public.exos_record_checkout_answers('cs_cq_leak', '{"order":{"%s":true},"tickets":[{}]}')$q$, qa));
+  ASSERT r LIKE '22023%"Emergency contact"%required%', 'CQ14: own labels are still named: ' || coalesce(r, 'accepted');
+  RAISE NOTICE 'OK  CQ14 validation errors never echo another event''s or org''s question label';
 END $$;
 
 -- CQ12 -----------------------------------------------------------------------

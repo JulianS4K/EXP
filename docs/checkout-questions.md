@@ -88,6 +88,12 @@ buyer) all keep them. The buyer can read an order's answers once its tickets are
 Not covered: POS walk-up mints (`exos-pos` doesn't mint tickets yet: its `mint_walkup` answers 501); comps, box-office
 and member-pass issues (staff can add answers at the door); partner (`/public/...`) reservations.
 
+Only the order's own tickets take its answers: the trigger requires the ticket's buyer to be the order's buyer, or
+the ticket to be parked on the org owner for an order with no buyer (guest, RSVP, reservation) or for that buyer's own
+checkout session (an unconfirmed account). `exos_claim_free_tickets`, the answered claim and
+`exos_record_checkout_answers` refuse an order ref whose answers belong to someone else. A validation error names only
+the validated event's own questions, and never an unknown question.
+
 Answers of a checkout that never paid stay unattached (`attached_at` NULL) and are left out of the report and the API.
 
 ## Who sees what
@@ -105,4 +111,6 @@ docs/api/questions.json: questions CRUD on `/v1/events/:id/questions` and `/v1/q
 events:write; DELETE archives), `PUT /v1/events/:id/questions/order`, the answers table on
 `GET /v1/events/:id/question-answers` (orders:read, paged), `GET /v1/orders/:id/answers` (orders:read) and
 `GET /v1/tickets/:id/answers` (tickets:read). Every ticket in the attendees, order and ticket answers carries
-`answers` (its own and its order's). DICE mapping: `fanSurveyQuestion.title` = `label`, `value` = `display`.
+`answers`: its own per-ticket answers, and its order's only for a credential with orders:read or of an owner, manager
+or finance (an org API key: its creator's role; `_shared/api/questionAnswers.ts`). A tickets:read-only door or
+check-in integration sees per-ticket answers only. DICE mapping: `fanSurveyQuestion.title` = `label`, `value` = `display`.
