@@ -211,6 +211,17 @@
         },
         {
           "status": 409,
+          "description": "The ticket type is on a price step (an early-bird price for the first N, docs/price-steps.md) and the line asks for more than the step has left: nothing was held. A reservation is priced at one step: reserve `remaining` at `price_cents` (face, in cents), then the rest in a second reservation at the next price. A reservation holds its step's places until it is completed, cancelled or expires, and is minted at the price it was quoted even if the step moves meanwhile.",
+          "example": {
+            "error": "price_step_remaining: only 2 of General admission left at this price; reserve those, then the rest at the next price",
+            "reason": "price_step_remaining",
+            "remaining": 2,
+            "price_cents": 2000,
+            "ticket_type_id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+          }
+        },
+        {
+          "status": 409,
           "description": "Over the cap the organizer set for your key (per ticket type or per event, docs/partner-sales.md \"Caps\"): nothing was held. `left` is how many you may still reserve.",
           "example": {
             "error": "partner_cap_reached: this partner may hold or sell 2 more of General admission",
