@@ -171,7 +171,7 @@ export default function LocationModePicker({
       )}
 
       {draft.mode !== 'venue_record' && (
-        <p className="type text-[11px] text-white/50">Every ticket type needs a capacity (no unlimited types without a venue on Exos).</p>
+        <p className="type text-[11px] text-white/50">Every ticket type has a capacity, and at least one needs 1 or more to publish. 0 closes sales.</p>
       )}
     </div>
   );

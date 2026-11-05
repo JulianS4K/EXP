@@ -130,8 +130,12 @@ export interface Blocker {
 /**
  * The location blockers for an event as the editor has it (mirror of SQL
  * _exos_location_blockers_row). `hasSecret`: a secret address is saved (or
- * typed); `capacities`: each ticket type's capacity (0 = unlimited).
+ * typed); `capacities`: each ticket type's capacity (0 closes sales; there is
+ * no unlimited). A promoter-run event needs at least one type above 0.
  */
+/** capacity_required's message (mirror of SQL, mig 20261105150000). */
+export const CAPACITY_REQUIRED_MESSAGE = "Give at least one ticket type a capacity of 1 or more (0 closes sales).";
+
 export function locationBlockers(e: LocationRow, hasSecret: boolean, capacities: number[] = []): Blocker[] {
   const out: Blocker[] = [];
   const mode = parseLocationMode(e.location_mode);
@@ -161,9 +165,8 @@ export function locationBlockers(e: LocationRow, hasSecret: boolean, capacities:
         message: "Choose whether tickets go on sale before the location is announced." });
     }
   }
-  if (isPromoterMode(mode) && capacities.some((c) => !(c > 0))) {
-    out.push({ code: "capacity_required", field: "ticket_types",
-      message: "Give every ticket type a capacity (events without a venue on Exos can't be unlimited)." });
+  if (isPromoterMode(mode) && capacities.length > 0 && !capacities.some((c) => c > 0)) {
+    out.push({ code: "capacity_required", field: "ticket_types", message: CAPACITY_REQUIRED_MESSAGE });
   }
   return out;
 }

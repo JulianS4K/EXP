@@ -69,9 +69,11 @@ a venue owned). `exos_location_venue_matches`, `GET /v1/venue-matches`, and `ven
 
 ## Capacity
 
-Operator rule: no unlimited capacity. An event in one of the three promoter modes needs a capacity on every ticket
-type sold on Exos: the publish blocker `capacity_required`, and a live event refuses an unlimited type (new or
-changed). The dashboard already required a capacity per ticket type; the editor says why for these events.
+Operator rule: there is no unlimited capacity, and 0 closes sales (mig 20261105100000). An event in one of the three
+promoter modes needs at least one ticket type sold on Exos with a capacity of 1 or more to publish: the publish
+blocker `capacity_required`. Setting an existing type to 0 is allowed, on a live event too: it closes that type (it
+shows sold out). A live event refuses only a missing or negative capacity (mig 20261105150000). A new ticket type
+still needs 1 or more, as on every event.
 
 ## Publish blockers
 

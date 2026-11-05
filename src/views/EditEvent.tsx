@@ -1,6 +1,6 @@
 import { geocodeEvent } from '../lib/geo';
 import LocationModePicker from '../components/LocationModePicker';
-import { blankLocationDraft, draftFromView, draftToPayload, isPrivateMode, validateLocationDraft, type Address, type LocationDraft, type LocationMode } from '../lib/eventLocation';
+import { blankLocationDraft, CAPACITY_REQUIRED_MESSAGE, draftFromView, draftToPayload, isPrivateMode, validateLocationDraft, type Address, type LocationDraft, type LocationMode } from '../lib/eventLocation';
 import { getEventLocation, setEventLocation } from '../lib/eventLocationApi';
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -338,8 +338,10 @@ export default function EditEvent() {
       const locErr = validateLocationDraft(isPrivateMode(loc.mode) ? loc
         : { ...loc, venueName: eventData.location || '', address: (eventData.address ?? {}) as Address }, { online: online0 });
       if (locErr) return locErr;
-      if ((eventData.ticketTiers || []).some((t) => !(Number(t.capacity) > 0))) {
-        return 'Give every ticket type a capacity (an event without a venue on Exos can\'t be unlimited).';
+      // 0 closes sales on an existing type (mig 20261105150000); one type must still sell.
+      const tiers0 = eventData.ticketTiers || [];
+      if (tiers0.length > 0 && !tiers0.some((t) => Number(t.capacity) > 0)) {
+        return CAPACITY_REQUIRED_MESSAGE;
       }
     }
     if ((eventData.subgenres || []).length > SUBGENRES_MAX_COUNT) {

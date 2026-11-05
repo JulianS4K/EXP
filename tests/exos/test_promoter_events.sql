@@ -8,7 +8,7 @@
 --   PE5  tba: explicit sales choice, sales gate, announcement on set
 --   PE6  the venue gate never blocks these modes and still can't be bypassed;
 --        a matching owned venue is only a suggestion
---   PE7  capacity required
+--   PE7  capacity: one sellable type to publish; 0 closes sales (mig 20261105150000)
 --   PE8  publish blockers and the published-row guard
 --   PE9  the secret is nowhere public before (or after) reveal: anon and a
 --        stranger sweep every readable relation, every feed / JSON builder,
@@ -419,29 +419,34 @@ BEGIN
 END $$;
 
 -- PE7 ------------------------------------------------------------------------
+-- Operator rule (wave 3, mig 20261105150000): no unlimited capacity, and 0
+-- closes sales. A promoter-run event needs one type that can sell to go
+-- live; a type set to 0 is closed, never refused.
 DO $$
 DECLARE s text; b jsonb;
 BEGIN
-  -- A promoter-mode draft with an unlimited type is blocked; venue_record isn't.
+  -- A promoter-mode draft whose only type is closed is blocked; venue_record isn't checked here.
   UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = 'f7e00000-0000-0000-0000-000000000201';
   b := public._exos_event_publish_blockers(pg_temp.ev(101));
-  ASSERT b @> '[{"code":"capacity_required"}]', 'PE7 secret draft with unlimited GA ' || b::text;
+  ASSERT b @> '[{"code":"capacity_required"}]', 'PE7 secret draft with every type closed ' || b::text;
   ASSERT NOT public._exos_event_publish_blockers(pg_temp.ev(104)) @> '[{"code":"capacity_required"}]',
-    'PE7 venue_record events are unchanged (capacity 0 = unlimited stays allowed)';
+    'PE7 venue_record events are unchanged';
   UPDATE public.exos_ticket_tiers SET capacity = 100 WHERE id = 'f7e00000-0000-0000-0000-000000000201';
-  -- On a live promoter event: never back to unlimited, nor a new unlimited type.
+  ASSERT NOT public._exos_event_publish_blockers(pg_temp.ev(101)) @> '[{"code":"capacity_required"}]', 'PE7 one open type is enough';
+  -- On a live promoter event: 0 closes sales (allowed); a capacity is still required.
   s := pg_temp.st($q$UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = 'f7e00000-0000-0000-0000-000000000203'$q$);
-  ASSERT s LIKE '22023 capacity_required%', 'PE7 live unlisted: ' || s;
-  s := pg_temp.st(format($q$INSERT INTO public.exos_ticket_tiers (event_id, name, price, capacity, visibility) VALUES (%L, 'Door', 0, 0, 'public')$q$, pg_temp.ev(103)));
-  ASSERT s LIKE '22023 capacity_required%', 'PE7 new unlimited type: ' || s;
-  -- Going live with one is refused too (direct status write).
+  ASSERT s = 'ok', 'PE7 live unlisted can close a type: ' || s;
+  s := pg_temp.st($q$UPDATE public.exos_ticket_tiers SET capacity = NULL WHERE id = 'f7e00000-0000-0000-0000-000000000203'$q$);
+  ASSERT s <> 'ok', 'PE7 no NULL capacity: ' || s;
+  s := pg_temp.st($q$UPDATE public.exos_ticket_tiers SET capacity = -1 WHERE id = 'f7e00000-0000-0000-0000-000000000203'$q$);
+  ASSERT s <> 'ok', 'PE7 no negative capacity: ' || s;
+  -- Going live with every type closed is refused (direct status write).
   UPDATE public.exos_events SET status = 'draft' WHERE id = pg_temp.ev(103);
-  UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = 'f7e00000-0000-0000-0000-000000000203';
   s := pg_temp.st(format($q$UPDATE public.exos_events SET status = 'published' WHERE id = %L$q$, pg_temp.ev(103)));
-  ASSERT s LIKE '22023 location:%capacity%', 'PE7 publish with unlimited refused: ' || s;
+  ASSERT s LIKE '22023 location:%capacity%', 'PE7 publish with every type closed refused: ' || s;
   UPDATE public.exos_ticket_tiers SET capacity = 50 WHERE id = 'f7e00000-0000-0000-0000-000000000203';
   UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.ev(103);
-  RAISE NOTICE 'OK  PE7 capacity required on promoter-mode events (blocker, live guard); venue_record unchanged';
+  RAISE NOTICE 'OK  PE7 promoter-mode events: one sellable type to publish, 0 closes sales on a live one; venue_record unchanged';
 END $$;
 
 -- PE8 ------------------------------------------------------------------------

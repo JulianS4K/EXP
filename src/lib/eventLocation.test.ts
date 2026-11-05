@@ -118,7 +118,10 @@ describe('blockers (mirror of the SQL)', () => {
       .toEqual([]);
     expect(codes({ location_mode: 'tba' })).toEqual(['tba_sales_choice']);
     expect(codes({ location_mode: 'tba', tba_allow_sales: false })).toEqual([]);
-    expect(codes({ location_mode: 'unlisted_venue', venue_address: { city: 'Queens' } }, false, [0, 10])).toEqual(['capacity_required']);
+    // 0 closes sales (mig 20261105150000): one closed type is fine, all closed blocks.
+    expect(codes({ location_mode: 'unlisted_venue', venue_address: { city: 'Queens' } }, false, [0, 10])).toEqual([]);
+    expect(codes({ location_mode: 'unlisted_venue', venue_address: { city: 'Queens' } }, false, [0, 0])).toEqual(['capacity_required']);
+    expect(locationBlockers({ location_mode: 'tba', tba_allow_sales: true }, false, [0])[0].message).toContain('0 closes sales');
     expect(codes({ location_mode: 'unlisted_venue' })).toEqual(['missing_venue_address']);
     expect(codes({ location_mode: 'venue_record' }, false, [0])).toEqual([]);
     expect(codes({ location_mode: 'secret_location', format: 'online' })).toEqual([]);

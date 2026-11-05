@@ -10,7 +10,7 @@ import {
 } from '../../supabase/functions/_shared/eventLocation.ts';
 
 export {
-  addressLine, effectiveRevealAt, feedLocation, holderLocation, isPrivateMode, isPromoterMode, isRevealed,
+  addressLine, CAPACITY_REQUIRED_MESSAGE, effectiveRevealAt, feedLocation, holderLocation, isPrivateMode, isPromoterMode, isRevealed,
   LOCATION_MODES, locationBlockers, ORG_TYPES, orgTypeDefaults, parseLocationMode, parseOrgType, publicLocation,
   revealAtFromHours, REVEAL_PRESETS, salesOpen, venueMatchKey,
   type Address, type Blocker, type HolderLocation, type HolderLocationView, type LocationMode, type OrgType,
@@ -156,7 +156,7 @@ export function validateLocationDraft(d: LocationDraft, opts: { online?: boolean
   return null;
 }
 
-/** Does this mode need a capacity on every ticket type (no unlimited)? */
+/** Does this mode need at least one ticket type that can sell to publish? (0 closes sales; there is no unlimited.) */
 export function needsCapacity(mode: LocationMode): boolean {
   return isPromoterMode(mode);
 }

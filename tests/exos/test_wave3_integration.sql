@@ -11,6 +11,8 @@
 --       /v1/me is pinned: it can't use X-Exos-Org; the parent still can
 --   W4  public discovery (#85) reads capacity 0 as closed (#88): a closed
 --       type is sold out, like a used-up one (mig 20261105150000)
+--   W5  a live promoter-run event (#89) can set a type to 0 (closed, #88):
+--       it shows sold out; with every type at 0 it can't be published
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -87,7 +89,9 @@ BEGIN
     ('public._exos_api_event_json(uuid)', '/* exos: location json */'),
     ('public._exos_wallet_payload(text)', '/* exos: location wallet */'),
     -- wave 3 integration (mig 20261105150000)
-    ('public._exos_api_public_tiers_json(uuid)', '/* exos: closed is sold out */')
+    ('public._exos_api_public_tiers_json(uuid)', '/* exos: closed is sold out */'),
+    ('public._exos_location_blockers_row(public.exos_events,boolean)', '/* exos: one sellable type */'),
+    ('public._exos_tg_tier_capacity_location()', '/* exos: 0 closes sales')
   ) AS t(sig, marker) LOOP
     n := n + 1;
     IF to_regprocedure(r.sig) IS NULL THEN
@@ -197,6 +201,49 @@ BEGIN
             FROM jsonb_array_elements(j) x), 'W4 closed and used-up are sold out, open is not: ' || j::text;
   ASSERT public.exos_tier_available('e3a00000-0000-0000-0000-0000000000d1') = 0, 'W4 the closed type has 0 left';
   RAISE NOTICE 'OK  W4 a closed type is sold out in public discovery';
+END $$;
+
+-- W5 -------------------------------------------------------------------------
+INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, total_tickets, created_by,
+                                location_mode, venue_name, venue_address) VALUES
+  ('e3a00000-0000-0000-0000-0000000000e5', 'e3a00000-0000-0000-0000-000000000001', 'E3A Warehouse', 'e3a-warehouse', 'draft',
+   now() + interval '9 days', 0, 'e3a00000-0000-0000-0000-0000000000a1',
+   'unlisted_venue', 'Warehouse 9', '{"street": "77 Kent Ave", "city": "Brooklyn"}');
+INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold, sort_order) VALUES
+  ('e3a00000-0000-0000-0000-0000000000d5', 'e3a00000-0000-0000-0000-0000000000e5', 'GA', 20, 50, 4, 1),
+  ('e3a00000-0000-0000-0000-0000000000d6', 'e3a00000-0000-0000-0000-0000000000e5', 'Early', 10, 20, 20, 2);
+UPDATE public.exos_events SET status = 'published' WHERE id = 'e3a00000-0000-0000-0000-0000000000e5';
+CREATE FUNCTION pg_temp.st(p_sql text) RETURNS text LANGUAGE plpgsql AS $$
+BEGIN
+  EXECUTE p_sql;
+  RETURN 'ok';
+EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ' ' || SQLERRM;
+END $$;
+DO $$
+DECLARE s text; j jsonb; b jsonb;
+BEGIN
+  -- Live and promoter-run: closing a type (0) is allowed, and it then shows sold out.
+  s := pg_temp.st($q$UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = 'e3a00000-0000-0000-0000-0000000000d5'$q$);
+  ASSERT s = 'ok', 'W5 a live promoter-run event closes a type: ' || s;
+  ASSERT public.exos_tier_available('e3a00000-0000-0000-0000-0000000000d5') = 0, 'W5 closed: 0 left';
+  j := public._exos_api_public_tiers_json('e3a00000-0000-0000-0000-0000000000e5');
+  ASSERT (SELECT bool_and((x->>'sold_out')::boolean) FROM jsonb_array_elements(j) x), 'W5 sold out in discovery: ' || j::text;
+  -- Every type at 0 is allowed while live (sales stopped)...
+  s := pg_temp.st($q$UPDATE public.exos_ticket_tiers SET capacity = 0 WHERE id = 'e3a00000-0000-0000-0000-0000000000d6'$q$);
+  ASSERT s = 'ok', 'W5 the last open type closes too: ' || s;
+  -- ...but it can't be published like that: the blocker, and the guard on going live.
+  b := public._exos_event_publish_blockers('e3a00000-0000-0000-0000-0000000000e5');
+  ASSERT b @> '[{"code":"capacity_required"}]', 'W5 blocker with every type closed: ' || b::text;
+  UPDATE public.exos_events SET status = 'draft' WHERE id = 'e3a00000-0000-0000-0000-0000000000e5';
+  s := pg_temp.st($q$UPDATE public.exos_events SET status = 'published' WHERE id = 'e3a00000-0000-0000-0000-0000000000e5'$q$);
+  ASSERT s LIKE '22023 location:%capacity%', 'W5 can''t go live with every type closed: ' || s;
+  -- One type open again: it publishes, with the other one still closed.
+  UPDATE public.exos_ticket_tiers SET capacity = 30 WHERE id = 'e3a00000-0000-0000-0000-0000000000d6';
+  ASSERT NOT public._exos_event_publish_blockers('e3a00000-0000-0000-0000-0000000000e5') @> '[{"code":"capacity_required"}]',
+    'W5 one open type is enough';
+  s := pg_temp.st($q$UPDATE public.exos_events SET status = 'published' WHERE id = 'e3a00000-0000-0000-0000-0000000000e5'$q$);
+  ASSERT s = 'ok', 'W5 publishes with one closed and one open type: ' || s;
+  RAISE NOTICE 'OK  W5 a live promoter-run event can close a type (sold out); every type closed can''t publish';
 END $$;
 
 ROLLBACK;
