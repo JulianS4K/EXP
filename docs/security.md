@@ -245,6 +245,9 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_partner_caps`, `exos_set_partner_caps` (mig 20261104200000) | OK | Per-partner caps: owner / manager of the event's org (`exos_has_org_role`), looked up from the event; partners and tiers must be the org's / the event's. Table `exos_partner_caps`: RLS owner / manager read, no client writes. `_exos_partner_cap_used`, `_exos_partner_cap_left`, `_exos_partner_cap_check`, `_exos_partner_caps_json`, `_exos_partner_caps_set` are service role only (exos-api, `events:*`); the check runs inside `_exos_partner_reserve` under a per-partner, per-event advisory lock |
 | `exos_org_pending_members`, `exos_org_member_approve`, `exos_org_member_reject`, `exos_set_invite_approval` (mig 20261104200000) | OK | Invite approval. List: owner / manager of the org (returns claimers' account emails to them only). Approve / reject: an owner, or a manager for finance / content / scanner (`_exos_member_decider`, no client grant), never for oneself. The switch: owner. A pending member is `disabled`, so no `exos_has_org_role` check passes; trigger `_exos_tg_membership_approval` refuses clients (`current_user` authenticated / anon) changing the approval columns or enabling a pending row |
 | `exos_pos_recount_drawer` (mig 20261104200000) | OK | Owner / manager of the drawer's org (door staff close drawers but don't recount), a closed drawer, 7 days, 3 recounts, a reason, no final settlement; the replaced count goes to `exos_pos_drawer_recounts` (RLS owner / manager / finance read, no client writes) |
+| `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
+| `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
+| `exos_staff_clock_in`, `exos_staff_clock_out`, `exos_staff_shift_close`, `exos_staff_shift_report` (mig 20261105120000) | OK | Clock in / out: the caller only, as an active member of the org (the role is kept on the shift). Close a forgotten shift (with a reason) and the report: owner / manager. `exos_staff_shifts`: RLS own rows for members, all for owner / manager, no client writes |
 | All anon-callable functions above | as above | authenticated also holds them |
 
 Everything else in the advisor's Exos list (triggers `exos_tg_*`, cron and
@@ -317,6 +320,36 @@ org; writes need a key whose creator holds the role now,
   the grantee key's creator (owner / manager now, `_exos_api_key_actor` in
   the SQL) and are logged in `exos_cohost_event_edits`.
 
+### Printed tickets, team switching, Tixel (mig 20261105120000)
+
+Nothing new is granted to anon. Points to review:
+
+- **Print codes are door credentials.** 128 random bits, shown once, stored as
+  SHA-256 only; never in `exos_api_writes` (the log keeps ticket ids and
+  counts). One live code a ticket (partial unique index); while live, the
+  ticket's `T-` / `W-` codes are refused, so a paper and a phone can't both
+  admit. The door spends it in the same transaction as the ticket (a row
+  update `WHERE status = 'active'`), and a trigger spends or voids it on any
+  other admission, transfer, refund / release / void or secret change.
+  Door phones get only its hash (`p` in the door keys). A print is never
+  replayed from an Idempotency-Key; print answers are `no-store`, the HTML
+  page has no script and a `default-src 'none'` CSP. Races:
+  `tests/exos/race_print_codes.sh`.
+- **`X-Exos-Org`** (`exos_api_token_auth_org`, service role): a personal
+  access token may act in another org only while its user is an active
+  member there, at the role there (the same narrowing as a token made in
+  that org). OAuth tokens never switch (consent was for one org); an org API
+  key naming another org is refused. The token's revocation still follows
+  its home org (leaving the home org revokes it everywhere).
+- **`exos-tixel-webhook`** is public (no JWT). The secret in `X-Secret` is
+  compared in constant time against `EXOS_TIXEL_WEBHOOK_SECRETS` (an env
+  var, 16+ characters a secret, one org each); unset = 404. It writes only
+  through `_exos_tixel_ingest` (service role): a waitlist row for the one
+  upcoming published event of that org with the Tixel title, never consent,
+  never another org. 32 KB bodies, 120 a minute per org; nothing is sent to
+  Tixel.
+
+### Search path
 ### Search path
 
 `exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function

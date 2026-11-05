@@ -51,6 +51,16 @@ expiry 30 / 90 / 365 days or none. Shown once (`exos_pat_` + 43 characters); onl
 13-character prefix are kept. A confirmed email is required; at most 25 live tokens per user. Revoke in the same
 panel, or with the token itself: `DELETE /v1/personal-access-tokens/current`.
 
+### Acting in another organization (`X-Exos-Org`)
+
+Mig `20261105120000`. A personal access token works in its own organization, and in any other organization its
+user is an active member of when the request names it: `X-Exos-Org: <organization id>`. Every such request is held
+to the user's role **there** (and that organization's role settings), exactly as a token made there would be;
+`GET /v1/me` then shows `credential.home_org_id`. Not a member there (or disabled): 403. Opendate's
+`PUT /team_memberships/{id}/switch` changes its web app's current team; the dashboard's organization picker does that
+here. OAuth access tokens stay in the organization the user approved the app for, and an org API key is its
+organization: either one naming another organization gets 403 (`exos_api_token_auth_org`).
+
 ## OAuth apps
 
 Register at `/developers/apps`: name, homepage, redirect URIs, the scopes the app may ask for, and the type.
@@ -126,7 +136,7 @@ routes are in `docs/api/team.json`: `GET/PATCH /v1/team`, `GET /v1/team/members`
 | `POST /oauth/token` grant_type=password ("Log in") | not built: apps never see a password; use the code flow or a personal token |
 | `POST /personal_access_tokens` | Profile → Developer (`exos_create_personal_token`, signed in) |
 | `DELETE /personal_access_tokens/current` | `DELETE /v1/personal-access-tokens/current` |
-| `GET /team_memberships`, `PUT …/{id}/switch` | `GET /v1/me/memberships`; switching doesn't apply (a token is pinned to one org) |
+| `GET /team_memberships`, `PUT …/{id}/switch` | `GET /v1/me/memberships`; switching: the dashboard's org picker, and `X-Exos-Org` on a personal access token (above) |
 | `GET/PATCH /teams/{id}` | `GET/PATCH /v1/team` |
 | `GET /teams/{id}/team_memberships`, `PATCH/DELETE …/{id}` | `GET /v1/team/members`, `PATCH/DELETE /v1/team/members/:id` |
 | `GET/POST /teams/{id}/invitations`, `DELETE …/{id}` | `GET/POST /v1/team/invitations`, `DELETE /v1/team/invitations/:id` |
