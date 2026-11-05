@@ -9,7 +9,8 @@
 //            current step) with the ticket type's tax, per unit like checkout
 //            (lineTotals, the same math as the SQL line trigger)
 //   tenders  comps cover whole tickets (comp quantity x the unit total); cash
-//            is the rest. A card tender is refused until the terminal is wired.
+//            is the rest. A card pays the whole sale on a Stripe Terminal
+//            reader (mig 20261107130000; no comps in a card sale).
 //   void     same night (12 hours) and before any scan: the seller or an
 //            owner / manager. After that: a refund, owner / manager; after a
 //            scan only with their override.
@@ -19,8 +20,33 @@ import { lineTotals, type PosTaxRule } from './totals.ts';
 /** How long after the sale a void is allowed ("same night"). Same as the SQL. */
 export const WALKUP_VOID_WINDOW_HOURS = 12;
 
-/** The answer to a card tender at the door until Stripe Terminal is wired. */
+/** The answer to a card tender at the door while card at the door is off (EXOS_POS_CARD) or has no reader. */
 export const WALKUP_CARD_MESSAGE = "Card at the door isn't connected yet: take cash, or comp it.";
+
+// Card at the door (mig 20261107130000): the Sell tab polls the sale while the
+// guest is at the reader. The reservation is 5 minutes; stop asking a little
+// after it (the server cancels anything the reader didn't finish).
+export const CARD_POLL_MS = 2000;
+export const CARD_POLL_GIVE_UP_MS = 6 * 60_000;
+
+export type CardSaleState = 'starting' | 'waiting' | 'succeeded' | 'declined' | 'canceled' | 'refunded';
+
+/** What the door screen says while a card sale is under way, and after. */
+export function cardStateText(state: CardSaleState, declineCode?: string | null): string {
+  switch (state) {
+    case 'starting': return 'Sending to the reader…';
+    case 'waiting': return 'Tap, insert or swipe on the reader.';
+    case 'succeeded': return 'Paid.';
+    case 'refunded': return "The card was charged but the tickets couldn't be issued: it was refunded in full.";
+    case 'canceled': return 'Cancelled: nothing was charged.';
+    case 'declined': return declineCode ? `Declined (${declineCode.replace(/_/g, ' ')}): nothing was charged.` : 'Declined: nothing was charged.';
+  }
+}
+
+/** A finished card sale (stop polling). */
+export function cardStateDone(state: CardSaleState): boolean {
+  return state === 'succeeded' || state === 'declined' || state === 'canceled' || state === 'refunded';
+}
 
 export type WalkupTender = 'cash' | 'comp' | 'card';
 

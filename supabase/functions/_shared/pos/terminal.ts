@@ -1,10 +1,10 @@
 // Venue POS: the card reader, as an interface. NOTHING HERE TALKS TO STRIPE.
 //
-// Stripe Terminal is not wired (docs/pos.md). This file defines what the POS
-// needs from a reader so the rest can be built and tested now:
-//   PaymentTerminal     the contract a real Stripe Terminal adapter will meet
+// This file defines what the POS needs from a reader:
+//   PaymentTerminal     the contract; the Stripe Terminal adapter is
+//                       StripeTerminal in ./stripeTerminal.ts (mig 20261107130000)
 //   FakeTerminal        deterministic, scripted, in-memory: for tests and demos
-//   NotWiredTerminal    what production gets today: every call refuses
+//   NotWiredTerminal    what exos-pos uses while EXOS_POS_CARD is off: every call refuses
 //
 // NO CARD DATA crosses this interface. The reader handles the card (card
 // present, EMV / tap); Exos only ever sees an opaque reference (a Stripe
@@ -21,7 +21,11 @@ export interface CollectRequest {
   orderId: string;
 }
 
-export type CollectStatus = 'succeeded' | 'declined' | 'canceled' | 'offline_queued';
+/**
+ * 'processing': the payment is on the reader (Stripe Terminal's server-driven
+ * readers and the SDK answer later; poll, or wait for the webhook).
+ */
+export type CollectStatus = 'succeeded' | 'declined' | 'canceled' | 'offline_queued' | 'processing';
 
 export interface CollectResult {
   status: CollectStatus;
@@ -31,6 +35,11 @@ export interface CollectResult {
   tipCents: number;
   /** Processor decline code, for the screen. Never card data. */
   declineCode?: string;
+  /**
+   * For a native Terminal SDK (Tap to Pay) only: the PaymentIntent's client
+   * secret, which lets that SDK collect THIS payment. Not card data.
+   */
+  clientSecret?: string;
 }
 
 export interface RefundResult {
