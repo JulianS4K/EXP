@@ -1,6 +1,17 @@
 # Kanban Board / Product Roadmap
 
-## Prod state vs this repo (updated 2026-11-04)
+## Prod state vs this repo (updated 2026-11-05)
+
+- **2026-11-05 rollout (from branch `ccr-3d973f5c-eulhen`, ahead of main):** `scripts/rollout-prod.sh` applied all
+  53 migrations in its list (`20261027100000_exos_fee_rules` through `20261106140000_exos_buyer_geo_genre`) and
+  deployed all 41 edge functions with the Supabase CLI (3.0.0 via npx, Management API, no `DB_URL`; the
+  FIRST group `stripe-webhook`, `exos-checkout`, `exos-refund`, `exos-reconcile-checkouts`,
+  `exos-reconcile-stripe` went first). `scripts/verify-prod.sh db`: PASS 119, WARN 9 (settings rows absent, so
+  the defaults apply), FAIL 0. Crons: the same 14 are active as before; the 12 new ones were all created inactive
+  (28 `exos%` jobs now). Not run yet: `verify-prod.sh http` (needs `SUPABASE_URL` + `SUPABASE_ANON_KEY`).
+  The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
+  migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
+  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.
 
 - **DB:** every migration on main is applied to prod, through `20261019120000_exos_door_roster_wallet_delta`
   (checked against `schema_migrations`, 2026-11-04). Also applied, ahead of main: `20261021174000` /

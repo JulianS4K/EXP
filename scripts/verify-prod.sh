@@ -5,7 +5,10 @@
 #   SUPABASE_URL='https://<ref>.supabase.co' SUPABASE_ANON_KEY='eyJ…' \
 #   bash scripts/verify-prod.sh [db|http|all]          # default: all
 #
-# db   needs DB_URL (same "Session pooler" string as rollout-prod.sh).
+# db   needs DB_URL (same "Session pooler" string as rollout-prod.sh), or, on a
+#      host that can't reach Postgres on 5432, SUPABASE_ACCESS_TOKEN alone: the
+#      queries then go through the Management API over HTTPS (needs jq), still
+#      read-only (see q / q_anon below).
 # http needs SUPABASE_URL and SUPABASE_ANON_KEY (the public anon key).
 #
 # It only reads. Every SQL statement runs in a session with
@@ -67,14 +70,46 @@ SEP=$'\x1f'
 add() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$(printf '%s' "$4" | tr '\t\n' '  ')" >>"$RES"; }
 say() { printf '%s\n' "$*" >&2; }
 
+REF=hzrizjeaxlqcxfrtczpq
+API="https://api.supabase.com/v1/projects/$REF/database/query"
+
+# api_q SQL [PRELUDE]: Management API fallback when DB_URL is unset. Runs SQL in
+# BEGIN READ ONLY; [PRELUDE] ... ROLLBACK and prints the rows of the last
+# statement that returns rows, like psql -At -F "$SEP" (booleans t/f, NULL
+# empty). Errors go to $TMP/psql.err, as psql's do.
+# Rows come back as JSON objects, so two output columns with the same name
+# collapse into one: give every column of a multi-column query its own alias.
+api_q() {
+  local out code
+  out=$(jq -n --arg q "begin read only; set local statement_timeout = '30s'; ${2:-}
+$1
+; rollback;" '{query: $q}' \
+        | curl -sS -X POST "$API" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" --data-binary @- -w $'\n%{http_code}' 2>"$TMP/psql.err")
+  code="${out##*$'\n'}"; out="${out%$'\n'*}"
+  if [[ "$code" != 2* ]]; then
+    printf 'Management API HTTP %s: %s\n' "$code" "$(printf '%s' "$out" | jq -r '.message? // .' 2>/dev/null || printf '%s' "$out")" >>"$TMP/psql.err"
+    return 1
+  fi
+  printf '%s' "$out" | jq -r --arg sep "$SEP" '.[] | [.[] |
+      if . == null then "" elif . == true then "t" elif . == false then "f"
+      elif type == "string" then . else tojson end] | join($sep)'
+}
+
 # q SQL: one read-only session, unaligned, field separator 0x1f.
+# Without DB_URL: the API's default role inside BEGIN READ ONLY ... ROLLBACK, so
+# Postgres refuses any write. (The API's read_only mode would use a role that
+# can't execute the exos functions the smoke checks call.)
 q() {
+  if [ -z "${DB_URL:-}" ]; then api_q "$1"; return; fi
   psql "$DB_URL" -X -q -At -F "$SEP" -v ON_ERROR_STOP=1 \
     -c "set default_transaction_read_only = on" -c "set statement_timeout = '30s'" \
     -c "$1" 2>"$TMP/psql.err"
 }
 # q_anon SQL: the same, inside a read-only transaction as role anon.
+# Without DB_URL: as q, plus SET LOCAL ROLE anon inside the transaction.
 q_anon() {
+  if [ -z "${DB_URL:-}" ]; then api_q "$1" "set local role anon;"; return; fi
   psql "$DB_URL" -X -q -At -F "$SEP" -v ON_ERROR_STOP=1 \
     -c "set default_transaction_read_only = on" -c "set statement_timeout = '30s'" \
     -c "begin read only" -c "set local role anon" -c "$1" -c "commit" 2>"$TMP/psql.err"
@@ -197,9 +232,12 @@ http_checks() {
 # DB sections
 # ---------------------------------------------------------------------------
 db_checks() {
-  if [ -z "${DB_URL:-}" ]; then add FAIL "1 migrations" "config" "set DB_URL for the database checks"; return; fi
+  if [ -z "${DB_URL:-}" ] && [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+    add FAIL "1 migrations" "config" "set DB_URL (or SUPABASE_ACCESS_TOKEN for the Management API) for the database checks"; return
+  fi
+  [ -n "${DB_URL:-}" ] || say "db: no DB_URL, querying through the Management API ($API)"
   if [ "$(q 'select 1')" != 1 ]; then
-    add FAIL "1 migrations" "connect" "can't run a query on DB_URL: $(pgerr)"; return
+    add FAIL "1 migrations" "connect" "can't run a query: $(pgerr)"; return
   fi
   local required; required=$(required_migrations)
   say "db: connected ($(q "select current_database()||' as '||current_user"))"
@@ -248,8 +286,8 @@ db_checks() {
     add WARN "2 objects" "derive" "no CREATE TABLE/FUNCTION/VIEW found in the required migrations"
   else
     if ! q "with o(v, kind, sch, name) as (values ${values#,})
-            select v, count(*), count(*) filter (where not ok),
-                   coalesce(string_agg(kind || ' ' || sch || '.' || name, ', ' order by name) filter (where not ok), '')
+            select v, count(*) as total, count(*) filter (where not ok) as bad,
+                   coalesce(string_agg(kind || ' ' || sch || '.' || name, ', ' order by name) filter (where not ok), '') as missing
               from (select o.*, case when kind = 'function'
                                      then exists (select 1 from pg_proc p join pg_namespace s on s.oid = p.pronamespace
                                                    where s.nspname = o.sch and p.proname = o.name)
@@ -407,7 +445,10 @@ db_checks() {
 
 # ---------------------------------------------------------------------------
 command -v curl >/dev/null || [ "$MODE" = db ] || { echo "verify-prod: needs curl" >&2; exit 2; }
-command -v psql >/dev/null || [ "$MODE" = http ] || { echo "verify-prod: needs psql" >&2; exit 2; }
+if [ "$MODE" != http ]; then
+  if [ -n "${DB_URL:-}" ]; then command -v psql >/dev/null || { echo "verify-prod: needs psql" >&2; exit 2; }
+  else command -v jq >/dev/null && command -v curl >/dev/null || { echo "verify-prod: the Management API path needs jq and curl" >&2; exit 2; }; fi
+fi
 [ "$MODE" = db ] || http_checks
 [ "$MODE" = http ] || db_checks
 
