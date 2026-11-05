@@ -458,7 +458,9 @@ export async function refundUnfulfilled(db: CardDb, stripe: TerminalStripe, orde
     metadata: { [POS_METADATA_KEY]: orderId, exos_auto: 'fulfillment_failed' },
   }, { idempotencyKey: autoRefundIdempotencyKey(orderId) });
   const status = r.status === 'succeeded' || r.status === 'failed' || r.status === 'canceled' ? r.status : 'pending';
-  await call(db, '_exos_pos_card_refund_record', { p_order: orderId, p_refund_ref: r.id, p_status: status, p_error: r.failure_reason ?? null });
+  await call(db, '_exos_pos_card_refund_record', {
+    p_order: orderId, p_pi: pi, p_refund_ref: r.id, p_status: status, p_error: r.failure_reason ?? null,
+  });
   return { id: r.id, status };
 }
 
@@ -599,7 +601,9 @@ export async function refundCardSale(
       return { id: null, status: 'pending', error: 'the card refund will be retried' };
     }
   }
-  await call(db, '_exos_pos_card_refund_record', { p_order: orderId, p_refund_ref: id, p_status: status, p_error: error ?? null });
+  await call(db, '_exos_pos_card_refund_record', {
+    p_order: orderId, p_pi: card.payment_intent, p_refund_ref: id, p_status: status, p_error: error ?? null,
+  });
   return { id, status, ...(error ? { error } : {}) };
 }
 
@@ -627,13 +631,18 @@ export function posOrderOf(pi: { metadata?: Record<string, string> | null } | nu
  * (authorized -> captured -> tickets) or gives its places back (declined /
  * cancelled). Idempotent: the database gates every step on the order's state,
  * so a replayed event, or one arriving after the door finished, changes
- * nothing. Throws on a transient error (the webhook answers 500 and Stripe
- * retries). { handled: false } for a PaymentIntent that isn't a door sale.
+ * nothing. Bound to what Exos recorded: the event's PaymentIntent must be
+ * the order's (metadata alone never picks an order), and a connected
+ * account's event (event.account) is never a door sale: door PaymentIntents
+ * live on the platform account. Throws on a transient error (the webhook
+ * answers 500 and Stripe retries); an unmatched event is { handled: true,
+ * ignored } (a 200, no retries). { handled: false } when it isn't a door sale.
  */
 export async function handlePosIntentEvent(
-  db: CardDb, stripe: TerminalStripe, event: { id: string; type: string; data: { object: unknown } },
-): Promise<{ handled: boolean; result?: AdvanceResult }> {
+  db: CardDb, stripe: TerminalStripe, event: { id: string; type: string; account?: string | null; data: { object: unknown } },
+): Promise<{ handled: boolean; ignored?: string; result?: AdvanceResult }> {
   if (!POS_INTENT_EVENTS.has(event.type)) return { handled: false };
+  if (event.account) return { handled: false, ignored: 'connected-account event' };
   const pi = event.data.object as IntentLike;
   const orderId = posOrderOf(pi);
   if (!orderId || typeof pi?.id !== 'string') return { handled: false };
@@ -650,8 +659,9 @@ export async function handlePosIntentEvent(
       result = await advanceCard(db, stripe, orderId, { ...cur, metadata: pi.metadata }, { via: 'webhook', eventId: event.id });
     }
   } catch (e) {
-    // An order the database doesn't know (deleted, another environment): nothing to do.
-    if (e instanceof CardDbError && e.db.code === 'P0002') return { handled: true };
+    // Not a recorded door PaymentIntent (another environment, a deleted order,
+    // metadata pointing at an order this PaymentIntent isn't): nothing to do.
+    if (e instanceof CardDbError && e.db.code === 'P0002') return { handled: true, ignored: 'payment intent not recorded for the order' };
     throw e;
   }
   return { handled: true, result };

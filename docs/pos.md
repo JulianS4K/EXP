@@ -275,7 +275,10 @@ platform account** (not the connected account), one Location per org and mode
    mid-payment still completes or releases the sale. Every step is gated on the order's state in SQL (the order
    lock; the card tender keyed on the PaymentIntent), so the door and the webhook racing, a replayed event, or one
    arriving after the door finished, make one set of tickets (`race_pos_terminal.sh`). Stripe has no event-id
-   dedupe table in Exos; this state gate is the dedupe, as for checkout sessions.
+   dedupe table in Exos; this state gate is the dedupe, as for checkout sessions. The metadata only names a
+   candidate order: every webhook step is bound to the PaymentIntent recorded for that order (and a refund
+   answer to the refund id already stored), and a connected account's event is ignored (door PaymentIntents are
+   the platform's). An unmatched event is logged and answered 200.
 6. **Void / refund**: the walk-up rules (`_exos_pos_reverse`: the seller same night before a scan, an owner or
    manager after, the override after a scan, nothing after the final settlement), then the card part on the
    `exos_pos_reversals` row (`card_cents`, `card_payment_intent`, `card_refund_status` pending) and a Stripe
