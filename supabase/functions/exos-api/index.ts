@@ -169,6 +169,9 @@ import { BOX_OFFICE_ROUTES, handleBoxOffice, USER_TOKEN_WRITES } from "./boxOffi
 import { handleLocation, LOCATION_ROUTES, LocationError } from "./promoterEvents.ts";
 // claude/exos-dice-import (mig 20261106100000).
 import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
+// claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
+import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
+import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
@@ -180,10 +183,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 
-const EVENT_LIST_COLS = "id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at";
+// category / genres / subgenres: claude/exos-buyer-geo-genre (mig 20261106140000).
+const EVENT_LIST_COLS = "id, name, slug, status, starts_at, currency, tickets_sold, total_tickets, created_at, " +
+  "category, genres, subgenres";
 const EVENT_COLS =
   "id, name, slug, status, starts_at, doors_at, ends_at, timezone, currency, venue_name, venue_location, " +
-  "exos_venue_id, exos_room_id, hold_id, tickets_sold, total_tickets, created_at";
+  "exos_venue_id, exos_room_id, hold_id, tickets_sold, total_tickets, created_at, category, genres, subgenres";
 // Routes that answer 201 Created.
 const CREATED = new Set([
   "create-venue", "create-room", "create-hold", "convert-hold", "create-show-activity", "create-event-note",
@@ -419,6 +424,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof OrgAccessError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof LocationError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof DiceApiError) return json({ error: e.message, ...e.extra }, e.status);
+    if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -576,6 +582,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   if (LOCATION_ROUTES.has(route.id)) {
     return await handleLocation(route, { sb, orgId, cred: c.cred, params: c.params, q: c.q, body: c.body });
   }
+  // claude/exos-buyer-geo-genre (mig 20261106140000): buyer locations, genres.
+  if (GEO_GENRE_ROUTES.has(route.id)) return await handleGeoGenre(route, { sb, orgId, params: c.params, q: c.q });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
@@ -632,6 +640,15 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       if (before) q = q.lt("starts_at", before);
       const tagId = c.q.get("tag_id");
       if (tagId !== null) q = q.in("id", await taggedIds(c, "event", tagId));
+      // ?genre= / ?genres= (mig 20261106140000): any of them, any case.
+      let genres: string[] | null;
+      try {
+        genres = genreFilter(c.q);
+      } catch (e) {
+        if (e instanceof GenreParamError) throw new ApiError(400, `${e.message}.`);
+        throw e;
+      }
+      if (genres) q = q.in("id", await eventIdsByGenre(sb, orgId, genres));
       return paged(await q.order("starts_at", { ascending: false }).order("id").range(page.from, page.to), page);
     }
 
@@ -758,7 +775,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
         .eq("org_id", orgId).eq("session_id", sid).maybeSingle();
       if (error) throw error;
       if (!order) throw new ApiError(404, "order not found");
-      const [tickets, addons, refunds] = await Promise.all([
+      const [tickets, addons, refunds, location] = await Promise.all([
         withoutMissing(TICKET_SEAT_COLS, (extra) =>
           sb.from("exos_tickets").select("id, tier_id, tier_name, attendee_name, owner_email, status, price_paid, check_in_at" + extra)
             .eq("org_id", orgId).eq("order_ref", sid).order("created_at")),
@@ -766,9 +783,15 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           .eq("org_id", orgId).eq("order_ref", sid).order("created_at"),
         sb.from("exos_order_refunds").select("id, amount_cents, currency, status, reason, is_partial, created_at")
           .eq("org_id", orgId).eq("session_id", sid).order("created_at"),
+        orderLocation(sb, orgId, sid),
       ]);
       for (const r of [tickets, addons, refunds]) if (r.error) throw r.error;
-      return { data: { ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data } };
+      return {
+        data: {
+          ...(order as unknown as Record<string, unknown>), tickets: tickets.data, add_ons: addons.data, refunds: refunds.data,
+          buyer_location: location,
+        },
+      };
     }
 
     case "list-invoices":

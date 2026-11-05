@@ -76,6 +76,7 @@ MIGRATIONS=(
   20261105150000_exos_wave3_integration
   20261105160000_exos_token_lineage
   20261106100000_exos_dice_import   # claude/exos-dice-import; its hourly cron is created inactive
+  20261106140000_exos_buyer_geo_genre
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

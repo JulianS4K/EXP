@@ -779,6 +779,13 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-dice-import', method: 'GET', auth: K, path: '/dice-import', scope: 'org:admin', paged: false, aliases: ['/dice_import'] },
   { id: 'list-dice-import-runs', method: 'GET', auth: K, path: '/dice-import/runs', scope: 'org:admin', paged: true, aliases: ['/dice_import/runs'] },
   { id: 'start-dice-import-sync', method: 'POST', auth: K, path: '/dice-import/sync', scope: 'org:admin', paged: false, aliases: ['/dice_import/sync'] },
+  // claude/exos-buyer-geo-genre (mig 20261106140000, exos-api/buyerGeoGenre.ts):
+  // where buyers are (DICE Order.ipCity / ipCountry, from the billing
+  // address, never an IP) and the genres in use (DICE genreTypes).
+  { id: 'get-event-buyer-locations', method: 'GET', auth: K, path: '/events/:id/buyer-locations', scope: 'orders:read', paged: false },
+  { id: 'get-buyer-locations', method: 'GET', auth: K, path: '/buyer-locations', scope: 'orders:read', paged: false },
+  { id: 'list-genres', method: 'GET', auth: K, path: '/genres', scope: 'events:read', paged: false },
+  { id: 'public-discovery-genres', method: 'GET', auth: A, path: '/public/discovery/genres', scope: null, paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

@@ -34,6 +34,7 @@ the details with counsel.)
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
 - [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
       delayed methods would outlive the 30-minute seat hold.
+- [ ] Stripe Checkout must collect the billing address: `exos-checkout` sets `billing_address_collection: "auto"` (country and postal code; never `"required"`, which adds a full address form), and stripe-webhook stores country / region / city / postal code for "Where buyers are" (mig 20261106140000).
 - [ ] Apple Pay and Google Pay switched on (no code: `payment_method_types: ["card"]` already
       carries both wallets). In the live Dashboard: Settings → Payment methods → Apple Pay and
       Google Pay on. The event-page checkout runs on `checkout.stripe.com`, so nothing else is needed

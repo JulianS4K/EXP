@@ -1103,6 +1103,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // pool, and a late webhook still finds its seat.
       expires_at: stripeExpiresAt,
       customer_email: buyerEmail || undefined,
+      billing_address_collection: "auto", // buyer location (mig 20261106140000): country + postal code, never "required"
       metadata: {
         exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
         exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
