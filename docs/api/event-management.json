@@ -935,7 +935,7 @@
       "method": "GET",
       "path": "/v1/events/:id/add-ons/:addon",
       "summary": "Get an add-on",
-      "description": "One add-on of the event (parking, merch, …).",
+      "description": "One add-on of the event (parking, merch, …). `separate_access_barcode`: each unit sold gets its own entry code, scanned at a check-in list that admits add-ons (mig 20261107110000).",
       "scope": "events:read",
       "parameters": [
         {
@@ -970,7 +970,8 @@
               "sold": 0,
               "max_per_order": 2,
               "visibility": "public",
-              "sort_order": 0
+              "sort_order": 0,
+              "separate_access_barcode": false
             }
           }
         },
@@ -1000,7 +1001,7 @@
       "method": "POST",
       "path": "/v1/events/:id/add-ons",
       "summary": "Create an add-on",
-      "description": "Adds an add-on. Writable fields: name (required), description, price (major unit, 0 or more), capacity (required, 1 or more; an update may set 0 to close it), max_per_order, visibility (public, hidden), image_url, sort_order.",
+      "description": "Adds an add-on. Writable fields: name (required), description, price (major unit, 0 or more), capacity (required, 1 or more; an update may set 0 to close it), max_per_order, visibility (public, hidden), image_url, sort_order. `separate_access_barcode`: each unit sold gets its own entry code, scanned at a check-in list that admits add-ons (mig 20261107110000).",
       "scope": "events:write",
       "parameters": [
         {
@@ -1016,7 +1017,7 @@
           "location": "body",
           "type": "object",
           "required": true,
-          "description": "The fields (or send them unwrapped).",
+          "description": "The fields (or send them unwrapped). `separate_access_barcode` (boolean, default false): each unit sold gets its own rotating entry code (A-…), scanned at a check-in list that admits add-ons (DICE Extra.hasSeparateAccessBarcode).",
           "example": {
             "name": "Parking",
             "price": 15,
@@ -1037,7 +1038,8 @@
           "name": "Parking",
           "price": 15,
           "capacity": 40,
-          "max_per_order": 2
+          "max_per_order": 2,
+          "separate_access_barcode": false
         }
       },
       "responses": [
@@ -1055,7 +1057,8 @@
               "sold": 0,
               "max_per_order": 2,
               "visibility": "public",
-              "sort_order": 0
+              "sort_order": 0,
+              "separate_access_barcode": false
             }
           }
         },
@@ -1092,7 +1095,7 @@
       "method": "PATCH",
       "path": "/v1/events/:id/add-ons/:addon",
       "summary": "Update an add-on",
-      "description": "Changes the given fields (same as Create an add-on).",
+      "description": "Changes the given fields (same as Create an add-on). `separate_access_barcode`: each unit sold gets its own entry code, scanned at a check-in list that admits add-ons (mig 20261107110000).",
       "scope": "events:write",
       "parameters": [
         {
@@ -1116,7 +1119,7 @@
           "location": "body",
           "type": "object",
           "required": true,
-          "description": "The fields to change.",
+          "description": "The fields to change. `separate_access_barcode` (boolean, default false): each unit sold gets its own rotating entry code (A-…), scanned at a check-in list that admits add-ons (DICE Extra.hasSeparateAccessBarcode).",
           "example": {
             "price": 12
           }
@@ -1150,7 +1153,8 @@
               "sold": 0,
               "max_per_order": 2,
               "visibility": "public",
-              "sort_order": 0
+              "sort_order": 0,
+              "separate_access_barcode": false
             }
           }
         },

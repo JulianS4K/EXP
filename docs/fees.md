@@ -81,6 +81,13 @@ item (ticket / add-on / order), unit and quantity, amount and whether it was tax
 deploy (no snapshot) gets its absorbed fees computed from the current rules and the price-disclosure lines
 (`source = 'rules'`); nothing passed on can have been charged without a snapshot.
 
+**Fee changes after the sale** (mig 20261107110000, DICE's Adjustment): `exos_fee_adjustments`, append-only, one row per
+change with a reason, the signed `fees_change_cents`, the actor and `processed_at`. A refund adds the buyer-fee part of
+the money it returned (passed-on fees x refunded / paid, cumulative per order, so a retry or a second partial refund
+never double-counts; a refund that fails later adds the reversal); finance adds manual changes with a note (Orders →
+Fees). `exos_order_fees` itself is still never rewritten, and logging moves no money. The settlement inputs carry the
+totals (`fee_adjustments`); the API reads them (docs/api/fee-adjustments.json).
+
 ## Who can do what
 
 - Owners and managers (and platform admins) write org rules, event rules and event settings; finance reads them and
@@ -97,8 +104,9 @@ deploy (no snapshot) gets its absorbed fees computed from the current rules and 
 - **Partner API, box office (POS).** `exos-api` returns a tier's base `price` (not an all-in price), and the door
   POS (`_shared/pos/totals.ts`) still prices with `allInCents(unit, tax)` and no fees: whether passed-on fees apply
   at the door is an open call. The MCP tools price all-in with the fees (`withPublicTierFees` in exos-mcp).
-- **Refunds.** A refund returns what the buyer paid (fees included); `exos_order_fees` isn't reversed on refund yet.
-  Settlements should net refunded sessions out until it is.
+- **Refunds.** A refund returns what the buyer paid (fees included); `exos_order_fees` isn't reversed on refund. The
+  fee log records the buyer-fee part of each refund, and settlements prorate fees by the share of the order still
+  valid, so neither double-counts; the settlement's fee lines don't read the log yet.
 - **Saved events / series cards** price from `event.price` without tiers (as before, also without tax).
 
 ## Gift cards and donations

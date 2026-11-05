@@ -8,12 +8,20 @@
 // checkout, staff fill it at the door), archive ("delete": answers are kept)
 // and restore, and a live preview of what buyers see. A question with answers
 // keeps its type and per order / per ticket (the server refuses a change).
+//
+// "Show only if…" (mig 20261107110000): a question can depend on a choice or
+// checkbox question of the event (per order; or, for a per-ticket question,
+// per ticket too) and is asked only when that one is answered with one of the
+// picked options (a checkbox: when ticked). The builder checks what the
+// server checks (conditionProblem); a parent with questions depending on it
+// can't be archived until they are changed.
 
 import { useEffect, useState } from 'react';
 import { ArrowDown, ArrowUp, Archive, Eye, EyeOff, HelpCircle, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  CHOICE_KINDS, QUESTION_KINDS, questionDefProblem, type QuestionDef, type QuestionKind, type QuestionScope,
+  CHOICE_KINDS, CONDITION_PARENT_KINDS, QUESTION_KINDS, conditionProblem, questionDefProblem, type QuestionDef, type QuestionKind,
+  type QuestionScope,
 } from '../../supabase/functions/_shared/questions.ts';
 import {
   archiveEventQuestion, draftProblems, EMPTY_DRAFT, listEventQuestions, reorderEventQuestions, saveEventQuestion,
@@ -42,11 +50,15 @@ interface Draft {
   max_value: string;
   hidden: boolean;
   hasAnswers: boolean;
+  /** "Show only if": the question it depends on ('' = always asked) and the answers that show it. */
+  parent_question_id: string;
+  parent_values: string[];
 }
 
 const BLANK: Draft = {
   label: '', help_text: '', kind: 'text', optionsText: '', required: false, scope: 'order', tier_ids: [],
   max_length: '', min_choices: '', max_choices: '', min_value: '', max_value: '', hidden: false, hasAnswers: false,
+  parent_question_id: '', parent_values: [],
 };
 
 const inputCls =
@@ -74,7 +86,18 @@ export function draftToQuestion(d: Draft): Partial<QuestionDef> & { hidden: bool
     min_value: d.kind === 'number' ? num(d.min_value) : null,
     max_value: d.kind === 'number' ? num(d.max_value) : null,
     hidden: d.hidden,
+    parent_question_id: d.parent_question_id || null,
+    parent_values: d.parent_question_id ? d.parent_values : null,
   };
+}
+
+/** "only if Size is L or XL" / "only if Photos ok? is ticked". */
+export function conditionText(q: Pick<QuestionDef, 'parent_question_id' | 'parent_values'>, all: readonly QuestionDef[]): string | null {
+  if (!q.parent_question_id) return null;
+  const p = all.find((x) => x.id === q.parent_question_id);
+  if (!p) return 'only if (a question no longer asked)';
+  if (p.kind === 'checkbox') return `only if "${p.label}" is ticked`;
+  return `only if "${p.label}" is ${(q.parent_values ?? []).join(' or ')}`;
 }
 
 function toDraft(q: AdminQuestion): Draft {
@@ -84,6 +107,7 @@ function toDraft(q: AdminQuestion): Draft {
     required: q.required, scope: q.scope, tier_ids: q.tier_ids ?? [], max_length: s(q.max_length),
     min_choices: s(q.min_choices), max_choices: s(q.max_choices), min_value: s(q.min_value), max_value: s(q.max_value),
     hidden: q.hidden, hasAnswers: q.answer_count > 0,
+    parent_question_id: q.parent_question_id ?? '', parent_values: q.parent_values ?? [],
   };
 }
 
@@ -114,7 +138,13 @@ export default function QuestionBuilder({ eventId, tiers }: { eventId: string; t
   const active = rows.filter((r) => !r.archived);
   const archived = rows.filter((r) => r.archived);
   const tierName = (id: string) => tiers.find((t) => t.id === id)?.name ?? 'a removed ticket type';
-  const problem = questionDefProblem(draftToQuestion(draft));
+  const problem = questionDefProblem(draftToQuestion(draft))
+    ?? conditionProblem({ ...draftToQuestion(draft), id: draft.id }, active);
+  // Questions this one may depend on: active choice / checkbox questions, not itself;
+  // a per-order question only on per-order ones.
+  const parentChoices = active.filter((q) => q.id !== draft.id && CONDITION_PARENT_KINDS.includes(q.kind)
+    && (draft.scope === 'ticket' || q.scope === 'order'));
+  const parent = active.find((q) => q.id === draft.parent_question_id);
   const previewTierId = previewTier || tiers[0]?.id || '';
   const previewQs = active.filter((q) => !q.hidden);
   const previewTiers = previewTierId ? [previewTierId, previewTierId] : [];
@@ -177,6 +207,7 @@ export default function QuestionBuilder({ eventId, tiers }: { eventId: string; t
                   {KIND_LABEL[q.kind]} · {q.scope === 'ticket' ? 'each ticket' : 'once per order'}
                   {q.tier_ids && q.tier_ids.length > 0 ? ` · only ${q.tier_ids.map(tierName).join(', ')}` : ''}
                   {q.hidden ? ' · hidden (door only)' : ''}
+                  {q.parent_question_id ? ` · ${conditionText(q, active)}` : ''}
                   {q.answer_count > 0 ? ` · ${q.answer_count} answer${q.answer_count === 1 ? '' : 's'}` : ''}
                 </p>
               </div>
@@ -293,6 +324,34 @@ export default function QuestionBuilder({ eventId, tiers }: { eventId: string; t
                 </label>
               ))}
             </div>
+          </fieldset>
+        )}
+        {parentChoices.length > 0 && (
+          <fieldset className="col-span-2 space-y-2" data-testid="question-condition">
+            <legend className={smallLabel}>Show only if…</legend>
+            <select aria-label="Show only if this question" value={draft.parent_question_id}
+              onChange={(e) => {
+                const next = active.find((q) => q.id === e.target.value);
+                setDraft({ ...draft, parent_question_id: e.target.value, parent_values: next?.kind === 'checkbox' ? ['true'] : [] });
+              }} className={inputCls}>
+              <option value="">Always ask it</option>
+              {parentChoices.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+            </select>
+            {parent && parent.kind === 'checkbox' && (
+              <p className="text-xs text-slate-500 ml-1">Asked when “{parent.label}” is ticked.</p>
+            )}
+            {parent && parent.kind !== 'checkbox' && (
+              <div className="flex flex-wrap gap-x-4 ml-1" role="group" aria-label={`Answers of ${parent.label} that show it`}>
+                {(parent.options ?? []).map((o) => (
+                  <label key={o} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={draft.parent_values.includes(o)}
+                      onChange={(e) => setDraft({ ...draft, parent_values: e.target.checked ? [...draft.parent_values, o] : draft.parent_values.filter((x) => x !== o) })} />
+                    {o}
+                  </label>
+                ))}
+              </div>
+            )}
+            {parent && <p className="text-[11px] text-slate-400 ml-1">Hidden from buyers until then; a hidden question is never required and its answer isn't kept.</p>}
           </fieldset>
         )}
         <label className="flex items-center gap-2 text-sm font-bold text-slate-700">

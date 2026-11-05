@@ -4,6 +4,8 @@
 //                    any column, paged. Row actions: edit the buyer's details
 //                    and the attendee names, resend the receipt, check the
 //                    whole order out at the door, see its edit history
+//                    and its fee changes (mig 20261107110000: the
+//                    append-only log; finance adds a manual change)
 //   Edit history     every change made here or through the API
 //   Recommendations  for one event: similar public events, and fans of the
 //                    org to invite (on the email list, no ticket yet)
@@ -16,7 +18,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ArrowUp, History, LogOut, Mail, Pencil, Printer } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Coins, History, LogOut, Mail, Pencil, Printer } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
@@ -40,6 +42,10 @@ import {
 import { canPrintOrder, printSummary, printWarning } from '../lib/printOrder';
 import type { Event } from '../types';
 import OrderProofQueue from '../components/OrderProofQueue';
+import {
+  FEE_REASON_LABEL, formatFeeChange, listOrderFeeAdjustments, netFeeChange, newAdjustmentKey, parseFeeInput,
+  recordFeeAdjustment, type FeeAdjustment,
+} from '../lib/feeAdjustments';
 
 type Tab = 'orders' | 'history' | 'recs' | 'preview' | 'settings';
 
@@ -138,7 +144,7 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState<OrderRow[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [open, setOpen] = useState<{ id: string; kind: 'edit' | 'receipt' | 'history' } | null>(null);
+  const [open, setOpen] = useState<{ id: string; kind: RowPanel } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [settings, setSettings] = useState<OrderSettings | null>(null);
 
@@ -225,7 +231,8 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
                 <Fragment key={o.sessionId}><OrderRowView o={o} actions={actions} busy={busy === o.sessionId} open={open?.id === o.sessionId ? open.kind : null}
                   onOpen={(kind) => setOpen(open?.id === o.sessionId && open.kind === kind ? null : { id: o.sessionId, kind })}
                   onCheckOut={() => void checkOut(o)} orgId={orgId} settings={settings} onChanged={() => void load()}
-                  onPrint={canPrintOrder(o, perm.edit) ? () => void print(o) : undefined} /></Fragment>
+                  onPrint={canPrintOrder(o, perm.edit) ? () => void print(o) : undefined}
+                  fees={perm.read && FEE_STATUSES.includes(o.status)} /></Fragment>
               );
             })}
             {rows !== null && rows.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">No orders match.</td></tr>}
@@ -238,10 +245,14 @@ function OrdersTab({ orgId, events, perm }: { orgId: string; events: Event[]; pe
   );
 }
 
-function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, settings, onChanged, onPrint }: {
-  o: OrderRow; actions: ReturnType<typeof orderActions>; busy: boolean; open: 'edit' | 'receipt' | 'history' | null;
-  onOpen: (k: 'edit' | 'receipt' | 'history') => void; onCheckOut: () => void; orgId: string; settings: OrderSettings | null;
-  onChanged: () => void; onPrint?: () => void;
+type RowPanel = 'edit' | 'receipt' | 'history' | 'fees';
+/** Orders that were placed: their fees can have changed. */
+const FEE_STATUSES = ['fulfilled', 'partially_refunded', 'refunded'];
+
+function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, settings, onChanged, onPrint, fees }: {
+  o: OrderRow; actions: ReturnType<typeof orderActions>; busy: boolean; open: RowPanel | null;
+  onOpen: (k: RowPanel) => void; onCheckOut: () => void; orgId: string; settings: OrderSettings | null;
+  onChanged: () => void; onPrint?: () => void; fees: boolean;
 }) {
   return (
     <>
@@ -259,6 +270,7 @@ function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, setti
             {actions.includes('check_out') && <button type="button" className={btn} disabled={busy} onClick={onCheckOut}><LogOut size={12} /> Check out</button>}
             {onPrint && <button type="button" className={btn} disabled={busy} onClick={onPrint}><Printer size={12} /> Print</button>}
             {actions.includes('history') && <button type="button" className={btn} aria-expanded={open === 'history'} onClick={() => onOpen('history')}><History size={12} /> History</button>}
+            {fees && <button type="button" className={btn} aria-expanded={open === 'fees'} onClick={() => onOpen('fees')}><Coins size={12} /> Fees</button>}
           </span>
         </td>
       </tr>
@@ -267,6 +279,7 @@ function OrderRowView({ o, actions, busy, open, onOpen, onCheckOut, orgId, setti
           {open === 'edit' && <EditOrder o={o} onSaved={onChanged} />}
           {open === 'receipt' && <ResendReceipt o={o} settings={settings} onSent={onChanged} />}
           {open === 'history' && <HistoryTab orgId={orgId} sessionId={o.sessionId} />}
+          {open === 'fees' && <FeeChanges o={o} />}
         </td></tr>
       )}
     </>
@@ -330,6 +343,69 @@ function EditOrder({ o, onSaved }: { o: OrderRow; onSaved: () => void }) {
         </div>
       )}
       <button type="button" className={btnDark} disabled={busy} onClick={() => void save()}>Save</button>
+    </div>
+  );
+}
+
+// Fee changes on this order (DICE Adjustment): refunds add the buyer-fee part of
+// what they returned; a manual change needs a note. Nothing here is ever edited.
+function FeeChanges({ o }: { o: OrderRow }) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<FeeAdjustment[] | null>(null);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [key, setKey] = useState(newAdjustmentKey);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    listOrderFeeAdjustments(o.sessionId).then(setRows).catch((e) => { setRows([]); toast({ kind: 'error', message: err(e) }); });
+  }, [o.sessionId, toast]);
+  useEffect(load, [load]);
+  const cents = parseFeeInput(amount);
+  const add = async () => {
+    if (cents === null || note.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await recordFeeAdjustment({ sessionId: o.sessionId, cents, note: note.trim(), key });
+      setAmount(''); setNote(''); setKey(newAdjustmentKey());
+      toast({ kind: 'success', message: 'Fee change recorded. No money moves: refund or pay out where you do today.' });
+      load();
+    } catch (e) {
+      toast({ kind: 'error', message: err(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3" data-testid="fee-changes">
+      <p className={label}>Fee changes</p>
+      {rows === null && <p className="text-xs text-slate-400">Loading…</p>}
+      {rows !== null && rows.length === 0 && <p className="text-xs text-slate-500">No fee changes on this order.</p>}
+      {rows !== null && rows.length > 0 && (
+        <table className="w-full text-xs">
+          <thead><tr><th className={th}>When</th><th className={th}>Reason</th><th className={th}>Change</th><th className={th}>Note</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="p-2 whitespace-nowrap">{when(r.processedAt)}</td>
+                <td className="p-2">{FEE_REASON_LABEL[r.reason]}{r.ticketId ? ' · one ticket' : ''}</td>
+                <td className="p-2 whitespace-nowrap font-bold">{formatFeeChange(r.feesChangeCents, r.currency)}</td>
+                <td className="p-2 text-slate-500">{r.note ?? ''}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-slate-200"><td className="p-2" colSpan={2}>Net</td>
+              <td className="p-2 font-black">{formatFeeChange(netFeeChange(rows), rows[0].currency)}</td><td /></tr>
+          </tbody>
+        </table>
+      )}
+      <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); void add(); }}>
+        <div><label className={label} htmlFor={`fa-${o.sessionId}-amt`}>Change (e.g. -1.50)</label>
+          <input id={`fa-${o.sessionId}-amt`} className={`${field} w-32`} inputMode="decimal" value={amount} maxLength={12}
+            aria-invalid={amount !== '' && cents === null ? true : undefined} onChange={(e) => setAmount(e.target.value)} /></div>
+        <div className="flex-1 min-w-[180px]"><label className={label} htmlFor={`fa-${o.sessionId}-note`}>Why</label>
+          <input id={`fa-${o.sessionId}-note`} className={field} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></div>
+        <button type="submit" className={btnDark} disabled={busy || cents === null || note.trim().length < 3}>Record</button>
+      </form>
+      <p className="text-xs text-slate-400">The log is append-only: to undo a change, record the opposite one.</p>
     </div>
   );
 }

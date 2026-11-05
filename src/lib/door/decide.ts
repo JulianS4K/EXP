@@ -31,12 +31,19 @@
 //     offline (or with this ticket's scans still queued on a re-entry list,
 //     which the server hasn't seen yet) the saved list and this device's
 //     marks do.
+//   * Add-on entry codes (A-, mig 20261107110000): an add-on with its own code
+//     scans at a list that admits add-ons, and only there ('tickets-only-list'
+//     at a ticket list or with no list; 'wrong-list' at a list for other
+//     add-ons). A ticket at a list that admits add-on codes only is
+//     'addon-only-list'. The saved list carries the event's passes
+//     (exos_event_addon_passes) as entries with `addon` set.
 //   * The same read twice within DUPLICATE_READ_MS is ignored (camera double
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
 
 import { extractTicketIdFromAny, normalizeCodePrefix } from '../barcode';
 import {
+  addonListRefusal,
   effectiveDirection,
   listAdmitsTier,
   listWindow,
@@ -67,7 +74,7 @@ export interface ParsedDoorCode {
  *  downgrade and fails the signature check. */
 export function parseDoorCode(raw: string, source: DoorSource): ParsedDoorCode {
   const v = normalizeCodePrefix((raw || '').trim());
-  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.includes(':');
+  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.startsWith('A-') && !v.includes(':');
   const id = v ? extractTicketIdFromAny(v) || v : null;
   // Ticket ids are UUIDs: anything over 128 chars can't be one.
   return { raw: v, ticketId: id && id.length <= 128 ? id : null, bare };
@@ -85,6 +92,10 @@ export interface DoorCachedTicket {
   tierId?: string | null;
   /** Last direction per re-entry list (roster list_state + local marks). */
   lists?: ListState;
+  /** An add-on's own entry code, not a ticket (mig 20261107110000). */
+  addon?: boolean;
+  /** The add-on it is for (null: the add-on was deleted). */
+  addonId?: string | null;
 }
 
 export interface DoorGate {
@@ -166,7 +177,11 @@ export type DoorRejectReason =
   /** An exit where the list doesn't allow re-entry (or there is no list). */
   | 'exit-not-allowed'
   /** An exit for a ticket that was never admitted. */
-  | 'not-inside';
+  | 'not-inside'
+  /** An add-on's entry code at a list that scans tickets only (or no list). */
+  | 'tickets-only-list'
+  /** A ticket at a list that scans add-on entry codes only. */
+  | 'addon-only-list';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -268,7 +283,14 @@ function decideOnSavedList(
   const list = input.list ?? null;
   const direction = effectiveDirection(list, input.direction ?? 'entry');
   const named = byName ? { byName: true } : {};
-  if (list && !listAdmitsTier(list, entry.tierId)) return { action: 'reject', ticketId, reason: 'wrong-list' };
+  if (entry.addon) {
+    const refusal = addonListRefusal(list, entry.addonId);
+    if (refusal) return { action: 'reject', ticketId, reason: refusal };
+  } else if (list?.admits === 'addons') {
+    return { action: 'reject', ticketId, reason: 'addon-only-list' };
+  } else if (list && !listAdmitsTier(list, entry.tierId)) {
+    return { action: 'reject', ticketId, reason: 'wrong-list' };
+  }
   if (direction === 'entry' && list && listWindow(list, now) !== 'open') {
     return { action: 'reject', ticketId, reason: 'invalid-time' };
   }

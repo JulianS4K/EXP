@@ -332,7 +332,7 @@
       "method": "GET",
       "path": "/v1/events/:id/add-ons",
       "summary": "List an event's add-ons",
-      "description": "Extras sold with tickets (parking, merch), in display order. `capacity` 0 means closed (nothing sells); there is no unlimited.",
+      "description": "Extras sold with tickets (parking, merch), in display order. `capacity` 0 means closed (nothing sells); there is no unlimited. `separate_access_barcode`: each unit sold gets its own entry code, scanned at a check-in list that admits add-ons (mig 20261107110000).",
       "auth": "api_key",
       "scope": "events:read",
       "parameters": [
@@ -360,7 +360,8 @@
                 "sold": 21,
                 "max_per_order": 2,
                 "visibility": "public",
-                "sort_order": 0
+                "sort_order": 0,
+                "separate_access_barcode": false
               }
             ]
           }
