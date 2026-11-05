@@ -8,7 +8,8 @@
 #   bash scripts/rollout-prod.sh functions       # step 2 (after step 1 is clean)
 #
 # DB_URL: Supabase → the project's "Connect" button → Connection String → "Session pooler".
-# SUPABASE_ACCESS_TOKEN: supabase.com → Account → Access Tokens. Needs the supabase CLI.
+# SUPABASE_ACCESS_TOKEN: supabase.com → Account → Access Tokens. Uses the supabase CLI if
+# installed, else `npx supabase@3.0.0` (2.x and 3.x flags both handled).
 #
 # No DB_URL (e.g. a host that can reach api.supabase.com but not Postgres on 5432)?
 # `migrations` then runs over HTTPS through the Management API
@@ -159,14 +160,22 @@ migrations() {
 
 functions() {
   : "${SUPABASE_ACCESS_TOKEN:?set SUPABASE_ACCESS_TOKEN}"
-  command -v supabase >/dev/null || { echo "install the supabase CLI first"; exit 1; }
+  # The installed CLI, else a pinned one through npx (no global install needed).
+  local sb=(supabase) target=()
+  command -v supabase >/dev/null || sb=(npx --yes supabase@3.0.0)
+  "${sb[@]}" --version >/dev/null 2>&1 || { echo "no supabase CLI (and npx could not fetch one)"; exit 1; }
+  # CLI 3.x targets a project with --remote=<ref> and needs --yes for hosted changes;
+  # 2.x takes --project-ref. Never --prune: it deletes deployed functions not in this repo.
+  if "${sb[@]}" functions deploy --help 2>&1 | grep -q -- '--remote'; then target=(--remote="$REF" --yes)
+  else target=(--project-ref "$REF"); fi
+  echo "supabase CLI: $("${sb[@]}" --version 2>&1 | tail -1) (${target[*]})"
   local all=() rest=()
   for d in supabase/functions/*/; do n=$(basename "$d"); [ "$n" = _shared ] || all+=("$n"); done
   for n in "${all[@]}"; do [[ " ${FIRST[*]} " == *" $n "* ]] || rest+=("$n"); done
   for n in "${FIRST[@]}" "${rest[@]}"; do
     flag=--no-verify-jwt; [[ " ${VERIFY_JWT[*]} " == *" $n "* ]] && flag=
     echo "deploy $n ${flag:-(verify jwt)}"
-    supabase functions deploy "$n" --project-ref "$REF" --use-api $flag
+    "${sb[@]}" functions deploy "$n" "${target[@]}" --use-api $flag
   done
   echo "functions done"
 }
