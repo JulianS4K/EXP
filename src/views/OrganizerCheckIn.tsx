@@ -29,7 +29,7 @@ import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
-import { verifyBarcode, type VerifyResult } from '../lib/barcode';
+import { isAddonCode, verifyBarcode, type VerifyResult } from '../lib/barcode';
 import TicketAnswersCard from '../components/TicketAnswersCard';
 import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
 import {
@@ -107,7 +107,7 @@ import {
   type RosterMarks,
   type RosterProtection,
 } from '../lib/door/roster';
-import { fetchDoorEvent, pingServer } from '../lib/door/api';
+import { fetchAddonRoster, fetchDoorEvent, pingServer } from '../lib/door/api';
 // timed entry (mig 20261030150000): "Admit anyway" outside a slot's entry window.
 import { admitOutsideWindow } from '../lib/seriesTimedApi';
 import { entryWindowMessage } from '../lib/slots';
@@ -180,6 +180,9 @@ const REFUSAL_TEXT: Record<string, string> = {
   // Printed tickets (mig 20261105120000, docs/wallet.md "Printed tickets").
   printed: 'This ticket was printed, so only the paper gets in. Scan the printed ticket, or the box office can void the paper.',
   'print-code-used': 'This printed ticket was already used. A paper ticket admits once.',
+  // Add-on entry codes (mig 20261107110000).
+  'tickets-only-list': "This is an add-on's own entry code (a VIP lounge, a merch pickup). It scans at that add-on's check-in list, not here. Switch the list if this device covers it.",
+  'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -785,6 +788,17 @@ export default function OrganizerCheckIn() {
         // ticket's door keys so the offline HMAC check works.
         roster = buildRoster(await listEventTicketsForRegistry(eventId));
       }
+      // Add-on entry codes (mig 20261107110000): saved with the tickets so an
+      // A- code is checked offline too. A failed read keeps the last ones.
+      const withPasses: Record<string, OfflineTicketEntry> = { ...roster };
+      try {
+        Object.assign(withPasses, await fetchAddonRoster(eventId));
+      } catch (err) {
+        console.warn('add-on entry codes unavailable', err);
+        const before: Record<string, OfflineTicketEntry> = rosterSyncRef.current?.base ?? {};
+        for (const k of Object.keys(before)) if (before[k].addon && !withPasses[k]) withPasses[k] = before[k];
+      }
+      roster = withPasses;
       // The page moved to another event while this ran: drop the result.
       if (eventIdRef.current !== eventId) return null;
       const count = Object.keys(roster).length;
@@ -1056,7 +1070,8 @@ export default function OrganizerCheckIn() {
       return;
     }
     // The list changed since the header was saved (deleted, re-tiered): pick it up.
-    if (result.reason === 'unknown-list' || result.reason === 'wrong-list' || result.reason === 'invalid-time') {
+    if (result.reason === 'unknown-list' || result.reason === 'wrong-list' || result.reason === 'invalid-time'
+        || result.reason === 'tickets-only-list' || result.reason === 'addon-only-list') {
       void loadEventHeader({ quiet: true });
     }
     // The server is the authority: bring the saved list in line with it.
@@ -1201,6 +1216,8 @@ export default function OrganizerCheckIn() {
         }
         return;
       case 'wrong-list':
+      case 'tickets-only-list':
+      case 'addon-only-list':
       case 'invalid-time':
       case 'exit-not-allowed':
       case 'not-inside':
@@ -1392,7 +1409,8 @@ export default function OrganizerCheckIn() {
       setStatus('searching');
       try {
         let scanTicket: ScanTicket | null = null;
-        if (!cached) {
+        // An add-on's entry code (A-) isn't a ticket: the check-in RPC reads it.
+        if (!cached && !isAddonCode(raw)) {
           // Staff-gated read. null when the ticket doesn't exist OR the caller
           // isn't staff of its org — both are "not a valid ticket for this door".
           scanTicket = await withDeadline(() => getTicketForScan(ticketId), DOOR_REQUEST_TIMEOUT_MS);
@@ -1455,8 +1473,9 @@ export default function OrganizerCheckIn() {
           showRefusal(result, ticketId, who, src);
           return;
         }
-        admitted(scanTicket ?? ({ id: ticketId, tierName: cached?.tier } as Ticket), who, result.reason === 'test-scan', false,
-          result.reason === 'checked-out' ? 'exit' : 'entry');
+        const addonName = (result as CheckInResult & { addon_name?: string | null }).addon_name;
+        admitted(scanTicket ?? ({ id: ticketId, tierName: addonName ?? cached?.tier } as Ticket), addonName && !who ? addonName : who,
+          result.reason === 'test-scan', false, result.reason === 'checked-out' ? 'exit' : 'entry');
         if (result.reason !== 'test-scan') admittedId = ticketId;
       } catch (err) {
         if (isServerAnswer(err)) {

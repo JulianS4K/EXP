@@ -38,6 +38,12 @@
 //      in the app to get a signed barcode. The server RPC rejects them too
 //      (migration 20260702120000), so client and server agree.
 //
+//   5. An add-on with its own entry code (mig 20261107110000) uses the same
+//      scheme with an A- prefix: `A-{passId}:{ownerId}:{bucket}:{hmac}`, the
+//      day key derived from the pass's own secret
+//      (exos_addon_passes.barcode_secret, served to its holder only by
+//      exos_my_addon_passes). The server checks it in _exos_check_in_addon_pass.
+//
 // What this still doesn't give us:
 //   * Full defense against a malicious organizer. The camera scan is now
 //     server-verified, but an owner or manager can still force a MANUAL
@@ -141,6 +147,24 @@ export async function signBarcode(
   return `T-${ticketId}:${ownerId}:${bucket}:${await doorCodeMac(ticketId, ownerId, bucket, dayKey)}`;
 }
 
+/** An add-on's own entry code (mig 20261107110000): the ticket scheme, A- prefix. */
+export async function signAddonBarcode(
+  passId: string,
+  ownerId: string,
+  secret: string,
+  bucket: number = currentBucket(),
+): Promise<string> {
+  ensureCryptoSubtleAvailable();
+  if (!secret) throw new Error('Refusing to sign an add-on code with an empty secret.');
+  const dayKey = await doorDayKey(passId, secret, doorDay(bucket));
+  return `A-${passId}:${ownerId}:${bucket}:${await doorCodeMac(passId, ownerId, bucket, dayKey)}`;
+}
+
+/** Is this an add-on's entry code? */
+export function isAddonCode(payload: string): boolean {
+  return typeof payload === 'string' && /^a-/i.test(payload.trim());
+}
+
 export interface VerifyResult {
   ok: boolean;
   reason?:
@@ -170,11 +194,11 @@ export interface VerifyResult {
  * "secret" segment for legacy barcodes because there's no integrity
  * guarantee on it — a fresh implementation would have used HMAC.
  */
-/** A reader that lower-cases ("t-…", "w-…", "p-…"): the prefix in upper case,
+/** A reader that lower-cases ("t-…", "w-…", "p-…", "a-…"): the prefix in upper case,
  *  as the server reads it (exos_check_in_ticket compares it case-insensitively).
  *  The rest of the code is case-sensitive and left alone. */
 export function normalizeCodePrefix(payload: string): string {
-  return typeof payload === 'string' && /^[twp]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
+  return typeof payload === 'string' && /^[twpa]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
 }
 
 export async function verifyBarcode(
@@ -211,7 +235,8 @@ export async function verifyBarcode(
       ? { ok: true, legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId }
       : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
   }
-  if (typeof payload !== 'string' || !payload.startsWith('T-')) {
+  // T- (a ticket) and A- (an add-on's own entry code) are signed the same way.
+  if (typeof payload !== 'string' || !/^[TA]-/.test(payload)) {
     return { ok: false, reason: 'malformed', legacy: false };
   }
   const parts = payload.slice(2).split(':');
@@ -281,7 +306,7 @@ export async function verifyBarcode(
 export function extractTicketIdFromAny(payload: string): string | null {
   if (!payload || typeof payload !== 'string') return null;
   const p = normalizeCodePrefix(payload);
-  const trimmed = p.startsWith('T-') || p.startsWith('W-') || p.startsWith('P-') ? p.slice(2) : p;
+  const trimmed = p.startsWith('T-') || p.startsWith('W-') || p.startsWith('P-') || p.startsWith('A-') ? p.slice(2) : p;
   const id = trimmed.split(':')[0];
   return id || null;
 }

@@ -41,6 +41,8 @@ const CONFLICT_TEXT: Record<string, string> = {
   voided: 'refunded / voided',
   'in-transfer': 'mid-transfer',
   'wrong-list': 'ticket type not on this list',
+  'tickets-only-list': 'add-on code at a ticket list',
+  'addon-only-list': 'ticket at an add-on list',
   'invalid-time': "outside this list's hours",
   'doors-not-open': 'before doors',
   'bad-scan-time': 'scan too old to upload',

@@ -173,7 +173,8 @@ for m in \
          20261106110000_exos_checkout_questions \
          20261106120000_exos_shared_capacity \
          20261106130000_exos_price_steps \
-         20261106140000_exos_buyer_geo_genre; do
+         20261106140000_exos_buyer_geo_genre \
+         20261107110000_exos_dice_gaps_6; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -387,7 +388,8 @@ for m in \
          20261106110000_exos_checkout_questions \
          20261106120000_exos_shared_capacity \
          20261106130000_exos_price_steps \
-         20261106140000_exos_buyer_geo_genre; do
+         20261106140000_exos_buyer_geo_genre \
+         20261107110000_exos_dice_gaps_6; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -491,3 +493,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtu
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_price_steps.sql"
 # Buyer location + genre filter (mig 20261106140000): order locations (RLS, report sums, account deletion), genres in the organizer and public discovery APIs
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_geo_genre.sql"
+# claude/exos-dice-gaps-6 (mig 20261107110000): fee-change log (append-only, refunds, RLS), add-on entry codes at their own lists (online + offline), conditional checkout questions (race: race_dice_gaps_6.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_gaps_6.sql"

@@ -1135,6 +1135,44 @@ await run('checkout questions: the organizer sees the buyer\'s answer in the rep
   ],
 } })) });
 
+// ── Conditional checkout questions (mig 20261107110000): "Guest name" shows
+// only once "Bringing a guest?" is answered Yes, goes again on No, and its
+// stale answer is left out of the request. ──
+const Q_GUEST = 'd6c00000-0000-4000-8000-000000000001';
+const Q_GUESTNAME = 'd6c00000-0000-4000-8000-000000000002';
+const COND_QUESTIONS = { questions: [
+  { id: Q_GUEST, label: 'Bringing a guest?', help_text: null, kind: 'single_choice', options: ['Yes', 'No'], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 0,
+    parent_question_id: null, parent_values: null },
+  { id: Q_GUESTNAME, label: "Your guest's name", help_text: null, kind: 'text', options: [], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 1,
+    parent_question_id: Q_GUEST, parent_values: ['Yes'] },
+], party_sizes: {} };
+const condCheckout = {};
+await run('conditional questions: the buyer sees B only after answering A, and B rides in the request only when shown', async (page, log) => {
+  await stubStripe(page, condCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Bringing a guest?');
+  const guestName = page.getByLabel("Your guest's name");
+  assert(await guestName.count() === 0, 'B is hidden before A is answered');
+  await page.getByLabel('Yes', { exact: true }).check();
+  await guestName.waitFor({ timeout: 5000 });
+  // Required once shown: buying without it shows the error, nothing is sent.
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  await expectText(page, 'This answer is required.');
+  assert(!log.some((l) => l.startsWith('fn exos-checkout')), 'no checkout while B is unanswered');
+  await guestName.fill('Grace');
+  // A changes to No: B goes, and its answer is left out.
+  await page.getByLabel('No', { exact: true }).check();
+  await until(async () => (await page.getByLabel("Your guest's name").count()) === 0, 'B hides again on No');
+  await until(async () => (await page.getByText('This answer is required.').count()) === 0, 'no error left');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const a = condCheckout.body?.answers;
+  assert(a && a.order?.[Q_GUEST] === 'No' && !(Q_GUESTNAME in (a.order ?? {})),
+    'only A rides in the request: ' + JSON.stringify(condCheckout.body?.answers));
+}, { mock: { ...checkoutFn(condCheckout), rpcs: { exos_public_event_questions: () => COND_QUESTIONS } } });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 
