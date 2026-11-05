@@ -75,8 +75,10 @@
 --    Handing a sale's tickets over (the screen QR / paper print codes, email)
 --    follows the void rule too: the seller or an owner / manager. Email gives
 --    an Exos account the tickets only when its email is confirmed (else a
---    claim link), and a ticket already handed over, claimed or scanned isn't
---    sent again, except by an owner / manager (never a scanned one).
+--    claim link). Only tickets the seller still holds are ever sent: never a
+--    claimed one (it is the buyer's: transfers and refunds change it), never
+--    a scanned one. An owner / manager may also resend one sitting in the
+--    seller's own unclaimed claim link (that link is cancelled).
 -- 6. A drawer is its holder's: cash goes into it (a sale, a bar tender, a
 --    cash gift card), comes out of it (a paid-out, a void / refund) and it is
 --    closed only by the member who opened it, or by an owner / manager. Nothing
@@ -553,9 +555,11 @@ GRANT EXECUTE ON FUNCTION public._exos_pos_walkup_begin(uuid, text, uuid, uuid, 
 -- Email the order's undelivered tickets: the box-office mail path
 -- (exos_issue_ticket_to_email). An Exos account gets them directly; anyone
 -- else gets a claim link (a pending transfer from the seller).
--- p_manager (an owner / manager): tickets already handed over or claimed are
--- sent again (their pending claim link is cancelled); a scanned ticket never.
--- Anyone else: only tickets still with the seller. The callers check who may.
+-- Only tickets the seller still holds (owner = the seller), active and never
+-- checked in. Anyone: those not in a claim link. p_manager (an owner /
+-- manager) also: those in the seller's own pending claim link, which is
+-- cancelled and replaced. A ticket now owned by anyone else (a buyer who
+-- claimed it) is never reassigned here. The callers check who may.
 CREATE OR REPLACE FUNCTION public._exos_pos_deliver_email(p_order uuid, p_actor uuid, p_email text, p_manager boolean)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -578,19 +582,23 @@ BEGIN
   SELECT * INTO ev FROM public.exos_events WHERE id = o.event_id;
   SELECT coalesce(l.ticket_ids, '{}') INTO v_all FROM public.exos_pos_order_lines l
    WHERE l.order_id = p_order AND l.category = 'ticket' ORDER BY l.created_at LIMIT 1;
-  -- Still with the seller: active, not in a transfer, never handed to anyone.
-  -- An owner / manager: every active ticket (a scanned one is 'used').
+  -- Still the seller's: active, never checked in, owned by the seller; not in
+  -- a claim link, or (an owner / manager) in the seller's own pending one.
   SELECT array_agg(t.id ORDER BY t.created_at, t.id) INTO v_ids FROM public.exos_tickets t
-   WHERE t.id = ANY (coalesce(v_all, '{}')) AND t.status = 'active'
-     AND (coalesce(p_manager, false)
-          OR (t.pending_transfer_id IS NULL AND t.owner_id IS NOT DISTINCT FROM o.rung_by AND t.check_in_at IS NULL));
+   WHERE t.id = ANY (coalesce(v_all, '{}')) AND t.status = 'active' AND t.check_in_at IS NULL
+     AND o.rung_by IS NOT NULL AND t.owner_id = o.rung_by
+     AND (t.pending_transfer_id IS NULL
+          OR (coalesce(p_manager, false) AND EXISTS (
+                SELECT 1 FROM public.exos_transfers tr
+                 WHERE tr.id = t.pending_transfer_id AND tr.status = 'pending' AND tr.sender_id = o.rung_by)));
   v_n := coalesce(cardinality(v_ids), 0);
   IF v_n = 0 THEN
-    RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned: an owner or manager can resend them'
+    RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned'
       USING ERRCODE = '55000', HINT = 'handed-over';
   END IF;
   IF coalesce(p_manager, false) THEN
-    UPDATE public.exos_transfers SET status = 'cancelled' WHERE ticket_id = ANY (v_ids) AND status = 'pending';
+    UPDATE public.exos_transfers SET status = 'cancelled'
+     WHERE ticket_id = ANY (v_ids) AND status = 'pending' AND sender_id = o.rung_by;
     UPDATE public.exos_tickets SET pending_transfer_id = NULL WHERE id = ANY (v_ids) AND pending_transfer_id IS NOT NULL;
   END IF;
   -- An account only when its email is confirmed: anyone can sign up with an
@@ -599,14 +607,13 @@ BEGIN
   SELECT lower(email) INTO v_sender_email FROM auth.users WHERE id = o.rung_by;
   IF v_rcpt IS NOT NULL THEN
     UPDATE public.exos_tickets SET owner_id = v_rcpt, buyer_id = v_rcpt, buyer_email = v_email
-     WHERE id = ANY (v_ids);
+     WHERE id = ANY (v_ids) AND owner_id = o.rung_by;
   ELSE
     FOREACH v_id IN ARRAY v_ids LOOP
       INSERT INTO public.exos_transfers
       SELECT * FROM jsonb_populate_record(NULL::public.exos_transfers, jsonb_build_object(
         'id', gen_random_uuid(), 'ticket_id', v_id, 'org_id', ev.org_id,
-        'sender_id', (SELECT owner_id FROM public.exos_tickets WHERE id = v_id),
-        'sender_email', v_sender_email, 'receiver_email', v_email,
+        'sender_id', o.rung_by, 'sender_email', v_sender_email, 'receiver_email', v_email,
         'receiver_name', o.buyer_name,
         'status', 'pending', 'event_id', ev.id, 'event_title', ev.name,
         'event_image', ev.image_url, 'tier_name', (SELECT tier_name FROM public.exos_tickets WHERE id = v_id),
@@ -1126,9 +1133,12 @@ GRANT EXECUTE ON FUNCTION public.exos_pos_paid_out(uuid, integer, text, uuid) TO
 -- The QR (screen) or paper for a walk-up's tickets: one-time print codes
 -- (docs/wallet.md "Printed tickets"), so they scan like any printed ticket.
 -- Door staff of the event, for a paid POS order's own tickets only.
--- The seller or an owner / manager (the void rule). The seller: only tickets
--- still with them (not emailed, claimed or scanned), so paper can't be made
--- for a ticket the buyer already holds in the app.
+-- The seller or an owner / manager (the void rule), and for everyone only
+-- tickets the seller still holds (active, never checked in, owned by the
+-- seller): a live paper code makes the holder's app code read "printed", so
+-- printing a claimed ticket would take it over. A buyer's ticket is printed
+-- only through exos_ticket_print and its own rules. A ticket in the seller's
+-- claim link comes back under skipped (in-transfer).
 CREATE OR REPLACE FUNCTION public.exos_pos_order_codes(p_order_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE o public.exos_pos_orders%ROWTYPE; v_ids uuid[]; v_role text;
@@ -1146,10 +1156,10 @@ BEGIN
     RAISE EXCEPTION 'this sale is %', CASE WHEN o.status = 'open' THEN 'pending' ELSE o.status END USING ERRCODE = '55000';
   END IF;
   SELECT array_agg(x) INTO v_ids FROM public.exos_pos_order_lines l, unnest(coalesce(l.ticket_ids, '{}')) x WHERE l.order_id = o.id;
-  IF v_ids IS NOT NULL AND v_role NOT IN ('owner', 'manager') THEN
+  IF v_ids IS NOT NULL THEN
     SELECT array_agg(t.id) INTO v_ids FROM public.exos_tickets t
-     WHERE t.id = ANY (v_ids) AND t.status = 'active' AND t.pending_transfer_id IS NULL
-       AND t.owner_id IS NOT DISTINCT FROM o.rung_by AND t.check_in_at IS NULL;
+     WHERE t.id = ANY (v_ids) AND t.status = 'active' AND t.check_in_at IS NULL
+       AND o.rung_by IS NOT NULL AND t.owner_id = o.rung_by;
     IF v_ids IS NULL THEN
       RAISE EXCEPTION 'these tickets were already handed over, claimed or scanned' USING ERRCODE = '55000', HINT = 'handed-over';
     END IF;
