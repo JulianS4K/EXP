@@ -13,7 +13,7 @@ what keeps us eligible for SAQ A as the product grows.
 | Venue embed (`/bridge/embed/event/:id`) → **Stripe Embedded Checkout** | Stripe's iframe on our page | SAQ A, as long as our page can't be tampered with (below) |
 | Event page → **Cash App Pay** (on Stripe Checkout, mig 20261031220000) | Stripe-hosted page, next to cards | SAQ A, same as cards |
 | Event page → **Pay with Venmo / PayPal** → `/bridge/pay/paypal` | PayPal's JS SDK buttons (PayPal / Venmo log-ins in PayPal's windows; card funding switched off) on a page of its own | No card data on our page. See "PayPal / Venmo" below |
-| Box office (`exos-pos`) | Cash and comp only; card is `501` (`docs/pos.md`) | Out of scope until Stripe Terminal is wired |
+| Box office (`exos-pos`) | Cash and comp; a card only on a Stripe Terminal reader when `EXOS_POS_CARD=on` (`docs/pos.md` "Card at the door"). The reader reads the card; Exos sends and keeps the PaymentIntent id only | Card-present: the card is read and encrypted inside Stripe's PCI PTS readers; see "Box office cards" |
 
 - No Exos code, table, log or email holds a card number, CVC or expiry. Exos keeps Stripe ids
   (`cs_…`, `pi_…`, `ch_…`) and amounts only (`grep -rn "last4\|card_number\|cvc" src supabase` finds nothing).
@@ -56,8 +56,11 @@ card field**, and Stripe's is never loaded on the PayPal page:
   Exos keeps PayPal ids (order, capture `ppcap_…`, refund `pprf_…`) and amounts only.
 - PayPal is a PCI DSS Level 1 service provider; add its AOC to the bid kit next to Stripe's.
 
-**Box office cards:** when Stripe Terminal is wired (`docs/pos.md`), use Stripe's readers only (card data stays
-in the reader). Re-check the SAQ type then (likely SAQ B-IP or a P2PE assessment) before taking a card.
+**Box office cards:** Stripe Terminal is wired (mig 20261107130000, off until `EXOS_POS_CARD=on`). Only Stripe's
+readers take the card (smart readers driven from the server; Tap to Pay later in a native app), and the card data
+stays in the reader: no Exos page, request, table or log sees it (`exos-pos` refuses any card-looking field; the
+Sell tab has no card field and loads no script). Before the first live card, re-check the SAQ type with Stripe
+(card-present usually adds SAQ B-IP or a P2PE assessment to SAQ A).
 
 ## Operator checklist (once, then yearly)
 

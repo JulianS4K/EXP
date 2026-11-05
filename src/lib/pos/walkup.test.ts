@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildSettlement, changeDue, drawerCashCents, paidOutProblem, quickCash, reconcileDrawer, reverseOption,
-  walkupQuote, WALKUP_VOID_WINDOW_HOURS, type SettlementOrder,
+  buildSettlement, CARD_POLL_GIVE_UP_MS, cardStateDone, cardStateText, changeDue, drawerCashCents, paidOutProblem, quickCash,
+  reconcileDrawer, reverseOption, walkupQuote, WALKUP_VOID_WINDOW_HOURS, type SettlementOrder,
 } from './index';
 
 // The same numbers as tests/exos/test_pos_walkup.sql (W2, W5, W7).
@@ -85,5 +85,17 @@ describe('the walk-up fee setting', () => {
   it('all-tickets charges cash ticket sales too', () => {
     const s = buildSettlement(DOOR, [], { feeBps: 300, feeBase: 'all-tickets' });
     expect(s).toMatchObject({ feeBaseCents: 7500, exosFeeCents: 225, organizerNetCents: 7275 });
+  });
+});
+
+describe('card at the door (screen text)', () => {
+  it('says what is happening and when to stop polling', () => {
+    expect(cardStateText('waiting')).toMatch(/reader/);
+    expect(cardStateText('declined', 'insufficient_funds')).toBe('Declined (insufficient funds): nothing was charged.');
+    expect(cardStateText('declined')).toBe('Declined: nothing was charged.');
+    expect(cardStateDone('waiting')).toBe(false);
+    expect(cardStateDone('starting')).toBe(false);
+    for (const s of ['succeeded', 'declined', 'canceled', 'refunded'] as const) expect(cardStateDone(s)).toBe(true);
+    expect(CARD_POLL_GIVE_UP_MS).toBeGreaterThan(5 * 60_000);
   });
 });

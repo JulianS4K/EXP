@@ -2,14 +2,14 @@
   "file": "pos-sales",
   "name": "Door sales (walk-up)",
   "order": 45.5,
-  "description": "Tickets sold at the door by the Exos Door app (the Sell tab): cash or a comp, rung by door staff, through the same inventory rules as online sales (a ticket type's capacity, shared limits and live checkouts all count) at the door price (`door_price_cents` when set, else the current price step). Each sale mints real tickets that scan like any other. Selling happens only in the door app, which needs a cash drawer; this API lists the sales and voids one. Card payments at the door are not connected yet: there are no card tenders. Money is integer cents. See docs/pos.md \"Walk-up sales\".",
+  "description": "Tickets sold at the door by the Exos Door app (the Sell tab): cash, a comp or a card on a Stripe Terminal reader (when the operator has switched card at the door on), rung by door staff, through the same inventory rules as online sales (a ticket type's capacity, shared limits and live checkouts all count) at the door price (`door_price_cents` when set, else the current price step). Each sale mints real tickets that scan like any other. Selling happens only in the door app (cash needs a cash drawer); this API lists the sales and voids cash and comp ones. A card sale is refunded to the card from the door app. Money is integer cents. See docs/pos.md \"Walk-up sales\".",
   "endpoints": [
     {
       "id": "list-event-pos-orders",
       "method": "GET",
       "path": "/v1/events/:id/pos-orders",
       "summary": "List an event's door sales",
-      "description": "The event's POS sales, newest first: walk-up ticket sales (and any bar or merch order rung at the event). `status` is `paid`, `pending` (reserved while a payment is being taken; not used until card payments exist), `void` (voided the same night: the tickets were cancelled and the cash handed back) or `refunded`. `tenders` splits what was paid by method; a comp is value given, not money. `ticket_ids` are the tickets the sale minted, `tickets_scanned` how many of them came in.",
+      "description": "The event's POS sales, newest first: walk-up ticket sales (and any bar or merch order rung at the event). `status` is `paid`, `pending` (reserved while the card is on the reader), `void` (voided the same night: the tickets were cancelled and the cash handed back) or `refunded`. `tenders` splits what was paid by method; a comp is value given, not money. `ticket_ids` are the tickets the sale minted, `tickets_scanned` how many of them came in.",
       "auth": "api_key",
       "scope": "orders:read",
       "parameters": [
@@ -247,9 +247,9 @@
         },
         {
           "status": 501,
-          "description": "The sale was paid by card (card refunds at the door aren't connected yet).",
+          "description": "The sale was paid by card: it's voided or refunded to the card from the door app, not over the API.",
           "example": {
-            "error": "card refunds at the door aren't connected yet"
+            "error": "a card sale is refunded to the card from the door app"
           }
         }
       ]

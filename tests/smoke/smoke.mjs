@@ -861,6 +861,67 @@ await run('door: the Sell tab sells one cash ticket and shows the QR', async (pa
   exos_server_time: () => new Date().toISOString(),
 }, fns: { 'exos-pos': walkupPos } }) });
 
+// --- Card at the door (mig 20261107130000): the switch on, a mocked reader ---
+const CARD_READER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+let cardPolls = 0;
+let cardSold = false;
+const cardOrder = (paid) => ({ ...walkupOrder(), payment_method: paid ? 'card' : null, status: paid ? 'paid' : 'pending',
+  tenders: { cash: 0, comp: 0, card: paid ? 2500 : 0 }, ticket_ids: paid ? [WALKUP_TICKET] : [],
+  card: { status: paid ? 'succeeded' : 'awaiting', mode: 'reader', payment_intent: paid ? 'pi_smoke' : null, decline_code: null } });
+const cardPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': {
+      const c = walkupPos(b).body.data;
+      return { body: { data: { ...c, card: { connected: true, switched_on: true, message: 'Charge the card on a reader.',
+        readers: [{ device_id: CARD_READER, label: 'Door S700', device_type: 'stripe_s700' }], has_location: true, can_manage: true,
+        tap_to_pay: false } } } };
+    }
+    case 'recent_sales': return { body: { data: cardSold ? [cardOrder(true)] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'card' || b.drawer_id || b.comp_quantity !== 0 || b.tier_id !== WALKUP_TIER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected card sale ' + JSON.stringify(b) } };
+      }
+      return { body: { data: cardOrder(false) } };
+    case 'card_payment':
+      if (b.mode !== 'reader' || b.reader_device_id !== CARD_READER || b.order_id !== WALKUP_ORDER) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected charge ' + JSON.stringify(b) } };
+      }
+      return { body: { data: { order_id: WALKUP_ORDER, card: { status: 'processing', mode: 'reader', payment_intent: 'pi_smoke' } } } };
+    case 'card_status':
+      cardPolls += 1;
+      if (cardPolls < 2) return { body: { data: { state: 'waiting', order_id: WALKUP_ORDER } } };
+      cardSold = true;
+      return { body: { data: { state: 'succeeded', order: cardOrder(true) } } };
+    case 'order_codes': return walkupPos(b);
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: with card on, the Sell tab charges on a reader and shows the QR', async (page, log) => {
+  cardPolls = 0; cardSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  const card = page.getByRole('radio', { name: /Card/ });
+  assert(!(await card.isDisabled()), 'card is enabled with a reader');
+  await card.click();
+  await expectText(page, 'on Door S700');
+  await page.getByRole('button', { name: /Charge \$25\.00 on reader/ }).click();
+  await expectText(page, 'Tap, insert or swipe');
+  await expectText(page, 'Sold 1 × Door GA', 12000);
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && sale.includes('"payment":"card"') && !/card_number|cvc|"pan"|exp_month/.test(sale), 'a card sale with no card data: ' + sale);
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"card_payment"')), 'charged on the reader');
+  assert(log.filter((l) => l.startsWith('fn exos-pos') && l.includes('"card_status"')).length >= 2, 'polled until captured');
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': cardPos } }) });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });

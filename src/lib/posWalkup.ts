@@ -1,5 +1,5 @@
 // The door app's Sell tab (mig 20261107100000, docs/pos.md "Walk-up sales"):
-// walk-up ticket sales for cash or as a comp, the ticket handed over as a QR
+// walk-up ticket sales for cash, as a comp or on a card reader (mig 20261107130000), the ticket handed over as a QR
 // on this screen, on paper or by email, voids / refunds, and the cash drawer.
 //
 // Sales, voids, refunds, paid-outs and the print codes go through the exos-pos
@@ -35,11 +35,31 @@ export interface WalkupDrawer {
   cash_cents: number;
 }
 
+/** A card reader the member may charge on (card at the door, mig 20261107130000). */
+export interface WalkupReader {
+  device_id: string;
+  label: string;
+  device_type: string | null;
+}
+
+export interface WalkupCardInfo {
+  /** On (EXOS_POS_CARD) and the org has a reader this member may use. */
+  connected: boolean;
+  message: string;
+  /** Present when the server's switch is on. */
+  switched_on?: boolean;
+  readers?: WalkupReader[];
+  has_location?: boolean;
+  can_manage?: boolean;
+  /** Tap to Pay on iPhone: false until the native app exists (docs/pos.md). */
+  tap_to_pay?: boolean;
+}
+
 export interface WalkupCatalog {
   event: { id: string; name: string; status: string; currency: string };
   role: DoorRole;
   can_comp: boolean;
-  card: { connected: boolean; message: string };
+  card: WalkupCardInfo;
   fee_base: string;
   tiers: WalkupTier[];
   questions: QuestionDef[];
@@ -71,6 +91,16 @@ export interface WalkupOrder {
   can_hand_over?: boolean;
   replay?: boolean;
   cash_returned_cents?: number;
+  /** A card sale's attempt (never card data: the PaymentIntent id and Stripe's decline code). */
+  card?: { status: string; mode: 'reader' | 'sdk'; payment_intent: string | null; decline_code: string | null } | null;
+  card_refund?: { status: string | null; amount_cents: number; error?: string } | null;
+}
+
+/** card_status / card_cancel: where a card sale is. */
+export interface CardProgress {
+  state: 'waiting' | 'succeeded' | 'declined' | 'canceled' | 'refunded';
+  order?: WalkupOrder | null;
+  decline_code?: string | null;
 }
 
 /** The function's answer: { data } on success, { error, message } otherwise. */
@@ -94,6 +124,13 @@ const FRIENDLY: Record<string, string> = {
   'drawer-short': "The drawer doesn't have that much cash.",
   'not-your-drawer': "That drawer is someone else's: use your own, or ask a manager.",
   'handed-over': 'These tickets were already handed over, claimed or scanned: an owner or manager can resend them.',
+  'no-reader': "Pick one of this organization's card readers.",
+  'no-location': "Card at the door isn't set up for this organization yet.",
+  'card-setup': "This organizer hasn't finished payment setup: take cash.",
+  'card-zero': 'Nothing to charge: sell it as cash.',
+  'card-refund-in-app': 'A card sale is refunded to the card from the door app.',
+  'not-card': "This sale isn't a card sale.",
+  card_service: "The card service didn't answer: try again.",
 };
 
 /** A refusal as the door shows it. */
@@ -138,6 +175,35 @@ export function sellWalkup(input: {
     buyer_email: input.buyerEmail?.trim() || undefined, answers: input.answers, comp_reason: input.compReason?.trim() || undefined,
   });
 }
+
+// Card at the door (mig 20261107130000). The reader handles the card; these
+// calls carry only ids. No card field, ever (docs/pci.md).
+
+/** Start a card sale: the places are held for 5 minutes while the guest pays. */
+export function beginCardSale(input: {
+  eventId: string; tierId: string; quantity: number; orderKey: string; buyerName?: string; buyerEmail?: string; answers?: unknown;
+}): Promise<WalkupOrder> {
+  return call<WalkupOrder>({
+    action: 'mint_walkup', payment: 'card', event_id: input.eventId, tier_id: input.tierId, quantity: input.quantity,
+    order_key: input.orderKey, comp_quantity: 0, buyer_name: input.buyerName?.trim() || undefined,
+    buyer_email: input.buyerEmail?.trim() || undefined, answers: input.answers,
+  });
+}
+/** Send the pending sale's charge to a smart reader (server-driven). */
+export const chargeOnReader = (orderId: string, readerDeviceId: string) =>
+  call<{ order_id: string; card: { status: string; payment_intent: string | null } }>(
+    { action: 'card_payment', order_id: orderId, mode: 'reader', reader_device_id: readerDeviceId });
+/** Where the card sale is (captures it once the reader authorized). */
+export const cardStatus = (orderId: string) => call<CardProgress>({ action: 'card_status', order_id: orderId });
+/** Stop the reader and cancel the pending card sale (places back). */
+export const cancelCardSale = (orderId: string, reason?: string) =>
+  call<CardProgress>({ action: 'card_cancel', order_id: orderId, reason: reason || undefined });
+/** Owner / manager: the venue's address for Stripe Terminal (once per organization). */
+export const setupCardLocation = (eventId: string, address: Record<string, string>, displayName?: string) =>
+  call<{ location: unknown; created: boolean }>({ action: 'terminal_location', event_id: eventId, address, display_name: displayName || undefined });
+/** Owner / manager: register a smart reader by the code it shows. */
+export const registerReader = (eventId: string, registrationCode: string, label: string) =>
+  call<{ device_id: string; label: string }>({ action: 'register_reader', event_id: eventId, registration_code: registrationCode, label });
 
 export const voidSale = (orderId: string, reason: string, drawerId?: string | null) =>
   call<WalkupOrder>({ action: 'void_order', order_id: orderId, reason, drawer_id: drawerId || undefined });
