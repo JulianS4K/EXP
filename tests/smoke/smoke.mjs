@@ -801,6 +801,127 @@ await run('door: a ticket refunded on Eventbrite is refused at the door', async 
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
+// --- Walk-up sales at the door (mig 20261107100000) -------------------------
+const WALKUP_TIER = '88888888-8888-4888-8888-888888888888';
+const WALKUP_ORDER = '99999999-9999-4999-8999-999999999999';
+const WALKUP_DRAWER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const WALKUP_TICKET = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+let walkupSold = false;
+const walkupOrder = () => ({
+  id: WALKUP_ORDER, event_id: EV, status: 'paid', payment_method: 'cash', currency: 'usd', total_cents: 2500, tax_cents: 0,
+  tenders: { cash: 2500, comp: 0, card: 0 }, tier_id: WALKUP_TIER, tier_name: 'Door GA', quantity: 1, comp_quantity: 0,
+  ticket_ids: [WALKUP_TICKET], tickets_scanned: 0, buyer_name: null, buyer_email: null, rung_by_me: true,
+  created_at: new Date().toISOString(), can_void: true, can_refund: true, can_hand_over: true, replay: false,
+});
+const walkupPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': return { body: { data: {
+      event: { id: EV, name: 'Fall Party', status: 'published', currency: 'USD' }, role: 'owner', can_comp: true,
+      card: { connected: false, message: "Card at the door isn't connected yet." }, fee_base: 'card-tickets',
+      tiers: [{ tier_id: WALKUP_TIER, name: 'Door GA', price_cents: 2500, price_source: 'door', step_name: null, step_remaining: null,
+        tax: null, unit_total_cents: 2500, remaining: walkupSold ? 41 : 42 }],
+      questions: [],
+      drawers: [{ id: WALKUP_DRAWER, device_id: null, mine: true, opened_at: new Date().toISOString(), open_float_cents: 10000,
+        cash_cents: walkupSold ? 12500 : 10000 }] } } };
+    case 'recent_sales': return { body: { data: walkupSold ? [walkupOrder()] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'cash' || b.tier_id !== WALKUP_TIER || b.quantity !== 1 || b.drawer_id !== WALKUP_DRAWER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected sale ' + JSON.stringify(b) } };
+      }
+      walkupSold = true;
+      return { body: { data: walkupOrder() } };
+    case 'order_codes': return { body: { data: { tickets: [{ ticket_id: WALKUP_TICKET,
+      print_code: 'P-' + WALKUP_TICKET + ':AbCdEfGhIjKlMnOpQrStUv', event_name: 'Fall Party', starts_at: null, tier_name: 'Door GA' }], skipped: [] } } };
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: the Sell tab sells one cash ticket and shows the QR', async (page, log) => {
+  walkupSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  await expectText(page, '42 left');
+  await page.getByRole('button', { name: '$25.00', exact: true }).first().click();  // quick cash: exact
+  await page.getByRole('button', { name: '$50.00', exact: true }).click();
+  await expectText(page, 'Change $25.00');
+  assert(await page.getByRole('radio', { name: /Card/ }).isDisabled(), 'card is disabled');
+  await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).click();
+  await expectText(page, 'Sold 1 × Door GA');
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && !/card_number|cvc|"pan"/.test(sale), 'the sale went to exos-pos without card data: ' + sale);
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  assert((await qr.getAttribute('src')).startsWith('data:image/svg+xml'), 'the QR is drawn locally');
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"order_codes"')), 'asked for the print code');
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupPos } }) });
+
+// --- Card at the door (mig 20261107130000): the switch on, a mocked reader ---
+const CARD_READER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+let cardPolls = 0;
+let cardSold = false;
+const cardOrder = (paid) => ({ ...walkupOrder(), payment_method: paid ? 'card' : null, status: paid ? 'paid' : 'pending',
+  tenders: { cash: 0, comp: 0, card: paid ? 2500 : 0 }, ticket_ids: paid ? [WALKUP_TICKET] : [],
+  card: { status: paid ? 'succeeded' : 'awaiting', mode: 'reader', payment_intent: paid ? 'pi_smoke' : null, decline_code: null } });
+const cardPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': {
+      const c = walkupPos(b).body.data;
+      return { body: { data: { ...c, card: { connected: true, switched_on: true, message: 'Charge the card on a reader.',
+        readers: [{ device_id: CARD_READER, label: 'Door S700', device_type: 'stripe_s700' }], has_location: true, can_manage: true,
+        tap_to_pay: false } } } };
+    }
+    case 'recent_sales': return { body: { data: cardSold ? [cardOrder(true)] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'card' || b.drawer_id || b.comp_quantity !== 0 || b.tier_id !== WALKUP_TIER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected card sale ' + JSON.stringify(b) } };
+      }
+      return { body: { data: cardOrder(false) } };
+    case 'card_payment':
+      if (b.mode !== 'reader' || b.reader_device_id !== CARD_READER || b.order_id !== WALKUP_ORDER) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected charge ' + JSON.stringify(b) } };
+      }
+      return { body: { data: { order_id: WALKUP_ORDER, card: { status: 'processing', mode: 'reader', payment_intent: 'pi_smoke' } } } };
+    case 'card_status':
+      cardPolls += 1;
+      if (cardPolls < 2) return { body: { data: { state: 'waiting', order_id: WALKUP_ORDER } } };
+      cardSold = true;
+      return { body: { data: { state: 'succeeded', order: cardOrder(true) } } };
+    case 'order_codes': return walkupPos(b);
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: with card on, the Sell tab charges on a reader and shows the QR', async (page, log) => {
+  cardPolls = 0; cardSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  const card = page.getByRole('radio', { name: /Card/ });
+  assert(!(await card.isDisabled()), 'card is enabled with a reader');
+  await card.click();
+  await expectText(page, 'on Door S700');
+  await page.getByRole('button', { name: /Charge \$25\.00 on reader/ }).click();
+  await expectText(page, 'Tap, insert or swipe');
+  await expectText(page, 'Sold 1 × Door GA', 12000);
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && sale.includes('"payment":"card"') && !/card_number|cvc|"pan"|exp_month/.test(sale), 'a card sale with no card data: ' + sale);
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"card_payment"')), 'charged on the reader');
+  assert(log.filter((l) => l.startsWith('fn exos-pos') && l.includes('"card_status"')).length >= 2, 'polled until captured');
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': cardPos } }) });
+
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
   await page.getByRole('heading', { name: 'Payouts' }).waitFor({ timeout: 8000 });
@@ -1134,6 +1255,44 @@ await run('checkout questions: the organizer sees the buyer\'s answer in the rep
       question_archived: false, created_at: '2026-11-05T12:00:00Z' },
   ],
 } })) });
+
+// ── Conditional checkout questions (mig 20261107110000): "Guest name" shows
+// only once "Bringing a guest?" is answered Yes, goes again on No, and its
+// stale answer is left out of the request. ──
+const Q_GUEST = 'd6c00000-0000-4000-8000-000000000001';
+const Q_GUESTNAME = 'd6c00000-0000-4000-8000-000000000002';
+const COND_QUESTIONS = { questions: [
+  { id: Q_GUEST, label: 'Bringing a guest?', help_text: null, kind: 'single_choice', options: ['Yes', 'No'], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 0,
+    parent_question_id: null, parent_values: null },
+  { id: Q_GUESTNAME, label: "Your guest's name", help_text: null, kind: 'text', options: [], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 1,
+    parent_question_id: Q_GUEST, parent_values: ['Yes'] },
+], party_sizes: {} };
+const condCheckout = {};
+await run('conditional questions: the buyer sees B only after answering A, and B rides in the request only when shown', async (page, log) => {
+  await stubStripe(page, condCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Bringing a guest?');
+  const guestName = page.getByLabel("Your guest's name");
+  assert(await guestName.count() === 0, 'B is hidden before A is answered');
+  await page.getByLabel('Yes', { exact: true }).check();
+  await guestName.waitFor({ timeout: 5000 });
+  // Required once shown: buying without it shows the error, nothing is sent.
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  await expectText(page, 'This answer is required.');
+  assert(!log.some((l) => l.startsWith('fn exos-checkout')), 'no checkout while B is unanswered');
+  await guestName.fill('Grace');
+  // A changes to No: B goes, and its answer is left out.
+  await page.getByLabel('No', { exact: true }).check();
+  await until(async () => (await page.getByLabel("Your guest's name").count()) === 0, 'B hides again on No');
+  await until(async () => (await page.getByText('This answer is required.').count()) === 0, 'no error left');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const a = condCheckout.body?.answers;
+  assert(a && a.order?.[Q_GUEST] === 'No' && !(Q_GUESTNAME in (a.order ?? {})),
+    'only A rides in the request: ' + JSON.stringify(condCheckout.body?.answers));
+}, { mock: { ...checkoutFn(condCheckout), rpcs: { exos_public_event_questions: () => COND_QUESTIONS } } });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

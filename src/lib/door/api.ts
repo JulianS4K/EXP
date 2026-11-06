@@ -4,7 +4,7 @@ import { supabase } from '../supabase';
 import { DOOR_REQUEST_TIMEOUT_MS, isMissingRpc, withDeadline } from './net';
 import { parseDoorSummary, type DoorSummary } from './summary';
 import type { ImportRow } from './imports';
-import { mapDoorEventRow, type DoorEvent } from './roster';
+import { buildAddonRoster, mapDoorEventRow, type DoorEvent, type DoorRoster } from './roster';
 import { listCheckinLists } from '../checkinLists';
 
 /** The event header for the scanner. Staff RLS on exos_events lets door staff
@@ -84,4 +84,20 @@ export async function findGuestListId(eventId: string, name: string): Promise<st
     .limit(1);
   if (error) throw error;
   return (data?.[0]?.id as string | undefined) ?? null;
+}
+
+/** The event's add-on entry codes for the saved list (mig 20261107110000):
+ *  door keys only. {} when the database doesn't have them yet. */
+export async function fetchAddonRoster(eventId: string): Promise<DoorRoster> {
+  try {
+    const data = await withDeadline(async (signal) => {
+      const { data: d, error } = await supabase.rpc('exos_event_addon_passes', { p_event_id: eventId }).abortSignal(signal);
+      if (error) throw error;
+      return d;
+    }, DOOR_REQUEST_TIMEOUT_MS);
+    return buildAddonRoster(data);
+  } catch (err) {
+    if (isMissingRpc(err)) return {};
+    throw err;
+  }
 }

@@ -76,7 +76,7 @@ export function matchImported<T>(scanned: string, index: Map<string, T>): T | nu
   return null;
 }
 
-/** Exos's own signed codes (rotating T- / wallet W-): never looked up among
+/** Exos's own signed codes (rotating T- / wallet W- / add-on A-): never looked up among
  *  imported codes. A bare uuid is not on this list: another platform may use
  *  uuids as ticket ids, so it is matched against the imported codes first. */
-export const isExosCode = (scanned: string): boolean => /^(T-|W-)/.test(scanned.trim());
+export const isExosCode = (scanned: string): boolean => /^(T-|W-|A-)/.test(scanned.trim());

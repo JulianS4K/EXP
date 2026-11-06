@@ -5,11 +5,13 @@ end-of-night settlement for each event. This document covers the **scaffolding**
 the data model, the pure money logic with tests, a placeholder edge function, and the decisions the
 operator still has to make.
 
-**No live payments.** Stripe Terminal is not wired. Card payments are defined as an interface with a
-fake implementation for tests. The edge function answers `501` for every payment action. **No card
+**Card payments are off by default.** Walk-up ticket sales can take a card on a Stripe Terminal reader
+(mig 20261107130000, "Card at the door" below) only when `exos-pos` runs with `EXOS_POS_CARD=on`; off, the
+edge function answers `501` for every card action as before. Bar / merch cards and tabs aren't built. **No card
 data is ever stored.** The reader handles the card, and Exos only ever keeps an opaque processor
-reference (a Stripe PaymentIntent id, later) in `exos_pos_payments.terminal_ref`. No column may hold a
-PAN, expiry, CVC, cardholder name or track data, and `test_pos_scaffold.sql` P1 checks for that.
+reference (the Stripe PaymentIntent id) in `exos_pos_payments.terminal_ref`. No column may hold a
+PAN, expiry, CVC, cardholder name or track data, and `test_pos_scaffold.sql` P1 and `test_pos_terminal.sql` T1
+check for that.
 
 ## Scope
 
@@ -45,16 +47,19 @@ an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own t
 | Settlement summary and records | ✅ SQL functions | `exos_pos_settlement_summary`, `exos_pos_record_settlement` |
 | Line and cart totals with tax, tips, tabs, split tenders, drawer math, settlement report, promoter and artist hooks | ✅ pure TS | `supabase/functions/_shared/pos/`, re-exported from `src/lib/pos` |
 | `PaymentTerminal` interface, `FakeTerminal`, `NotWiredTerminal` | ✅ | `_shared/pos/terminal.ts` |
-| `exos-pos` edge function: catalog and settlement preview (read-only), `501` for payments | ✅ authored, not deployed | `supabase/functions/exos-pos/index.ts` |
+| `exos-pos` edge function: catalog and settlement preview, walk-up sales, voids, refunds, paid-outs, print codes, email; `501` for card actions | ✅ authored, not deployed | `supabase/functions/exos-pos/index.ts` |
 | Tests | ✅ | `src/lib/pos/*.test.ts` (vitest), `tests/exos/test_pos_scaffold.sql` (in `run_p0.sh`) |
-| Stripe Terminal adapter (connection tokens, reader registration, PaymentIntents with `card_present`) | ⬜ later | a `PaymentTerminal` implementation |
-| Walk-up ticket mint: a ticket line mints through `exos_mint_tickets` and fills `order_lines.ticket_ids` | ⬜ later | server side in `exos-pos` |
-| Voids and refunds of POS orders | ⬜ later | an SQL function, plus a terminal refund for card |
+| Stripe Terminal adapter (connection tokens, locations, reader registration, `card_present` PaymentIntents, capture, refunds, webhook fallback) | ✅ authored, off until `EXOS_POS_CARD=on` | mig 20261107130000, `_shared/pos/stripeTerminal.ts` (`StripeTerminal implements PaymentTerminal`), `exos-pos`, `stripe-webhook` |
+| Walk-up ticket sales (cash, comp): reserve, price at the door channel, mint, fill `order_lines.ticket_ids` | ✅ SQL functions + UI | mig 20261107100000, `exos_pos_walkup_sell`, the door app's Sell tab |
+| Voids and refunds of POS orders (cash, comp, and walk-up cards: refunded to the card) | ✅ SQL functions + UI | `exos_pos_void_order`, `exos_pos_refund_order`, `_exos_pos_card_reverse`, `exos_pos_reversals` |
 | Paying a tab with one tender that covers all its orders | ⬜ later | `allocateTabPayment` is the math |
-| Cash paid-outs from a drawer | ⬜ later | `reconcileDrawer` already takes `paidOutCents` |
+| Cash paid-outs from a drawer | ✅ SQL function + UI | `exos_pos_paid_out`, `exos_pos_paid_outs` (also the cash of voids and refunds) |
 | Promoter commission accrual for POS tickets (the per-ticket ledger) | ⬜ later | `exos_promoter_commissions` |
 | Offline ringing (queued orders replayed with `client_ref`) | ⬜ later | `exos_pos_orders.client_ref` is reserved for this |
-| Register UI (iPad) | ⬜ later | SPA route |
+| Register UI: walk-up tickets on a phone | ✅ | `/checkin/:event` → Sell (`components/DoorSellPanel`) |
+| Register UI: bar and merch | ⬜ later | SPA route |
+| Card at the door on smart readers (S700, WisePOS E), from the web door app | ✅ authored, off until `EXOS_POS_CARD=on` | "Card at the door" below; the Sell tab |
+| Tap to Pay on iPhone, Bluetooth readers | ⬜ later (server side ready: `connection_token`, `card_payment` mode `sdk`) | needs the native wrapper app |
 
 ## Data model
 
@@ -113,13 +118,203 @@ The database, not the register, is the source of truth for anything to do with m
 | Ring orders, bar and merch lines, cash and comp tenders; open drawers; open and close tabs | door staff for the event: `exos_pos_can_ring` = `exos_can_door_event` (owner, manager, or a scanner who is org-wide or assigned to the event in `exos_event_staff`) |
 | 86 an item | owner, manager; door staff for an event-scoped item |
 | Ticket lines and card tenders | **service role only** (the walk-up mint path and the terminal integration) |
+| Set up the card location, register a card reader | owner, manager of the org (`_exos_pos_terminal_manage_check`) |
+| Get a Terminal connection token (SDK) | door staff of the event (`_exos_pos_terminal_token_check`) |
+| Start a card walk-up, charge it on a reader, cancel it | door staff for the event start it; the seller, an owner or a manager charge or cancel it |
+| Poll a card sale (`card_status`) | door staff of the event |
+| Sell a walk-up ticket for cash | door staff for the event (`exos_pos_walkup_sell`) |
+| Comp a walk-up ticket | owner, manager (the box-office comp rule; counts against the comp budget) |
+| Void a sale (within 12 hours, before any of its tickets is scanned) | the member who sold it, owner, manager |
+| Refund a sale (after a scan: with an override, recorded) | owner, manager |
+| Pay cash out of a drawer; take cash into it (a sale, a bar tender, a cash gift card); hand a void's cash back from it; close it | the member who opened the drawer; an owner or manager naming it. Nothing picks another member's drawer by itself |
+| Show / print a sale's tickets (print codes), email them | the member who sold it, owner, manager; only tickets the seller still holds (active, never checked in, owned by the seller), never a claimed or scanned one; an owner / manager may also resend one in the seller's unclaimed claim link. A buyer's ticket is printed only through `exos_ticket_print` |
 | Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
 | Anyone outside the org | nothing (`test_pos_scaffold.sql` P3 and P9b check this) |
 
-Orders, lines and tenders can't be updated or deleted from the client. Voids and refunds will come
-through functions.
+Orders, lines and tenders can't be updated or deleted from the client. Voids and refunds go through
+functions (below).
+
+## Walk-up sales
+
+Mig `20261107100000`. Door staff sell tickets at the door in the door app (`/checkin/:event`, the **Sell**
+tab), on a phone: pick a ticket type (its door price and what's left), the quantity, cash or comp, an
+optional name and email and the event's checkout questions (optional at the door), then confirm. The
+ticket goes over as a **one-time QR on the staff screen** for the buyer to photograph, on **paper**
+(any ticket printer, the 4 × 8 in PDF of "Printed tickets" in `docs/wallet.md`), or by **email**. Both
+the QR and the paper are print codes (`P-…`, `printed_via = 'pos'`), so a walk-up ticket scans like any
+printed ticket, online and offline; an email gives the buyer the ticket in the app (an Exos account
+gets it directly; anyone else gets a claim link, the box-office path of `exos_issue_ticket_to_email`).
+
+**How a sale works.** Two steps, so a card tender can be added later without rework:
+
+1. **Begin** (`_exos_pos_walkup_begin`): the role, then the same inventory rules as online sales, in
+   the same lock order as holds: the type's shared limits by `quota_id` (`exos_assert_quota`), the
+   type, its price steps; the type's room (`exos_effective_available`: live online checkouts count),
+   the house cap, and the step's places. The price is the **door channel**'s:
+   `exos_tier_current_price(tier, now(), 'door')` = `door_price_cents` when set, else the current
+   step; tax is the type's rule, per unit, as at checkout. The order is created (status `open`, shown
+   as `pending`) with its ticket line, and the places are **reserved** with `exos_cart_holds` rows tied
+   to the order (`pos_order_id`; paid places on their step, comps on none). Nothing is minted.
+2. **Complete** (`_exos_pos_walkup_complete`): the tenders (cash into the drawer, comps as a comp
+   tender), then the holds become tickets in one transaction (channel `pos` for paid ones, `boxoffice`
+   at 0 for comps, `order_ref` `pos:<order>`), `order_lines.ticket_ids` is filled, and the email goes
+   if one was given.
+3. **Cancel** (`_exos_pos_walkup_cancel`) gives a pending sale's places back; an expired reservation
+   gives them back by itself and can't be completed.
+
+Cash and comps do 1 and 2 in one transaction (`exos_pos_walkup_sell`). It is idempotent on the
+client's **order key** (a UUID per sale, `exos_pos_orders.client_ref`): a double tap returns the first
+sale; the key used for another sale (or by another member, event or org) is refused without saying
+anything about that sale. Rate limit: 30 sales a minute per device (or per member without one).
+
+**Tenders.** Cash needs an open drawer at the event that the member opened (theirs on this device,
+else their latest). An owner or manager may name any open drawer at the event; nobody else's drawer is
+ever picked by default. A comp covers whole tickets and needs an owner or manager, like the box-office comp,
+and counts against the org's comp budget. A sale can mix them (two tickets, one comped). A **card**
+tender goes through the card path ("Card at the door" below) when it's switched on, and is refused
+otherwise ("Card at the door isn't connected yet"). No card data is accepted: `exos-pos` refuses a body with a
+card-looking field before it looks at anything else.
+
+**Void and refund.** A void (the seller, an owner or a manager; within 12 hours and before any ticket
+of the sale is scanned) voids the tickets (their places go back on sale; a step's place too, unless
+the step has already sold out), hands the cash back out of an open drawer as a **paid-out row** (kind
+`void`), marks the tenders `refunded`, and writes an `exos_pos_reversals` row. A refund (owner or
+manager) does the same later; after a scan it needs their **override**, which is recorded, and a
+scanned ticket stays `used` and keeps its place (the guest came in), as an online refund does. A
+pending sale is cancelled instead. Nothing can be reversed after the event's final settlement. The
+cash comes back out of a drawer the member may use (the one it went into if it's theirs, else their
+own; an owner or manager may name any open drawer at the event), and the drawer must hold it.
+
+**Handing over.** Only the member who sold it, an owner or a manager can show, print or email a sale's
+tickets (another scanner at the same door can't redirect them). Codes for the screen QR or paper are
+made only for tickets the seller still holds, for everyone: a live paper code makes the holder's app
+code read "printed", so printing a buyer's ticket would take it over (a buyer's ticket is printed only
+through `exos_ticket_print`). Email only ever sends tickets the
+seller still holds (active, never checked in, owned by the seller): a ticket a buyer has claimed is
+theirs and changes only through the normal transfer and refund flows, and a scanned ticket is never
+sent. The seller sends tickets not yet in a claim link; an owner or manager can also resend one sitting
+in the seller's own unclaimed claim link (that link is cancelled and the new one is from the seller
+too). Email gives an Exos account the tickets directly only when its email is confirmed; otherwise
+it's a claim link.
+
+**Paid-outs.** `exos_pos_paid_out(drawer, amount, reason, key)`: owner, manager or the member who
+opened the drawer (the same holder rule now applies to bar cash tenders, cash gift cards sold into a
+drawer and closing a drawer); a reason; never more than the drawer holds; once per key. A drawer's expected cash
+at close is float + cash taken (refunded sales too: that cash came in) + cash gift cards - paid-outs
+(voids and refunds included), which is `reconcileDrawer` with `paidOutCents`.
+
+**Settlement.** `exos_pos_settlement_summary` counts paid orders as before, and adds
+`cash_ticket_cents`, `fee_base`, `fee_base_cents`, `reversals` (voids, refunds, overrides, the cash
+returned) and `paid_outs`. Voided and refunded sales drop out of the gross and the tenders.
+
+**The fee on walk-up tickets (OPEN operator decision 1).** One platform setting,
+`exos_platform_settings` key `pos_walkup_fee_base`:
+
+| Value | Exos fee on walk-up tickets |
+|---|---|
+| `"card-tickets"` (**default**, what the scaffold settlement already did) | card ticket sales only: a cash or comp walk-up pays no Exos fee |
+| `"all-tickets"` | cash ticket sales too (per order floor(ticket gross × cash / total)) |
+
+The rate is the event's (`exos_event_fee_bps`: 0 in the org's free months and on the free tier).
+`buildSettlement` takes the same values (`feeBase`).
+
+**API** (`docs/api/pos-sales.json`): `GET /v1/events/:id/pos-orders` (`orders:read`, paged) and
+`POST /v1/events/:id/pos-orders/:order/void` (`refunds:write`, an organization API key whose creator
+is an owner or manager now; same night, before a scan). Selling and refunds after a scan stay in the
+door app.
+
+Tests: `tests/exos/test_pos_walkup.sql` (W1-W17), `tests/exos/race_pos_walkup.sh` (by hand: two
+devices and the last ticket, a walk-up against an online checkout for a shared limit's last place,
+a double tap from two sessions, a void against a paid-out), `src/lib/pos/walkup.test.ts`, the smoke
+test "the Sell tab sells one cash ticket and shows the QR".
+
+## Card at the door (Tap to Pay / Terminal)
+
+Operator ask 2026-11-05: card payments for on-site sales. Mig `20261107130000`, `_shared/pos/stripeTerminal.ts`,
+`exos-pos`, `stripe-webhook`. **Off until `EXOS_POS_CARD=on`** on `exos-pos` (a live Stripe key also needs
+`EXOS_POS_CARD_LIVE=on`); off, every card action answers `501` as before. `terminal_ref` stays the only card
+reference: no card data, ever.
+
+**The charge model is the online one.** `exos-checkout` makes a **destination charge** on the platform account
+(`transfer_data.destination` = the org's connected account) with `application_fee_amount` = the Exos fee + Stripe's
+card fee (the platform pays Stripe under destination charges; `checkoutFeeSplit`). A card walk-up is the same, with
+the card fee estimated at Terminal's in-person rate (2.7% + 5c, `EXOS_STRIPE_TERMINAL_FEE_BPS` /
+`_FIXED_CENTS`). The Exos rate is the event's (`exos_event_fee_bps`: 0 in the org's free months and on the free
+tier). Under either `pos_walkup_fee_base` value a card walk-up pays the Exos fee, which is what the settlement
+counts. `on_behalf_of` is off, as online (`EXOS_POS_CARD_ON_BEHALF_OF=on` makes the connected account the
+settlement merchant). Because the charges are the platform's, the **Terminal Location and the readers live on the
+platform account** (not the connected account), one Location per org and mode
+(`exos_pos_terminal_locations`).
+
+**How a card sale works** (the walk-up's two steps with a PaymentIntent in the middle):
+
+1. **Begin** (`mint_walkup` with `payment: "card"` → `_exos_pos_walkup_begin_card`): the walk-up begin (role, rate
+   limit, order key, inventory, door price), places held **5 minutes**, an `exos_pos_card_payments` row
+   `awaiting`. No comps in a card sale; a $0 sale is cash; the org must have finished Stripe setup.
+2. **Charge** (`card_payment` → `_exos_pos_card_begin`): the seller, an owner or a manager; the reader must be
+   one Exos registered for this org (active, org-wide or set to this event, this Stripe mode); the places still
+   held (extended 5 minutes). Then a `card_present` PaymentIntent with **manual capture**: the order's amount
+   (never the client's), the destination charge and fee above, `metadata.exos_pos_order`, idempotency key
+   `exos_pos_pi_<order>`. It's recorded (`_exos_pos_card_attach`) **before** the reader sees it, then sent to a
+   smart reader (`process_payment_intent`, server-driven) or, in mode `sdk`, its client secret goes back to a
+   Terminal SDK.
+3. **Capture** (`card_status` / `capture`, polled every 2 s by the Sell tab): when the reader authorized
+   (`requires_capture`), `_exos_pos_card_capture_prepare` checks under the order lock that the sale is still
+   pending and its places held (extended 2 minutes), Exos captures (key `exos_pos_capture_<pi>`), and
+   `_exos_pos_card_complete` runs the walk-up complete with the PaymentIntent as the card tender's `terminal_ref`:
+   tickets minted, QR / paper / email as for cash. A capture that can't become tickets (the sale was cancelled,
+   the places lapsed, a wrong amount) cancels the sale and is **refunded in full** (`refund_pending` → `refunded`);
+   an authorization Exos never captures is cancelled and takes no money.
+4. **Decline / cancel**: a decline (the PaymentIntent's error, or the reader's failed action) or "Cancel the card
+   payment" cancels the PaymentIntent, then the sale (`_exos_pos_card_fail`): places back. Never after money was
+   taken.
+5. **Webhook fallback** (`stripe-webhook`): `payment_intent.amount_capturable_updated`, `.succeeded`,
+   `.payment_failed` and `.canceled` with `metadata.exos_pos_order` run the same steps, so a door app that died
+   mid-payment still completes or releases the sale. Every step is gated on the order's state in SQL (the order
+   lock; the card tender keyed on the PaymentIntent), so the door and the webhook racing, a replayed event, or one
+   arriving after the door finished, make one set of tickets (`race_pos_terminal.sh`). Stripe has no event-id
+   dedupe table in Exos; this state gate is the dedupe, as for checkout sessions. The metadata only names a
+   candidate order: every webhook step is bound to the PaymentIntent recorded for that order (and a refund
+   answer to the refund id already stored), and a connected account's event is ignored (door PaymentIntents are
+   the platform's). An unmatched event is logged and answered 200.
+6. **Void / refund**: the walk-up rules (`_exos_pos_reverse`: the seller same night before a scan, an owner or
+   manager after, the override after a scan, nothing after the final settlement), then the card part on the
+   `exos_pos_reversals` row (`card_cents`, `card_payment_intent`, `card_refund_status` pending) and a Stripe
+   refund of the PaymentIntent with the online refund's Connect flags (`reverse_transfer`, the application fee
+   back unless `EXOS_REFUND_KEEP_PLATFORM_FEE=true`), key `exos_pos_refund_<order>`. Stripe's answer, and the
+   webhook's later one, land on the same row; a pending refund is retried by repeating the void / refund. The
+   cash RPCs and the partner API refuse a card sale (`0A000`): it's refunded to the card from the door app.
+
+**Tips are not built** (decision 3): the card amount is the order total. **Who pays card processing**
+(decision 2): the organizer, as online (the fee carries Stripe's estimated fee).
+
+**Readers.** Smart readers (Stripe Reader S700, BBPOS WisePOS E) are driven from the server, so they work from
+the web door app with no native code. Owners and managers add one in the Sell tab ("Card readers": the venue's
+address once, then the code the reader shows), which creates the org's Location on demand and registers the
+reader (`exos_pos_devices` kind `reader`, `hardware_ref` = the reader id, plus `exos_pos_terminal_readers`, the
+proof the reader is the org's: a device row edited by hand can't point a charge at another reader).
+
+**Tap to Pay on iPhone** needs a native iOS app: the Stripe Terminal iOS SDK (or React Native SDK) and Apple's
+ProximityReader entitlement; a web page can't use the iPhone's NFC for payments. Bluetooth readers (BBPOS
+WisePad 3, Stripe M2) need a native SDK too. The server side is ready for it: `connection_token` (door staff of
+the event, scoped to the org's Location) and `card_payment` with `mode: "sdk"` (returns the PaymentIntent's client
+secret; the app collects it, then calls `card_status` like the web). The Tap to Pay button stays hidden
+(`card.tap_to_pay: false`) until the app exists. Still to do for it: the wrapper app (the same SPA in a web view
+plus the SDK bridge), the entitlement, `onBehalfOf` / the merchant display name in the SDK's connection config if
+`EXOS_POS_CARD_ON_BEHALF_OF` is used, and App Store review.
+
+**Operator setup:** Stripe Terminal enabled on the platform account (test mode first: Stripe's simulated reader,
+registration code `simulated-wpe`); a smart reader per door to buy (S700 or WisePOS E, ordered from the Stripe
+Dashboard to the venue's address); each org's Location is created from the Sell tab; set `EXOS_POS_CARD=on` (and
+later `EXOS_POS_CARD_LIVE=on` with the live key); add the four `payment_intent.*` events to the platform webhook
+endpoint; re-check the PCI SAQ type before the first live card (`docs/pci.md`). For Tap to Pay: an Apple
+Developer account (organization), the Tap to Pay on iPhone entitlement (Apple reviews it), Tap to Pay enabled in
+Stripe, iPhone XS or newer on a current iOS, the wrapper app on the App Store.
+
+**Still open:** offline card capture (below), tips on the reader (decision 3), Interac in Canada (`card_present`
+only today), and whether card walk-ups count toward promoter commissions (decision 8).
 
 ## Settlement math
 
@@ -147,8 +342,8 @@ A supported-device list, to confirm before any venue goes live:
 | Role | Candidate | Notes |
 |---|---|---|
 | Register | iPad (10th gen or newer) running the SPA, or a native shell later | Safari PWA first; a native shell only if the reader SDK needs one |
-| Card reader | A Stripe Terminal reader (e.g. BBPOS WisePad 3 over Bluetooth, or Stripe Reader S700 over Wi-Fi / smart reader) | Registered as `exos_pos_devices` kind `reader`; `hardware_ref` = the Stripe reader id |
-| Tap to Pay | Tap to Pay on iPhone through Stripe Terminal | No extra hardware; check the per-device limits |
+| Card reader | A Stripe Terminal smart reader (Stripe Reader S700 or BBPOS WisePOS E, Wi-Fi / Ethernet), driven from the server; Bluetooth readers (WisePad 3, M2) later with the native app | Registered from the Sell tab: `exos_pos_devices` kind `reader`, `hardware_ref` = the Stripe reader id, and `exos_pos_terminal_readers` |
+| Tap to Pay | Tap to Pay on iPhone through Stripe Terminal | No extra hardware, but a native iOS app (the Terminal SDK + Apple's entitlement): see "Card at the door" |
 | Receipt printer | An ESC/POS network printer (optional) | kind `printer` |
 | Cash drawer | Printer-kicked drawer (optional) | |
 | Wristbands | Printed / RFID wristbands with a code | `wristband_code` is 3–64 of `[A-Za-z0-9_-]` |
@@ -172,7 +367,8 @@ them later. Before relying on it:
 1. **Exos fee on POS sales.** The scaffold charges the 3% fee on **card ticket sales only**. Bar,
    merch and cash aren't charged (`feeBase: 'card-tickets'`). The alternatives, `'card-all'` and
    `'all-sales'`, are implemented and tested. The SQL summary uses card tickets only until this is
-   decided.
+   decided. For walk-up tickets the choice is one setting, `pos_walkup_fee_base` (`card-tickets` by
+   default, or `all-tickets` to charge cash walk-ups): see "Walk-up sales".
 2. **Who pays card processing** at the venue (Stripe Terminal is 2.7% + 5c): the organizer, as at
    checkout, or passed through? Also, is card processing on tips taken from the tips?
 3. **Tip base.** The presets tip on the pre-tax subtotal by default (18 / 20 / 22%). The alternative
@@ -186,6 +382,8 @@ them later. Before relying on it:
    The default is 0.
 7. **Org-wide taxed items.** Tax rules are per event today, so an org-wide item can't carry a tax
    rule. Options: add org-level tax rules, or require every taxed item to be scoped to an event.
-8. **Walk-up ticket pricing.** Door price vs online price (a separate door tier or the same tier),
-   and whether walk-up sales count toward promoter commissions.
-9. **Hardware.** Which readers to support first, and whether a native shell is needed.
+8. **Walk-up ticket pricing.** Built: the same ticket type at its door price (`door_price_cents`, else
+   the current step). Still open: whether walk-up sales count toward promoter commissions (they carry
+   no promoter today).
+9. **Hardware.** Smart readers (S700 / WisePOS E) work today from the web; Tap to Pay and Bluetooth readers need
+   the native shell. Which to buy first is still the operator's call.

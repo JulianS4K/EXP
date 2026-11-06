@@ -82,12 +82,21 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    the current step. DICE equivalent: `PriceTier` (allocation, time, faceValue, price, doorSalesPrice).
    Left: POS walk-up sales (501 today) must call the door channel, and partner reservations don't lock a step yet.
    API writes (steps, pools, door price) need an owner / manager key, enforced in SQL.
+   **[built: claude/exos-partner-steps] The partner leftovers of 3 + 4** (mig `20261107120000`): partner and organizer
+   reservations lock the current step like a checkout hold (409 `price_step_remaining` over it, minted at the locked
+   price); complete locks every pool by id, then every type, before any type (no deadlock with a checkout).
 5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
    by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
    migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
-6. Later: a fee-change log after a sale (`Adjustment`), and a separate entry barcode for an add-on
-   (`Extra.hasSeparateAccessBarcode`).
+6. **[built: claude/exos-dice-gaps-6] Fee-change log, add-on entry codes, conditional questions** (mig `20261107110000`).
+   `exos_fee_adjustments` (DICE `Adjustment`): append-only; refunds log the buyer-fee part of what they return, finance adds
+   manual changes with a note (Orders → Fees); `GET /v1/orders/:id/adjustments`, `/v1/events/:id/fee-adjustments`, settlement
+   inputs. An add-on can have its own rotating entry code per unit (`Extra.hasSeparateAccessBarcode`), shown in the buyer's
+   ticket and scanned at a check-in list that admits add-ons (online, offline, offline merge); a ticket is refused there and
+   an add-on code at a ticket list. Checkout questions can be "show only if" another is answered a given way (SQL + TS rules,
+   builder, buyer form). Left: refunds don't reverse `exos_order_fees` (the log records the fee share; settlement fee lines
+   don't read it yet), add-on codes in Apple / Google Wallet, undoing an add-on scan, and a POST for manual adjustments in the API.
 
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 
@@ -589,6 +598,24 @@ signup or first sale; counsel on marketplace-facilitator tax and 1099-K; consent
   and merch in cash / comp; card tenders and walk-up ticket lines are server-only. **No live payments**: Stripe
   Terminal is an interface plus a `FakeTerminal`; `exos-pos` answers 501 for payment actions. No card data stored.
   Open operator decisions in `docs/pos.md` (fee on POS sales, tip base, POS staff role, tab pre-auth, hardware).
+- 🟡 **Walk-up sales at the door** (`claude/exos-pos-walkup`, `20261107100000_exos_pos_walkup`, authored, not applied;
+  `docs/pos.md` "Walk-up sales"): the door app's Sell tab sells a ticket for cash or as a comp (owner / manager)
+  through the online inventory rules at the door price, hands it over as a one-time QR on the staff screen, paper or
+  email, and voids (same night, before a scan) or refunds (owner / manager; override after a scan) with a ledger row
+  and the cash back out of the drawer as a paid-out; paid-outs; `GET /v1/events/:id/pos-orders` and
+  `POST …/pos-orders/:order/void`. Card stays 501. **Open:** the Exos fee on walk-up tickets is one setting
+  (`pos_walkup_fee_base`, default `card-tickets` = no fee on cash), still an operator decision.
+- ⬜ **Tap to Pay on iPhone for on-site sales** (operator ask 2026-11-05): `docs/pos.md` "Card at the door (Tap to Pay
+  / Terminal)" has the plan (server: connection tokens, Terminal locations, `card_present` PaymentIntents through
+  Connect; client: a native wrapper with the Terminal SDK, smart readers server-driven from the web).
+- 🟡 **Card at the door, Stripe Terminal** (`claude/exos-pos-terminal`, `20261107130000_exos_pos_terminal`, authored,
+  not applied; `docs/pos.md` "Card at the door"): off until `EXOS_POS_CARD=on`. Smart readers (S700 / WisePOS E)
+  from the web Sell tab: a pending walk-up, a `card_present` PaymentIntent (destination charge + application fee as
+  online, manual capture), capture only while the places are held, the sale completed with the PaymentIntent as
+  `terminal_ref`; declines / cancels give the places back; `stripe-webhook` completes or releases a sale whose app
+  died; void / refund refunds the card with a reversal ledger row. Locations and readers per org (owner / manager),
+  connection tokens for door staff. **Next:** the native wrapper for Tap to Pay (server side ready, mode `sdk`);
+  operator: Terminal on the platform account, readers, the `payment_intent.*` webhook events.
 
 ## Net-equal marketplace pricing 2026-09-29
 

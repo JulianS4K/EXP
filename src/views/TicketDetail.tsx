@@ -5,6 +5,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
 import { loadPasses, savePasses } from '../lib/passCache';
 import RefundAskCard from '../components/RefundAskCard';
+import AddonPassesCard from '../components/AddonPassesCard';
 import SmsOptIn from '../components/SmsOptIn';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -612,6 +613,8 @@ export default function TicketDetail() {
                     {/* Ask for a refund (the buyer only; hidden offline: it needs the server). */}
                     {event?.id && savedCopyAt === null && <RefundAskCard eventId={event.id} ticketId={currentTicket.id} />}
                     {event?.orgId && savedCopyAt === null && <SmsOptIn orgId={event.orgId} eventId={event.id} />}
+                    {/* Add-ons with their own entry code (mig 20261107110000): hidden offline (it needs the server). */}
+                    {event?.id && user?.uid && savedCopyAt === null && <AddonPassesCard eventId={event.id} ownerId={user.uid} />}
                  </div>
               </div>
 

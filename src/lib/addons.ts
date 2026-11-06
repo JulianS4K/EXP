@@ -37,6 +37,9 @@ export interface AddonInput {
   visibility?: 'public' | 'hidden';
   imageUrl?: string | null;
   sortOrder?: number;
+  /** Each unit sold gets its own entry code, scanned at a list that admits
+   *  add-ons (mig 20261107110000; DICE Extra.hasSeparateAccessBarcode). */
+  separateAccessBarcode?: boolean;
 }
 
 function mapPublic(r: any): PublicAddon {
@@ -67,14 +70,14 @@ export async function listPublicAddons(eventId: string): Promise<PublicAddon[]> 
 }
 
 /** Organizer: full catalog (incl. hidden) for an event. Staff RLS. */
-export async function listEventAddons(eventId: string): Promise<(PublicAddon & { visibility: 'public' | 'hidden' })[]> {
+export async function listEventAddons(eventId: string): Promise<(PublicAddon & { visibility: 'public' | 'hidden'; separateAccessBarcode: boolean })[]> {
   const { data, error } = await supabase
     .from('exos_event_addons')
     .select('*')
     .eq('event_id', eventId)
     .order('sort_order', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({ ...mapPublic(r), visibility: r.visibility }));
+  return (data ?? []).map((r: any) => ({ ...mapPublic(r), visibility: r.visibility, separateAccessBarcode: r.separate_access_barcode === true }));
 }
 
 /** Organizer: create or update an add-on. Staff RLS gates the write. */
@@ -92,6 +95,7 @@ export async function saveAddon(eventId: string, input: AddonInput): Promise<str
     visibility: input.visibility ?? 'public',
     image_url: input.imageUrl?.trim() || null,
     sort_order: Number(input.sortOrder) || 0,
+    ...(input.separateAccessBarcode !== undefined ? { separate_access_barcode: input.separateAccessBarcode } : {}),
   };
   if (input.id) {
     const { error } = await supabase.from('exos_event_addons').update(row).eq('id', input.id);

@@ -173,7 +173,11 @@ for m in \
          20261106110000_exos_checkout_questions \
          20261106120000_exos_shared_capacity \
          20261106130000_exos_price_steps \
-         20261106140000_exos_buyer_geo_genre; do
+         20261106140000_exos_buyer_geo_genre \
+         20261107100000_exos_pos_walkup \
+         20261107110000_exos_dice_gaps_6 \
+         20261107120000_exos_partner_steps \
+         20261107130000_exos_pos_terminal; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -387,7 +391,11 @@ for m in \
          20261106110000_exos_checkout_questions \
          20261106120000_exos_shared_capacity \
          20261106130000_exos_price_steps \
-         20261106140000_exos_buyer_geo_genre; do
+         20261106140000_exos_buyer_geo_genre \
+         20261107100000_exos_pos_walkup \
+         20261107110000_exos_dice_gaps_6 \
+         20261107120000_exos_partner_steps \
+         20261107130000_exos_pos_terminal; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -491,3 +499,11 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtu
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -v fixtures="$DIR/fixtures" -f "$DIR/test_price_steps.sql"
 # Buyer location + genre filter (mig 20261106140000): order locations (RLS, report sums, account deletion), genres in the organizer and public discovery APIs
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_buyer_geo_genre.sql"
+# claude/exos-pos-walkup: walk-up sales at the door, void / refund, paid-outs, settlement (mig 20261107100000; race: race_pos_walkup.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_walkup.sql"
+# claude/exos-pos-terminal: card at the door through Stripe Terminal: locations, readers, tokens, card sale states, webhook idempotency, refunds, cross-org (mig 20261107130000; race: race_pos_terminal.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_terminal.sql"
+# claude/exos-dice-gaps-6 (mig 20261107110000): fee-change log (append-only, refunds, RLS), add-on entry codes at their own lists (online + offline), conditional checkout questions (race: race_dice_gaps_6.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_gaps_6.sql"
+# claude/exos-partner-steps: partner + organizer reservations lock a price step; one pool lock order on complete (mig 20261107120000; race: race_partner_steps.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_steps.sql"

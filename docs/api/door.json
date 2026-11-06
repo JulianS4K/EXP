@@ -173,7 +173,7 @@
       "method": "GET",
       "path": "/v1/scan-lookups/:code",
       "summary": "Look up a scanned code",
-      "description": "Finds the ticket behind a ticket id or a rotating door code (T-<ticket>:…). It only finds the ticket; checking in with the code (POST /v1/tickets/:id/check-in with barcode) is what verifies it.",
+      "description": "Finds the ticket behind a ticket id or a rotating door code (T-<ticket>:…). It only finds the ticket; checking in with the code (POST /v1/tickets/:id/check-in with barcode) is what verifies it. An add-on's own entry code (`A-<pass>:…`, mig 20261107110000) answers `code_type: \"addon_code\"` with its `addon_pass` (id, event, add-on, status); check it in with POST /v1/tickets/:id/check-in using the pass id, the code and a `list_id` that admits add-ons.",
       "scope": "tickets:read",
       "parameters": [
         {

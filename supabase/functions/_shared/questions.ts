@@ -24,6 +24,14 @@
 //   ticketTiers  the ticket type of each ticket of the order (quantity x
 //                party size entries; a table of 8 is 8 tickets).
 //
+// Conditional questions (mig 20261107110000): a question with a parent
+// (parent_question_id + parent_values) is shown only when its parent is shown
+// and answered with one of the values (a choice; any picked one of a multiple
+// choice; 'true' for a ticked checkbox). A hidden question is never required
+// and its answer is dropped, whatever it was. hiddenQuestions mirrors
+// public._exos_question_hidden; src/lib/conditionalQuestions.test.ts runs the
+// cases of tests/exos/test_dice_gaps_6.sql (DG6-CASES) through both.
+//
 // Pure, no imports: vitest, the SPA and Deno all load it.
 
 export const QUESTION_KINDS = [
@@ -79,6 +87,10 @@ export interface QuestionDef {
   min_value?: number | null;
   max_value?: number | null;
   sort_order?: number;
+  /** Show only if this question (same event) is answered with one of parent_values. */
+  parent_question_id?: string | null;
+  /** The parent's answers that show it: options, or ['true'] for a checkbox. */
+  parent_values?: string[] | null;
 }
 
 export type AnswerValue = string | number | boolean | string[];
@@ -227,9 +239,93 @@ export function appliesToOrder(q: Pick<QuestionDef, 'tier_ids'>, ticketTiers: re
   return ticketTiers.some((t) => appliesToTier(q, t));
 }
 
+/** Kinds a question can depend on ("Show only if …"). */
+export const CONDITION_PARENT_KINDS: readonly QuestionKind[] = ['single_choice', 'multiple_choice', 'checkbox'];
+/** Levels of "show only if" (SQL: the same limit). */
+export const CONDITION_MAX_DEPTH = 10;
+
+/** Does the parent's raw answer meet the condition? Empty or invalid: no (SQL _exos_condition_met). */
+export function conditionMet(parent: QuestionDef, raw: unknown, values: readonly string[] | null | undefined): boolean {
+  if (!Array.isArray(values) || isEmptyAnswer(raw)) return false;
+  const r = normalizeAnswer(parent, raw);
+  if ('problem' in r) return false;
+  const v = r.value;
+  if (Array.isArray(v)) return v.some((x) => values.includes(x));
+  if (typeof v === 'boolean') return v === true && values.includes('true');
+  return values.includes(String(v));
+}
+
+export interface HiddenQuestions {
+  order: Set<string>;
+  /** One set per ticket. */
+  tickets: Set<string>[];
+}
+
+/**
+ * The questions their conditions hide, for this input (SQL
+ * _exos_question_hidden). A question is shown when it has no parent, or its
+ * parent is in `questions`, asked here (its ticket types), shown itself, and
+ * answered with one of the values. A per-ticket parent counts for the same
+ * ticket only; a per-order parent for every ticket.
+ */
+export function hiddenQuestions(
+  questions: readonly QuestionDef[],
+  input: unknown,
+  ticketTiers: readonly string[],
+): HiddenQuestions {
+  const n = ticketTiers.length;
+  const out: HiddenQuestions = { order: new Set(), tickets: Array.from({ length: n }, () => new Set<string>()) };
+  if (!questions.some((q) => q.parent_question_id)) return out;
+  const body = isObject(input) ? input : {};
+  const order = isObject(body.order) ? body.order : {};
+  const tickets = Array.isArray(body.tickets) ? body.tickets : [];
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  const shown = (q: QuestionDef, ticket: number | null, depth: number): boolean => {
+    const pid = q.parent_question_id;
+    if (!pid) return true;
+    if (depth >= CONDITION_MAX_DEPTH) return false;
+    const p = byId.get(pid);
+    if (!p) return false;
+    if (p.scope === 'order') {
+      if (!appliesToOrder(p, ticketTiers)) return false;
+      if (!shown(p, null, depth + 1)) return false;
+      return conditionMet(p, order[pid], q.parent_values);
+    }
+    if (ticket === null || !appliesToTier(p, ticketTiers[ticket - 1])) return false;
+    if (!shown(p, ticket, depth + 1)) return false;
+    const t = tickets[ticket - 1];
+    if (!isObject(t)) return false;
+    return conditionMet(p, t[pid], q.parent_values);
+  };
+  for (const q of questions) {
+    if (q.scope === 'order' && q.parent_question_id && !shown(q, null, 0)) out.order.add(q.id);
+  }
+  for (let i = 0; i < n; i++) {
+    for (const q of questions) {
+      if (q.scope === 'ticket' && q.parent_question_id && !shown(q, i + 1, 0)) out.tickets[i].add(q.id);
+    }
+  }
+  return out;
+}
+
+/** The questions a buyer sees now, given what they have answered so far. */
+export function visibleQuestionsFor(
+  questions: readonly QuestionDef[],
+  ticketTiers: readonly string[],
+  input: unknown,
+): { order: QuestionDef[]; ticket: QuestionDef[][] } {
+  const f = questionsFor(questions, ticketTiers);
+  const h = hiddenQuestions(questions, input, ticketTiers);
+  return {
+    order: f.order.filter((q) => !h.order.has(q.id)),
+    ticket: f.ticket.map((list, i) => list.filter((q) => !h.tickets[i]?.has(q.id))),
+  };
+}
+
 /**
  * Check and normalise a buyer's answers. `require: false` (the door, the
  * organizer's API) skips the required check only; every other rule holds.
+ * A question its condition hides is skipped: never required, answer dropped.
  */
 export function validateAnswers(
   questions: readonly QuestionDef[],
@@ -272,7 +368,9 @@ export function validateAnswers(
     }
   });
 
+  const hidden = hiddenQuestions(questions, { order: orderIn, tickets: ticketsIn }, ctx.ticketTiers);
   const one = (q: QuestionDef, raw: unknown, ticket: number | null, put: (v: AnswerValue) => void) => {
+    if (ticket === null ? hidden.order.has(q.id) : hidden.tickets[ticket - 1]?.has(q.id)) return;
     if (isEmptyAnswer(raw)) {
       if (ctx.require && q.required) bad('required', q.id, ticket);
       return;
@@ -346,6 +444,36 @@ export function problemText(p: Pick<AnswerProblem, 'code'>, q?: Pick<QuestionDef
   if (q && p.code === 'too_many_choices' && q.max_choices != null) return `Pick up to ${q.max_choices}.`;
   if (q && p.code === 'too_few_choices' && q.min_choices != null) return `Pick at least ${q.min_choices}.`;
   return PROBLEM_TEXT[p.code] ?? 'This answer is not valid.';
+}
+
+/**
+ * A question's "show only if", or the first problem with it (the SQL refuses
+ * the same, _exos_question_condition_problem). `all` is the event's active
+ * questions, for the parent and the loop check.
+ */
+export function conditionProblem(d: Partial<QuestionDef> & { id?: string }, all: readonly QuestionDef[]): string | null {
+  const pid = d.parent_question_id;
+  if (!pid) return null;
+  if (d.id && pid === d.id) return "A question can't depend on itself.";
+  const byId = new Map(all.map((q) => [q.id, q]));
+  const p = byId.get(pid);
+  if (!p) return 'Pick a question of this event.';
+  if (!CONDITION_PARENT_KINDS.includes(p.kind)) return 'It can depend only on a choice or checkbox question.';
+  if (d.scope === 'order' && p.scope !== 'order') return 'A question asked once per order can depend only on another per-order question.';
+  const vals = d.parent_values ?? [];
+  if (vals.length === 0) return 'Pick the answer that shows it.';
+  if (p.kind === 'checkbox') {
+    if (vals.length !== 1 || vals[0] !== 'true') return 'A checkbox shows it when ticked.';
+  } else if (vals.some((v) => !(p.options ?? []).includes(v))) {
+    return "Show it for one of the other question's options.";
+  }
+  let cur: string | null | undefined = p.id;
+  for (let n = 1; cur; n++) {
+    if (d.id && cur === d.id) return 'That would make a loop of questions.';
+    if (n > CONDITION_MAX_DEPTH) return `At most ${CONDITION_MAX_DEPTH} levels of questions.`;
+    cur = byId.get(cur)?.parent_question_id;
+  }
+  return null;
 }
 
 /**

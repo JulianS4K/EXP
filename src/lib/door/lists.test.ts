@@ -37,7 +37,7 @@ const list = (over: Partial<DoorCheckinList> = {}): DoorCheckinList => ({
 describe('mapCheckinListRow', () => {
   it('maps a row; re-entry is off unless the row says true', () => {
     expect(mapCheckinListRow({ id: 'a', name: 'VIP', tier_ids: ['t1'], allow_reentry: true, valid_from: null, sort_order: 2 }))
-      .toEqual({ id: 'a', name: 'VIP', tierIds: ['t1'], allowReentry: true, validFrom: null, validUntil: null, sortOrder: 2 });
+      .toEqual({ id: 'a', name: 'VIP', tierIds: ['t1'], allowReentry: true, validFrom: null, validUntil: null, sortOrder: 2, admits: 'tickets', addonIds: null });
     expect(mapCheckinListRow({ id: 'b', name: 'Main', tier_ids: null }).allowReentry).toBe(false);
     expect(mapCheckinListRow({ id: 'b', name: 'Main', tier_ids: [] }).tierIds).toBeNull();
   });

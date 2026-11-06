@@ -1,0 +1,183 @@
+{
+  "file": "fee-adjustments",
+  "name": "Fee changes",
+  "order": 31.5,
+  "description": "Every change to the fees of an order after it was placed, as an append-only log (DICE's Adjustment { reason, processedAt, ticket, feesChange }). `fees_change_cents` is signed, in the order currency's minor unit: negative when fees went down. Reasons: `refund` (the buyer-fee part of the money a refund returned: the order's passed-on fees times refunded / paid, cumulative, so a retried or partial refund is never counted twice and a full refund returns exactly the order's buyer fees), `refund_reversed` (a refund that succeeded and then failed), `manual` (recorded by an owner, manager or finance member in the dashboard, with a note; the order's net fees never go below zero). `order_edit` and `fee_rule` are reserved: an order edit changes the buyer's contact details only, and a fee-rule change never touches a placed order (the order's fees are a snapshot taken when it was paid). Logging a change moves no money: refunds and payouts happen where they always have, and the order's fee snapshot is never rewritten. Rows are never edited or deleted; to undo a manual change, record the opposite one.",
+  "endpoints": [
+    {
+      "id": "get-order-fee-adjustments",
+      "method": "GET",
+      "path": "/v1/orders/:id/adjustments",
+      "summary": "An order's fee changes",
+      "description": "The order's fee changes, oldest first, with their sum (`net_fees_change_cents`). An order with none answers an empty list.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order id (its checkout session id). Another organization's order answers 404.",
+          "example": "cs_live_a1B2c3"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "order_id": "cs_live_a1B2c3",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "ticket_id": null,
+                "reason": "refund",
+                "note": "customer asked",
+                "fees_change_cents": -100,
+                "currency": "usd",
+                "refund_id": "0e9d8c7b-6a5f-4e3d-9c2b-1a0f9e8d7c6b",
+                "processed_at": "2026-11-07T18:02:11Z"
+              },
+              {
+                "id": "7d2e3f4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "order_id": "cs_live_a1B2c3",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "ticket_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "reason": "manual",
+                "note": "Goodwill: late doors",
+                "fees_change_cents": -50,
+                "currency": "usd",
+                "refund_id": null,
+                "processed_at": "2026-11-07T19:15:40Z"
+              }
+            ],
+            "net_fees_change_cents": -150,
+            "currency": "usd"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization.",
+          "example": {
+            "error": "order not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-fee-adjustments",
+      "method": "GET",
+      "path": "/v1/events/:id/fee-adjustments",
+      "summary": "An event's fee changes",
+      "description": "Every fee change on the event's orders, newest first, paged. The settlement's inputs carry the same totals per reason (`fee_adjustments`).",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's event answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, from 1.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200.",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d2e3f4a-5b6c-4d7e-9f8a-0b1c2d3e4f5a",
+                "order_id": "cs_live_a1B2c3",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "ticket_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "reason": "manual",
+                "note": "Goodwill: late doors",
+                "fees_change_cents": -50,
+                "currency": "usd",
+                "refund_id": null,
+                "processed_at": "2026-11-07T19:15:40Z"
+              },
+              {
+                "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "order_id": "cs_live_a1B2c3",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "ticket_id": null,
+                "reason": "refund",
+                "note": "customer asked",
+                "fees_change_cents": -100,
+                "currency": "usd",
+                "refund_id": "0e9d8c7b-6a5f-4e3d-9c2b-1a0f9e8d7c6b",
+                "processed_at": "2026-11-07T18:02:11Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page or per_page.",
+          "example": {
+            "error": "per_page must be between 1 and 200."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

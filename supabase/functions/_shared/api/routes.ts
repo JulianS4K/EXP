@@ -809,6 +809,16 @@ export const ROUTES: readonly ApiRoute[] = [
   { id: 'get-buyer-locations', method: 'GET', auth: K, path: '/buyer-locations', scope: 'orders:read', paged: false },
   { id: 'list-genres', method: 'GET', auth: K, path: '/genres', scope: 'events:read', paged: false },
   { id: 'public-discovery-genres', method: 'GET', auth: A, path: '/public/discovery/genres', scope: null, paged: false },
+  // claude/exos-pos-walkup (mig 20261107100000, exos-api/posSales.ts,
+  // docs/api/pos-sales.json): the door's walk-up sales; a void moves cash, so
+  // refunds:write (an owner / manager key, checked in SQL).
+  { id: 'list-event-pos-orders', method: 'GET', auth: K, path: '/events/:id/pos-orders', scope: 'orders:read', paged: true },
+  { id: 'void-event-pos-order', method: 'POST', auth: K, path: '/events/:id/pos-orders/:order/void', scope: 'refunds:write', paged: false },
+  // claude/exos-dice-gaps-6 (mig 20261107110000, exos-api/feeAdjustments.ts,
+  // docs/api/fee-adjustments.json): the fee-change log (DICE Adjustment).
+  // Existing scopes: orders:read for one order's, finance:read for an event's.
+  { id: 'get-order-fee-adjustments', method: 'GET', auth: K, path: '/orders/:id/adjustments', scope: 'orders:read', paged: false },
+  { id: 'list-event-fee-adjustments', method: 'GET', auth: K, path: '/events/:id/fee-adjustments', scope: 'finance:read', paged: true },
 ];
 
 /** Methods the API answers (anything else is 405). */
