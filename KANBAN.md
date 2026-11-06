@@ -10,6 +10,10 @@
   absent, so the defaults apply), FAIL 0. All 41 functions answer, `exos-api` refuses keyless calls with 401, and
   every cron calls a deployed function. Crons: the same 14 are active as before and their post-deploy runs
   succeeded; the 12 new ones were all created inactive (28 `exos%` jobs now).
+  **Not on prod yet: wave 6** (#108, merged to main after the rollout): migrations `20261107100000_exos_pos_walkup`,
+  `20261107110000_exos_dice_gaps_6`, `20261107120000_exos_partner_steps`, `20261107130000_exos_pos_terminal`
+  (checked against `schema_migrations` 2026-11-06), and its changes to `exos-api`, `exos-pos` and `stripe-webhook`
+  aren't deployed. Add the four to `rollout-prod.sh`'s list and rerun both steps before relying on them.
   The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
   migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
   prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.
