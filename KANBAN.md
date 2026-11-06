@@ -6,9 +6,18 @@
   53 migrations in its list (`20261027100000_exos_fee_rules` through `20261106140000_exos_buyer_geo_genre`) and
   deployed all 41 edge functions with the Supabase CLI (3.0.0 via npx, Management API, no `DB_URL`; the
   FIRST group `stripe-webhook`, `exos-checkout`, `exos-refund`, `exos-reconcile-checkouts`,
-  `exos-reconcile-stripe` went first). `scripts/verify-prod.sh db`: PASS 119, WARN 9 (settings rows absent, so
-  the defaults apply), FAIL 0. Crons: the same 14 are active as before; the 12 new ones were all created inactive
-  (28 `exos%` jobs now). Not run yet: `verify-prod.sh http` (needs `SUPABASE_URL` + `SUPABASE_ANON_KEY`).
+  `exos-reconcile-stripe` went first). `scripts/verify-prod.sh all` (2026-11-06): PASS 163, WARN 9 (settings rows
+  absent, so the defaults apply), FAIL 0. All 41 functions answer, `exos-api` refuses keyless calls with 401, and
+  every cron calls a deployed function. Crons: the same 14 are active as before and their post-deploy runs
+  succeeded; the 12 new ones were all created inactive (28 `exos%` jobs now).
+- **2026-11-06, wave 6 (#108) rolled out from main (`617e50a`):** its four migrations applied
+  (`20261107100000_exos_pos_walkup`, `20261107110000_exos_dice_gaps_6`, `20261107120000_exos_partner_steps`,
+  `20261107130000_exos_pos_terminal`; the 53 earlier ones skipped as recorded) and all 41 functions redeployed,
+  which carries its `exos-api`, `exos-pos` and `stripe-webhook` changes. Before applying, all 30 of its text
+  patches were checked to match exactly once (27 against prod's function bodies, the 3 in `pos_terminal` against
+  the `pos_walkup` source that creates their targets). `verify-prod.sh all`: PASS 170, WARN 9 (the same settings
+  defaults), FAIL 0. Crons unchanged (28 jobs, 14 active). Card payments at the door stay off until
+  `EXOS_POS_CARD=on`.
   The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
   migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
   prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.

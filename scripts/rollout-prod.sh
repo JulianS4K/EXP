@@ -26,7 +26,7 @@
 # After the rollout: run scripts/verify-prod.sh (read-only) with the same DB_URL
 # (or, without one, SUPABASE_ACCESS_TOKEN: its db checks then use the Management
 # API too) plus SUPABASE_URL and SUPABASE_ANON_KEY.
-# Applied in full on 2026-11-05 (see KANBAN "Prod state"). A text patch that
+# Applied in full: 2026-11-05 through 20261106140000, 2026-11-06 wave 6 (20261107*) (see KANBAN "Prod state"). A text patch that
 # stops this script ("expected N match(es) ... found 0") means prod's function
 # body differs from the repo's: see supabase/README.md, migration rule 4. It checks that every migration above is
 # recorded, their objects exist, anon grants and RLS, the exos crons, that each
