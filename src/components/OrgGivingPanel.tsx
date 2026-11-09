@@ -11,6 +11,7 @@ import {
   donationsCsv, donationsExport, listCampaigns, majorToCents, recordOfflineDonation, saveCampaign, type GivingCampaign,
 } from '../lib/commerce';
 import { csvFileName, downloadCsv } from '../lib/csv';
+import { logExport } from '../lib/orgAuditApi';
 import { publicUrl } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 
@@ -69,6 +70,7 @@ export default function OrgGivingPanel({ orgId, orgSlug, canEdit, canRecord }: P
     try {
       const rows = await donationsExport(orgId);
       downloadCsv(csvFileName(['donations']), donationsCsv(rows));
+      void logExport(orgId, 'donations', rows.length); // claude/exos-org-audit
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not export.' });
     }

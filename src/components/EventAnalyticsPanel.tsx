@@ -19,6 +19,7 @@ import {
   type EventAnalytics,
 } from '../lib/analytics';
 import { csvFileName, downloadCsv } from '../lib/csv';
+import { logExport } from '../lib/orgAuditApi';
 import { answerColumns, listEventAnswers } from '../lib/checkoutQuestions';
 import { formatCurrency } from '../lib/utils';
 import type { Ticket } from '../types';
@@ -66,6 +67,7 @@ export default function EventAnalyticsPanel({ eventId, eventTitle, currency, tic
     // them (owner / manager / finance); otherwise the plain export.
     const answers = await listEventAnswers(eventId).then(answerColumns).catch(() => undefined);
     downloadCsv(csvFileName(['attendees', eventTitle]), attendeesCsv(tickets, answers && answers.columns.length > 0 ? answers : undefined));
+    void logExport(null, 'attendees', tickets.length, eventId); // claude/exos-org-audit
   };
 
   if (loading && !data) {

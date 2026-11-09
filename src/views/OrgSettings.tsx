@@ -13,6 +13,7 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import OrgTypePanel from '../components/OrgTypePicker';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -81,6 +82,7 @@ const CURRENCIES: readonly [string, string][] = [
 ];
 
 export default function OrgSettings() {
+  const motionGate = useMotionGate();
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
   const { activeRole } = useOrganization();
@@ -292,7 +294,7 @@ export default function OrgSettings() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-tm-gray text-slate-900"
     >
@@ -338,6 +340,12 @@ export default function OrgSettings() {
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >
             Limit flags
+          </button>
+          <button
+            onClick={() => navigate(`/orgs/${org.id}/activity`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Activity
           </button>
           <button
             onClick={() => navigate(`/orgs/${org.id}/seat-maps`)}

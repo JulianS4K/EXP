@@ -26,8 +26,8 @@
 #                 objects exists (unless a later migration drops or renames it)
 #   3 grants      anon can execute only the H3 allowlist's definer functions
 #                 (parsed from tests/exos/test_rpc_hardening.sql); no exos
-#                 table/view grants anon INSERT/UPDATE/DELETE; RLS on for every
-#                 exos_* table
+#                 table/view grants anon INSERT/UPDATE/DELETE; no exos sequence
+#                 anon can use, read or update; RLS on for every exos_* table
 #   4 crons       exos% jobs: active, last run; FAIL an active job whose last
 #                 run failed, or one calling an edge function that answered 404
 #                 (the cross-check needs `all`)
@@ -342,6 +342,17 @@ db_checks() {
     if [ -z "$w" ]; then add PASS "3 grants" "anon writes on exos tables" "no exos table or view grants anon INSERT/UPDATE/DELETE"
     else add FAIL "3 grants" "anon writes on exos tables" "$w"; fi
   else add FAIL "3 grants" "anon writes on exos tables" "$(pgerr)"; fi
+  # Supabase's default privileges give anon USAGE / SELECT / UPDATE on every new
+  # sequence in public (shared with Terminal-2, so they stay); each Exos
+  # migration revokes anon's on its own (mig 20261109110000 did the older ones).
+  if w=$(q "select coalesce(string_agg(c.relname, ', ' order by c.relname), '')
+              from pg_class c join pg_namespace s on s.oid = c.relnamespace
+             where s.nspname = 'public' and c.relname like 'exos\\_%' and c.relkind = 'S'
+               and (has_sequence_privilege('anon', c.oid, 'USAGE') or has_sequence_privilege('anon', c.oid, 'SELECT')
+                    or has_sequence_privilege('anon', c.oid, 'UPDATE'))"); then
+    if [ -z "$w" ]; then add PASS "3 grants" "anon on exos sequences" "no exos sequence anon can use, read or update"
+    else add FAIL "3 grants" "anon on exos sequences" "anon can use / read / update: $w"; fi
+  else add FAIL "3 grants" "anon on exos sequences" "$(pgerr)"; fi
   local norls ntab
   ntab=$(q "select count(*) from pg_class c join pg_namespace s on s.oid = c.relnamespace
              where s.nspname = 'public' and c.relname like 'exos\\_%' and c.relkind in ('r','p')")

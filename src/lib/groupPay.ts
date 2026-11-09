@@ -158,8 +158,10 @@ export function toSeatView(d: any, fetchedAt: number = Date.now()): SeatView | n
     groupStatus: d.group_status === 'cancelled' ? 'cancelled' : d.group_status === 'closed' ? 'closed' : 'open',
     paid: Number(d.paid ?? 0),
     open: Number(d.open ?? 0),
-    eventId: String(d.event_id),
-    tierId: String(d.tier_id),
+    // Null once the event is unpublished (mig 20261109110000): '' so the page
+    // looks nothing up and the seat can't be paid.
+    eventId: d.event_id == null ? '' : String(d.event_id),
+    tierId: d.tier_id == null ? '' : String(d.tier_id),
     event: d.event ? {
       name: String(d.event.name ?? ''), startsAt: d.event.starts_at ?? null, venueName: d.event.venue_name ?? null,
       imageUrl: d.event.image_url ?? null, currency: String(d.event.currency || 'USD'),

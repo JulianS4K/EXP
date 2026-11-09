@@ -69,7 +69,7 @@ It applies **every** `*exos*` migration in timestamp order, from
 still used by `run.sh` / `run_money_path.sh`) and skipped the 34 migrations
 up to `20260924200848`. Only what Supabase itself provides is stubbed:
 roles, `auth`, `pgcrypto` (`prereq_lifecycle.sql`), storage, the realtime
-publication, `cron_should_fire` (`prereq_supabase.sql`) and vault
+publication, `cron_should_fire`, the default privileges on sequences (`prereq_supabase.sql`) and vault
 (`prereq_vault.sql`). A few migrations need a shim around them, set in
 `apply()` in `run_p0.sh`; none of them is edited:
 
@@ -79,6 +79,7 @@ publication, `cron_should_fire` (`prereq_supabase.sql`) and vault
 | `20260703130000_exos_event_artist_links` | drop `exos_public_events` before, `shim_artist_links_view.sql` after | Its view puts `artist_links` mid-list, which can't replace the phase-1 view; prod has it appended last (`20260911133000` relies on that) |
 | `20260601120500_sec_p3_…` | `ALTER … scanned_by DROP NOT NULL` before | Terminal-2's `20260526020000_fix_checkins_scanned_by_nullable`, the one Terminal-2 migration that changes an `exos_*` column (rule 3), at its place |
 | `20260929080000_exos_rpc_hardening` | `prereq_rpc_hardening.sql` before | Prod's `exos_queue_mail` / `exos_queue_ticket_issued` / `exos_create_org` as of 2026-09-28 carry prod-only edits the chain doesn't build |
+| `20261109110000_exos_security_hygiene` | `shim_security_hygiene.sql` before | Prod's leftovers it cleans up (`exos_paste_probe`, anon EXECUTE on two helpers), and a snapshot of the `exos_*` policies for `test_security_hygiene.sql` |
 
 The replay loop re-runs every migration from `20260924215000` on (the first
 written to be re-run safe). The 34 older ones are applied but not replayed:
