@@ -37,6 +37,10 @@
 --       2 minutes), a PayPal order or one already closed
 --   G17 still refused: reserved seating, hidden and free types, a free
 --       current price step
+--   G18 abuse limits (review 2026-11-09): maxPerAccount covers the whole group
+--       and what the host already has or holds; live group seats of all hosts
+--       reserve at most a quarter of what's left (>= 10); 3 starts an hour,
+--       cancelled ones included; a same-buyer re-claim within 2 minutes (G5)
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -63,7 +67,9 @@ INSERT INTO public.exos_org_memberships(org_id,user_id,role,disabled) VALUES
 INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits) VALUES
   ('c7e00000-0000-0000-0000-0000000000e1','c7e00000-0000-0000-0000-000000000001','C7 Show','c7-show','published',now() + interval '10 days','Hall',0,0,'{"maxPerOrder": 6}'),
   ('c7e00000-0000-0000-0000-0000000000e2','c7e00000-0000-0000-0000-000000000001','C7 Draft','c7-draft','draft',now() + interval '10 days','Hall',0,0,NULL),
-  ('c7e00000-0000-0000-0000-0000000000e3','c7e00000-0000-0000-0000-000000000002','C7 Other Show','c7-oshow','published',now() + interval '10 days','Hall',0,0,NULL);
+  ('c7e00000-0000-0000-0000-0000000000e3','c7e00000-0000-0000-0000-000000000002','C7 Other Show','c7-oshow','published',now() + interval '10 days','Hall',0,0,NULL),
+  ('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-000000000001','C7 Limited','c7-limited','published',now() + interval '10 days','Hall',0,0,'{"maxPerAccount": 1, "maxPerOrder": 10}'),
+  ('c7e00000-0000-0000-0000-0000000000e5','c7e00000-0000-0000-0000-000000000001','C7 Busy','c7-busy','published',now() + interval '10 days','Hall',0,0,NULL);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('c7e00000-0000-0000-0000-0000000000d1','c7e00000-0000-0000-0000-0000000000e1','GA',25,20,0),
   ('c7e00000-0000-0000-0000-0000000000d2','c7e00000-0000-0000-0000-0000000000e1','Free',0,20,0),
@@ -74,7 +80,9 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUE
   ('c7e00000-0000-0000-0000-0000000000d9','c7e00000-0000-0000-0000-0000000000e3','Other GA',25,20,0),
   ('c7e00000-0000-0000-0000-0000000000d7','c7e00000-0000-0000-0000-0000000000e1','Stepped',20,20,0),
   ('c7e00000-0000-0000-0000-0000000000d8','c7e00000-0000-0000-0000-0000000000e1','Timed',25,20,0),
-  ('c7e00000-0000-0000-0000-0000000000da','c7e00000-0000-0000-0000-0000000000e1','Free first',10,20,0);
+  ('c7e00000-0000-0000-0000-0000000000da','c7e00000-0000-0000-0000-0000000000e1','Free first',10,20,0),
+  ('c7e00000-0000-0000-0000-0000000000db','c7e00000-0000-0000-0000-0000000000e4','Limited GA',25,10,0),
+  ('c7e00000-0000-0000-0000-0000000000dc','c7e00000-0000-0000-0000-0000000000e5','Busy GA',25,40,0);
 -- Price steps (mig 20261106130000): Early $20 for 3, then Regular $30; and a
 -- type whose first two are free.
 INSERT INTO public.exos_price_steps (tier_id, sort_order, name, price_cents, ends_after_count) VALUES
@@ -228,7 +236,7 @@ END $$;
 -- G4 / G5 / G6 friends pay (exos-checkout's calls, as service role = postgres here)
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE v_g uuid := (SELECT id FROM g WHERE k = 'main'); v_ctx jsonb; v_hold uuid; v_ids uuid[]; v_sold int;
+DECLARE v_g uuid := (SELECT id FROM g WHERE k = 'main'); v_ctx jsonb; v_hold uuid; v_ids uuid[]; v_sold int; v_detail text;
 BEGIN
   PERFORM pg_temp.as_user('', '');
   v_ctx := public.exos_group_checkout_ctx(pg_temp.tok(v_g, 1), NULL, 'c7e00000-0000-0000-0000-0000000000b1');
@@ -244,7 +252,18 @@ BEGIN
   ASSERT pg_temp.err(format($q$SELECT public.exos_group_checkout_ctx(%L, NULL, NULL)$q$, pg_temp.tok(v_g, 1))) IS NULL, 'G5 the link still reads';
   PERFORM pg_temp.sess('cs_test_c7_f1a', 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com', 1);
   ASSERT public.exos_group_attach('cs_test_c7_f1a', pg_temp.tok(v_g, 1), NULL) = 1, 'G4 attached';
-  -- Friend 1 starts over (back button): same claimant, a new checkout; the old one can't be issued.
+  -- Friend 1 starts over (back button) at once: refused while the claim is
+  -- under 2 minutes old, with the open order to hand back (mig 20261110110000).
+  BEGIN
+    PERFORM public.exos_group_claim(pg_temp.tok(v_g, 1), NULL, 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com',
+            'c7e00000-0000-0000-0000-0000000000e1', 'c7e00000-0000-0000-0000-0000000000d1', 1);
+    RAISE EXCEPTION 'G5 an immediate re-claim went through';
+  EXCEPTION WHEN SQLSTATE 'XG429' THEN
+    GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
+    ASSERT v_detail = 'cs_test_c7_f1a', 'G5 the open order comes back: ' || v_detail;
+  END;
+  -- Later: same claimant, a new checkout; the old one can't be issued.
+  UPDATE public.exos_group_buy_seats SET claimed_at = now() - interval '3 minutes' WHERE group_id = v_g AND seat_no = 1;
   v_hold := public.exos_group_claim(pg_temp.tok(v_g, 1), NULL, 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com',
             'c7e00000-0000-0000-0000-0000000000e1', 'c7e00000-0000-0000-0000-0000000000d1', 1);
   PERFORM pg_temp.sess('cs_test_c7_f1b', 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com', 1);
@@ -699,6 +718,7 @@ BEGIN
           'c7e00000-0000-0000-0000-0000000000e1', 'c7e00000-0000-0000-0000-0000000000d1', 1);
   PERFORM pg_temp.sess('cs_test_c7_x_old', 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com', 1);
   PERFORM public.exos_group_attach('cs_test_c7_x_old', pg_temp.tok(v_g, 1), NULL);
+  UPDATE public.exos_group_buy_seats SET claimed_at = now() - interval '3 minutes' WHERE group_id = v_g AND seat_no = 1;
   PERFORM public.exos_group_claim(pg_temp.tok(v_g, 1), NULL, 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com',
           'c7e00000-0000-0000-0000-0000000000e1', 'c7e00000-0000-0000-0000-0000000000d1', 1);
   PERFORM pg_temp.sess('cs_test_c7_x_new', 'c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com', 1);
@@ -781,6 +801,53 @@ BEGIN
          LIKE '22023%free tickets%', 'G17 a type whose current price step is free';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_group_buys WHERE host_uid = 'c7e00000-0000-0000-0000-0000000000b6'), 'G17 nothing started';
   RAISE NOTICE 'OK  G17 still refused: reserved seating, hidden, free, a free current step (add-ons, gift cards, donations: exos-checkout)';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- G18 abuse limits
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE r jsonb; v_g uuid; i int; v_h uuid;
+BEGIN
+  -- The review's repro: maxPerAccount 1, capacity 10, a group of 10 held every seat.
+  PERFORM pg_temp.as_user('c7e00000-0000-0000-0000-0000000000b0', 'c7-host@x.com');
+  ASSERT pg_temp.err($q$SELECT public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-0000000000db',10)$q$)
+         LIKE '22023%allows 1 ticket per person%group of at most 1%', 'G18 a group over maxPerAccount is refused';
+  ASSERT pg_temp.err($q$SELECT public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-0000000000db',2)$q$)
+         LIKE '22023%allows 1 ticket per person%', 'G18 even a group of 2';
+  ASSERT public.exos_tier_available('c7e00000-0000-0000-0000-0000000000db') = 10
+     AND NOT EXISTS (SELECT 1 FROM public.exos_group_buys WHERE event_id = 'c7e00000-0000-0000-0000-0000000000e4'), 'G18 nothing held';
+  -- Cumulative: with maxPerAccount 3, a cart of 2 in the host's name leaves room for 1.
+  UPDATE public.exos_events SET purchase_limits = '{"maxPerAccount": 3, "maxPerOrder": 10}' WHERE id = 'c7e00000-0000-0000-0000-0000000000e4';
+  v_h := public.exos_create_hold('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-0000000000db',2);
+  ASSERT pg_temp.err($q$SELECT public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-0000000000db',2)$q$)
+         LIKE '23514%allows 3 tickets per person and you already have or hold 2%at most 1%', 'G18 the host''s live holds count';
+  UPDATE public.exos_cart_holds SET status = 'released', released_at = now() WHERE id = v_h;
+  r := public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e4','c7e00000-0000-0000-0000-0000000000db',3);
+  ASSERT jsonb_array_length(r->'seats') = 3, 'G18 up to the limit is fine';
+  ASSERT (SELECT count(*) FROM public.exos_cart_holds h JOIN public.exos_group_buy_seats x ON x.hold_id = h.id
+           WHERE x.group_id = (r->>'id')::uuid AND h.status = 'active') = 3, 'G18 three seats held';
+  PERFORM public.exos_group_buy_cancel((r->>'id')::uuid);
+
+  -- The per-event ceiling: capacity 40, live group seats of every host at most
+  -- max(10, a quarter of what's left) = 10.
+  PERFORM pg_temp.as_user('c7e00000-0000-0000-0000-0000000000b1', 'c7-f1@x.com');
+  PERFORM public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e5','c7e00000-0000-0000-0000-0000000000dc',6);
+  PERFORM pg_temp.as_user('c7e00000-0000-0000-0000-0000000000b2', 'c7-f2@x.com');
+  ASSERT pg_temp.err($q$SELECT public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e5','c7e00000-0000-0000-0000-0000000000dc',6)$q$)
+         LIKE '53400%lots of groups are holding seats%', 'G18 another host''s group past the ceiling is refused';
+  r := public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e5','c7e00000-0000-0000-0000-0000000000dc',4);
+  ASSERT public.exos_tier_available('c7e00000-0000-0000-0000-0000000000dc') = 30, 'G18 up to the ceiling: 10 of 40 held by groups';
+
+  -- 3 starts an hour per host, cancelled ones included.
+  PERFORM pg_temp.as_user('c7e00000-0000-0000-0000-0000000000b6', 'c7-f6@x.com');
+  FOR i IN 1..3 LOOP
+    v_g := (public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e1','c7e00000-0000-0000-0000-0000000000d1',2)->>'id')::uuid;
+    PERFORM public.exos_group_buy_cancel(v_g);
+  END LOOP;
+  ASSERT pg_temp.err($q$SELECT public.exos_group_buy_start('c7e00000-0000-0000-0000-0000000000e1','c7e00000-0000-0000-0000-0000000000d1',2)$q$)
+         LIKE '53400%too many groups started%', 'G18 cancel and restart can''t refresh the holds';
+  RAISE NOTICE 'OK  G18 abuse limits: maxPerAccount over the whole group and live holds, the per-event group ceiling, 3 starts an hour';
 END $$;
 
 ROLLBACK;

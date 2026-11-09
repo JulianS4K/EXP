@@ -170,6 +170,7 @@ import {
   type CommissionPlan,
 } from "../_shared/payouts/commissionMethods.ts";
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
+import { gateGroupClaim } from "../_shared/groupGate.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -929,12 +930,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // sent when needed, so public tiers work before that migration is applied.
     // A guest hold is also where the guest rate limits and the organizer's
     // guestCheckout switch are enforced (guests never bypass, see above).
+    // exos: group pay — the seat's own hold, claimed for this buyer, behind
+    // the rate limits and the "your page is already open" check
+    // (_shared/groupGate.ts), all before any Stripe call.
+    let groupHold: string | null = null;
+    if (group) {
+      const gate = await gateGroupClaim(group, ipHash, {
+        rateHit: async (bucket, limit) => {
+          const { data, error } = await sb.rpc("exos_rate_hit", { p_bucket: bucket, p_limit: limit });
+          if (error) throw new Error(error.message);
+          return data === true;
+        },
+        claim: async () => await sb.rpc("exos_group_claim", {
+          p_token: group.seat, p_group_id: group.cover, p_buyer: buyerUid, p_email: buyerEmail,
+          p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
+        }),
+        openSession: async (id) => {
+          if (!stripeKey) return null;
+          const st = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+          const cs = await st.checkout.sessions.retrieve(id);
+          return { status: cs.status, url: cs.url, client_secret: cs.client_secret };
+        },
+        reason: groupReason,
+      }, { embedded });
+      if (!("hold" in gate)) return json(gate.body, gate.status);
+      groupHold = gate.hold;
+    }
     const { data: hid, error: holdErr } = group
-      // exos: group pay — the seat's own hold, claimed for this buyer.
-      ? await sb.rpc("exos_group_claim", {
-        p_token: group.seat, p_group_id: group.cover, p_buyer: buyerUid, p_email: buyerEmail,
-        p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
-      })
+      ? { data: groupHold as unknown, error: null }
       : buyerUid
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
@@ -1469,7 +1492,7 @@ type GroupRef = {
 };
 const GROUP_REASONS: Record<string, string> = {
   XG404: "group_link", XG403: "group_host", XG410: "group_closed", XG411: "group_paid",
-  XG409: "seat_taken", XG412: "group_changed", XG400: "group_link",
+  XG409: "seat_taken", XG412: "group_changed", XG400: "group_link", XG429: "seat_checkout_open",
 };
 function groupReason(code: unknown): string {
   return GROUP_REASONS[String(code ?? "")] ?? "group";

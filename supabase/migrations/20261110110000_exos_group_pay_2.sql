@@ -17,7 +17,8 @@
 --              FUNCTION exos_group_seat_view (marker
 --                 '/* exos: seat view price slot */')
 --              FUNCTION exos_group_attach (marker '/* exos: group attach slot step */')
---              FUNCTION exos_group_claim (marker '/* exos: audit order.group_cover */')
+--              FUNCTION exos_group_claim (markers '/* exos: audit order.group_cover */',
+--                 '/* exos: group reclaim guard */')
 --              FUNCTION exos_group_buy_cancel (marker '/* exos: audit hold.group_cancel */')
 --              FUNCTION exos_group_pages_to_expire (new, service role:
 --                 exos-reconcile-checkouts)
@@ -60,6 +61,13 @@
 --    add-ons, gift cards and donations on a group seat (exos-checkout).
 -- 6. Audit (mig 20261109100000): the host's cover (order.group_cover, at the
 --    claim, with the seats' face total) and cancel (hold.group_cancel).
+-- 7. Abuse limits (review 2026-11-09). A start counts the whole group against
+--    the host's maxPerAccount (tickets + every live hold in their name + this
+--    group), live group seats of all hosts reserve at most a quarter of what's
+--    left (>= 10, the guest-hold ceiling's rule), and a host starts at most 3
+--    groups an hour whatever became of them. A seat's same buyer can't
+--    re-claim within 2 minutes (XG429), and exos-checkout rate-limits group
+--    claims before any Stripe call.
 --
 -- Lock order unchanged: session -> holds -> seats -> group; start: pools ->
 -- type (exos_create_hold) -> hold -> slot row (exos_attach_hold_slot) ->
@@ -153,6 +161,10 @@ DECLARE
   v_step     uuid;
   v_price    int;
   v_rem      int;
+  v_acct     int;
+  v_have     int;
+  v_avail    int;
+  v_grouped  int;
   i          int;
 BEGIN
   IF v_uid IS NULL THEN
@@ -193,16 +205,54 @@ BEGIN
   IF v_max IS NOT NULL AND v_max > 0 AND p_quantity > v_max THEN
     RAISE EXCEPTION 'exos_group_buy_start: at most % seats per group for this event', v_max USING ERRCODE = '22023';
   END IF;
+  -- /* exos: group per-account cap */ (review 2026-11-09): each seat's hold is a
+  -- one-ticket exos_create_hold, which checks only 1 against maxPerAccount, and
+  -- the guard keeps earlier group holds alive. A group is the host's order
+  -- until friends pay (the cover issues every unpaid seat to the host), so the
+  -- whole group counts against the host's maxPerAccount.
+  v_acct := nullif(e.purchase_limits ->> 'maxPerAccount', '')::int;
+  IF v_acct IS NOT NULL AND v_acct > 0 AND p_quantity > v_acct THEN
+    RAISE EXCEPTION 'exos_group_buy_start: this event allows % ticket% per person, and a group is held in your name until friends pay: start a group of at most %',
+      v_acct, CASE WHEN v_acct = 1 THEN '' ELSE 's' END, v_acct USING ERRCODE = '22023';
+  END IF;
 
-  -- One open group per host per event; at most 10 started per host per hour.
+  -- One open group per host per event; at most 3 STARTED per host per hour,
+  -- whatever became of them (cancelled and expired ones count), so cancel and
+  -- restart can't keep seats off sale: one group, one retry after a mistake
+  -- and one spare. (Was 10, which let one account cycle 100 held seats an hour.)
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_group_buy:' || v_uid::text, 0));
   IF EXISTS (SELECT 1 FROM public.exos_group_buys g
               WHERE g.host_uid = v_uid AND g.event_id = p_event_id AND g.status = 'open' AND g.deadline > now()) THEN
     RAISE EXCEPTION 'exos_group_buy_start: you already have an open group for this event' USING ERRCODE = '23505';
   END IF;
   IF (SELECT count(*) FROM public.exos_group_buys g
-       WHERE g.host_uid = v_uid AND g.created_at > now() - interval '1 hour') >= 10 THEN
-    RAISE EXCEPTION 'exos_group_buy_start: too many groups started, try again later' USING ERRCODE = '53400';
+       WHERE g.host_uid = v_uid AND g.created_at > now() - interval '1 hour') >= 3 THEN
+    RAISE EXCEPTION 'exos_group_buy_start: too many groups started, try again in an hour' USING ERRCODE = '53400';
+  END IF;
+  -- maxPerAccount, cumulative: the host's tickets for the event, plus every
+  -- live hold in their name (seats of any group, and a normal cart), plus this
+  -- group. Under exos_assert_purchase_limit's own lock for (event, host).
+  IF v_acct IS NOT NULL AND v_acct > 0 THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_event_id::text || ':' || v_uid::text, 0));
+    SELECT count(*) INTO v_have FROM public.exos_tickets
+     WHERE event_id = p_event_id AND owner_id = v_uid AND status <> 'voided';
+    v_have := v_have + (SELECT coalesce(sum(h.quantity), 0)::int FROM public.exos_cart_holds h
+                         WHERE h.event_id = p_event_id AND h.buyer_uid = v_uid AND h.status = 'active' AND h.expires_at > now());
+    IF v_have + p_quantity > v_acct THEN
+      RAISE EXCEPTION 'exos_group_buy_start: this event allows % ticket% per person and you already have or hold %: start a group of at most %',
+        v_acct, CASE WHEN v_acct = 1 THEN '' ELSE 's' END, v_have, greatest(v_acct - v_have, 0) USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  -- /* exos: group event ceiling */ Live group seats of ALL hosts reserve at
+  -- most a quarter of what's left (at least 10 seats), the guest-hold ceiling's
+  -- rule (exos_create_guest_hold), under one lock per event.
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_group_ceiling:' || p_event_id::text, 0));
+  v_avail := public.exos_effective_available(p_tier_id);
+  SELECT coalesce(sum(h.quantity), 0)::int INTO v_grouped FROM public.exos_cart_holds h
+   WHERE h.event_id = p_event_id AND h.group_seat_id IS NOT NULL AND h.status = 'active' AND h.expires_at > now();
+  IF v_grouped + p_quantity > greatest(10, ceil((coalesce(v_avail, 1000000) + v_grouped) / 4.0)::int) THEN
+    RAISE EXCEPTION 'exos_group_buy_start: lots of groups are holding seats for this event right now: start a smaller group, buy now, or try again shortly'
+      USING ERRCODE = '53400';
   END IF;
 
   INSERT INTO public.exos_group_buys (org_id, event_id, tier_id, host_uid, quantity, deadline, slot_id)
@@ -414,6 +464,29 @@ SELECT pg_temp.exos_patch_n('public.exos_group_claim(text,uuid,uuid,text,uuid,uu
     (SELECT e.currency FROM public.exos_events e WHERE e.id = g.event_id),
     'host covers the unpaid seats', p_buyer);
   RETURN v_hold;$n$, 1);
+
+-- The same buyer starting over on a seat (review 2026-11-09): refused while
+-- their claim is under 2 minutes old, so a guest can't open Stripe pages on a
+-- link without end (exos-checkout also rate-limits before the claim,
+-- _shared/groupGate.ts). XG429; DETAIL = their order's session id when one is
+-- attached and still pending, so exos-checkout hands that page back.
+SELECT pg_temp.exos_patch_n('public.exos_group_claim(text,uuid,uuid,text,uuid,uuid,integer)',
+  '/* exos: group reclaim guard */',
+  $o$      RAISE EXCEPTION 'seat already taken: a friend is paying for it right now' USING ERRCODE = 'XG409';
+    END IF;
+    UPDATE public.exos_group_buy_seats
+       SET status = 'paying', cover = false,$o$,
+  $n$      RAISE EXCEPTION 'seat already taken: a friend is paying for it right now' USING ERRCODE = 'XG409';
+    END IF;
+    /* exos: group reclaim guard */ -- mig 20261110110000
+    IF v_state = 'paying' AND s.claimed_at > now() - interval '2 minutes' THEN
+      RAISE EXCEPTION 'your checkout for this seat is already open: finish it there, or try again in 2 minutes'
+        USING ERRCODE = 'XG429',
+              DETAIL = coalesce((SELECT xs.session_id FROM public.exos_checkout_sessions xs
+                                  WHERE xs.session_id = s.session_id AND xs.status = 'pending'), '');
+    END IF;
+    UPDATE public.exos_group_buy_seats
+       SET status = 'paying', cover = false,$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_group_buy_cancel(uuid)',
   '/* exos: audit hold.group_cancel */',

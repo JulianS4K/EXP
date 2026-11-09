@@ -288,6 +288,11 @@ codes and limits.
   - Not for reserved seating, hidden (code-only) types or free tickets (including a price step that's
     free right now), and a group seat is just the ticket: no add-ons, gift cards or donations on it.
     One open group per buyer per event; a host can't hold seats for longer than 30 minutes, ever.
+  - **Limits** that keep one account from holding your event off sale: a group counts in full against
+    your max per person (the host's tickets and live holds for the event, plus the group's seats);
+    all groups together hold at most a quarter of what's left (at least 10 seats); a buyer starts at
+    most 3 groups an hour, ended ones included. A seat link opens at most a handful of checkout pages a
+    minute, and a friend who comes back within 2 minutes gets the page they already opened.
 
 ### Changing the date
 
