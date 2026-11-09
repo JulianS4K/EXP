@@ -119,6 +119,7 @@ import FeeRulesEditor from '../components/FeeRulesEditor';
 import EventBookingPanels from '../components/booking/EventBookingPanels';
 import { useOrganization } from '../context/OrganizationContext';
 import { blockersSentence, getPublishBlockers, publishEvent, type PublishBlocker } from '../lib/publishBlockers';
+import { getFollowerNotice, noticeLine, type FollowerNotice } from '../lib/followers';
 import { CAPACITY_REQUIRED } from '../../supabase/functions/_shared/capacity.ts';
 
 export default function EditEvent() {
@@ -175,6 +176,10 @@ export default function EditEvent() {
   // What stops the saved event from going live (exos_event_publish_blockers,
   // the same list as the partner API's). null: not loaded (or not a draft).
   const [blockers, setBlockers] = useState<PublishBlocker[] | null>(null);
+  // Followers' new-event email (mig 20261111110000): "N followers will be
+  // notified" before publishing, "Notified N followers" after. Owner /
+  // manager only; anyone else gets nothing (the RPC refuses).
+  const [followerNotice, setFollowerNotice] = useState<FollowerNotice | null>(null);
   const [originalNotifiable, setOriginalNotifiable] = useState<{
     title?: string;
     location?: string;
@@ -239,6 +244,7 @@ export default function EditEvent() {
       if (data.status === 'draft') {
         getPublishBlockers(eventId).then(setBlockers).catch((err) => console.warn('publish blockers unavailable:', err));
       }
+      getFollowerNotice(eventId).then(setFollowerNotice).catch(() => setFollowerNotice(null));
       if (data.lineup !== undefined) setStore(storeFromEvent(data));
       if (data.locationMode !== undefined) {
         setLocSaved(data.locationMode);
@@ -839,7 +845,8 @@ export default function EditEvent() {
           return;
         }
       }
-      toast({ kind: 'success', message: publishing ? 'Saved and published.' : 'Changes saved.' });
+      const notified = publishing ? noticeLine(await getFollowerNotice(eventId).catch(() => null)) : null;
+      toast({ kind: 'success', message: publishing ? `Saved and published.${notified ? ` ${notified}` : ''}` : 'Changes saved.' });
       navigate('/dashboard');
     } catch (error) {
       // The server refused a plain date change (tickets it didn't know about
@@ -979,6 +986,9 @@ export default function EditEvent() {
           >
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest">{label}</p>
+              {noticeLine(followerNotice) && (
+                <p className="mt-1 text-[11px] normal-case" data-testid="follower-notice">{noticeLine(followerNotice)}</p>
+              )}
               {status === 'draft' && blockers && blockers.length > 0 && (
                 <div className="mt-2 normal-case">
                   <p className="text-[11px] font-bold">Before it can go live:</p>

@@ -42,7 +42,25 @@ export const tables = {
   exos_public_event_geo: [],
 };
 
+// Neighborhood pages (mig 20261111110000): Bushwick has the Fall Party this week.
+export const NEIGHBORHOOD_PAGE = {
+  neighborhood: { slug: 'bushwick', name: 'Bushwick', borough: 'Brooklyn', city: 'nyc', timezone: 'America/New_York' },
+  days: 7, from: new Date().toISOString(), to: future,
+  events: [{ id: EV, name: 'Fall Party', slug: 'fall-party', starts_at: future, ends_at: null, timezone: 'America/New_York',
+    currency: 'usd', venue_name: 'Elsewhere', venue_location: 'Brooklyn, NY', image_url: null, genres: ['House'],
+    from_price: 20, sold_out: false, org: { name: 'Brooklyn Nights', slug: 'bk-nights' } }],
+};
+export const NEIGHBORHOODS = [
+  { slug: 'bushwick', name: 'Bushwick', borough: 'Brooklyn', events: 1 },
+  { slug: 'williamsburg', name: 'Williamsburg', borough: 'Brooklyn', events: 0 },
+  { slug: 'lower-east-side', name: 'Lower East Side', borough: 'Manhattan', events: 0 },
+  { slug: 'ridgewood', name: 'Ridgewood', borough: 'Queens', events: 0 },
+];
+
 export const rpcs = {
+  exos_neighborhood_page: (b) => (b.p_slug === 'bushwick' ? NEIGHBORHOOD_PAGE : null),
+  exos_neighborhoods_list: () => NEIGHBORHOODS,
+  exos_unfollow_by_token: (b) => (/^[0-9a-f]{64}$/.test(b.p_token) ? { ok: true, org_name: 'Brooklyn Nights' } : { ok: false }),
   // Checkout questions (mig 20261106110000): none unless a test adds some.
   exos_public_event_questions: () => ({ questions: [], party_sizes: {} }),
   exos_list_event_questions: () => [],

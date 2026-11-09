@@ -79,6 +79,8 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 | `exos_ticket_link_location` (mig 20261105130000) | OK | The same 256-bit link key as `exos_ticket_link_view` (recomputed and compared; a wrong key and an unknown ticket give `{ ok: false }`). Answers that ticket's event location as the public sees it (mode, area, reveal time), plus a `secret_location` event's exact address only once its reveal time has passed and only for an active or used ticket. Read-only. docs/promoter-events.md |
 | `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the event and ticket type ids (also published only, since mig 20261109110000), and the group's time slot and locked step price (published only, mig 20261110110000). Never the host's seat labels, another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
+| `exos_neighborhoods_list`, `exos_neighborhood_page` (mig 20261111110000) | OK (anon + authenticated; rate limited) | Neighborhood pages (`/nyc`, `/nyc/<slug>`): published events that aren't `noindex`, haven't ended and start in the next 1-14 days, placed by their public pin (`exos_public_event_geo`: fresh, never a secret / TBA location), each as the public card `_exos_public_event_json` plus the org's public name and slug; per neighborhood only a count. The count of listed events with no pin is added only for platform admins (`exos_is_admin()`). 120 calls a minute per network between the two (`_exos_request_ip_bucket()`, the platform-set IP), checked first. In the H3 allowlist |
+| `exos_unfollow_by_token` (mig 20261111110000) | OK (anon + authenticated; 64-hex token) | The unfollow link in `follower-new-event` mail: a 64-hex token per (org, follower) (two UUIDv4s), format-checked; it removes only that follow (and its waiting notices), keeping `followers_count` right. Answers `{ ok, org_name }`; a malformed or unknown token answers `{ ok: false }` and nothing else. In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -672,6 +674,36 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   latest publish time only, never rows.
 - **Out of scope.** Door scans (`exos_checkins` records them) and buyer
   self-service (transfers, refund asks, profile edits).
+
+### Neighborhood pages and followers (mig 20261111110000)
+
+Three anon RPCs, listed above and in H3. The rest:
+
+- **Organizer side, owner / manager only** (platform admins too; 42501 for
+  everyone else). `exos_event_follower_notice` gives counts for the
+  event's own org (an event of another org, or no caller, is P0002 before
+  anything is counted). `exos_org_followers` returns follower rows only for
+  followers with a fan profile in the org (the Fans tab already shows them);
+  the rest are a count, so following never discloses an address.
+  `exos_org_followers_export` is the same rows, rate limited (3 a minute,
+  20 a day per org) and logged as `export.run` (`/* exos: audit export.run */`).
+- **The mail is consent-gated in SQL** (`_exos_follower_skip_reason`): still
+  following, not org staff, an account email, no platform marketing opt-out,
+  not unsubscribed from the org's list. `exos_mail_enqueue` re-checks the
+  opt-out and adds the unsubscribe token and `List-Unsubscribe` header. The
+  recipient is always derived server-side from the follow graph.
+- **Once, and at most daily.** `exos_follower_notices` (PK event + follower)
+  and `exos_follower_mail_slots` (an upsert that only claims a slot unused
+  for 24 hours, under row locks) make it idempotent and race-safe
+  (`tests/exos/race_follower_mail.sh`). The trigger never blocks a publish:
+  errors are a WARNING.
+- **Tables.** `exos_follower_notices`, `exos_follower_mail_slots`,
+  `exos_follow_tokens`: RLS on, no client grants, service role only.
+  `exos_neighborhoods`: reference data (no org), anon / authenticated read
+  active rows, no client writes.
+- **`exos_announce_to_followers`** is redefined to go through the same
+  consent-gated path (before, it mailed every follower with no opt-out check,
+  no unsubscribe link and no dedupe). Same caller check.
 
 ### Search path
 

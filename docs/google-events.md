@@ -123,3 +123,30 @@ events that never went public, so it isn't public.
 
 Separately from the program, event pages already carry schema.org `Event` JSON-LD for crawlers
 (`src/lib/hosting/seo.ts`), which is what regular Google Search reads.
+
+## Neighborhood pages ("this week in Bushwick")
+
+Phase 1 item 7c (`docs/gtm-nyc.md`, "Content and SEO"). Mig `20261111110000_exos_neighborhoods.sql`, harness
+`tests/exos/test_neighborhoods.sql`.
+
+- **Pages.** `/nyc` lists New York's neighborhoods with how many events each has this week; `/nyc/<neighborhood>`
+  (`/nyc/bushwick`) is "This week in Bushwick": the next 7 days, by day, soonest first (`?days=14` for two weeks).
+  Views `src/views/NeighborhoodsIndex.tsx`, `src/views/NeighborhoodPage.tsx`; logic `src/lib/neighborhoods.ts`.
+- **What's listed.** Exactly what public discovery lists: published events that aren't hidden from search
+  (`noindex`), that haven't ended, starting inside the window. Drafts, cancelled and hidden events never show.
+- **Where an event is.** Its venue pin from `exos-geocode` (`docs/maps.md`), read through `exos_public_event_geo`, so
+  only fresh pins (30 days) and never a secret or to-be-announced location. Each neighborhood is a center point and a
+  radius in `exos_neighborhoods` (seeded for 20 NYC neighborhoods; the operator edits rows, `active = false` hides
+  one). There is no PostGIS here, so the distance is a haversine in plain SQL (`exos_geo_distance_m`, mirrored by
+  `distanceMeters` in TS). An event belongs to the nearest center whose circle holds it, so it is never on two pages.
+- **No pin, not listed.** An event without coordinates can't be placed and is left out. Platform admins see, on the
+  page, how many listed events in the city's time zone have no pin (online events and secret / TBA locations aren't
+  counted); nobody else gets that number.
+- **Search engines.** The page sets its title ("This week in Bushwick"), description, Open Graph tags and a canonical
+  URL with `applyMeta` (`src/lib/meta.ts`), plus schema.org JSON-LD: a `CollectionPage` whose `ItemList` holds each
+  event as an `Event`. Link-preview bots get the title and description server-side (`neighborhoodTags` in
+  `src/lib/hosting/seo.ts`), and `/bridge/sitemap.xml` lists `/nyc` and every neighborhood.
+- **RPCs (anon).** `exos_neighborhoods_list(city, days)` and `exos_neighborhood_page(slug, days)`: 120 calls a minute
+  per network between them (the platform-set IP, as `exos_api_public`); 54000 over it.
+- **Adding a city or a neighborhood.** Insert rows (service role) with `city`, center, `radius_m` and `timezone`; the
+  SPA routes are NYC-only today (`/nyc`).

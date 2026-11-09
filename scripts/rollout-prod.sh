@@ -105,6 +105,7 @@ MIGRATIONS=(
   20261110110000_exos_group_pay_2     # claude/exos-group-pay-2: group pay on timed / price-step types, seat labels, friends' open pages listed for expiry (exos-reconcile-checkouts); no cron; deploy exos-checkout + exos-reconcile-checkouts after
   20261110120000_exos_leftovers_9     # claude/exos-leftovers-9: reservation answers (2 patches on _exos_partner_reserve), API add-on undo (2 patches on exos_api_write), event audit summary; no cron; apply before deploying exos-api
   20261111100000_exos_e2e_fixes      # claude/exos-e2e-sim: one audit row per price-step change (patches _exos_tg_audit_row, exos_set_price_steps, _exos_api_price_steps_set); no cron, no deploy needed
+  20261111110000_exos_neighborhoods  # claude/exos-neighborhoods: neighborhood pages (anon RPCs), follower new-event mail (trigger on exos_events, queued only), follower list; cron exos-follower-digests-hourly created INACTIVE; redefines exos_announce_to_followers
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

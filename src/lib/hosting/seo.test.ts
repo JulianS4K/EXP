@@ -42,6 +42,11 @@ describe('previewTarget', () => {
     ['my-tickets', '', null],
     ['event/not-a-uuid', '', null],
     ['o/../../etc', '', null],
+    ['nyc', '', ['neighborhoods', 'nyc']],
+    ['nyc/bushwick', '', ['neighborhood', 'bushwick']],
+    ['nyc/long-island-city/', '', ['neighborhood', 'long-island-city']],
+    ['nyc/Bushwick', '', null],
+    ['nyc/../etc', '', null],
   ])('%s ?%s', (page, query, expected) => {
     expect(previewTarget(page, query)).toEqual(expected);
   });
@@ -269,6 +274,28 @@ describe('buildSitemap', () => {
     expect(xml).toContain('/bridge/o/a&amp;b</loc>');
     expect(xml.split('/bridge/o/').length - 1).toBe(2);
     expect((await buildSitemap(fake({}), 'https://x.example')).endsWith('</urlset>\n')).toBe(true);
+  });
+});
+
+describe('neighborhood pages (mig 20261111110000)', () => {
+  const base = 'https://x.example';
+  const hoods = fake({ exos_neighborhoods: [{ slug: 'bushwick', name: 'Bushwick', city: 'nyc' }, { slug: 'ridgewood', name: 'Ridgewood', city: 'nyc' }] });
+  it('previews the index and a neighborhood; an unknown one gets none', async () => {
+    const one = await buildPreview(hoods, ['neighborhood', 'bushwick'], base);
+    expect(one).toContain('<title>This week in Bushwick</title>');
+    expect(one).toContain(`canonical" href="${base}/bridge/nyc/bushwick"`);
+    expect(one).toContain('index, follow');
+    expect(await buildPreview(hoods, ['neighborhoods', 'nyc'], base)).toContain('New York events by neighborhood');
+    expect(await buildPreview(hoods, ['neighborhood', 'nowhere'], base)).toBeNull();
+    const broken: PublicReader = async () => { throw new Error('relation does not exist'); };
+    expect(await buildPreview(broken, ['neighborhood', 'bushwick'], base)).toBeNull();
+  });
+  it('lists the pages in the sitemap when the table is there', async () => {
+    const xml = await buildSitemap(hoods, base);
+    expect(xml).toContain(`${base}/bridge/nyc</loc>`);
+    expect(xml).toContain(`${base}/bridge/nyc/bushwick</loc>`);
+    expect(xml).toContain(`${base}/bridge/nyc/ridgewood</loc>`);
+    expect(await buildSitemap(fake({}), base)).not.toContain('/bridge/nyc');
   });
 });
 
