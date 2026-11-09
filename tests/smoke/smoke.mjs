@@ -1733,10 +1733,47 @@ await run('edit event: "Notified N followers" after publishing', async (page) =>
   const notice = page.getByTestId('follower-notice');
   await notice.waitFor({ timeout: 8000 });
   const text = await notice.innerText();
-  assert(text === 'Notified 4 followers, 1 more waiting (one email a day per follower).', 'notice: ' + text);
+  assert(text === 'Notified 4 followers, 1 more waiting (sent in batches, at most one email a day per follower).', 'notice: ' + text);
 }, { signedIn: true, mock: ownerMock({ rpcs: {
   exos_event_follower_notice: () => ({ state: 'after', followers: 9, eligible: true, reason: null, notified: 4, waiting: 1, not_notified: 4 }),
   exos_event_quotas: () => [],
+} }) });
+
+// claude/exos-follower-fixes (mig 20261112100000): the follower list carries
+// names and fan status only; addresses come from the logged CSV export.
+await run('fans: Followers tab shows names, never an address; the CSV comes from the logged export', async (page, log) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/fans?tab=followers');
+  const total = page.getByTestId('followers-total');
+  await total.waitFor({ timeout: 8000 });
+  assert((await total.innerText()) === '5 followers', 'total: ' + (await total.innerText()));
+  assert(log.some((l) => l === `rpc exos_org_followers {"p_org_id":"${ORG}","p_limit":100,"p_offset":0}`), 'asked for the list');
+  const table = page.getByRole('table', { name: 'Followers who are also your fans' });
+  await table.getByText('Ann Lee').waitFor({ timeout: 8000 });
+  const text = (await table.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('No name given') && text.includes('Unsubscribed') && text.includes('On your list'), 'rows: ' + text);
+  assert(!text.includes('@'), 'no address in the list: ' + text);
+  await expectText(page, 'Email addresses are in the export only; each export is logged.');
+  assert(!log.some((l) => l.startsWith('rpc exos_org_followers_export')), 'no export on page load');
+  const { name, text: csv } = await download(page, () => page.getByRole('button', { name: /Export CSV/ }).click());
+  assert(name.startsWith('followers-brooklyn-nights-'), 'file name ' + name);
+  const lines = firstLines(csv);
+  assert(lines[0] === 'email,first_name,last_name,followed_at,email_list,gets_new_event_email', 'CSV header ' + lines[0]);
+  assert(lines[1].startsWith('ann@example.com,Ann,Lee,'), 'CSV row ' + lines[1]);
+  assert(log.some((l) => l === `rpc exos_org_followers_export {"p_org_id":"${ORG}"}`), 'the export asked once, for this org');
+  await expectText(page, 'Exported 2 followers. The export is logged.');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_org_tags: () => [],
+  exos_org_followers: (b) => (b.p_org_id !== ORG ? { __status: 403, __body: { code: '42501', message: 'owners and managers only' } } : {
+    total: 5, listed: 2, not_listed: 3, gets_new_event_mail: 1,
+    rows: [
+      { fan_id: 'f1', first_name: 'Ann', last_name: 'Lee', followed_at: '2026-11-01T12:00:00Z', email_list: 'subscribed', gets_new_event_mail: true },
+      { fan_id: 'f2', first_name: null, last_name: null, followed_at: '2026-10-20T12:00:00Z', email_list: 'unsubscribed', gets_new_event_mail: false },
+    ],
+  }),
+  exos_org_followers_export: () => ({ count: 2, generated_at: '2026-11-09T12:00:00Z', rows: [
+    { email: 'ann@example.com', first_name: 'Ann', last_name: 'Lee', followed_at: '2026-11-01T12:00:00Z', email_list: 'subscribed', gets_new_event_mail: true },
+    { email: 'b@example.com', first_name: null, last_name: null, followed_at: '2026-10-20T12:00:00Z', email_list: 'unsubscribed', gets_new_event_mail: false },
+  ] }),
 } }) });
 
 await run('unfollow link: one click, signed out', async (page, log) => {

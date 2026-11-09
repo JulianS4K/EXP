@@ -8,7 +8,7 @@
 //   Refund requests every event's open asks: Refund runs the usual refund
 //                   (exos-refund, nonce ask:<id>), Decline sends a note
 //   Followers       how many follow the org and get its new-event email;
-//                   rows only for followers who are fans; export CSV
+//                   rows (names, no address) only for followers who are fans; export CSV
 //                   (owner / manager, logged as export.run; mig 20261111110000)
 //
 // Roles: fans and refunds owner / manager / finance (finance reads only);
@@ -31,7 +31,7 @@ import {
   type FanDetail, type FanRow, type OrgTag, type QueueAsk, type TagChip, type TaggableType,
 } from '../lib/fans';
 import { listSignupForms, saveSignupForm, signupSnippets, type SignupForm } from '../lib/signupForms';
-import { exportOrgFollowers, FOLLOWERS_CSV_HEADER, followersCsvRows, listOrgFollowers, type OrgFollowers } from '../lib/followers';
+import { exportOrgFollowers, followerName, FOLLOWERS_CSV_HEADER, followersCsvRows, listOrgFollowers, type OrgFollowers } from '../lib/followers';
 import type { Event } from '../types';
 
 type Tab = 'fans' | 'tags' | 'forms' | 'refunds' | 'followers';
@@ -710,7 +710,8 @@ function FollowersTab({ orgId, orgName }: { orgId: string; orgName: string }) {
           </p>
         )}
       </div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        <p className="text-xs text-slate-500">Email addresses are in the export only; each export is logged.</p>
         <button type="button" className={btn} disabled={busy || data.listed === 0} onClick={() => void doExport()}>
           <Download size={14} /> Export CSV
         </button>
@@ -731,10 +732,11 @@ function FollowersTab({ orgId, orgName }: { orgId: string; orgName: string }) {
             </thead>
             <tbody>
               {data.rows.map((r) => (
-                <tr key={r.fanId || r.email} className="border-t border-slate-100">
+                <tr key={r.fanId} className="border-t border-slate-100">
                   <td className="px-3 py-2">
-                    <span className="font-bold">{[r.firstName, r.lastName].filter(Boolean).join(' ') || r.email}</span>
-                    {(r.firstName || r.lastName) && <span className="block text-xs text-slate-500">{r.email}</span>}
+                    {followerName(r)
+                      ? <span className="font-bold">{followerName(r)}</span>
+                      : <span className="text-slate-500">No name given</span>}
                   </td>
                   <td className="px-3 py-2">{day(r.followedAt)}</td>
                   <td className="px-3 py-2">{LIST_LABEL[r.emailList]}</td>

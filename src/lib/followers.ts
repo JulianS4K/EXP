@@ -1,7 +1,9 @@
 // Followers (mig 20261111110000, docs/fans.md "Followers"): the "new event"
 // mail's counts on the event editor, the follower list + CSV on the Fans page,
 // and the one-click unfollow page. Organizers get counts, and rows only for
-// followers who are already their fans. Pure up top, calls below.
+// followers who are already their fans: names and fan status, never an
+// address (mig 20261112100000; addresses come only from the logged CSV
+// export). Pure up top, calls below.
 
 import { supabase } from './supabase';
 import type { CsvCell } from './csv';
@@ -43,14 +45,19 @@ export function noticeLine(n: FollowerNotice | null): string | null {
     if (n.willNotify === 0) return `None of your ${plural(n.followers, 'follower')} can be emailed right now.`;
     return `${plural(n.willNotify, 'follower')} will be notified when you publish.`;
   }
+  // The publish only records who to tell; the follower digest sends the
+  // emails in batches (mig 20261112100000), so right after publishing they
+  // are all still waiting.
+  const batches = 'sent in batches, at most one email a day per follower';
+  if (n.waiting > 0 && n.notified === 0) return `${plural(n.waiting, 'follower')} waiting for the new-event email (${batches}).`;
   const parts = [`Notified ${plural(n.notified, 'follower')}`];
-  if (n.waiting > 0) parts.push(`${n.waiting} more waiting (one email a day per follower)`);
+  if (n.waiting > 0) parts.push(`${n.waiting} more waiting (${batches})`);
   return `${parts.join(', ')}.`;
 }
 
+/** A follower on the list: no address (the export has those). */
 export interface FollowerRow {
   fanId: string;
-  email: string;
   firstName: string | null;
   lastName: string | null;
   followedAt: Date | null;
@@ -76,10 +83,10 @@ const date = (v: unknown) => {
 const list = (v: unknown): FollowerRow['emailList'] => (v === 'subscribed' || v === 'unsubscribed' ? v : 'none');
 
 export function parseFollowerRow(r: any): FollowerRow | null {
-  const email = str(r?.email);
-  if (!email) return null;
+  const fanId = str(r?.fan_id);
+  if (!fanId) return null;
   return {
-    fanId: str(r?.fan_id) ?? '', email, firstName: str(r?.first_name), lastName: str(r?.last_name),
+    fanId, firstName: str(r?.first_name), lastName: str(r?.last_name),
     followedAt: date(r?.followed_at), emailList: list(r?.email_list), getsNewEventMail: r?.gets_new_event_mail === true,
   };
 }
@@ -93,6 +100,11 @@ export function parseOrgFollowers(data: unknown): OrgFollowers {
 }
 
 export const FOLLOWERS_CSV_HEADER = ['email', 'first_name', 'last_name', 'followed_at', 'email_list', 'gets_new_event_email'];
+
+/** A row's display name, or null when the fan gave none. */
+export function followerName(r: Pick<FollowerRow, 'firstName' | 'lastName'>): string | null {
+  return [r.firstName, r.lastName].filter(Boolean).join(' ') || null;
+}
 
 /** Rows of exos_org_followers_export as CSV cells (csv.ts quotes and defuses formulas). */
 export function followersCsvRows(rows: unknown[]): CsvCell[][] {
