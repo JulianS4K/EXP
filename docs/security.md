@@ -78,7 +78,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_event_questions` (mig 20261106110000) | OK (anon + authenticated) | The checkout questions of a **published** event, as its event page asks them: label, help text, kind, options, required, per order / per ticket, ticket types and limits, plus each table ticket type's party size. Never hidden or archived questions, answer counts or answers; a draft answers an empty list unless the caller can edit the event (the builder's preview). In the H3 allowlist. Answers (`exos_question_answers`) have no anon access: RLS lets owner / manager / finance read the org's, the buyer their own (`buyer_uid`), and door staff of the event (`exos_can_door_event`) per-ticket answers only; writes go through `exos_record_checkout_answers` (service role), `exos_claim_free_tickets_answered` (the signed-in claimer), `exos_rsvp_record_answers` (service role) and `exos_door_set_ticket_answers` (door staff). The cores (`_exos_validate_answers*`, `_exos_record_answers`, `_exos_question_*`, `_exos_answers_for`, `_exos_event_answer_rows`) are service role only. Security review 2026-11-05: in the partner API a tickets:read-only credential gets per-ticket answers only (order answers need the credential's orders:read scope; a user's or key creator's role never stands in for it; `_exos_answers_for(ids, p_include_order)`); the mint trigger attaches answers only to the order's buyer's tickets (or tickets parked on the org owner for a buyerless order or that buyer's own session), and the free claim / checkout refuse an order ref another buyer's answers hold; validation errors name only the validated event's questions and never an unknown one |
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 | `exos_ticket_link_location` (mig 20261105130000) | OK | The same 256-bit link key as `exos_ticket_link_view` (recomputed and compared; a wrong key and an unknown ticket give `{ ok: false }`). Answers that ticket's event location as the public sees it (mode, area, reveal time), plus a `secret_location` event's exact address only once its reveal time has passed and only for an active or used ticket. Read-only. docs/promoter-events.md |
-| `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the ticket type id. Never another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
+| `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the event and ticket type ids (also published only, since mig 20261109110000). Never another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -644,10 +644,56 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   self-service (transfers, refund asks, profile edits).
 
 ### Search path
+
+### Hygiene 2026-11-09 (mig 20261109110000)
+
+The should-fix items of the Applier's Supabase advisor sweep, Exos objects only.
+Nothing new is callable by anon (H3 unchanged); tests in
+`tests/exos/test_security_hygiene.sql`.
+
+- `exos_paste_probe` (a test table left in prod, one row) is dropped.
+- **Sequences.** Supabase's default privileges give anon, authenticated and
+  service_role USAGE, SELECT and UPDATE on every new sequence in `public`, so
+  anon could `setval()` an Exos id sequence. Anon's (and PUBLIC's) are revoked
+  on every `exos_*` sequence. The default privileges themselves stay: they're
+  per schema, and `public` is shared with Terminal-2, whose future sequences
+  would lose the grants too. So **a migration that creates an `exos_*`
+  sequence (a `serial` / `bigserial` / identity column) must revoke anon's**:
+  `REVOKE ALL ON SEQUENCE public.<seq> FROM PUBLIC, anon`. The harness carries
+  the same default privileges (`prereq_supabase.sql`), S3 fails on an
+  anon-usable `exos_*` sequence, and `scripts/verify-prod.sh` checks prod
+  ("anon on exos sequences").
+- **`_exos_site_error(jsonb)`, `_exos_door_code_loose(text)`**: no anon or
+  PUBLIC EXECUTE; authenticated and service_role keep it. Their callers are
+  definer functions (`exos_set_org_site`, `exos_door_code_lookup`) and the
+  index `exos_guest_list_entries_loose_code_idx`, which runs the helper as
+  the writing role: only definer functions and the service role write guest
+  list entries.
+- **RLS initplan.** 43 policies on `exos_*` tables called `auth.uid()` /
+  `auth.jwt()` per row; they now call `(select auth.uid())`, evaluated once
+  per statement. The rewrite only wraps bare calls (ALTER POLICY, so name,
+  command, roles and permissive flag can't change); S4 compares every policy
+  with a snapshot taken just before the migration and what five users see
+  and may insert under the old and new expressions. New policies: write
+  `(select auth.uid())`. `exos_has_org_role(org_id, …)` takes a row's column
+  and can't be hoisted; it stays as it is.
+- **Not changed, on purpose.** `exos_run_channel_splits_each(integer)` has no
+  pinned `search_path`: it's a procedure that commits after each event, and a
+  procedure with a `SET` clause can't `COMMIT`, so pinning it would break the
+  hourly channel-split cron. It's `SECURITY INVOKER`, only its owner can
+  `CALL` it and every name in it is schema-qualified; the advisor's finding
+  for it is accepted. The advisor's `multiple_permissive_policies` (30
+  table / command pairs, all `authenticated` SELECT: a staff policy next to a
+  holder or public one) are left for a later, separate change.
+- Matched seats: a guest's ticket parked on the organizer is keyed, mailed and
+  (not) texted as the guest's (`docs/matched-seats.md`).
+
 ### Search path
 
 `exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function
-without a pinned `search_path`; it now has `public, pg_temp`.
+without a pinned `search_path`; it now has `public, pg_temp`. The one other
+unpinned Exos routine, `exos_run_channel_splits_each`, can't be pinned (see
+"Hygiene 2026-11-09").
 
 ### SECURITY DEFINER views (8, by design)
 

@@ -38,6 +38,9 @@ apply() {
     # place in the timeline.
     20260601120500_sec_p3_document_exos_public_views_accepted)
       $PSQL -c 'ALTER TABLE public.exos_event_checkins ALTER COLUMN scanned_by DROP NOT NULL' ;;
+    # Prod's leftovers it cleans up (exos_paste_probe, anon EXECUTE on two
+    # helpers) and the policy set before it, for test_security_hygiene.sql.
+    20261109110000_exos_security_hygiene) $PSQL -f "$DIR/shim_security_hygiene.sql" ;;
   esac
   $PSQL -f "$MIG/$1.sql"
   case "$1" in
@@ -268,7 +271,8 @@ for m in \
   20261108110000_exos_dice_leftovers \
   20261108120000_exos_group_pay \
   20261108130000_exos_claim_alias_fix \
-  20261109100000_exos_org_audit; do
+  20261109100000_exos_org_audit \
+  20261109110000_exos_security_hygiene; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -499,7 +503,8 @@ for m in \
          20261108110000_exos_dice_leftovers \
          20261108120000_exos_group_pay \
          20261108130000_exos_claim_alias_fix \
-         20261109100000_exos_org_audit; do
+         20261109100000_exos_org_audit \
+         20261109110000_exos_security_hygiene; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -621,3 +626,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_claim_alias_fix.sql"
 # claude/exos-org-audit: the org audit log (mig 20261109100000): append-only, RLS, actors (user, API key, OAuth app, service), masking, cross-org, export.run (race: race_org_audit.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_audit.sql"
+# claude/exos-hygiene: advisor sweep 2026-11-09: probe table, anon off exos sequences and two helpers, auth.* wrapped in exos policies (same access), parked guest tickets in matched seats, seat view ids (mig 20261109110000)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_security_hygiene.sql"
