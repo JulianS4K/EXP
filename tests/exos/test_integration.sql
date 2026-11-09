@@ -28,7 +28,8 @@ INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
   ('1e000000-0000-0000-0000-0000000000a1', 'ix-manager@x.com', now()),
   ('1e000000-0000-0000-0000-0000000000b1', 'ix-buyer@x.com', now()),
   ('1e000000-0000-0000-0000-0000000000b2', 'ix-member@x.com', now()),
-  ('1e000000-0000-0000-0000-0000000000b3', 'ix-nonmember@x.com', now());
+  ('1e000000-0000-0000-0000-0000000000b3', 'ix-nonmember@x.com', now()),
+  ('1e000000-0000-0000-0000-0000000000b9', 'ix-holder@x.com', now());   -- holds pg_temp.mint's tickets (buyer_id is NOT NULL)
 INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
   ('1e000000-0000-0000-0000-000000000001', 'IX Org', 'ix-org', '1e000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
@@ -72,10 +73,12 @@ END $$;
 GRANT EXECUTE ON FUNCTION pg_temp.refused(text, text) TO anon, authenticated, service_role;
 -- A ticket row as a box office / comp path writes it (the insert triggers decide).
 CREATE FUNCTION pg_temp.mint(p_event text, p_tier text, p_ref text, p_channel text) RETURNS void LANGUAGE sql AS $$
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid,
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid,
                                    order_ref, channel_source)
   VALUES (('1e000000-0000-0000-0000-0000000000' || p_event)::uuid, '1e000000-0000-0000-0000-000000000001',
-          ('1e000000-0000-0000-0000-0000000000' || p_tier)::uuid, 'IX', p_ref || '@x.com', 'active', p_ref, 0, p_ref, p_channel)
+          ('1e000000-0000-0000-0000-0000000000' || p_tier)::uuid, 'IX',
+          '1e000000-0000-0000-0000-0000000000b9', '1e000000-0000-0000-0000-0000000000b9',
+          p_ref || '@x.com', 'active', p_ref, 0, p_ref, p_channel)
 $$;
 CREATE TEMP TABLE ix (k text PRIMARY KEY, v text);
 GRANT ALL ON ix TO anon, authenticated, service_role;
