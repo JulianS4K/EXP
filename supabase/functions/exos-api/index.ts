@@ -179,6 +179,8 @@ import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, order
 import { handlePosSales, POS_SALES_ROUTES, PosSalesError } from "./posSales.ts"; // claude/exos-pos-walkup
 import { FEE_ADJ_CREATED, FEE_ADJ_ROUTES, FeeAdjError, handleFeeAdjustments } from "./feeAdjustments.ts";
 import { handleJournal, JOURNAL_ROUTES, JournalError } from "./journal.ts"; // claude/exos-money-journal
+import { AUDIT_ROUTES, AuditError, handleAudit } from "./audit.ts"; // claude/exos-org-audit
+import { actorHeaders } from "../_shared/api/audit.ts"; // claude/exos-org-audit
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
@@ -299,7 +301,12 @@ interface Ctx {
   tokenHash: string;
 }
 
-const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+// claude/exos-org-audit: `headers` name the credential to the org audit log
+// (X-Exos-Actor / X-Exos-Request-Id, _shared/api/audit.ts); the database
+// reads them on service-role requests only.
+const service = (headers?: Record<string, string>) =>
+  createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    headers && Object.keys(headers).length ? { global: { headers } } : undefined);
 const appBase = () => (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, "") || null;
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -406,7 +413,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const ctx: Ctx = {
-      sb, orgId, cred,
+      // claude/exos-org-audit: every call for this request carries its actor.
+      sb: service(actorHeaders(cred, crypto.randomUUID())), orgId, cred,
       key: { id: cred.id, name: cred.name, key_prefix: cred.key_prefix, scopes: cred.scopes },
       params: match.params,
       q: url.searchParams,
@@ -439,6 +447,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof PosSalesError) return json({ error: e.message }, e.status); // claude/exos-pos-walkup
     if (e instanceof FeeAdjError) return json({ error: e.message }, e.status);
     if (e instanceof JournalError) return json({ error: e.message }, e.status); // claude/exos-money-journal
+    if (e instanceof AuditError) return json({ error: e.message }, e.status); // claude/exos-org-audit
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -624,6 +633,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-money-journal (mig 20261108100000): the journal, read-only.
   if (JOURNAL_ROUTES.has(route.id)) return await handleJournal(route, { sb, orgId, q: c.q, page });
+  // claude/exos-org-audit (mig 20261109100000): the org audit log, read-only.
+  if (AUDIT_ROUTES.has(route.id)) return await handleAudit(route, { sb, orgId, q: c.q, page });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {

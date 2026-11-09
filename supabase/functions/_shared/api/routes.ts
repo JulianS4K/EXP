@@ -827,6 +827,10 @@ export const ROUTES: readonly ApiRoute[] = [
   // docs/api/fee-adjustments.json): record a manual fee change. finance:write,
   // and an API key whose creator is an owner, manager or finance (in SQL).
   { id: 'create-order-fee-adjustment', method: 'POST', auth: K, path: '/orders/:id/adjustments', scope: 'finance:write', paged: false },
+  // claude/exos-org-audit (mig 20261109100000, exos-api/audit.ts,
+  // docs/api/audit.json): the org audit log, newest first. Read-only; the new
+  // scope audit:read (owner and finance credentials by default).
+  { id: 'list-audit', method: 'GET', auth: K, path: '/audit', scope: 'audit:read', paged: true },
 ];
 
 /** Methods the API answers (anything else is 405). */

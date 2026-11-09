@@ -174,6 +174,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/components/PosDrawersPanel.tsx', 'supabase/functions/exos-pos/index.ts',
       'supabase/migrations/20261107100000_exos_pos_walkup.sql'],
   },
+  {
+    id: 'org-audit-log', audience: 'organizer', status: 'at_launch',
+    claim: 'Changes to events, ticket types, promo codes, holds, refunds, payouts and team access are kept in an audit log that can\'t be edited, showing who made each one, when and from where, with a CSV export and an API.',
+    code: ['src/views/OrgActivity.tsx', 'supabase/functions/exos-api/audit.ts',
+      'supabase/migrations/20261109100000_exos_org_audit.sql'],
+    note: 'Works once mig 20261109100000 is applied (scripts/rollout-prod.sh).',
+  },
 
   // ---- Door ---------------------------------------------------------------
   {
