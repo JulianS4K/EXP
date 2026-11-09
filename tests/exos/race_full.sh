@@ -78,6 +78,8 @@ cleanup() {
       DELETE FROM public.exos_mail WHERE to_email LIKE 'e2r-%';
       DELETE FROM auth.users WHERE email LIKE 'e2r-%@x.com';
     END \$\$;" >/dev/null
+  # Group pay v2 is paused (mig 20261111120000): back off at the end.
+  $P -c "SELECT public.exos_set_group_pay_enabled(false, 'race_full.sh: done')" >/dev/null
 }
 cleanup
 trap 'cleanup; rm -rf "${TMP:-/nonexistent}"' EXIT
@@ -86,6 +88,9 @@ fail=0
 ok() { echo "OK   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 q() { $P -c "$1"; }
+# Group pay v2 is paused (operator 2026-11-09, mig 20261111120000): race 1
+# needs it, so the switch is on for this script and off again in cleanup.
+q "SELECT public.exos_set_group_pay_enabled(true, 'race_full.sh: setup')" >/dev/null
 
 # Fixtures (committed): org A (owner, manager, finance, scanner), org B and
 # its one order; e1 with GA (5 places), a pool of 2 (VIP + Balcony), a pool

@@ -345,6 +345,10 @@ SELECT pg_temp.check_invariants('E2E-12 sale: two orders for the matinee');
 
 -- E2E-13 group pay: h1 holds 3 GA seats for friends; f1 and f2 pay their
 -- own seat, the host covers the last one. The group locks the Early price.
+-- Group pay v2 is paused (operator 2026-11-09, mig 20261111120000): the step
+-- turns the switch on for itself and off after it (the audit row it writes is
+-- the platform's, nil org, outside I6's two orgs).
+SELECT public.exos_set_group_pay_enabled(true, 'sim_full.sql: E2E-13');
 DO $$
 DECLARE r jsonb; v_g uuid; v_ctx jsonb; v_hold uuid; v_ans jsonb;
 BEGIN
@@ -381,6 +385,7 @@ BEGIN
              AND price_step_id = pg_temp.v('step_early')::uuid) = 3, 'E2E-13 three seats on the Early step';
 END $$;
 SELECT pg_temp.check_invariants('E2E-13 sale: group pay, two friends and the host''s cover', ARRAY['order.group_cover:user']);
+SELECT public.exos_set_group_pay_enabled(false, 'sim_full.sql: E2E-13 done');
 
 -- E2E-14 a partner reservation with answers (exos-api /v1/partner), completed.
 INSERT INTO public.exos_tier_distribution (tier_id, event_id, org_id, enabled) VALUES (pg_temp.u('ga'), pg_temp.u('e1'), pg_temp.u('A'), true);

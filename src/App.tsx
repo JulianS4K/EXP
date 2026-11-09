@@ -10,6 +10,7 @@ import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
 import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
+import GroupPayGate from './components/GroupPayGate';
 import { isPixelRoute, leavePixelScope } from './lib/pixels';
 
 // Home is the landing page — keep it eagerly loaded so the first paint is
@@ -205,8 +206,9 @@ export default function App() {
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
-                    <Route path="/group-pay/seat/:token" element={<GroupPaySeat />} />
-                    <Route path="/group-pay/:groupId" element={<GroupPayHost />} />
+                    {/* Group pay v2 is paused (mig 20261111120000): "not available" unless VITE_EXOS_GROUP_PAY=on. */}
+                    <Route path="/group-pay/seat/:token" element={<GroupPayGate><GroupPaySeat /></GroupPayGate>} />
+                    <Route path="/group-pay/:groupId" element={<GroupPayGate><GroupPayHost /></GroupPayGate>} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
                     <Route path="/unfollow" element={<Unfollow />} />
                     <Route path="/nyc" element={<NeighborhoodsIndex />} />

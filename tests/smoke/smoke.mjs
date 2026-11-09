@@ -5,6 +5,9 @@ import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
+// Group pay v2 is paused (mig 20261111120000): its steps run against a build
+// with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
+const GP_BASE = process.env.SMOKE_GROUP_BASE || BASE;
 const IG = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.2.23.108 (iPhone15,2; iOS 17_5; en_US; en; scale=3.00; 1179x2556; 624443862)';
 const FB_ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-S918U Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.71 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/471.0.0.35.80;]';
 // SMOKE_CHROMIUM: a local browser binary when Playwright's own download isn't available.
@@ -1415,8 +1418,22 @@ await run('dashboard: the genre filter narrows the event list', async (page) => 
 ] } }) });
 
 // ── Group buy v2, "pay separately" (mig 20261108120000): a friend's seat page
-// and the host's group page, against mocked RPCs. ──
+// and the host's group page, against mocked RPCs. Paused (operator 2026-11-09,
+// mig 20261111120000): these run against GP_BASE, the build with
+// VITE_EXOS_GROUP_PAY=on; the default build is checked first. ──
 const SEAT_TOKEN = 'ab'.repeat(16);
+await run('group pay off (default build): no "Pay separately" on the event page, "not available" on its links', async (page, log) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  assert(await page.getByTestId('group-pay-start').count() === 0 && !/pay separately/i.test(await page.locator('body').innerText()),
+    'no group start on the event page');
+  for (const path of ['/group-pay/seat/' + SEAT_TOKEN, '/group-pay/c7e00000-0000-4000-8000-000000000001']) {
+    await page.goto(BASE + path);
+    await page.getByRole('heading', { name: "Group pay isn't available" }).waitFor({ timeout: 8000 });
+    await expectText(page, 'Split with friends');
+  }
+  assert(!log.some((l) => /exos_group_/.test(l)), 'nothing asked of the server: ' + log.filter((l) => /exos_group_/.test(l)).join(', '));
+}, { signedIn: true });
 const GROUP = 'c7e00000-0000-4000-8000-000000000001';
 const inMinutes = (m) => new Date(Date.now() + m * 60_000).toISOString();
 const seatView = (over = {}) => ({
@@ -1429,7 +1446,7 @@ const seatView = (over = {}) => ({
 const seatCheckout = {};
 await run('group pay: a friend opens their seat link, sees price and time left, pays as a guest for exactly that seat', async (page, log) => {
   await stubStripe(page, seatCheckout);
-  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await page.goto(GP_BASE + '/group-pay/seat/' + SEAT_TOKEN);
   await expectText(page, 'Seat 2 of 4');
   await expectText(page, '$50.00');
   await expectText(page, '1 of 4 paid');
@@ -1447,12 +1464,12 @@ await run('group pay: a friend opens their seat link, sees price and time left, 
 }, { mock: { ...checkoutFn(seatCheckout), rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView() : null) } } });
 
 await run('group pay: a seat a friend is paying for, a released seat, and a bad link', async (page) => {
-  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await page.goto(GP_BASE + '/group-pay/seat/' + SEAT_TOKEN);
   await expectText(page, 'A friend is paying for this seat right now');
   assert(await page.getByRole('button', { name: /Pay for my seat/ }).count() === 0, 'no pay button on a taken seat');
-  await page.goto(BASE + '/group-pay/seat/' + 'cd'.repeat(16));
+  await page.goto(GP_BASE + '/group-pay/seat/' + 'cd'.repeat(16));
   await expectText(page, 'time ran out');
-  await page.goto(BASE + '/group-pay/seat/not-a-token');
+  await page.goto(GP_BASE + '/group-pay/seat/not-a-token');
   await expectText(page, "isn't valid");
 }, { mock: { rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView({ state: 'paying' })
   : b.p_token === 'cd'.repeat(16) ? seatView({ state: 'released', group_status: 'closed', deadline: inMinutes(-2) }) : null) } } });
@@ -1460,7 +1477,7 @@ await run('group pay: a seat a friend is paying for, a released seat, and a bad 
 const coverCheckout = {};
 await run('group pay: the host sees each seat live, texts a link, and covers the rest', async (page, log) => {
   await stubStripe(page, coverCheckout);
-  await page.goto(BASE + '/group-pay/' + GROUP);
+  await page.goto(GP_BASE + '/group-pay/' + GROUP);
   await expectText(page, '1 of 3 paid');
   await expectText(page, 'Seat 3');
   const sms = await page.getByRole('link', { name: 'Text' }).first().getAttribute('href');
@@ -1494,7 +1511,7 @@ const labelGroup = () => ({
   ],
 });
 await run('group pay: the host names a seat; a locked step price and the slot show on the host page', async (page, log) => {
-  await page.goto(BASE + '/group-pay/' + GROUP);
+  await page.goto(GP_BASE + '/group-pay/' + GROUP);
   await expectText(page, 'Seat 1: Sam');
   await expectText(page, 'at $20.00 each, entry 2026-11-12 10:30');
   const field = page.getByTestId('seat-label-3');
@@ -1510,7 +1527,7 @@ await run('group pay: the host names a seat; a locked step price and the slot sh
 }, { signedIn: true, mock: { rpcs: { exos_group_buy_get: labelGroup }, tables: { exos_group_buy_seats: [{ id: 's3', label: 'Jo' }] } } });
 
 await run('group pay: a friend\'s seat page shows the locked price and the slot, never the host\'s names', async (page) => {
-  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await page.goto(GP_BASE + '/group-pay/seat/' + SEAT_TOKEN);
   await expectText(page, 'Seat 2 of 4');
   await expectText(page, '$20.00');
   await expectText(page, 'Entry slot: 2026-11-12 10:30');
