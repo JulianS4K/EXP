@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { ArrowLeft, Mail, UserX, UserCheck, X, Check, Minus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -67,6 +68,7 @@ const PERM_MATRIX: Array<[string, number[]]> = [
 ];
 
 export default function OrgMembers() {
+  const motionGate = useMotionGate();
   const { orgId } = useParams<{ orgId: string }>();
   const { user, isAdmin } = useAuth();
   const { activeRole } = useOrganization();
@@ -206,7 +208,7 @@ export default function OrgMembers() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-tm-gray text-slate-900"
     >

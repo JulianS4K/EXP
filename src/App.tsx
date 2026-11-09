@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 import { lazy, Suspense, ReactNode, useEffect } from 'react';
+import { MotionConfig } from 'motion/react';
 import { AuthProvider } from './context/AuthContext';
 import { OrganizationProvider } from './context/OrganizationContext';
 import { ToastProvider } from './context/ToastContext';
@@ -177,6 +178,9 @@ function ChromeLayout({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
+      {/* Reduced motion (OS setting): motion turns transforms off below this;
+          fade-ins are skipped per element with useMotionGate (lib/motion.ts). */}
+      <MotionConfig reducedMotion="user">
       {/* basename matches vite base '/bridge/' so client routes resolve under
           the unified-shell prefix (app.py /bridge → static/bridge/). */}
       <Router basename={((import.meta as any).env?.BASE_URL ?? '/').replace(/\/$/, '')}>
@@ -302,6 +306,7 @@ export default function App() {
         </ToastProvider>
         </LanguageProvider>
       </Router>
+      </MotionConfig>
     </ErrorBoundary>
   );
 }

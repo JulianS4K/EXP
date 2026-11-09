@@ -11,6 +11,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { ArrowLeft, BarChart3, DollarSign, Tag, Users, Ban, Undo2 } from 'lucide-react';
 import { getEventForEdit } from '../lib/events';
 import { listEventTickets, releaseTicket, voidTicket } from '../lib/tickets';
@@ -77,6 +78,7 @@ const REPORT_TABS: { key: ReportTab; label: string }[] = [
 ];
 
 export default function OrganizerEventReport() {
+  const motionGate = useMotionGate();
   const { eventId } = useParams<{ eventId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -258,7 +260,7 @@ export default function OrganizerEventReport() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="bg-[#f2f4f7] min-h-screen"
     >

@@ -18,6 +18,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { Check, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -38,6 +39,7 @@ interface InviteDoc {
 }
 
 export default function ClaimInvite() {
+  const motionGate = useMotionGate();
   const { token } = useParams<{ token: string }>();
   const { user, openAuthModal } = useAuth();
   const { refresh, setActiveOrg } = useOrganization();
@@ -160,7 +162,7 @@ export default function ClaimInvite() {
   if (state.kind === 'invalid') {
     return (
       <motion.div
-        initial={{ opacity: 0 }}
+        initial={motionGate.enter({ opacity: 0 })}
         animate={{ opacity: 1 }}
         className="wall min-h-screen"
       >
@@ -186,7 +188,7 @@ export default function ClaimInvite() {
   if (state.kind === 'done') {
     return (
       <motion.div
-        initial={{ opacity: 0 }}
+        initial={motionGate.enter({ opacity: 0 })}
         animate={{ opacity: 1 }}
         className="wall min-h-screen"
       >
@@ -217,7 +219,7 @@ export default function ClaimInvite() {
   const { invite, org } = state;
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="wall min-h-screen"
     >

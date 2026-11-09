@@ -325,7 +325,7 @@ export default function GuestListDoor({
   if (!extras) {
     return (
       <div className="py-10 text-center">
-        <p className="text-sm text-slate-500 mb-4">Download the guest lists to check names in (works offline after).</p>
+        <p className="text-sm text-slate-600 mb-4">Download the guest lists to check names in (works offline after).</p>
         <button type="button" onClick={onSync} disabled={syncing || isOffline}
           className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
           <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} /> Download lists
@@ -368,7 +368,7 @@ export default function GuestListDoor({
           >
             <label htmlFor="guest-code" className="sr-only">Ticket code from another platform</label>
             <div className="relative flex-1">
-              <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
               <input
                 id="guest-code"
                 value={code}
@@ -392,7 +392,7 @@ export default function GuestListDoor({
           </form>
           {cameraOn && <div id="guest-reader" className="mt-3 overflow-hidden rounded-xl bg-black" />}
           {codeFlash && (
-            <p role="status" className={`mt-2 text-[12px] font-bold ${codeFlash.ok ? 'text-emerald-600' : 'text-rose-500'}`}>
+            <p role="status" className={`mt-2 text-[12px] font-bold ${codeFlash.ok ? 'text-emerald-600' : 'text-rose-700'}`}>
               {codeFlash.text}
             </p>
           )}
@@ -409,13 +409,13 @@ export default function GuestListDoor({
           className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-4 pl-12 pr-4 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue"
           aria-label="Search guest list"
         />
-        <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+        <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
       </div>
 
       {guests.length === 0 ? (
-        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest py-6 text-center">No names on any list.</p>
+        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest py-6 text-center">No names on any list.</p>
       ) : results.length === 0 ? (
-        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest py-6 text-center">No match. Check the spelling or ask which list.</p>
+        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest py-6 text-center">No match. Check the spelling or ask which list.</p>
       ) : (
         <ul className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden">
           {results.map((g) => {
@@ -427,9 +427,9 @@ export default function GuestListDoor({
                   <span className="min-w-0 flex-1">
                     <span className="block font-bold text-slate-900 truncate">
                       {g.guestName}
-                      {g.plusOnes > 0 && <span className="text-slate-500 font-medium"> +{g.plusOnes}</span>}
+                      {g.plusOnes > 0 && <span className="text-slate-600 font-medium"> +{g.plusOnes}</span>}
                     </span>
-                    <span className="block text-[11px] text-slate-400 truncate">
+                    <span className="block text-[11px] text-slate-500 truncate">
                       {listName[g.listId] ?? 'Guest list'}
                       {g.ticketLabel ? ` · ${g.ticketLabel}` : ''}
                       {g.source ? ` · ${g.source}` : ''}
@@ -446,7 +446,7 @@ export default function GuestListDoor({
                     <button
                       type="button"
                       onClick={() => void undoArrival(g)}
-                      className="text-[10px] font-black text-slate-500 hover:text-slate-900 uppercase tracking-widest shrink-0"
+                      className="text-[10px] font-black text-slate-600 hover:text-slate-900 uppercase tracking-widest shrink-0"
                     >
                       Undo
                     </button>
@@ -492,7 +492,7 @@ export default function GuestListDoor({
                   )}
                 </div>
                 {flash?.id === g.id && (
-                  <p className={`mt-2 text-[11px] font-bold ${flash.ok ? 'text-emerald-600' : 'text-rose-500'}`}>{flash.text}</p>
+                  <p className={`mt-2 text-[11px] font-bold ${flash.ok ? 'text-emerald-600' : 'text-rose-700'}`}>{flash.text}</p>
                 )}
               </li>
             );
