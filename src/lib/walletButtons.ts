@@ -120,6 +120,19 @@ export function addonWalletEligible(pass: { status?: string | null; barcodeSecre
   return pass.status === 'active' && !!pass.barcodeSecret;
 }
 
+/** How many add-on wallet reissues a holder gets in a rolling day (exos_wallet_addon_reissue). */
+export const ADDON_REISSUES_PER_DAY = 5;
+
+/**
+ * "Reissue" is offered next to an add-on's wallet buttons once the unit is in
+ * a wallet (exos_my_addon_passes' wallet_epoch, mig 20261111140000) and can
+ * still be used: reissuing rotates the wallet code, so a pass never added has
+ * nothing to rotate.
+ */
+export function addonReissueEligible(pass: { status?: string | null; barcodeSecret?: string | null; walletEpoch?: number | null }): boolean {
+  return addonWalletEligible(pass) && typeof pass.walletEpoch === 'number' && pass.walletEpoch >= 1;
+}
+
 /** A holder-facing sentence for exos-wallet's 409 reasons and other errors. */
 export function walletErrorMessage(reason: string | null | undefined): string {
   switch (reason) {
@@ -135,6 +148,10 @@ export function walletErrorMessage(reason: string | null | undefined): string {
       return 'This add-on was refunded and can no longer be added to a wallet.';
     case 'not your add-on':
       return 'Only the add-on holder can add it to a wallet.';
+    case 'rate-limited':
+      return `You can reissue add-on wallet passes ${ADDON_REISSUES_PER_DAY} times a day. Try again tomorrow.`;
+    case 'no-pass':
+      return "This add-on isn't in a wallet yet, so there is nothing to reissue. Add it first.";
     case 'unauthorized':
       return 'Sign in again to add the ticket to your wallet.';
     default:

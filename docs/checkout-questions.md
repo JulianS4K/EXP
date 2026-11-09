@@ -100,8 +100,8 @@ buyer) all keep them. The buyer can read an order's answers once its tickets are
 | Paid checkout | `exos-checkout` body `answers: { order: {...}, tickets: [{...}] }` |
 | Free claim (signed in) | `exos_claim_free_tickets_answered`; the plain `exos_claim_free_tickets` refuses an event with required questions |
 | Phone RSVP | `exos-rsvp` "info" returns the questions, "start" takes `answers` (one entry per guest incl. plus-ones); a refusal expires the RSVP |
-| Organizer reservations (API) | `answers` on POST /v1/events/:id/organizer-reservations (and `/build`, checked only) or on …/:token/complete; checked, hidden questions allowed, never required (mig 20261110120000 added the reserve) |
-| Partner reservations (`/public/…`) | `ticket_reservation[answers]` on the reserve (and `comp[answers]` on comps): checked like checkout, **required ones required** (422 `questions_required`, nothing held); optional ones may come with complete instead. See below |
+| Organizer reservations (API) | `answers` on POST /v1/events/:id/organizer-reservations (and `/build`, checked only) or on …/:token/complete; checked, hidden questions allowed, never required (mig 20261110120000 added the reserve); PUT …/:token replaces them while open (mig 20261111140000) |
+| Partner reservations (`/public/…`) | `ticket_reservation[answers]` on the reserve (and `comp[answers]` on comps): checked like checkout, **required ones required** (422 `questions_required`, nothing held); optional ones may come with complete instead; PUT …/:token replaces them while open (mig 20261111140000). See below |
 | The door | `exos_door_set_ticket_answers` (door staff of the event; per-ticket questions, hidden ones included, nothing required) |
 | Walk-up sales at the door | `exos-pos` `mint_walkup` `answers` (cash, comp and card; mig 20261108110000): see below |
 
@@ -126,8 +126,18 @@ its reserve call, `answers: { order: {...}, tickets: [{...}] }`. `tickets[i]` is
   ref `po:<reservation>`, source `api`, no buyer; the attach trigger gives the n-th ticket minted at complete (parked
   on the org owner) the n-th entry. Complete may send answers when the reserve sent none
   (`_exos_partner_reservation_answers` for a partner's own reservation, `_exos_api_reservation_answers` for the
-  organizer's); one set per reservation, the first sent wins.
-- Tests: `tests/exos/test_leftovers_9.sql` LO1-LO2, `src/lib/leftovers9.test.ts`.
+  organizer's); reserve and complete keep one set, the first sent wins.
+- **The update replaces the set** (mig 20261111140000). `_exos_partner_reservation_update` takes `answers` in its
+  attrs (marker `exos: reservation answers update`) and calls `_exos_reservation_answers_replace` once the
+  reservation is known to be active: under the reservation's row lock (the one complete takes), the new set is checked
+  with `_exos_reservation_answers_check` (the reserve's rules: partners' required ones required, `EXQRQ`; organizers'
+  hidden ones allowed, nothing required), then the unattached `po:<reservation>` answers and their cursor are deleted
+  and the new set recorded. A refusal changes nothing. Open means active, before `expires_at`, nothing attached;
+  otherwise `EX409` (a completed or cancelled reservation) or the expired status (410 at the edge). One
+  `_exos_audit` row per replacement (`reservation.answers_replace`: `answers: [before, after]` counts and the
+  channel; never the values; marker `exos: audit reservation.answers_replace`).
+- Tests: `tests/exos/test_leftovers_9.sql` LO1-LO2, `tests/exos/test_api_leftovers.sql` AL1-AL2,
+  `tests/exos/race_api_leftovers.sh` races 2-3, `src/lib/leftovers9.test.ts`, `src/lib/wallet/addonReissue.test.ts`.
 
 ### Walk-up sales (mig 20261108110000)
 
@@ -177,3 +187,11 @@ events:write; DELETE archives), `PUT /v1/events/:id/questions/order`, the answer
 `answers`: its own per-ticket answers, and its order's only for a credential with orders:read. The credential's scopes
 decide, never its user's or creator's role (`_shared/api/questionAnswers.ts`). A tickets:read-only door or
 check-in integration sees per-ticket answers only. DICE mapping: `fanSurveyQuestion.title` = `label`, `value` = `display`.
+
+Distribution partners (`/v1/public/orders`, `/v1/public/orders/:id`, mig 20261111140000) get each ticket's
+answers on their own orders: `_exos_partner_order_answers_json` wraps the order with `answers` (the order's answers
+and the ticket's own, the shape above) and Opendate's `custom_field_values` (`custom_field_id` = question id, `name`
+= label, `value` = display) per ticket, from `_exos_partner_ticket_answers`: only answers recorded for that
+reservation (`po:<id>`), only for one of its tickets, and never a hidden question's (staff-only, even when the door
+answered it). The partner's key and partner id scope the order in SQL (`_exos_partner_orders` / `_exos_partner_order`,
+markers `exos: partner order answers`); the organizer's read of the same order (no partner) is unchanged.

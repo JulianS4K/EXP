@@ -552,7 +552,7 @@
       "method": "PUT",
       "path": "/v1/events/:id/organizer-reservations/:token",
       "summary": "Set the attendee",
-      "description": "Doesn't extend the hold.",
+      "description": "Attendee, email, transaction id and the checkout answers. Doesn't extend the hold.",
       "auth": "api_key",
       "scope": "tickets:write",
       "parameters": [
@@ -619,6 +619,26 @@
           "required": false,
           "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
           "example": 54.0
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Replaces the reservation's checkout answers while it is open: the reserve's shape and rules (hidden staff questions allowed, never required). The whole set is replaced; {} clears it; leave it out to keep it. A completed reservation is 409.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [

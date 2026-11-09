@@ -7,7 +7,9 @@ Partner sales" (`docs/api/partner-sales.json`); this page is how it works.
 
 - **Migration:** `supabase/migrations/20261031130000_exos_partner_sales.sql`. Harness:
   `tests/exos/test_partner_sales.sql`. Checkout answers on reservations: `20261110120000_exos_leftovers_9.sql`,
-  `tests/exos/test_leftovers_9.sql` (LO1, LO2).
+  `tests/exos/test_leftovers_9.sql` (LO1, LO2). Answers on update and in order reads:
+  `20261111140000_exos_api_leftovers.sql`, `tests/exos/test_api_leftovers.sql` (AL1-AL3), race
+  `tests/exos/race_api_leftovers.sh`.
 - **Code:** `supabase/functions/exos-api/index.ts` (`partnerApi`), `_shared/partners/sales.ts` (parsing),
   `_shared/api/routes.ts` (the `/public/…` rows). Wallet fallback: `exos-wallet` `POST /link-pass`.
 - **UI:** Org settings → Distribution partners (`DistributionPartnersPanel`), Edit event → Sell through partners
@@ -91,8 +93,8 @@ reserve ──201 token, expires_at──▶ charge your buyer ──▶ PUT att
   them: the loser gets 409 before charging anyone. Up to 10 ticket types and 100 tickets. On a type with price
   steps the holds also carry the step and its price, taken under the lock checkout's `exos_hold_lock_price`
   uses, so a partner and a buyer can't both get the last early birds (`tests/exos/race_partner_steps.sh`).
-- **Update** sets the attendee name and email, whether we email the tickets, and the partner's transaction id.
-  It doesn't extend the hold.
+- **Update** sets the attendee name and email, whether we email the tickets, the partner's transaction id and the
+  checkout answers (see "Checkout questions" below). It doesn't extend the hold.
 - **Complete** consumes the holds and mints the tickets in one transaction, the way `exos_fulfill_checkout`
   does. It first locks every shared limit of every line by id, then the ticket types by id (the order holds
   use), so a multi-type reservation can't deadlock against a checkout. It is idempotent: a repeat call answers 200 with the same order. After `expires_at` it answers 410 and
@@ -123,9 +125,19 @@ balance back.
   label, ticket }]` and holds nothing, so ask your buyer before you charge. An invalid answer is 400. Answers are
   stored with the reservation (order ref `po:<reservation>`, like online answers) and attached to each ticket at
   complete; the organizer sees them in the event report and the API. Complete may carry answers when the reserve
-  sent none (optional ones); a reservation keeps one set, the first sent. Comps take `comp[answers]` the same way.
-  Organizer reservations take `answers` on reserve, `/build` (checked, not stored) and complete: checked, hidden
+  sent none (optional ones); reserve and complete keep one set, the first sent. Comps take `comp[answers]` the same
+  way. Organizer reservations take `answers` on reserve, `/build` (checked, not stored) and complete: checked, hidden
   staff questions allowed, never required.
+- **Changing the answers** (mig `20261111140000`). `PUT …/ticket_reservations/:token` with
+  `ticket_reservation[answers]` replaces the whole set while the reservation is open (active, before `expires_at`,
+  before complete), checked exactly as on reserve: required questions are required for partners (422
+  `questions_required`, the stored set unchanged), an invalid answer is 400, a hidden question is refused. The
+  organizer's `PUT /v1/events/:id/organizer-reservations/:token` does the same with the organizer's rules (hidden
+  questions allowed, never required; `{}` clears the set). Leaving `answers` out keeps the stored set. A completed
+  or cancelled reservation answers 409, an expired one 410; nothing changes. Each replacement is one org audit row
+  (`reservation.answers_replace`, the number of answers before and after, never the values). The update and
+  complete take the same row lock, so an update racing a complete either lands before the mint (and the tickets
+  get the new set) or sees the reservation completed (`tests/exos/race_api_leftovers.sh`).
 - **Member presales:** while an organizer's member presale runs on a ticket type, partners can't reserve it (422,
   `reason: not_available`); organizer reservations still can.
   That is the default (`block`); an organizer can set `allow` for the organization or one event, and partners then
@@ -164,7 +176,12 @@ in an order comes with `delivery.url`:
 - Orders: `GET /orders` lists your completed orders, newest first, in Opendate's envelope
   (`current_page, per_page, total_entries, total_pages, collection`; `per_page` up to 250), filterable by
   event, email, your transaction id and created / updated time. Money is in major units. Each order lists the
-  tickets the buyer still holds (voided ones marked).
+  tickets the buyer still holds (voided ones marked). `GET /orders/:id` is one order in the same shape.
+- Each ticket in an order carries the checkout answers given for it (mig `20261111140000`): `answers` (`question_id`,
+  `scope`, `label`, `kind`, `value`, `display`; the order's answers on every ticket, then the ticket's own) and
+  Opendate's `custom_field_values` (`custom_field_id` = the question id, `name` = its label, `value` = the answer as
+  text). Only answers recorded for that order, only your own orders, and never a question the organizer keeps for
+  staff (hidden from checkout), even when door staff answered it.
 
 ## Opendate mapping
 
@@ -173,7 +190,8 @@ in an order comes with `delivery.url`:
 | `GET /public/confirms/{id}/ticket_types` | same path |
 | (none) | `GET /public/confirms/{id}/questions`: the checkout questions a reservation answers |
 | `POST/PUT/DELETE /public/confirms/{id}/ticket_reservations[/{token}]`, `…/{token}/complete` | same paths (+ `GET …/{token}`) |
-| `GET /public/orders`, `/public/orders/{id}`, `…/ticket_pdfs[/{ticket_id}]` | same paths; links instead of PDFs |
+| `GET /public/orders`, `/public/orders/{id}`, `…/ticket_pdfs[/{ticket_id}]` | same paths; links instead of PDFs; tickets add `answers` and `custom_field_values` |
+| `PUT /public/confirms/{id}/ticket_reservations/{token}` (attendee only) | same path; also replaces the checkout answers while open |
 | `POST /public/confirms/{id}/comps` | same path; needs the comps scope |
 | `POST /confirms/{id}/organizer_ticket_reservations[/build]`, `PUT/DELETE …/{token}`, `…/{token}/complete` | `/v1/events/:id/organizer-reservations[/build]`, `…/:token`, `…/:token/complete` |
 | `POST/DELETE …/organizer_ticket_reservations/{token}/gift_card_redemptions[/{id}]` | `/v1/events/:id/organizer-reservations/:token/gift-card-redemptions[/:rid]` (+ `GET`); `docs/gift-cards.md` "On reservations" |

@@ -223,6 +223,8 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 | `exos_wallet_passes` | holder: `SELECT` of own rows, without `auth_token_hash`; no client writes |
 | `exos_wallet_registrations` | service role only |
 | `exos_wallet_issue_pass`, `exos_wallet_reissue` | `authenticated`; the caller must own the ticket |
+| `exos_wallet_addon_pass`, `exos_wallet_addon_reissue` | `authenticated`; the caller must hold the add-on pass (the reissue: 5 a day per holder) |
+| `exos_addon_wallet_reissues` | the holder and the org's owners / managers: `SELECT`; no client writes |
 | `exos_wallet_pass_payload`, `exos_wallet_fetch_pass`, `exos_wallet_register_device`, `exos_wallet_unregister_device`, `exos_wallet_updated_serials`, `exos_wallet_push_queue`, `exos_wallet_push_done`, `exos_wallet_drop_push_tokens` | service role only; the PassKit ones check the ApplePass token |
 | `_exos_wallet_*` helpers | nobody (called from SECURITY DEFINER functions) |
 
@@ -235,6 +237,7 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 | `POST /exos-wallet/reissue` `{ticket_id}` | Supabase JWT (holder) | `{ ok, code_epoch }` |
 | `POST /exos-wallet/season-pass` `{pass_id, kind}` | Supabase JWT (holder) | `.pkpass` (apple) / `{ save_url, serial }` (google); 404 `record_not_found` / `wallet_pass_unavailable` (voided, used up, past) |
 | `POST /exos-wallet/addon-pass` `{addon_pass_id, kind}` | Supabase JWT (holder) | `.pkpass` (apple) / `{ save_url, serial }` (google) of one add-on unit's entry code; 403 not yours, 409 `voided` (mig 20261108110000) |
+| `POST /exos-wallet/addon-reissue` `{addon_pass_id, kind?}` | Supabase JWT (holder) | a new code epoch, then as `/addon-pass` for `kind`, or `{ ok, code_epoch, reissues_left }` without one; 403 not yours, 409 `voided` / `no-pass`, 429 `rate-limited` (5 a day per holder; mig 20261111140000) |
 | `POST /exos-wallet/push` | `x-cron-secret` | summary; a dry run until pushes are configured |
 | `POST /exos-wallet/apple/v1/devices/{d}/registrations/{pt}/{serial}` | `ApplePass <token>` | 201 new / 200 known / 401 |
 | `DELETE` same path | `ApplePass <token>` | 200 / 401 |
@@ -272,7 +275,36 @@ of the same message, and back fields can't be scanned), so the code can't ride o
   The saved list (`exos_event_addon_passes`) carries `wa` (the Apple code's SHA-256), `wg` (the TOTP key) and `we`,
   so an offline door checks them too (`verifyAddonWalletWithKeys`, `src/lib/barcode.ts`).
 - Static on purpose: no push or update path for add-on passes. A refunded or transferred add-on's Apple pass keeps
-  showing its code, which the door refuses; Google's object is left as stored. A reissue (a new epoch) isn't built.
+  showing its code, which the door refuses; Google's object is left as stored.
+- **Reissue** (mig `20261111140000`, claude/exos-api-leftovers). The holder of a unit that is in a wallet can reissue
+  it ("my pass leaked"): `POST /exos-wallet/addon-reissue { addon_pass_id, kind? }` calls `exos_wallet_addon_reissue`,
+  which moves `wallet_epoch` up by one, so every earlier `A-…:a|g{epoch}` code is refused at the door
+  (`_exos_addon_wallet_check` takes the live epoch only), and answers the fresh pass the way `/addon-pass` does for that
+  `kind` (Apple: a `.pkpass` with the same serial, which replaces the old one in Wallet; Google: the stored object is
+  updated in place and its save link returned). Without a `kind` it only rotates (`{ ok, code_epoch, reissues_left }`)
+  and the holder adds the new pass with the usual buttons.
+  - Holder only (`42501`, 403 "not your add-on", the pass unnamed); a voided pass (409 `voided`) or one never added to
+    a wallet (409 `no-pass`: nothing to rotate) is not reissued.
+  - **5 a day per holder** (a rolling 24 hours, across all of the holder's add-on passes), counted in
+    `exos_addon_wallet_reissues` under a per-holder advisory lock, so parallel calls can't pass the count together
+    (`tests/exos/race_api_leftovers.sh` race 1). Over it: 429 `rate-limited` with `retry_after_seconds` (and
+    `Retry-After`). The limit and the holder check run in SQL before any pass is built or any call goes to Google.
+  - The wallet's settings are checked before the epoch moves, so a 503 never leaves a dead code without a new pass.
+  - Logged in `exos_addon_wallet_reissues` (the epoch before and after; RLS: the holder and the org's owners and
+    managers read, no client writes) and in the org audit log (`addon_pass.wallet_reissue`, `wallet_epoch: [old,
+    new]`, actor the holder).
+  - Offline doors: the saved keys (`exos_event_addon_passes`) carry the new epoch from their next download. A door
+    that downloaded before the reissue still admits the old code offline; the upload re-checks at the scan time
+    against the live epoch and refuses it (as for a reissued ticket pass).
+  - The app (`AddonWalletButtons`, `src/components/WalletButtons.tsx`): "Reissue" under the add-on's wallet buttons,
+    only for a usable unit with a `wallet_epoch` (`exos_my_addon_passes` returns it, marker `exos: addon wallet
+    epoch`; `addonReissueEligible` in `src/lib/walletButtons.ts`). It asks first ("The old wallet code for this add-on
+    will stop working"), then on a phone with one wallet delivers the new pass straight away; on a desktop with both
+    wallets it rotates only. Calls: `reissueAddonPassApple` / `reissueAddonPassGoogleUrl` / `reissueAddonPassOnly`
+    in `src/lib/walletApi.ts`. Smoke: "add-on wallet reissue: …".
+  - Tests: `tests/exos/test_api_leftovers.sql` AL4 (old Apple and Google codes refused online and on the offline
+    replay, the new one admits, keys, the limit, RLS), `src/lib/wallet/addonReissue.test.ts` (the door's offline check
+    with the new keys).
 - **The button** (claude/exos-leftovers-9): on the ticket page, each add-on code that can still be used (active, its
   code drawn for this account) gets "Add to Apple Wallet" / "Add to Google Wallet" under it, named for the add-on
   ("Add to Apple Wallet: VIP lounge 1 of 2"). It is hidden exactly when the ticket's buttons are: the same session
