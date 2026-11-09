@@ -55,11 +55,14 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
   );
   if (orders === null) return null;
 
+  // free_kind (mig 20261108100000) marks a $0 free / comp order; a database
+  // without it answers the plain read.
+  const readQuantities = (cols: string) => readAll<{ session_id: string; quantity: number | null; free_kind?: string | null }>(
+    (from, to) => supabase.from('exos_checkout_sessions').select(cols).eq('event_id', eventId).in('status', ['fulfilled', 'partially_refunded', 'refunded']).range(from, to),
+    (r) => r.session_id,
+  );
   const [quantities, marketplace, commissions] = await Promise.all([
-    readAll<{ session_id: string; quantity: number | null }>(
-      (from, to) => supabase.from('exos_checkout_sessions').select('session_id, quantity').eq('event_id', eventId).in('status', ['fulfilled', 'partially_refunded', 'refunded']).range(from, to),
-      (r) => r.session_id,
-    ),
+    readQuantities('session_id, quantity, free_kind').then((q) => q ?? readQuantities('session_id, quantity')),
     readAll<MarketplaceMoneyRow>(
       (from, to) => supabase.from('exos_marketplace_order_money').select(MARKETPLACE_MONEY_COLS).eq('event_id', eventId).range(from, to),
       (r) => r.order_id,
@@ -70,9 +73,13 @@ export async function getEventMoney(eventId: string): Promise<EventMoneyData | n
     ),
   ]);
 
-  const qty = new Map((quantities ?? []).map((q) => [q.session_id, q.quantity]));
+  const qty = new Map((quantities ?? []).map((q) => [q.session_id, q]));
   return {
-    orders: orders.map((o) => ({ ...o, quantity: qty.has(o.session_id) ? qty.get(o.session_id) ?? null : null })),
+    orders: orders.map((o) => ({
+      ...o,
+      quantity: qty.has(o.session_id) ? qty.get(o.session_id)?.quantity ?? null : null,
+      free_kind: qty.get(o.session_id)?.free_kind ?? null,
+    })),
     marketplace: marketplace ?? [],
     commissions: commissions ?? [],
   };
