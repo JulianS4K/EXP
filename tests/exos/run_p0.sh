@@ -275,7 +275,8 @@ for m in \
   20261109110000_exos_security_hygiene \
   20261110100000_exos_journal_complete \
   20261110110000_exos_group_pay_2 \
-  20261110120000_exos_leftovers_9; do
+  20261110120000_exos_leftovers_9 \
+  20261111100000_exos_e2e_fixes; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -510,7 +511,8 @@ for m in \
          20261109110000_exos_security_hygiene \
          20261110100000_exos_journal_complete \
          20261110110000_exos_group_pay_2 \
-         20261110120000_exos_leftovers_9; do
+         20261110120000_exos_leftovers_9 \
+         20261111100000_exos_e2e_fixes; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -638,3 +640,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_audit
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_security_hygiene.sql"
 # claude/exos-leftovers-9 (mig 20261110120000): partner / organizer reservations take checkout answers (required for partners, conditional, cross-org), API undo of an add-on scan, the event report's changes since publish
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_leftovers_9.sql"
+# claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"
