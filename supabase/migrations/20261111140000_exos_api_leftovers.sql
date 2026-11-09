@@ -32,10 +32,17 @@
 --    question_id, scope, label, kind, value, display; the order's answers on
 --    every ticket, then the ticket's own) and `custom_field_values`
 --    (Opendate's ticket field: custom_field_id = question id, name = label,
---    value = display). Only answers recorded for that reservation
---    ('po:<reservation>'), only questions not hidden from checkout (hidden
---    ones are staff-only: never shown to partners, whatever the door
---    recorded), only the partner's own completed orders (the existing
+--    value = display). Only the answers THE PARTNER submitted: each answer
+--    row now carries its origin (exos_question_answers.partner_reservation_id,
+--    set by a BEFORE INSERT trigger only for an 'api' answer recorded for
+--    'po:<id>' of a partner reservation while it is still active, before any
+--    ticket; cleared by a BEFORE UPDATE trigger whenever anyone later
+--    rewrites the answer's value or source). The read also needs source 'api'
+--    and a row created at or before the reservation's completion. So a door
+--    answer, an organizer's or a later holder's answer (after a transfer, a
+--    claim), or an in-place edit of the partner's answer, is never returned
+--    to the partner. Only questions not hidden from checkout (hidden ones are
+--    staff-only), only the partner's own completed orders (the existing
 --    _exos_partner_orders / _exos_partner_order filters). Organizer reads
 --    (p_partner_id NULL) are unchanged: their answers come with the
 --    credential's scopes (docs/checkout-questions.md "API").
@@ -60,6 +67,9 @@
 --
 -- Touches:  C: TABLE exos_addon_wallet_reissues (RLS: owner / manager of the
 --              org read; no client writes)
+--           W: TABLE exos_question_answers (+partner_reservation_id, two
+--              BEFORE triggers: _exos_tg_answer_partner_origin), backfilled
+--              for partner answers recorded before this migration
 --           C: FUNCTION _exos_reservation_answers_replace,
 --              _exos_partner_ticket_answers, _exos_partner_order_answers_json
 --              (service role only), exos_wallet_addon_reissue (authenticated)
@@ -72,7 +82,9 @@
 --           (H3 unchanged).
 -- Additive, replay-safe (IF NOT EXISTS, CREATE OR REPLACE, marker-checked
 -- patches). No cron. Not applied. Prod apply needs operator OK.
--- ROLLBACK: DROP the four functions and the table above; re-create
+-- ROLLBACK: DROP the two exos_question_answers origin triggers, their
+--           function and the partner_reservation_id column; DROP the four
+--           functions and the table above; re-create
 --           _exos_partner_reservation_update, _exos_partner_orders and
 --           _exos_partner_order from 20261031130000 and exos_my_addon_passes
 --           from 20261107110000.
@@ -166,10 +178,67 @@ SELECT pg_temp.exos_patch_n('public._exos_partner_reservation_update(uuid,uuid,t
 -- ===========================================================================
 -- 2. Partner order reads carry each ticket's answers
 -- ===========================================================================
--- One ticket's answers as a partner sees them: the reservation's own
--- ('po:<id>'), the order's (attached at complete) and the ticket's, never a
--- question hidden from checkout (staff-only). The ticket must be one of the
--- reservation's.
+-- Where an answer came from. A partner's answers (reserve, comps, complete,
+-- update) are all inserted by _exos_record_answers for 'po:<id>' with source
+-- 'api' while the reservation is active and before any ticket exists; only
+-- then is the origin set. An organizer reservation (no partner) never gets
+-- one; neither does an answer added to a minted ticket (_exos_set_ticket_answers
+-- inserts with ticket_id set) or anything after completion. The origin can
+-- only be cleared: rewriting an answer's value, display, source or question
+-- (the door, an org key, a later holder) drops it, and it can't be set or
+-- moved by an UPDATE.
+ALTER TABLE public.exos_question_answers ADD COLUMN IF NOT EXISTS partner_reservation_id uuid
+  REFERENCES public.exos_partner_reservations (id) ON DELETE SET NULL;
+COMMENT ON COLUMN public.exos_question_answers.partner_reservation_id IS
+  'The partner reservation whose partner submitted this exact answer (mig 20261111140000); NULL for any other origin or once rewritten. Partner order reads return only these.';
+CREATE INDEX IF NOT EXISTS exos_question_answers_partner_res_idx ON public.exos_question_answers (partner_reservation_id)
+  WHERE partner_reservation_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public._exos_tg_answer_partner_origin()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.partner_reservation_id := NULL;
+    IF NEW.source = 'api' AND NEW.ticket_id IS NULL AND NEW.attached_at IS NULL
+       AND NEW.order_ref ~ '^po:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+      SELECT r.id INTO NEW.partner_reservation_id FROM public.exos_partner_reservations r
+       WHERE r.id = substr(NEW.order_ref, 4)::uuid AND r.org_id = NEW.org_id AND r.event_id = NEW.event_id
+         AND r.partner_id IS NOT NULL AND r.status = 'active';
+    END IF;
+    RETURN NEW;
+  END IF;
+  -- UPDATE: never set or moved; cleared when the answer itself is rewritten.
+  NEW.partner_reservation_id := CASE
+    WHEN NEW.value IS DISTINCT FROM OLD.value OR NEW.display IS DISTINCT FROM OLD.display
+      OR NEW.source IS DISTINCT FROM OLD.source OR NEW.question_id IS DISTINCT FROM OLD.question_id
+      OR NEW.order_ref IS DISTINCT FROM OLD.order_ref THEN NULL
+    ELSE OLD.partner_reservation_id END;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_answer_partner_origin() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_question_answers_partner_origin_ins ON public.exos_question_answers;
+CREATE TRIGGER exos_question_answers_partner_origin_ins BEFORE INSERT ON public.exos_question_answers
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_answer_partner_origin();
+DROP TRIGGER IF EXISTS exos_question_answers_partner_origin_upd ON public.exos_question_answers;
+CREATE TRIGGER exos_question_answers_partner_origin_upd BEFORE UPDATE ON public.exos_question_answers
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_answer_partner_origin();
+
+-- Answers recorded before this migration (wave 9's reserve / complete): the
+-- partner's when they are 'api' answers of a partner reservation, created
+-- and last changed no later than its completion (the attach at complete
+-- stamps updated_at in the same transaction), or of one still open.
+-- Re-run safe: only rows without an origin.
+UPDATE public.exos_question_answers a SET partner_reservation_id = r.id
+  FROM public.exos_partner_reservations r
+ WHERE a.partner_reservation_id IS NULL AND a.order_ref = 'po:' || r.id
+   AND a.org_id = r.org_id AND a.event_id = r.event_id AND r.partner_id IS NOT NULL AND a.source = 'api'
+   AND ((r.status = 'active' AND a.ticket_id IS NULL)
+        OR (r.status = 'completed' AND a.created_at <= r.completed_at AND a.updated_at <= r.completed_at));
+
+-- One ticket's answers as a partner sees them: only the ones that partner
+-- submitted for this reservation (origin set, source api, created by its
+-- completion), the order's and this ticket's, never a question hidden from
+-- checkout (staff-only). The ticket must be one of the reservation's.
 CREATE OR REPLACE FUNCTION public._exos_partner_ticket_answers(p_res uuid, p_ticket uuid)
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT coalesce(jsonb_agg(jsonb_build_object('question_id', a.question_id, 'scope', a.scope, 'label', a.label,
@@ -178,8 +247,10 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_
     FROM public.exos_partner_reservations r
     JOIN public.exos_question_answers a
       ON a.order_ref = 'po:' || r.id AND a.org_id = r.org_id AND a.event_id = r.event_id
+     AND a.partner_reservation_id = r.id AND a.source = 'api' AND a.created_at <= r.completed_at
     JOIN public.exos_event_questions q ON q.id = a.question_id AND q.event_id = r.event_id
-   WHERE r.id = p_res AND p_ticket = ANY (r.ticket_ids) AND NOT q.hidden
+   WHERE r.id = p_res AND r.partner_id IS NOT NULL AND r.status = 'completed'
+     AND p_ticket = ANY (r.ticket_ids) AND NOT q.hidden
      AND ((a.scope = 'order' AND a.attached_at IS NOT NULL) OR (a.scope = 'ticket' AND a.ticket_id = p_ticket))
 $$;
 REVOKE ALL ON FUNCTION public._exos_partner_ticket_answers(uuid, uuid) FROM PUBLIC, anon, authenticated;

@@ -191,7 +191,11 @@ check-in integration sees per-ticket answers only. DICE mapping: `fanSurveyQuest
 Distribution partners (`/v1/public/orders`, `/v1/public/orders/:id`, mig 20261111140000) get each ticket's
 answers on their own orders: `_exos_partner_order_answers_json` wraps the order with `answers` (the order's answers
 and the ticket's own, the shape above) and Opendate's `custom_field_values` (`custom_field_id` = question id, `name`
-= label, `value` = display) per ticket, from `_exos_partner_ticket_answers`: only answers recorded for that
-reservation (`po:<id>`), only for one of its tickets, and never a hidden question's (staff-only, even when the door
-answered it). The partner's key and partner id scope the order in SQL (`_exos_partner_orders` / `_exos_partner_order`,
+= label, `value` = display) per ticket, from `_exos_partner_ticket_answers`: only answers the partner itself
+submitted for that reservation, only for one of its tickets, and never a hidden question's. "Submitted by the
+partner" is the row's origin, `exos_question_answers.partner_reservation_id`: set on insert (trigger
+`_exos_tg_answer_partner_origin`) only for an `api` answer of `po:<id>` while the partner reservation is active and
+no ticket exists, and cleared whenever anyone rewrites the answer (the door, an org key, a later holder); the read
+also requires source `api` and a row created by completion. A door or holder answer added after completion, or a
+rewrite of the partner's own answer, is never shown to the partner. The partner's key and partner id scope the order in SQL (`_exos_partner_orders` / `_exos_partner_order`,
 markers `exos: partner order answers`); the organizer's read of the same order (no partner) is unchanged.

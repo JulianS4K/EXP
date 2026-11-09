@@ -14,7 +14,9 @@
 --   AL2 an organizer's update: never required, hidden questions allowed,
 --       clearing with {}; a partner can't reach it; another org can't
 --   AL3 partner order reads: each ticket's answers + custom_field_values,
---       hidden questions left out (even when the door answered them),
+--       only the answers the partner itself submitted (origin, source api, by
+--       completion): a door answer and a holder's rewrite after completion
+--       are left out, hidden questions too,
 --       another partner's / org's order is nothing; organizer reads unchanged
 --   AL4 add-on wallet reissue: holder only (42501, unnamed), voided / never
 --       in a wallet refused, the epoch moves, the door refuses the old Apple
@@ -134,6 +136,8 @@ BEGIN
   INSERT INTO al11q VALUES ('gname', r ->> 'id');
   r := public.exos_save_event_question(pg_temp.u('e1'), '{"label": "Staff note", "kind": "text", "scope": "ticket", "hidden": true}');
   INSERT INTO al11q VALUES ('hidden', r ->> 'id');
+  r := public.exos_save_event_question(pg_temp.u('e1'), '{"label": "Dietary needs", "kind": "text", "scope": "ticket"}');
+  INSERT INTO al11q VALUES ('diet', r ->> 'id');
   PERFORM pg_temp.act(pg_temp.u('ob'));
   r := public.exos_save_event_question(pg_temp.u('e9'), '{"label": "B secret label", "kind": "text", "scope": "order"}');
   INSERT INTO al11q VALUES ('bq', r ->> 'id');
@@ -340,6 +344,33 @@ BEGIN
   -- The list carries the same.
   r := public._exos_partner_orders(pg_temp.u('A'), pg_temp.u('p2'), '{}'::jsonb, 1, 25, 'https://exos.test');
   ASSERT (r ->> 'total_entries')::int = 1 AND r -> 'collection' -> 0 = o, 'AL3 the list = the single read: ' || r::text;
+  -- Only what the partner itself submitted. Its rows carry their origin; after completion the door answers a
+  -- shown question on ticket 1 and a later holder rewrites ticket 1's size: neither reaches the partner.
+  ASSERT (SELECT bool_and(partner_reservation_id = v_res) FROM public.exos_question_answers
+           WHERE order_ref = 'po:' || v_res AND source = 'api'), 'AL3 the partner''s answers carry their origin';
+  PERFORM public._exos_set_ticket_answers(v_tk, jsonb_build_object(pg_temp.q('diet'), 'Vegan, nut allergy'), 'door');
+  PERFORM public._exos_set_ticket_answers(v_tk, jsonb_build_object(pg_temp.q('size'), 'M'), 'checkout');
+  ASSERT (SELECT display = 'M' AND source = 'checkout' AND partner_reservation_id IS NULL FROM public.exos_question_answers
+           WHERE ticket_id = v_tk AND question_id = pg_temp.q('size')::uuid), 'AL3 the rewritten answer lost its origin';
+  ASSERT (SELECT partner_reservation_id IS NULL FROM public.exos_question_answers
+           WHERE ticket_id = v_tk AND question_id = pg_temp.q('diet')::uuid), 'AL3 the door''s answer has no origin';
+  -- An UPDATE can't hand an origin to someone else's answer.
+  UPDATE public.exos_question_answers SET partner_reservation_id = v_res
+   WHERE ticket_id = v_tk AND question_id = pg_temp.q('diet')::uuid;
+  ASSERT (SELECT partner_reservation_id IS NULL FROM public.exos_question_answers
+           WHERE ticket_id = v_tk AND question_id = pg_temp.q('diet')::uuid), 'AL3 an origin can''t be set by an update';
+  o := public._exos_partner_order(pg_temp.u('A'), pg_temp.u('p2'), v_res, 'https://exos.test');
+  t := (SELECT x FROM jsonb_array_elements(o -> 'tickets') x WHERE x ->> 'id' = v_tk::text);
+  ASSERT o::text NOT LIKE '%Vegan%' AND o::text NOT LIKE '%Dietary%', 'AL3 the door''s later answer left out: ' || o::text;
+  ASSERT jsonb_array_length(t -> 'answers') = 2
+     AND (SELECT bool_and(a ->> 'scope' = 'order') FROM jsonb_array_elements(t -> 'answers') a)
+     AND t -> 'answers' @> jsonb_build_array(jsonb_build_object('label', 'Company', 'display', 'Initech'))
+     AND jsonb_array_length(t -> 'custom_field_values') = 2,
+    'AL3 ticket 1: the holder''s rewrite left out, the partner''s order answers kept: ' || t::text;
+  ASSERT (SELECT x FROM jsonb_array_elements(o -> 'tickets') x WHERE x ->> 'id' <> v_tk::text) -> 'answers' @>
+         jsonb_build_array(jsonb_build_object('label', 'Size', 'display', 'L')), 'AL3 ticket 2 still has the partner''s L';
+  r := public._exos_partner_orders(pg_temp.u('A'), pg_temp.u('p2'), '{}'::jsonb, 1, 25, 'https://exos.test');
+  ASSERT r -> 'collection' -> 0 = o, 'AL3 the list agrees';
   -- Another partner's order, another org's partner: nothing (404 at the edge); p1's list has no p2 order.
   ASSERT public._exos_partner_order(pg_temp.u('A'), pg_temp.u('p1'), v_res, 'https://exos.test') IS NULL, 'AL3 another partner';
   ASSERT public._exos_partner_order(pg_temp.u('B'), pg_temp.u('p9'), v_res, 'https://exos.test') IS NULL, 'AL3 another org';
@@ -362,7 +393,9 @@ BEGIN
   PERFORM pg_temp.complete(r ->> 'token', 'org');
   o := public._exos_partner_order(pg_temp.u('A'), NULL, pg_temp.res_id(r ->> 'token'), 'https://exos.test');
   ASSERT o IS NOT NULL AND NOT (o -> 'tickets' -> 0 ? 'answers'), 'AL3 organizer read unchanged: ' || o::text;
-  RAISE NOTICE 'OK  AL3 partner order reads: answers + custom_field_values per ticket, hidden left out, own orders only';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_question_answers WHERE order_ref = 'po:' || pg_temp.res_id(r ->> 'token')
+                      AND partner_reservation_id IS NOT NULL), 'AL3 an organizer reservation''s answers have no partner origin';
+  RAISE NOTICE 'OK  AL3 partner order reads: only the partner''s own answers (later door / holder answers left out), hidden left out, own orders only';
 END $$;
 
 -- AL4 -------------------------------------------------------------------------

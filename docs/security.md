@@ -624,15 +624,26 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   the same lock, so a replacement can't race the mint into an unattached set
   (`tests/exos/race_api_leftovers.sh`). One audit row per replacement:
   counts only, never answer values.
-- **Partner order reads.** `_exos_partner_ticket_answers` and
-  `_exos_partner_order_answers_json` (service role only) are reached only
-  through `_exos_partner_orders` / `_exos_partner_order` with the partner's
-  own id (the key resolves it; `partner_id = p_partner_id` in SQL), so a
-  partner sees answers on its own orders only, recorded for that reservation
-  only, for that reservation's tickets only, and never for a question hidden
-  from checkout (staff notes stay staff-only even when the door answered
-  them). The organizer's read (no partner) is unchanged: its answers still
-  follow the credential's scopes.
+- **Partner order reads: only what the partner submitted.**
+  `_exos_partner_ticket_answers` and `_exos_partner_order_answers_json`
+  (service role only) are reached only through `_exos_partner_orders` /
+  `_exos_partner_order` with the partner's own id (the key resolves it;
+  `partner_id = p_partner_id` in SQL), so a partner sees its own completed
+  orders only, that reservation's tickets only, and never a question hidden
+  from checkout. Within that, an answer is returned only if the partner
+  itself submitted it: `exos_question_answers.partner_reservation_id` is set
+  by a BEFORE INSERT trigger (`_exos_tg_answer_partner_origin`) only for a
+  source `api` answer recorded for `po:<id>` of a partner reservation while
+  it is still active and before any ticket exists (reserve, comps, complete,
+  update), and a BEFORE UPDATE trigger only ever clears it, whenever an
+  answer's value, display, source, question or order is rewritten. The read
+  also requires source `api` and a row created at or before completion. So
+  answers added or rewritten later by the door, an organizer key or a later
+  holder (after a transfer or a claim) never reach the partner, even on a
+  question the partner answered (review 2026-11-09: the first version
+  returned every non-hidden answer on the tickets). Existing rows are
+  backfilled once, by the same rule. The organizer's read (no partner) is
+  unchanged: its answers still follow the credential's scopes.
 - **Add-on wallet reissue.** `exos_wallet_addon_reissue` (authenticated)
   checks `auth.uid()`, takes a per-holder advisory lock, then answers the
   pass's holder only (42501 for anyone else, the pass unnamed), and counts

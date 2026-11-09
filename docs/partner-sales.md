@@ -180,8 +180,10 @@ in an order comes with `delivery.url`:
 - Each ticket in an order carries the checkout answers given for it (mig `20261111140000`): `answers` (`question_id`,
   `scope`, `label`, `kind`, `value`, `display`; the order's answers on every ticket, then the ticket's own) and
   Opendate's `custom_field_values` (`custom_field_id` = the question id, `name` = its label, `value` = the answer as
-  text). Only answers recorded for that order, only your own orders, and never a question the organizer keeps for
-  staff (hidden from checkout), even when door staff answered it.
+  text). Only the answers you submitted for that order (on reserve, comps, complete or update), only your own
+  orders, and never a question the organizer keeps for staff (hidden from checkout). Answers added or changed after
+  the order completed (by door staff, the organizer, or whoever holds the ticket later) are not returned: an answer
+  someone else rewrote drops out of your read.
 
 ## Opendate mapping
 

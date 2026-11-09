@@ -1113,7 +1113,7 @@
       "method": "GET",
       "path": "/v1/public/orders",
       "summary": "List your orders",
-      "description": "Your completed orders, newest first, in Opendate's envelope. Each lists the tickets the buyer still holds (voided ones marked). Each ticket carries the checkout answers its buyer gave (answers, and Opendate's custom_field_values: custom_field_id = the question id, name = its label, value = the answer as text); questions the organizer keeps for staff are never shown.",
+      "description": "Your completed orders, newest first, in Opendate's envelope. Each lists the tickets the buyer still holds (voided ones marked). Each ticket carries the checkout answers you submitted for it (answers, and Opendate's custom_field_values: custom_field_id = the question id, name = its label, value = the answer as text); answers added or changed after the order completed (door staff, the organizer, a later holder) and questions the organizer keeps for staff are never shown.",
       "auth": "partner_key",
       "scope": null,
       "parameters": [
