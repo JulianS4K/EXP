@@ -32,7 +32,7 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner@r
        INSERT INTO exos_org_secrets(org_id,payments) VALUES ('$O','{\"connectedAccountId\":\"acct_raceCm\"}');
        INSERT INTO exos_events(id,org_id,name,status,starts_at,currency) VALUES
          ('$E','$O','Race split','published',now()-interval '10 days','usd'), ('$F','$O','Race fee','published',now()-interval '10 days','usd');
-       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES ('$T','$E','GA',20,0,0), ('$TF','$F','GA',20,0,0);
+       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES ('$T','$E','GA',20,100,0), ('$TF','$F','GA',20,100,0);
        INSERT INTO exos_org_commission_settings(org_id,default_method,holdback_days,split_at_sale_enabled) VALUES ('$O','manual',3,true);
        INSERT INTO exos_event_commission_settings(event_id,org_id,method) VALUES ('$E','$O','split_at_sale'), ('$F','$O','platform_fee');" >/dev/null
 $P -c "SELECT set_config('app.uid','$A',false); SELECT public.exos_upsert_promoter('$O','race-p','Race P');" >/dev/null

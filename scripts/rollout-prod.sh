@@ -95,6 +95,10 @@ MIGRATIONS=(
   20261107110000_exos_dice_gaps_6  # claude/exos-dice-gaps-6: fee log, add-on entry codes, conditional questions
   20261107120000_exos_partner_steps
   20261107130000_exos_pos_terminal    # claude/exos-pos-terminal; no cron; card stays off until EXOS_POS_CARD=on
+  20261108100000_exos_money_journal   # claude/exos-money-journal; no cron; backfills the journal at apply
+  20261108110000_exos_dice_leftovers  # claude/exos-dice-leftovers: walk-up questions, POST fee adjustments, add-on undo, add-on wallet codes; no cron
+  20261108120000_exos_group_pay       # claude/exos-group-pay; no cron (the existing exos_expire_holds sweep); patches exos_fulfill_checkout
+  20261108130000_exos_claim_alias_fix  # claude/exos-harness-full: transfer claims fail in prod (t.order_ref ambiguous); conditional patch, no cron
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

@@ -325,10 +325,10 @@ export default function TicketDetail() {
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
                         barcode ? (
-                          <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" />
+                          <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" role="img" aria-label="Entry QR code. Show it at the door." />
                         ) : (
                           <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20" role="status">
-                            <p className="type text-[11px] uppercase tracking-widest text-black/50">
+                            <p className="type text-[11px] uppercase tracking-widest text-black/60">
                               {codeError ? 'Entry code unavailable' : 'Loading entry code…'}
                             </p>
                             {codeError ? (
@@ -339,7 +339,7 @@ export default function TicketDetail() {
                       ) : (
                         <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20">
                           <Lock className="w-8 h-8 text-black/60 mb-3" aria-hidden="true" />
-                          <p className="type text-[11px] uppercase tracking-widest text-black/50">{t('ticket.locked')}</p>
+                          <p className="type text-[11px] uppercase tracking-widest text-black/60">{t('ticket.locked')}</p>
                           <p className="type text-[11px] text-black/60 mt-1">
                             Unlocks 24h before{event.date ? ` · ${formatInTz(event.date.toDate(), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ' the event'}
                           </p>
@@ -409,8 +409,8 @@ export default function TicketDetail() {
                        // No countdown while the code itself is still locked.
                        <div className="mt-7 flex flex-col items-center">
                           <p className="type text-[11px] text-black/60 uppercase tracking-widest">{t('ticket.expiresIn')}</p>
-                          <p className="disp text-4xl text-black tracking-tight leading-none mt-1">00:{timeLeft.toString().padStart(2, '0')}</p>
-                          <div className="w-40 h-[3px] bg-black/10 mt-3">
+                          <p className="disp text-4xl text-black tracking-tight leading-none mt-1" role="timer">00:{timeLeft.toString().padStart(2, '0')}</p>
+                          <div className="w-40 h-[3px] bg-black/10 mt-3" aria-hidden="true">
                              <div className="h-full bg-brand-primary transition-all duration-1000" style={{ width: `${(timeLeft / 30) * 100}%` }}></div>
                           </div>
                        </div>

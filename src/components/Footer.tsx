@@ -18,14 +18,14 @@ export default function Footer() {
               The standard for secure digital entry. We leverage encrypted rotating tokens to eliminate ticket fraud and scalping.
             </p>
             <div className="flex gap-6">
-              <Twitter className="w-5 h-5 text-slate-300 hover:text-slate-900 cursor-pointer transition-colors" />
-              <Instagram className="w-5 h-5 text-slate-300 hover:text-slate-900 cursor-pointer transition-colors" />
-              <Github className="w-5 h-5 text-slate-300 hover:text-slate-900 cursor-pointer transition-colors" />
+              <Twitter className="w-5 h-5 text-slate-300" aria-hidden="true" />
+              <Instagram className="w-5 h-5 text-slate-300" aria-hidden="true" />
+              <Github className="w-5 h-5 text-slate-300" aria-hidden="true" />
             </div>
           </div>
 
           <div>
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Platform</h4>
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Platform</h4>
             <ul className="space-y-3">
               <li><Link to="/" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Discover Events</Link></li>
               <li><Link to="/my-tickets" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">My Tickets</Link></li>
@@ -34,7 +34,7 @@ export default function Footer() {
           </div>
 
           <div>
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Organizers</h4>
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Organizers</h4>
             <ul className="space-y-3">
               <li><Link to="/dashboard" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Organizer Dashboard</Link></li>
               <li><Link to="/create-event" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Create an Event</Link></li>
@@ -43,7 +43,7 @@ export default function Footer() {
           </div>
 
           <div>
-            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Trust &amp; Safety</h4>
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Trust &amp; Safety</h4>
             <ul className="space-y-3">
               <li><Link to="/privacy" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Privacy Policy</Link></li>
               <li><Link to="/terms" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Terms of Service</Link></li>
@@ -54,13 +54,13 @@ export default function Footer() {
         </div>
 
         <div className="pt-6 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest leading-none">
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
             © {new Date().getFullYear()} EXOS TECHNOLOGIES • SECURE TICKETING
           </p>
           <div className="flex gap-6">
-            <Link to="/privacy" className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Privacy</Link>
-            <Link to="/terms" className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Terms</Link>
-            <button type="button" onClick={openConsentSettings} className="text-[10px] text-slate-300 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Cookie settings</button>
+            <Link to="/privacy" className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Privacy</Link>
+            <Link to="/terms" className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Terms</Link>
+            <button type="button" onClick={openConsentSettings} className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hover:text-slate-900 transition-colors">Cookie settings</button>
           </div>
         </div>
       </div>

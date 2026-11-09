@@ -633,8 +633,9 @@ DO $$
 DECLARE ev uuid := pg_temp.v('ev')::uuid; tier uuid;
 BEGIN
   SELECT id INTO tier FROM public.exos_ticket_tiers WHERE event_id = ev;
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, status, barcode_secret, price_paid, order_ref)
-  VALUES (ev, pg_temp.o(1), tier, 'GA', 'active', 'ac-s1', 20, 'ac-o1'), (ev, pg_temp.o(1), tier, 'GA', 'used', 'ac-s2', 20, 'ac-o2');
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, status, barcode_secret, price_paid, order_ref)
+  VALUES (ev, pg_temp.o(1), tier, 'GA', 'ac000000-0000-0000-0000-0000000000a1', 'ac000000-0000-0000-0000-0000000000a1', 'active', 'ac-s1', 20, 'ac-o1'),
+         (ev, pg_temp.o(1), tier, 'GA', 'ac000000-0000-0000-0000-0000000000a1', 'ac000000-0000-0000-0000-0000000000a1', 'used', 'ac-s2', 20, 'ac-o2');
 END $$;
 SET LOCAL ROLE service_role;
 DO $$

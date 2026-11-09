@@ -20,7 +20,7 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone text, ADD COLUMN IF NOT EX
 CREATE TABLE IF NOT EXISTS auth.identities (user_id uuid);
 CREATE TABLE IF NOT EXISTS auth.sessions (user_id uuid);
 CREATE TABLE IF NOT EXISTS auth.refresh_tokens (user_id text);
-CREATE TABLE IF NOT EXISTS public.exos_org_invites (email text, claimed_by uuid);
+CREATE TABLE IF NOT EXISTS public.exos_org_invites (org_id uuid, role text, email text, claimed_by uuid);
 CREATE TABLE IF NOT EXISTS public.exos_org_follows (follower_uid uuid);
 CREATE TABLE IF NOT EXISTS public.exos_event_saves (user_id uuid);
 CREATE TABLE IF NOT EXISTS public.exos_notification_reads (uid uuid);
@@ -55,13 +55,15 @@ SET LOCAL session_replication_role = origin;
 -- The victim's email-keyed rows, and the same for the confirmed account.
 INSERT INTO public.exos_transfers (id, ticket_id, org_id, sender_id, receiver_email, status) VALUES
   ('9a000000-0000-0000-0000-000000000201', '9a000000-0000-0000-0000-000000000101', '9a000000-0000-0000-0000-000000000001',
-   '9a000000-0000-0000-0000-0000000000a0', 'victim@x.com', 'accepted'),
+   '9a000000-0000-0000-0000-0000000000a0', 'victim@x.com', 'completed'),
   ('9a000000-0000-0000-0000-000000000202', '9a000000-0000-0000-0000-000000000102', '9a000000-0000-0000-0000-000000000001',
-   '9a000000-0000-0000-0000-0000000000a0', 'gx-confirmed@x.com', 'accepted');
+   '9a000000-0000-0000-0000-0000000000a0', 'gx-confirmed@x.com', 'completed');   -- claimed (status is pending / completed / cancelled)
 INSERT INTO public.exos_promoters (id, org_id, code, name, email) VALUES
   ('9a000000-0000-0000-0000-000000000301', '9a000000-0000-0000-0000-000000000001', 'GXVIC', 'Victim', 'victim@x.com'),
   ('9a000000-0000-0000-0000-000000000302', '9a000000-0000-0000-0000-000000000001', 'GXCON', 'Confirmed', 'gx-confirmed@x.com');
-INSERT INTO public.exos_org_invites (email, claimed_by) VALUES ('victim@x.com', NULL), ('gx-confirmed@x.com', NULL);
+INSERT INTO public.exos_org_invites (org_id, role, email, claimed_by) VALUES   -- org_id / role: phase-1's table where it exists
+  ('9a000000-0000-0000-0000-000000000001', 'scanner', 'victim@x.com', NULL),
+  ('9a000000-0000-0000-0000-000000000001', 'scanner', 'gx-confirmed@x.com', NULL);
 INSERT INTO public.exos_mail (id, to_email, template, subject, html, status) VALUES
   ('9a000000-0000-0000-0000-000000000401', 'victim@x.com', 'event-reminder', 's', 'h', 'pending'),
   ('9a000000-0000-0000-0000-000000000402', 'victim@x.com', 'event-reminder', 's', 'h', 'sent'),

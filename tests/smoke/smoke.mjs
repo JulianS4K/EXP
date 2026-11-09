@@ -1294,6 +1294,162 @@ await run('conditional questions: the buyer sees B only after answering A, and B
     'only A rides in the request: ' + JSON.stringify(condCheckout.body?.answers));
 }, { mock: { ...checkoutFn(condCheckout), rpcs: { exos_public_event_questions: () => COND_QUESTIONS } } });
 
+// --- claude/exos-dice-leftovers (mig 20261108110000): walk-up questions ------
+// A required question at the door: the sale waits for it, "Skip questions"
+// sells anyway (the server logs the skip); answering it sells normally.
+const WQ = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const walkupQSales = [];
+const walkupQPos = (b) => {
+  if (b.action === 'walkup_catalog') {
+    const c = walkupPos(b);
+    c.body.data.questions = [{ id: WQ, label: 'Company', kind: 'text', required: true, scope: 'order', options: [], tier_ids: null, hidden: false }];
+    return c;
+  }
+  if (b.action === 'mint_walkup') {
+    walkupQSales.push(b);
+    return { body: { data: { ...walkupOrder(), questions_skipped: b.skip_questions === true } } };
+  }
+  return walkupPos(b);
+};
+await run('door: a required question at the door: Skip questions sells (logged), an answer sells normally', async (page, log) => {
+  walkupSold = false;
+  walkupQSales.length = 0;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  await expectText(page, '1 required answer missing: Company');
+  const sellBtn = page.getByRole('button', { name: /Take \$25\.00 · sell 1/ });
+  assert(await sellBtn.isDisabled(), 'the sale waits for the required answer');
+  await page.getByTestId('walkup-skip-questions').click();
+  await expectText(page, 'Sold 1 × Door GA (questions skipped)');
+  assert(walkupQSales.length === 1 && walkupQSales[0].skip_questions === true, 'the skip rides in the sale: ' + JSON.stringify(walkupQSales));
+  // The next sale: answered, no skip.
+  await page.getByTestId('walkup-questions-toggle').click();
+  await page.getByLabel(/Company/).fill('Acme');
+  await until(async () => !(await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).isDisabled()), 'answered: the sale is on');
+  assert(await page.getByTestId('walkup-skip-questions').count() === 0, 'no skip button once answered');
+  await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).click();
+  await until(async () => walkupQSales.length === 2, 'the second sale went');
+  assert(!('skip_questions' in walkupQSales[1]) && walkupQSales[1].answers?.order?.[WQ] === 'Acme',
+    'answered sale: the answer, no skip: ' + JSON.stringify(walkupQSales[1]));
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"skip_questions":true')), 'logged call');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupQPos } }) });
+
+// Undo an add-on scan from the scan log (mig 20261108110000): online, its own RPC.
+const ADDON_PASS = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+await run('door: an add-on scan can be undone from the scan log', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  const box = page.getByLabel('Search by name or pass ID');
+  await box.waitFor({ timeout: 8000 });
+  await box.fill(`A-${ADDON_PASS}:${UID}:${Math.floor(Date.now() / 30000)}:mac`);
+  await box.press('Enter');
+  await until(async () => log.some((l) => l.startsWith('rpc exos_check_in_ticket')), 'the add-on code went to the check-in');
+  assert(!log.some((l) => l.includes('exos_get_ticket_for_scan')), 'an add-on code is not read as a ticket');
+  await page.getByTestId('addon-undo').click();
+  await page.getByLabel('Reason for undoing this check-in').fill('scanned the wrong wristband');
+  await page.getByRole('button', { name: 'Undo', exact: true }).last().click();
+  await expectText(page, 'Add-on scan undone');
+  const call = log.find((l) => l.startsWith('rpc exos_undo_addon_check_in'));
+  assert(call && call.includes(ADDON_PASS) && call.includes('scanned the wrong wristband'), 'the undo call: ' + call);
+  assert(!log.some((l) => l.startsWith('rpc exos_undo_check_in')), 'not the ticket undo');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+  exos_check_in_ticket: () => ({ ok: true, reason: 'checked-in', kind: 'addon', pass_id: ADDON_PASS, addon_name: 'VIP lounge',
+    check_in_at: new Date().toISOString(), verified: true }),
+  exos_undo_addon_check_in: () => ({ ok: true, reason: 'undone', kind: 'addon', status: 'active', removed: 1 }),
+} }) });
+
+// The organizer dashboard's genre filter (mig 20261106140000's genres, here
+// on the dashboard): only the picked genre's events stay listed.
+await run('dashboard: the genre filter narrows the event list', async (page) => {
+  await page.goto(BASE + '/dashboard');
+  await expectText(page, 'Fall Party');
+  const sel = page.getByTestId('dashboard-genre-filter');
+  await sel.waitFor({ timeout: 8000 });
+  const opts = await sel.locator('option').allTextContents();
+  assert(opts.includes('All genres') && opts.includes('House') && opts.includes('Jazz'), 'options: ' + opts.join(', '));
+  await sel.selectOption({ label: 'Jazz' });
+  await expectText(page, 'Late Jazz');
+  await until(async () => (await page.getByText('Fall Party', { exact: true }).count()) === 0, 'Fall Party (House) filtered out');
+  await sel.selectOption({ label: 'All genres' });
+  await expectText(page, 'Fall Party');
+}, { signedIn: true, mock: ownerMock({ tables: { exos_events: [
+  { ...EVENT_ROW, genres: ['House'] },
+  { ...EVENT_ROW, id: '99999999-9999-4999-8999-999999999992', slug: 'late-jazz', name: 'Late Jazz', genres: ['Jazz'] },
+] } }) });
+
+// ── Group buy v2, "pay separately" (mig 20261108120000): a friend's seat page
+// and the host's group page, against mocked RPCs. ──
+const SEAT_TOKEN = 'ab'.repeat(16);
+const GROUP = 'c7e00000-0000-4000-8000-000000000001';
+const inMinutes = (m) => new Date(Date.now() + m * 60_000).toISOString();
+const seatView = (over = {}) => ({
+  seat_no: 2, seats: 4, state: 'waiting', mine: false, is_host: false, group_id: null,
+  deadline: inMinutes(24), server_now: new Date().toISOString(), group_status: 'open', paid: 1, open: 3,
+  event_id: EV, tier_id: TIER2,
+  event: { name: 'Fall Party', starts_at: inMinutes(7 * 1440), venue_name: 'Elsewhere', image_url: null, currency: 'USD' },
+  ...over,
+});
+const seatCheckout = {};
+await run('group pay: a friend opens their seat link, sees price and time left, pays as a guest for exactly that seat', async (page, log) => {
+  await stubStripe(page, seatCheckout);
+  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await expectText(page, 'Seat 2 of 4');
+  await expectText(page, '$50.00');
+  await expectText(page, '1 of 4 paid');
+  const t = await page.getByTestId('seat-countdown').innerText();
+  assert(/2[34]:\d\d left to pay/.test(t), 'countdown: ' + t);
+  const body = await page.locator('body').innerText();
+  assert(!body.includes('@') && !/[0-9a-f]{32}/.test(body), 'nothing about other friends on the page');
+  await page.getByLabel('Email for your ticket').fill('friend@example.com');
+  await page.getByRole('button', { name: /Pay for my seat/ }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = seatCheckout.body;
+  assert(b?.group_seat === SEAT_TOKEN && b.quantity === 1 && b.tier_id === TIER2 && b.guest_email === 'friend@example.com', 'one seat, by its link: ' + JSON.stringify(b));
+  assert(b.cancel_url.endsWith('/group-pay/seat/' + SEAT_TOKEN), 'cancel comes back to the seat');
+  assert(log.some((l) => l.startsWith('rpc exos_group_seat_view')), 'read by the token');
+}, { mock: { ...checkoutFn(seatCheckout), rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView() : null) } } });
+
+await run('group pay: a seat a friend is paying for, a released seat, and a bad link', async (page) => {
+  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await expectText(page, 'A friend is paying for this seat right now');
+  assert(await page.getByRole('button', { name: /Pay for my seat/ }).count() === 0, 'no pay button on a taken seat');
+  await page.goto(BASE + '/group-pay/seat/' + 'cd'.repeat(16));
+  await expectText(page, 'time ran out');
+  await page.goto(BASE + '/group-pay/seat/not-a-token');
+  await expectText(page, "isn't valid");
+}, { mock: { rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView({ state: 'paying' })
+  : b.p_token === 'cd'.repeat(16) ? seatView({ state: 'released', group_status: 'closed', deadline: inMinutes(-2) }) : null) } } });
+
+const coverCheckout = {};
+await run('group pay: the host sees each seat live, texts a link, and covers the rest', async (page, log) => {
+  await stubStripe(page, coverCheckout);
+  await page.goto(BASE + '/group-pay/' + GROUP);
+  await expectText(page, '1 of 3 paid');
+  await expectText(page, 'Seat 3');
+  const sms = await page.getByRole('link', { name: 'Text' }).first().getAttribute('href');
+  assert(sms.startsWith('sms:') && decodeURIComponent(sms).includes('/group-pay/seat/' + 'ef'.repeat(16)), 'the text carries the seat link: ' + sms);
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: /Cover the rest: 2 seats/ }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = coverCheckout.body;
+  assert(b?.group_cover === GROUP && b.quantity === 2 && !b.group_seat, 'the cover: ' + JSON.stringify(b));
+  assert(log.some((l) => l.startsWith('rpc exos_group_buy_get')), 'the host read');
+}, { signedIn: true, mock: { ...checkoutFn(coverCheckout), rpcs: { exos_group_buy_get: () => ({
+  id: GROUP, event_id: EV, tier_id: TIER2, quantity: 3, deadline: inMinutes(20), status: 'open', server_now: new Date().toISOString(),
+  can_cover: true, counts: { paid: 1, paying: 1, waiting: 1, released: 0 },
+  seats: [
+    { id: 's1', seat_no: 1, state: 'paid', path: '/group-pay/seat/' + 'aa'.repeat(16), paid_at: new Date().toISOString(), order_status: 'fulfilled' },
+    { id: 's2', seat_no: 2, state: 'paying', path: '/group-pay/seat/' + 'ef'.repeat(16), paid_at: null, order_status: null },
+    { id: 's3', seat_no: 3, state: 'waiting', path: '/group-pay/seat/' + 'bb'.repeat(16), paid_at: null, order_status: null },
+  ] }) } } });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

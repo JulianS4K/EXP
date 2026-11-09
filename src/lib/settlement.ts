@@ -44,6 +44,8 @@ export interface OrderMoneyRow {
   transfer_id?: string | null;
   /** Tickets in the order (exos_checkout_sessions.quantity), when readable. */
   quantity?: number | null;
+  /** Set on the $0 order Exos records for a free claim / comp (mig 20261108100000): not a sale. */
+  free_kind?: string | null;
 }
 
 export interface MarketplaceMoneyRow {
@@ -119,7 +121,9 @@ export function orderNetAfterRefunds(o: Pick<OrderMoneyRow, 'gross_cents' | 'org
   return net - Math.round((net * refunded) / gross);
 }
 
-const isPaid = (o: OrderMoneyRow) => (PAID_ORDER_STATUSES as readonly string[]).includes(o.status);
+// A $0 order recorded for a free claim or comp (free_kind) took no money: the
+// settlement leaves it out, as it did before those orders existed.
+const isPaid = (o: OrderMoneyRow) => (PAID_ORDER_STATUSES as readonly string[]).includes(o.status) && !o.free_kind;
 const isCancelledMarketplace = (m: MarketplaceMoneyRow) =>
   (CANCELLED_MARKETPLACE_STATES as readonly string[]).includes(m.state ?? '');
 

@@ -20,7 +20,9 @@
   `EXOS_POS_CARD=on`.
   The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
   migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
-  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.
+  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4. Since 2026-11-09
+  `tests/exos/run_p0.sh` builds every `*exos*` migration from the phase-1 schema on, as prod was built, so the
+  harness now has prod's claim body (`claude/exos-harness-full`).
 
 - **DB:** every migration on main is applied to prod, through `20261019120000_exos_door_roster_wallet_delta`
   (checked against `schema_migrations`, 2026-11-04). Also applied, ahead of main: `20261021174000` /
@@ -81,8 +83,9 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
 2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
    ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
-   References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
-   `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
+   References: pretix `Question`, hi.events `Question`. Left: partner `/public/...` reservations. POS walk-up
+   mints ask them now: required ones too, unless the seller taps "Skip questions", which is logged
+   (claude/exos-dice-leftovers, mig `20261108110000`); conditional questions came with item 6; docs/checkout-questions.md.
 3. **[built: claude/exos-capacity-pricing] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
    across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
    Built on the existing `exos_quotas` (no second pool table); left: partner reservations across several types lock pools per type, not in one global order.
@@ -97,7 +100,7 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
 5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
    by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
-   migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
+   migration have no location (no backfill). The organizer dashboard's event list filters by genre now (claude/exos-dice-leftovers).
 6. **[built: claude/exos-dice-gaps-6] Fee-change log, add-on entry codes, conditional questions** (mig `20261107110000`).
    `exos_fee_adjustments` (DICE `Adjustment`): append-only; refunds log the buyer-fee part of what they return, finance adds
    manual changes with a note (Orders → Fees); `GET /v1/orders/:id/adjustments`, `/v1/events/:id/fee-adjustments`, settlement
@@ -105,7 +108,8 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    ticket and scanned at a check-in list that admits add-ons (online, offline, offline merge); a ticket is refused there and
    an add-on code at a ticket list. Checkout questions can be "show only if" another is answered a given way (SQL + TS rules,
    builder, buyer form). Left: refunds don't reverse `exos_order_fees` (the log records the fee share; settlement fee lines
-   don't read it yet), add-on codes in Apple / Google Wallet, undoing an add-on scan, and a POST for manual adjustments in the API.
+   don't read it yet). Built in claude/exos-dice-leftovers (mig `20261108110000`): `POST /v1/orders/:id/adjustments`, undoing an
+   add-on scan (online and offline), add-on codes as their own Apple / Google Wallet passes (code and tests only; no SPA button or reissue yet).
 
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 
@@ -337,7 +341,10 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
 2. PCI operator steps: SAQ A + AOC in the Stripe Dashboard, Stripe's Level 1 AOC, MFA on every admin account,
    quarterly external scan if Stripe's SAQ flow says it applies (`docs/pci.md` checklist). *(operator)*
 3. Parked: insurance (general liability + cyber / tech E&O, about $3–10k a year). *(operator)*
-4. Parked: VPAT / WCAG 2.1 AA audit (about $1–3k plus fixes); ADA Title II deadline April 2027 / 2028 for buyers.
+4. ✅ VPAT / WCAG 2.1 AA, code side (branch `claude/exos-a11y-gate`): axe in CI smoke (WCAG 2.0/2.1 A + AA on the buyer
+   path and the Door app; serious / critical fail), jsx-a11y lint, fixes; `docs/pci.md` "Accessibility conformance".
+   Left: manual screen-reader pass or third-party audit (about $1–3k), the VPAT 2.5 write-up (GTM); ADA Title II
+   deadline April 2027 / 2028 for buyers.
 5. Parked: security packet (HECVAT Lite, Supabase + Stripe reports, a pen test) and an SLA / event-day support plan.
 6. Parked: reserved seating, season tickets, box-office card payments (Stripe Terminal) and ticket printing.
 7. Parked: agency payment gateways (e.g. TouchNet) and campus SSO (SAML).
@@ -513,7 +520,7 @@ How we build it (techniques):
    the event report's Overview, read-only, aggregated in the browser from `exos_order_money`,
    `exos_marketplace_order_money` and `exos_promoter_commissions` (`src/lib/settlement.ts`); card fees actual when
    recorded, else the estimate; per-order CSV. Disputes are a separate block under it (item 7).
-3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
+3. ✅ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id) (mig `20261108100000_exos_money_journal`).
 4. ✅ Credit notes on refund (mig `20261001100000`, **not applied**): every succeeded refund, full or partial, on
    an invoiced order issues a credit note from a gapless per-org `CN-000001` series, tax share pro rata to the
    invoice; the invoice stays unchanged (`exos_invoice_totals` derives refunded amount and status). Backfills
@@ -534,19 +541,25 @@ How we build it (techniques):
    recover; the transfer reversal itself isn't built (a Stripe write, operator sign-off). Evidence is submitted
    from the platform's Stripe dashboard; no evidence tooling in Exos.
 8. ✅ Payout statements and a Payouts page (`/orgs/:orgId/payouts`: marketplace payouts with their lines and
-   statuses, CSV per line; owner / manager / finance). Journal CSV and QuickBooks / Xero not built.
-9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps. (Free orders no longer get a $0
-   invoice, mig `20261001100000`; free claims and comps still have no order row.)
+   statuses, CSV per line; owner / manager / finance). Journal CSV built. QuickBooks / Xero not built.
+9. ✅ Sales-tax report by jurisdiction; order rows for free claims and comps (mig `20261108100000_exos_money_journal`). (Free orders no longer get a $0
+   invoice, mig `20261001100000`; the $0 order rows don't change that: `docs/journal.md`.)
 10. ✅ Refunds when the date changes (mig 20260929150000, live): a move to another day or by more than
     3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
     start − 24 h). Holders get an `event-rescheduled` mail with a per-ticket refund / release link; buyers refund
     themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
     buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
     (`docs/organizer-guide.md` "Changing the date").
-- ⬜ **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
-  change). v2: each friend pays their own seat within a 30-min group window (N one-seat holds, Exos expires the
-  sessions, unpaid seats return to sale, host can cover the rest). Never a multi-day hold: card authorizations last
-  ~7 days and ticketing can't use Stripe's extended authorization.
+- 🟡 **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
+  change). **v2 built 2026-11-09** (mig `20261108120000_exos_group_pay`, branch `claude/exos-group-pay`; not on prod):
+  each friend pays their own seat within a 30-min group window: N one-seat holds through `exos_create_hold` that end
+  at the deadline, `exos-checkout` claims and attaches the seat's hold (`group_seat` / `group_cover`), fulfilment needs
+  the hold live and its own (late payments fail and are auto-refunded), unpaid seats return to sale through the
+  existing expiry sweep, host can cover the rest; `/group-pay/:groupId`, `/group-pay/seat/:token`, event-page
+  "Pay separately"; `test_group_pay.sql`, `race_group_pay.sh`. Left: expire friends' open Stripe pages at the
+  deadline (today a late payment is refunded, not prevented), seated / timed / price-step types, a group seat with
+  add-ons or a gift card, API / MCP routes, host-side labels for seats. Never a multi-day hold: card authorizations
+  last ~7 days and ticketing can't use Stripe's extended authorization.
 
 ### Distribution
 - ⬜ **Automatiq route** (`docs/marketplace/automatiq.md`): one route per event (direct or Automatiq, never both),

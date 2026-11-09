@@ -45,6 +45,7 @@ import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import PhoneRsvpLink from '../components/PhoneRsvpLink';
+import GroupPayStart from '../components/GroupPayStart';
 import SaveEventButton from '../components/SaveEventButton';
 import { buyerTierPrice, effectiveTierPrice, includedFees, nextPriceStep, tierAllInPrice } from '../lib/pricing';
 import { voucherUnitPrice } from '../../supabase/functions/_shared/pricing.ts';
@@ -1445,7 +1446,7 @@ export default function EventDetails() {
                       >
                         <Minus className="w-4 h-4 text-white" />
                       </button>
-                      <span className="disp text-2xl flex-1 text-center">{quantity}</span>
+                      <span className="disp text-2xl flex-1 text-center" aria-live="polite">{quantity}</span>
                       <button
                         type="button"
                         aria-label={t('event.more')}
@@ -1598,6 +1599,11 @@ export default function EventDetails() {
                   >
                     {venmoPossible(event.currency) ? 'Pay with Venmo / PayPal' : 'Pay with PayPal'}
                   </button>
+                )}
+                {/* Group buy v2 (mig 20261108120000): friends each pay their own seat. */}
+                {stripeEnabled && !soldOut && !paidNotOnSale && !!selectedTier && priceToDisplay > 0 && !seatedSelected && !slotTier
+                  && !voucher && (selectedTier.visibility ?? 'public') === 'public' && (
+                  <GroupPayStart eventId={event.id} tierId={selectedTier.id} quantity={quantity} maxPerOrder={maxPerOrder} signedIn={!!user} />
                 )}
                 </>)}
 

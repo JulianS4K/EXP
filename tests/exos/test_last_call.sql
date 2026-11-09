@@ -30,6 +30,7 @@ DELETE FROM public.exos_platform_settings
 
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('d7000000-0000-0000-0000-0000000000a0','d7-owner@x.com',now()),
+  ('d7000000-0000-0000-0000-0000000000a9','d7-holder@x.com',now()),   -- buys the L4b tickets (buyer_id is NOT NULL)
   ('d7000000-0000-0000-0000-0000000000a1','d7-manager@x.com',now()),
   ('d7000000-0000-0000-0000-0000000000a2','d7-finance@x.com',now()),
   ('d7000000-0000-0000-0000-0000000000a3','d7-scanner@x.com',now()),
@@ -217,17 +218,17 @@ BEGIN
   -- A bypass_capacity voucher on a free claim: the count doesn't stop it, the trigger does.
   INSERT INTO public.exos_vouchers (event_id, code, tier_id, max_uses, bypass_capacity)
   VALUES (pg_temp.u('e1'), 'D7BYPASS', pg_temp.u('d2'), 5, true) RETURNING id INTO v;
-  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
-                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'v@x.com', 'active', 'x1', 0, 'D7BYPASS', 'vibepass')$q$,
+  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'd7000000-0000-0000-0000-0000000000a9', 'd7000000-0000-0000-0000-0000000000a9', 'v@x.com', 'active', 'x1', 0, 'D7BYPASS', 'vibepass')$q$,
                          'on sale only at Eventbrite'), 'L4b: a voucher mint';
-  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
-                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'r@x.com', 'active', 'x2', 0, 'referral_1', 'referral_reward')$q$,
+  ASSERT pg_temp.refused($q$INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+                            VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'd7000000-0000-0000-0000-0000000000a9', 'd7000000-0000-0000-0000-0000000000a9', 'r@x.com', 'active', 'x2', 0, 'referral_1', 'referral_reward')$q$,
                          'last call'), 'L4b: a referral reward';
   ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = pg_temp.u('e1')) = n0, 'L4b: nothing minted';
   -- Let through: a fulfilled Stripe checkout, a marketplace sale.
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
-  VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 's@x.com', 'active', 'x3', 90, 'cs_d7', 'stripe'),
-         (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'm@x.com', 'active', 'x4', 90, 'sh-1', 'stubhub');
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+  VALUES (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'd7000000-0000-0000-0000-0000000000a9', 'd7000000-0000-0000-0000-0000000000a9', 's@x.com', 'active', 'x3', 90, 'cs_d7', 'stripe'),
+         (pg_temp.u('e1'), 'd7000000-0000-0000-0000-000000000001', pg_temp.u('d2'), 'VIP', 'd7000000-0000-0000-0000-0000000000a9', 'd7000000-0000-0000-0000-0000000000a9', 'm@x.com', 'active', 'x4', 90, 'sh-1', 'stubhub');
   DELETE FROM public.exos_tickets WHERE event_id = pg_temp.u('e1') AND barcode_secret IN ('x3', 'x4');
 END $$;
 

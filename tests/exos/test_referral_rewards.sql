@@ -20,7 +20,7 @@ INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
 INSERT INTO auth.users(id,email,email_confirmed_at)
   SELECT ('a7000000-0000-0000-0000-0000000000b' || g)::uuid, 'friend' || g || '@y.com', now() FROM generate_series(1,9) g;
 
-INSERT INTO public.exos_orgs(id,name,slug) VALUES ('a7000000-0000-0000-0000-000000000001','RR Org','rr-org');
+INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES ('a7000000-0000-0000-0000-000000000001','RR Org','rr-org','a7000000-0000-0000-0000-00000000000a');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('a7000000-0000-0000-0000-000000000001','a7000000-0000-0000-0000-00000000000a','owner'),
   ('a7000000-0000-0000-0000-000000000001','a7000000-0000-0000-0000-00000000000f','finance');
@@ -200,13 +200,16 @@ END $$;
 DO $$
 DECLARE c text := current_setting('test.code_a');
 BEGIN
+  -- buyer_id is NOT NULL (phase-2 schema): the third ticket is bought by a
+  -- third account under the referrer's email.
+  INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('a7000000-0000-0000-0000-0000000000ad','rr-other@x.com',now());
   INSERT INTO public.exos_tickets(event_id,org_id,tier_id,buyer_id,owner_id,buyer_email,status,price_paid,order_ref,barcode_secret,referral_code) VALUES
     ('a7000000-0000-0000-0000-0000000000e1','a7000000-0000-0000-0000-000000000001','a7000000-0000-0000-0000-0000000000d1',
      'a7000000-0000-0000-0000-0000000000a1','a7000000-0000-0000-0000-0000000000a1','fana@x.com','active',20,'rr-self1','s',c),
     ('a7000000-0000-0000-0000-0000000000e1','a7000000-0000-0000-0000-000000000001','a7000000-0000-0000-0000-0000000000d1',
      'a7000000-0000-0000-0000-0000000000ac','a7000000-0000-0000-0000-0000000000ac',NULL,'active',20,'rr-self2','s',c),
     ('a7000000-0000-0000-0000-0000000000e1','a7000000-0000-0000-0000-000000000001','a7000000-0000-0000-0000-0000000000d1',
-     NULL,NULL,'FANA@x.com','active',20,'rr-self3','s',c);
+     'a7000000-0000-0000-0000-0000000000ad','a7000000-0000-0000-0000-0000000000ad','FANA@x.com','active',20,'rr-self3','s',c);
   ASSERT public.exos_rr_counted_tickets(c, true) = 2, 'RR5: self tickets counted, got ' || public.exos_rr_counted_tickets(c, true);
   ASSERT pg_temp.rr_vouchers(c) = 1, 'RR5: no extra voucher';
   RAISE NOTICE 'OK  RR5 self-referral ignored (same user, same email)';
@@ -271,7 +274,7 @@ BEGIN
   UPDATE public.exos_tickets SET status = 'voided' WHERE referral_code = c AND buyer_email IN ('friend5@y.com','friend6@y.com');
   ASSERT (SELECT count(*) FROM public.exos_referral_rewards WHERE referral_code = c AND status = 'issued') = 2, 'RR8: nothing revoked at 4';
   -- 4 -> 3: reward 2 (unused) revoked, its voucher expired.
-  UPDATE public.exos_tickets SET status = 'refunded' WHERE referral_code = c AND buyer_email = 'friend4@y.com';
+  UPDATE public.exos_tickets SET status = 'voided' WHERE referral_code = c AND buyer_email = 'friend4@y.com';
   ASSERT (SELECT status FROM public.exos_referral_rewards WHERE id = r2) = 'revoked', 'RR8: reward 2 revoked';
   SELECT v.* INTO v2 FROM public.exos_vouchers v JOIN public.exos_referral_rewards rr ON rr.voucher_id = v.id WHERE rr.id = r2;
   ASSERT (SELECT reason FROM public.exos_check_voucher(v2.event_id, v2.code, 'fana@x.com')) = 'expired', 'RR8: revoked voucher unusable';

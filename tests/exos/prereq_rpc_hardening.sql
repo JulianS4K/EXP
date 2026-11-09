@@ -1,10 +1,11 @@
 -- ============================================================================
 -- Harness prereq for mig 20260929080000 (RPC hardening): the RPCs it patches
--- (exos_queue_mail, exos_queue_ticket_issued, exos_create_org) predate the Exos migration chain (Terminal-2's 20260520160000 /
--- 20260523210000 plus later prod-only edits), so the scratch schema doesn't
--- have them. These are prod's bodies as of 2026-09-28 (read with
+-- (exos_queue_mail, exos_queue_ticket_issued, exos_create_org) come from
+-- 20260520120000 / 20260520160000 / 20260523210000 plus later prod-only edits,
+-- so the bodies the chain builds aren't prod's. run_p0.sh runs this just before
+-- 20260929080000 to put back prod's bodies as of 2026-09-28 (read with
 -- pg_get_functiondef), verbatim, so the migration's patches run against the
--- same text they will meet in prod. Test harness only, never a migration.
+-- same text they met in prod. Test harness only, never a migration.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.exos_queue_mail(p_template text, p_ref_id uuid DEFAULT NULL::uuid)

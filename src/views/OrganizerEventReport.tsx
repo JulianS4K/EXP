@@ -35,6 +35,7 @@ import PriceStepsEditor from '../components/PriceStepsEditor';
 import ReschedulePanel from '../components/ReschedulePanel';
 import RefundPanel from '../components/RefundPanel';
 import SettlementPanel from '../components/SettlementPanel';
+import EventSalesTax from '../components/finance/EventSalesTax';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import BuyerLocationsPanel from '../components/BuyerLocationsPanel';
@@ -337,6 +338,8 @@ export default function OrganizerEventReport() {
         {/* End-of-night money (online, door, fees, promoters owed); mig 20261102150000. */}
         <MoneySoFarPanel eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
         <SettlementPanel event={event} canView={canSeeMoney(activeRole, isAdmin)} />
+        {/* Sales tax by jurisdiction next to the settlement (mig 20261108100000). */}
+        <EventSalesTax event={event} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* POS cash drawers and their recounts (mig 20261104200000). */}
         <PosDrawersPanel eventId={event.id} currency={currency} canView={canSeeMoney(activeRole, isAdmin)} canAct={canAct} />
         {/* Phone-number RSVP for free ticket types (mig 20261102150000). */}
