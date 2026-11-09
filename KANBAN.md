@@ -513,7 +513,7 @@ How we build it (techniques):
    the event report's Overview, read-only, aggregated in the browser from `exos_order_money`,
    `exos_marketplace_order_money` and `exos_promoter_commissions` (`src/lib/settlement.ts`); card fees actual when
    recorded, else the estimate; per-order CSV. Disputes are a separate block under it (item 7).
-3. ⬜ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id).
+3. ✅ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id) (mig `20261108100000_exos_money_journal`).
 4. ✅ Credit notes on refund (mig `20261001100000`, **not applied**): every succeeded refund, full or partial, on
    an invoiced order issues a credit note from a gapless per-org `CN-000001` series, tax share pro rata to the
    invoice; the invoice stays unchanged (`exos_invoice_totals` derives refunded amount and status). Backfills
@@ -534,9 +534,9 @@ How we build it (techniques):
    recover; the transfer reversal itself isn't built (a Stripe write, operator sign-off). Evidence is submitted
    from the platform's Stripe dashboard; no evidence tooling in Exos.
 8. ✅ Payout statements and a Payouts page (`/orgs/:orgId/payouts`: marketplace payouts with their lines and
-   statuses, CSV per line; owner / manager / finance). Journal CSV and QuickBooks / Xero not built.
-9. ⬜ Sales-tax report by jurisdiction; order rows for free claims and comps. (Free orders no longer get a $0
-   invoice, mig `20261001100000`; free claims and comps still have no order row.)
+   statuses, CSV per line; owner / manager / finance). Journal CSV built. QuickBooks / Xero not built.
+9. ✅ Sales-tax report by jurisdiction; order rows for free claims and comps (mig `20261108100000_exos_money_journal`). (Free orders no longer get a $0
+   invoice, mig `20261001100000`; the $0 order rows don't change that: `docs/journal.md`.)
 10. ✅ Refunds when the date changes (mig 20260929150000, live): a move to another day or by more than
     3 hours on a sold event asks "Offer refunds?" (default on, deadline default: earlier of +14 days and new
     start − 24 h). Holders get an `event-rescheduled` mail with a per-ticket refund / release link; buyers refund

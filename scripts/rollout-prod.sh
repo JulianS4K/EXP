@@ -95,6 +95,7 @@ MIGRATIONS=(
   20261107110000_exos_dice_gaps_6  # claude/exos-dice-gaps-6: fee log, add-on entry codes, conditional questions
   20261107120000_exos_partner_steps
   20261107130000_exos_pos_terminal    # claude/exos-pos-terminal; no cron; card stays off until EXOS_POS_CARD=on
+  20261108100000_exos_money_journal   # claude/exos-money-journal; no cron; backfills the journal at apply
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt
