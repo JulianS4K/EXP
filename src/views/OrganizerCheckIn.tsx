@@ -1675,7 +1675,7 @@ export default function OrganizerCheckIn() {
            <button
              type="button"
              onClick={exportAttendeesCsv}
-             aria-label="Export attendees as CSV"
+             aria-label="Export CSV of attendees"
              className="flex items-center space-x-2 px-3 py-2 bg-white text-slate-900 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
            >
               <Download className="w-3 h-3" aria-hidden="true" />

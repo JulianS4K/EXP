@@ -4,11 +4,12 @@
 // to the buyer. The tier price is the deposit per table; the minimum spend
 // is shown to the buyer and the door, never charged online.
 
+import { useId } from 'react';
 import type { TableTierDraft } from '../lib/tables';
 
 const inputCls =
   'w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors disabled:opacity-50';
-const labelCls = 'type text-[9px] text-white/40 uppercase tracking-widest ml-1';
+const labelCls = 'type text-[9px] text-white/60 uppercase tracking-widest ml-1';
 
 export default function TableTierFields({
   value,
@@ -23,6 +24,7 @@ export default function TableTierFields({
   currency?: string;
 }) {
   const set = (patch: Partial<TableTierDraft>) => onChange({ ...value, ...patch });
+  const id = useId();
   return (
     <div className="md:col-span-2 border border-white/10 p-4 space-y-4">
       <label className="flex items-center gap-3 cursor-pointer">
@@ -43,8 +45,9 @@ export default function TableTierFields({
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <label className={labelCls}>Party size</label>
+              <label htmlFor={`${id}-party`} className={labelCls}>Party size</label>
               <input
+                id={`${id}-party`}
                 type="number"
                 min={1}
                 max={50}
@@ -56,8 +59,9 @@ export default function TableTierFields({
               />
             </div>
             <div className="space-y-2">
-              <label className={labelCls}>Minimum spend ({currency.toUpperCase()})</label>
+              <label htmlFor={`${id}-spend`} className={labelCls}>Minimum spend ({currency.toUpperCase()})</label>
               <input
+                id={`${id}-spend`}
                 type="number"
                 min={0}
                 step="1"
@@ -68,8 +72,9 @@ export default function TableTierFields({
               />
             </div>
             <div className="space-y-2">
-              <label className={labelCls}>Section</label>
+              <label htmlFor={`${id}-section`} className={labelCls}>Section</label>
               <input
+                id={`${id}-section`}
                 type="text"
                 maxLength={60}
                 placeholder="e.g. Mezzanine"

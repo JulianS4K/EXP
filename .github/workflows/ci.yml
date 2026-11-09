@@ -29,6 +29,11 @@ jobs:
       - name: Type check (tsc --noEmit)
         run: npm run lint
 
+      # WCAG 2.1 AA (docs/pci.md "Accessibility conformance"): jsx-a11y's
+      # recommended rules on src/. The smoke job runs axe on the live pages.
+      - name: Accessibility lint (eslint jsx-a11y)
+        run: npm run lint:a11y
+
       - name: Unit tests (vitest)
         run: npm test
 
@@ -101,7 +106,9 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Smoke tests (tests/smoke)
+      # smoke.mjs, then a11y.mjs: axe (WCAG 2.0/2.1 A + AA) on the buyer path
+      # and the Door app; serious or critical violations fail the job.
+      - name: Smoke tests + accessibility gate (tests/smoke)
         run: npm run smoke
 
       - name: Failure screenshots

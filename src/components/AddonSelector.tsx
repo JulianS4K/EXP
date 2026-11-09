@@ -82,7 +82,7 @@ export default function AddonSelector({ eventId, currency = 'USD', onChange, ini
 
   return (
     <div className="mb-6 space-y-3">
-      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{t('addon.title')}</p>
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">{t('addon.title')}</p>
       {addons.map((a) => {
         const remaining = capacityLeft(a.capacity, a.sold);  // 0 = closed, never unlimited
         const soldOut = remaining <= 0;

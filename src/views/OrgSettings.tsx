@@ -435,7 +435,7 @@ export default function OrgSettings() {
               </p>
 
               <div className="mb-6">
-                <label className={LBL}>Logo</label>
+                <p className={LBL}>Logo</p>
                 <div className="flex items-center gap-4">
                   {logoUrl ? (
                     <img

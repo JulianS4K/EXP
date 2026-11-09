@@ -92,7 +92,7 @@ export default function AddToCalendar({ event, variant = 'list', className }: Pr
         {open && (
           <>
             {/* click-away backdrop */}
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div className="fixed inset-0 z-40" role="presentation" onClick={() => setOpen(false)} />
             <div className="absolute left-0 right-0 bottom-full mb-2 z-50 flex flex-col bg-neutral-900 border border-white/10 shadow-2xl">
               {options}
             </div>

@@ -1445,7 +1445,7 @@ export default function EventDetails() {
                       >
                         <Minus className="w-4 h-4 text-white" />
                       </button>
-                      <span className="disp text-2xl flex-1 text-center">{quantity}</span>
+                      <span className="disp text-2xl flex-1 text-center" aria-live="polite">{quantity}</span>
                       <button
                         type="button"
                         aria-label={t('event.more')}
