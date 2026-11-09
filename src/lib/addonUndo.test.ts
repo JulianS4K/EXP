@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const rpc = vi.fn();
 vi.mock('./supabase', () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
 
-import { ADDON_UNDO_TEXT, ADDON_UNDO_WINDOW_MINUTES, addonUndoAccess, queuedAddonUndo, undoAddonCheckIn } from './addonUndo';
+import { ADDON_UNDO_SYNC_GRACE_MINUTES, ADDON_UNDO_TEXT, ADDON_UNDO_WINDOW_MINUTES, addonUndoAccess, queuedAddonUndo, undoAddonCheckIn } from './addonUndo';
 import { hasQueuedScan, parseQueue, type QueuedScan } from './offlineCheckins';
 import { checkInOffline } from './tickets';
 
@@ -18,6 +18,7 @@ describe('undo an add-on scan (mig 20261108110000)', () => {
 
   it('the window is the SQL one', () => {
     expect(migration).toContain(`v_window  CONSTANT interval := interval '${ADDON_UNDO_WINDOW_MINUTES} minutes'`);
+    expect(migration).toContain(`v_grace   CONSTANT interval := interval '${ADDON_UNDO_SYNC_GRACE_MINUTES} minutes'`);
   });
   it('the scanner within the window; a manager always; anyone else not', () => {
     const now = Date.parse('2026-11-08T22:00:00Z');

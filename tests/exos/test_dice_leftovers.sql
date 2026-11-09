@@ -26,6 +26,9 @@
 --       used for another pass is refused; only scans at or before the undo
 --       go (a later entry stands, the pass stays used); an undo time in the
 --       future or over a day old is refused
+--   DL6 the scanner's undo window is on the server clock (a back-dated undo
+--       time is ignored online, bounded by 10 minutes + 1 hour offline); a
+--       scanner's undo removes their own scan only; a manager's clears all
 --   DL5 add-on wallet codes: only the holder gets a pass (epoch issued once);
 --       a voided pass gets none; the Apple and Google codes scan at the
 --       add-on's list (online and offline replay); a code before the pass is
@@ -469,9 +472,10 @@ BEGIN
   r := public.exos_check_in_offline(pg_temp.u('r2'), p4, pg_temp.u('e1'), now() - interval '330 seconds',
                                     pg_temp.acode(p4, now() - interval '330 seconds'), 'camera', NULL, 'Door DL', pg_temp.u('lp'), 'exit');
   ASSERT r ->> 'reason' = 'checked-out', 'DL4 offline out: ' || r::text;
-  -- The undo the door made offline at -4 min, replayed: removes the first visit only.
+  -- The scanner's undo made offline at -4 min, replayed: removes their entry only (not the exit).
   r := pg_temp.undo(p4, 'scanned the wrong wristband', pg_temp.u('u1'), now() - interval '4 minutes');
-  ASSERT (r ->> 'ok')::boolean AND (r ->> 'removed')::int = 2 AND r ->> 'status' = 'active', 'DL4 offline undo: ' || r::text;
+  ASSERT (r ->> 'ok')::boolean AND (r ->> 'removed')::int = 1 AND r ->> 'status' = 'active', 'DL4 offline undo: ' || r::text;
+  ASSERT (SELECT count(*) = 1 AND bool_and(direction = 'exit') FROM public.exos_addon_pass_checkins WHERE pass_id = p4), 'DL4 the exit stays';
   r2 := pg_temp.undo(p4, 'scanned the wrong wristband', pg_temp.u('u1'), now() - interval '4 minutes');
   ASSERT (r2 ->> 'ok')::boolean AND (r2 ->> 'duplicate')::boolean, 'DL4 the same ref again: ' || r2::text;
   ASSERT (SELECT count(*) FROM public.exos_addon_pass_undos WHERE client_ref = pg_temp.u('u1')) = 1, 'DL4 one undo row';
@@ -492,17 +496,23 @@ BEGIN
                                     pg_temp.acode(p5, now() - interval '1 minute'), 'camera', NULL, 'Door DL', pg_temp.u('lp'), 'entry');
   ASSERT (r ->> 'ok')::boolean, 'DL4 p5 in again at -1: ' || r::text;
   r := pg_temp.undo(p5, 'first visit was a mistake', pg_temp.u('u2'), now() - interval '7 minutes' + interval '10 seconds');
-  ASSERT (r ->> 'ok')::boolean AND r ->> 'status' = 'used' AND (r ->> 'removed')::int = 2, 'DL4 a later entry stands: ' || r::text;
-  ASSERT (SELECT count(*) FROM public.exos_addon_pass_checkins WHERE pass_id = p5) = 1, 'DL4 one scan left';
+  ASSERT (r ->> 'ok')::boolean AND r ->> 'status' = 'used' AND (r ->> 'removed')::int = 1, 'DL4 a later entry stands: ' || r::text;
+  ASSERT (SELECT count(*) FROM public.exos_addon_pass_checkins WHERE pass_id = p5) = 2, 'DL4 the exit and the later entry left';
   ASSERT (SELECT status = 'used' AND check_in_at > now() - interval '2 minutes' FROM public.exos_addon_passes WHERE id = p5),
     'DL4 the pass stays used, at the later entry';
+  -- A manager's offline undo (at -30 s) clears every scan up to it.
+  PERFORM pg_temp.act(pg_temp.u('ma'));
+  r := pg_temp.undo(p5, 'manager: clear it', pg_temp.u('u5'), now() - interval '30 seconds');
+  ASSERT (r ->> 'ok')::boolean AND (r ->> 'removed')::int = 2 AND r ->> 'status' = 'active', 'DL4 manager offline clears all: ' || r::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_addon_pass_checkins WHERE pass_id = p5), 'DL4 nothing left';
+  PERFORM pg_temp.act(pg_temp.u('sa'));
   -- Undo times: in the future, or more than a day ago.
   r := pg_temp.undo(p5, 'future', pg_temp.u('u3'), now() + interval '1 hour');
   ASSERT r ->> 'reason' = 'bad-undo-time', 'DL4 future: ' || r::text;
   r := pg_temp.undo(p5, 'old', pg_temp.u('u4'), now() - interval '25 hours');
   ASSERT r ->> 'reason' = 'bad-undo-time', 'DL4 too old: ' || r::text;
   PERFORM pg_temp.act(NULL);
-  RAISE NOTICE 'OK  DL4 undo offline merge: once per ref, only scans before the undo, later entries stand, time bounds';
+  RAISE NOTICE 'OK  DL4 undo offline merge: once per ref, a scanner''s own scan only, a manager''s all before the undo, later entries stand, time bounds';
 END $$;
 
 -- DL5 -------------------------------------------------------------------------
@@ -588,6 +598,63 @@ BEGIN
   END;
   PERFORM pg_temp.act(NULL);
   RAISE NOTICE 'OK  DL5 add-on wallet codes: holder-only issue, Apple + Google at the door (online, offline), keys, transfer, isolation';
+END $$;
+
+-- DL6 -------------------------------------------------------------------------
+-- The scanner's window is the server's: a back-dated undo time can't stretch
+-- it; a scanner removes only their own scan; a manager still clears all.
+DO $$
+DECLARE pa uuid; pb uuid; r jsonb; v_sb uuid;
+BEGIN
+  INSERT INTO public.exos_order_addons (id, event_id, org_id, addon_id, addon_name, buyer_id, owner_id, quantity, unit_price_paid, order_ref, channel_source)
+  VALUES (pg_temp.u('l7'), pg_temp.u('e1'), pg_temp.u('A'), pg_temp.u('ad1'), 'VIP lounge', pg_temp.u('b2'), pg_temp.u('b2'), 2, 30, 'cs_dl2', 'stripe');
+  pa := pg_temp.pass('l7', 1);
+  pb := pg_temp.pass('l7', 2);
+  -- sa scans pa; the scan was 2 hours ago (the server's record).
+  PERFORM pg_temp.act(pg_temp.u('sa'));
+  r := pg_temp.scan(pa, pg_temp.acode(pa), 'lp');
+  ASSERT (r ->> 'ok')::boolean, 'DL6 pa in: ' || r::text;
+  UPDATE public.exos_addon_pass_checkins SET scanned_at = now() - interval '2 hours' WHERE pass_id = pa;
+  -- Online, a back-dated undo time is ignored: the server's clock says 2 hours.
+  r := pg_temp.undo(pa, 'late', NULL, now() - interval '2 hours' + interval '1 minute');
+  ASSERT r ->> 'reason' = 'undo-window-passed', 'DL6 online back-dated undo: ' || r::text;
+  -- Replayed as offline (a ref), the same back-dated time: past 10 minutes + 1 hour of grace on the server.
+  r := pg_temp.undo(pa, 'late', pg_temp.u('u6'), now() - interval '2 hours' + interval '1 minute');
+  ASSERT r ->> 'reason' = 'undo-window-passed', 'DL6 offline back-dated undo: ' || r::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_addon_pass_undos WHERE pass_id = pa), 'DL6 nothing undone';
+  ASSERT (SELECT status FROM public.exos_addon_passes WHERE id = pa) = 'used', 'DL6 still used';
+  -- Within the grace (scanned 30 minutes ago, undone offline a minute later): a real late sync, allowed.
+  UPDATE public.exos_addon_pass_checkins SET scanned_at = now() - interval '30 minutes' WHERE pass_id = pa;
+  r := pg_temp.undo(pa, 'offline, synced late', pg_temp.u('u7'), now() - interval '29 minutes');
+  ASSERT (r ->> 'ok')::boolean AND r ->> 'status' = 'active', 'DL6 offline undo within the grace: ' || r::text;
+
+  -- pb at the pickup list (re-entry): sb in, sb out, then sa in.
+  PERFORM pg_temp.act(pg_temp.u('sb'));
+  r := pg_temp.scan(pb, pg_temp.acode(pb), 'lp');
+  ASSERT (r ->> 'ok')::boolean, 'DL6 sb in: ' || r::text;
+  r := pg_temp.scan(pb, pg_temp.acode(pb), 'lp', 'exit');
+  ASSERT r ->> 'reason' = 'checked-out', 'DL6 sb out: ' || r::text;
+  PERFORM pg_temp.act(pg_temp.u('sa'));
+  r := pg_temp.scan(pb, pg_temp.acode(pb), 'lp');
+  ASSERT (r ->> 'ok')::boolean, 'DL6 sa in: ' || r::text;
+  -- sa's undo removes sa's scan only; sb's entry and exit stand, the pass stays used.
+  r := pg_temp.undo(pb, 'my scan was wrong');
+  ASSERT (r ->> 'ok')::boolean AND (r ->> 'removed')::int = 1 AND r ->> 'status' = 'used', 'DL6 scanner undo, two scanners: ' || r::text;
+  ASSERT (SELECT count(*) = 2 AND bool_and(scanned_by = pg_temp.u('sb')) FROM public.exos_addon_pass_checkins WHERE pass_id = pb),
+    'DL6 the other scanner''s scans stand';
+  ASSERT (SELECT jsonb_array_length(checkins) = 1 AND checkins -> 0 ->> 'scanned_by' = pg_temp.u('sa')::text
+            FROM public.exos_addon_pass_undos WHERE pass_id = pb), 'DL6 the audit row holds sa''s scan only';
+  -- sa can't undo sb's scan now (the last entry is sb's).
+  r := pg_temp.undo(pb, 'not mine');
+  ASSERT r ->> 'reason' = 'needs-manager', 'DL6 sa on sb''s scan: ' || r::text;
+  -- A manager clears all.
+  PERFORM pg_temp.act(pg_temp.u('ma'));
+  r := pg_temp.undo(pb, 'manager: clear it');
+  ASSERT (r ->> 'ok')::boolean AND (r ->> 'removed')::int = 2 AND r ->> 'status' = 'active', 'DL6 manager clears all: ' || r::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_addon_pass_checkins WHERE pass_id = pb), 'DL6 nothing left';
+  ASSERT (SELECT status = 'active' AND check_in_at IS NULL FROM public.exos_addon_passes WHERE id = pb), 'DL6 pass active';
+  PERFORM pg_temp.act(NULL);
+  RAISE NOTICE 'OK  DL6 undo window on the server clock (back-dated refused, late sync within grace), scanner removes own scan only, manager all';
 END $$;
 
 DO $$ BEGIN RAISE NOTICE 'test_dice_leftovers: all passed'; END $$;
