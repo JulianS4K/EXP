@@ -59,7 +59,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/onboarding.md`](docs/onboarding.md): start here as a developer
 - [`docs/payments-go-live.md`](docs/payments-go-live.md): switching Stripe on (operator runbook)
 - [`docs/self-hosting.md`](docs/self-hosting.md): running your own Exos (Supabase, edge functions, secrets, the web app, schedules)
-- [`docs/pci.md`](docs/pci.md): PCI DSS scope (SAQ A), the controls that keep it, and the yearly operator checklist
+- [`docs/pci.md`](docs/pci.md): PCI DSS scope (SAQ A), the controls that keep it, and the yearly operator checklist; accessibility conformance (WCAG 2.1 AA: the CI checks behind a VPAT)
 - [`docs/gift-cards.md`](docs/gift-cards.md), [`docs/giving.md`](docs/giving.md): gift cards (ledger, codes, redeem at checkout) and donations / campaigns
 - [`docs/dice-coverage.md`](docs/dice-coverage.md): DICE's partner API field by field in Exos, and how Import from DICE brings events, ticket holders and fans over
 - [`docs/memberships.md`](docs/memberships.md): memberships (Stripe subscriptions, member price, presales, households, gifts), season passes and flex packs, and the Opendate API mapping

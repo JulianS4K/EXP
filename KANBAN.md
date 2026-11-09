@@ -339,7 +339,10 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
 2. PCI operator steps: SAQ A + AOC in the Stripe Dashboard, Stripe's Level 1 AOC, MFA on every admin account,
    quarterly external scan if Stripe's SAQ flow says it applies (`docs/pci.md` checklist). *(operator)*
 3. Parked: insurance (general liability + cyber / tech E&O, about $3–10k a year). *(operator)*
-4. Parked: VPAT / WCAG 2.1 AA audit (about $1–3k plus fixes); ADA Title II deadline April 2027 / 2028 for buyers.
+4. ✅ VPAT / WCAG 2.1 AA, code side (branch `claude/exos-a11y-gate`): axe in CI smoke (WCAG 2.0/2.1 A + AA on the buyer
+   path and the Door app; serious / critical fail), jsx-a11y lint, fixes; `docs/pci.md` "Accessibility conformance".
+   Left: manual screen-reader pass or third-party audit (about $1–3k), the VPAT 2.5 write-up (GTM); ADA Title II
+   deadline April 2027 / 2028 for buyers.
 5. Parked: security packet (HECVAT Lite, Supabase + Stripe reports, a pen test) and an SLA / event-day support plan.
 6. Parked: reserved seating, season tickets, box-office card payments (Stripe Terminal) and ticket printing.
 7. Parked: agency payment gateways (e.g. TouchNet) and campus SSO (SAML).

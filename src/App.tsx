@@ -158,8 +158,12 @@ function ChromeLayout({ children }: { children: ReactNode }) {
   }
   return (
     <div className="flex flex-col min-h-screen">
+      {/* WCAG 2.4.1: the first Tab stop skips the navbar. */}
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:bg-white focus:text-black focus:px-4 focus:py-2 focus:font-bold">
+        Skip to content
+      </a>
       <Navbar />
-      <main className="flex-grow">
+      <main id="main" tabIndex={-1} className="flex-grow focus:outline-none">
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
       <Footer />
