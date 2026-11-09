@@ -33,6 +33,8 @@ export const JOURNAL_SOURCES = [
   // mig 20261110100000 (claude/exos-journal-2)
   "pos_reversals", "gift_card_ledger", "gift_card_redemptions", "pos_drawer_sessions", "org_instant_payouts",
   "paypal_org_remittances",
+  // mig 20261111130000 (claude/exos-journal-3)
+  "stripe_org_payouts",
 ] as const;
 
 const COLS =

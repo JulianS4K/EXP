@@ -173,6 +173,7 @@ const SOURCE_LABEL: Record<string, string> = {
   exos_pos_drawer_sessions: 'Cash drawer',
   exos_org_instant_payouts: 'Instant payout',
   exos_paypal_org_remittances: 'PayPal remittance',
+  exos_stripe_org_payouts: 'Stripe payout',
 };
 
 export function sourceLabel(sourceTable: string): string {

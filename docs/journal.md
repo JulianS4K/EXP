@@ -1,8 +1,11 @@
 # Money journal, sales tax by jurisdiction, $0 orders
 
-Migrations `20261108100000_exos_money_journal.sql` and `20261110100000_exos_journal_complete.sql` (card at the door,
-gift cards, payouts, the drawer). Tests: `tests/exos/test_money_journal.sql` and `tests/exos/test_journal_complete.sql`
-(run by `run_p0.sh`), `tests/exos/race_money_journal.sh` (by hand, races 1 to 7), `src/lib/journal.test.ts`. Code: `src/lib/journal.ts` (pure),
+Migrations `20261108100000_exos_money_journal.sql`, `20261110100000_exos_journal_complete.sql` (card at the door,
+gift cards, payouts, the drawer) and `20261111130000_exos_journal_payouts_tax.sql` (Stripe's scheduled payouts, the tax
+report read from the journal, the owed gift card fee handed back). Tests: `tests/exos/test_money_journal.sql`,
+`tests/exos/test_journal_complete.sql` and `tests/exos/test_journal_payouts_tax.sql` (run by `run_p0.sh`),
+`tests/exos/race_money_journal.sh` and `tests/exos/race_journal_payouts.sh` (CI, after `run_p0.sh`), the simulation's
+invariant I10 (`tests/exos/e2e_helpers.sql`), `src/lib/journal.test.ts`, `src/lib/payouts/orgPayouts.test.ts`. Code: `src/lib/journal.ts` (pure),
 `src/lib/journalApi.ts` (reads), `src/components/finance/JournalPanel.tsx` (Payouts page),
 `src/components/finance/EventSalesTax.tsx` (the event's Money section), `supabase/functions/exos-api/journal.ts`
 (`GET /v1/journal`, `docs/api/journal.json`).
@@ -67,18 +70,44 @@ It follows the existing money model, never a second one: the settlement (`src/li
 | POS card refund (`exos_pos_reversals`, `card_refund_status` succeeded) | `pos_card_refund`: Dr refunds + tax, Cr clearing (net), Cr Exos fee + card fees (the application fee comes back in proportion, as online). Nothing while the refund is pending. |
 | Gift card sale (`exos_gift_card_ledger`, issue) | `gc_issue`: Cr gift cards outstanding (a liability, never revenue). Dr: online, Stripe clearing less the application fee (Dr Exos fee; the commerce order's `application_fee_cents`); cash sold from a drawer, the drawer; cash, check or a card taken outside Exos, cash on hand; a comp, gift cards given away; an import, opening balances. |
 | Gift card redemption | On a checkout order: the order's own `sale` entry (Dr gift cards, above): nothing posts from the ledger's hold / release rows. On a partner reservation (`exos_gift_card_redemptions`, captured when the reservation completes): `gc_redeem`: Dr gift cards, Cr ticket revenue. |
-| Refund back to a gift card (`exos_gift_card_ledger`, refund) | `gc_refund`: Dr refunds + the tax share (the order's tax × the amount ÷ the order's value, never more than the order's tax not yet handed back), Cr gift cards outstanding: the liability is restored. |
+| Refund back to a gift card (`exos_gift_card_ledger`, refund) | `gc_refund`: Dr refunds + the tax share (the order's tax × the amount ÷ the order's value, never more than the order's tax not yet handed back), Cr gift cards outstanding: the liability is restored. When the order owes an Exos fee on its gift card part (`exos_fee_owed_cents`), `gc_refund_fee` (same ledger row): Dr organizer payable, Cr Exos fee, the owed fee × the part handed back ÷ the order's gift card part, cumulative over the order's refund rows in id order (like a card refund's application fee), so the parts hand back exactly the whole owed fee. |
 | Gift card void (`exos_gift_card_ledger`, void) | `gc_void`: Dr gift cards, Cr breakage. When the purchase itself was refunded (`exos_commerce_refund` voids the card): `gc_purchase_refund`: Dr gift cards, Cr clearing (net), Cr Exos fee (returned in proportion). |
 | Instant payout (`exos_org_instant_payouts`, sent) | `stripe_payout`: Dr bank, Cr Stripe clearing; one that fails later: `stripe_payout_reversal`. |
+| Stripe payout from the connected account (`exos_stripe_org_payouts`, paid) | `stripe_payout`: Dr bank, Cr Stripe clearing (a negative payout, Stripe debiting the bank, the other way), dated by its arrival; paid then failed: `stripe_payout_reversal`. Synced on the payout id. An instant payout Exos sent posts from `exos_org_instant_payouts` instead, never twice. |
 | PayPal remittance (`exos_paypal_org_remittances`) | `paypal_remittance`: Dr bank (Stripe clearing for a `stripe_transfer`), Cr PayPal receivable. |
 | Drawer (`exos_pos_drawer_sessions`) | `drawer_float`: Dr drawer, Cr cash on hand. At close: `drawer_variance` (source id `<drawer>:variance`): Dr / Cr drawer against cash over / short (counted − expected); `drawer_close` (`<drawer>:close`): Dr cash on hand, Cr drawer (the counted cash leaves). A recount posts the difference (`…_adjust`). The drawer's postings are the close's expected terms, so a closed drawer nets to zero. |
 
 Gift cards are posted at commit (a deferred trigger on the ledger): a box-office card is tied to its drawer, and a
 refunded purchase's commerce order marked refunded, right after the ledger row is written.
 
-Not in the journal: Stripe's scheduled payouts from the connected account (Exos records none; only instant payouts),
-Stripe's fee on an instant payout (only an estimate is known), absorbed fees (an allocation, not money), the Exos fee
-owed on a gift-card-paid order when that part is refunded back to the card (the sale's owed fee stays).
+Not in the journal: Stripe's fee on an instant payout (only an estimate is known), absorbed fees (an allocation, not
+money).
+
+## Payouts to the bank
+
+Which payouts Exos can see. A Stripe checkout is a destination charge: the charge is the platform's, Stripe moves the
+organizer's share to their connected account, and the connected account pays out to the organizer's bank on its own
+schedule. The platform's balance transactions (`exos-reconcile-stripe` stores them in `exos_stripe_balance_txns`)
+therefore carry the charge, the application fee and the transfer to the account, but never the account's payouts: a
+`payout` there is the platform's own payout of its fees to Exos's bank, not the organizer's. So nothing Exos stored
+before recorded a scheduled payout. Stripe does let a Connect platform read a connected account's objects with the
+`Stripe-Account` header, and Exos already reads the account's balance that way (`exos-instant-payouts`), so:
+
+- `exos-reconcile-stripe` (cron secret, the same run as the reconciliation, not scheduled yet) lists each connected
+  account's payouts (`GET /v1/payouts`, `Stripe-Account: acct_…`; a read, never a write) created from 14 days before
+  its window, since Stripe marks a payout paid or failed days after creating it, and hands them per org to
+  `exos_stripe_org_payouts_record` (service role). `EXOS_RECONCILE_PAYOUTS=off` skips the step; a failure there is
+  reported and never fails the reconciliation.
+- The record checks the account is the org's own (`exos_org_secrets.payments.connectedAccountId`), upserts one row per
+  payout id (`exos_stripe_org_payouts`: amount, currency, status, method, arrival), never moves a payout another org
+  recorded, and only moves a status forward (pending, in transit, paid, then failed / canceled). Paid, failed and
+  canceled are in the org's audit log (`payout.stripe_status`).
+- A paid payout posts Dr bank, Cr Stripe clearing; a failure after paid reverses it. Stripe clearing is the
+  organizer's Stripe balance as the journal sees it (charges less the application fee, less refunds), so after the
+  payouts it holds what is still at Stripe.
+- Instant payouts show up in the same list. One Exos sent (`exos_org_instant_payouts.stripe_payout_id`) is posted from
+  there; its Stripe row posts nothing, and if the Stripe row is recorded first, its posting is taken back when the
+  instant payout learns its id. An instant payout taken outside Exos (Stripe's dashboard) posts from the Stripe row.
 
 **TODO (operator decision): the Exos fee on walk-up cash sales is NOT posted.** Whether Exos charges a fee on cash taken
 at the door, and how it would be collected (there is no charge to withhold it from), is open (docs/pos.md). Until it is
@@ -97,9 +126,17 @@ decided, `pos_cash_sale` carries no Exos fee line and nothing records one as owe
 
 `exos_sales_tax_report(org, from, to, event)`: grouped by the venue's location (`exos_events.venue_address`: country,
 region, city, postal code), the tax rule (name and rate of the tier / add-on's `exos_tax_rules` row) and the source.
-Online: collected = the price-disclosure lines' tax (tax a line doesn't explain is "Rate not recorded"); refunded = the
-credit notes' tax, spread over the order's rates. Door (POS): the order lines' tax on the part paid in money (a comp
-tender collects none), refunded when the sale is voided or refunded. On the Payouts page (the org, a period) and in
+Every tax amount is a journal line on sales tax payable (mig `20261111130000`), so the report and the journal always
+agree: its net per org, currency, event and period is exactly what sales tax payable moved (`check_invariants()` I10
+in the simulation, `test_journal_payouts_tax.sql` JP3). Collected = the sale entries (an order, a door tender);
+refunded = every other entry on the account: a card refund (the credit note's tax, else pro rata), a refund back to a
+gift card (its tax share), a door void / refund / card refund, and a refund that failed later counts back. Each
+entry's amount is spread over its order's rates by the order's own split: online, the price-disclosure lines' tax (tax
+a line doesn't explain is "Rate not recorded"); at the door, the order lines' tax; the remainder goes to the largest
+rate. Dated by the journal entry (the sale: fulfilment; a refund: when it was made). Taxable and order counts still
+come from the orders in the period (online: fulfilment; door: the part paid in money, a comp tender collects none).
+Before this, refunded counted only the credit notes, so a refund back to a gift card, a refund with no credit note
+and a door refund of part of a sale read differently from the journal. On the Payouts page (the org, a period) and in
 the event's Money section. Exos doesn't file or remit tax.
 
 ## $0 orders for free claims and comps
