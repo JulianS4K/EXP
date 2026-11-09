@@ -7,8 +7,10 @@
 //   2. the claim (exos_group_claim), which refuses the same buyer's re-claim
 //      while their claim is under 2 minutes old (XG429, DETAIL = the order's
 //      session id when one is attached and pending);
-//   3. on XG429: the buyer's page that is still open is handed back (its url,
-//      or client_secret for the embed) instead of a new one; otherwise 429.
+//   3. on XG429: a SIGNED-IN buyer's page that is still open is handed back
+//      (its url, or client_secret for the embed) instead of a new one; a guest
+//      gets a 429 (security review: anyone holding the seat link who knows the
+//      guest's email could otherwise fetch that open page).
 // Pure apart from the injected calls, so the Deno test checks the order.
 
 export const GROUP_CLAIM_PER_NETWORK = 5;
@@ -40,7 +42,7 @@ export type GateResult =
   | { hold: string }
   | { status: number; body: Record<string, unknown> };
 
-export async function gateGroupClaim(g: GroupKey, ipHash: string, deps: GateDeps, opts: { embedded?: boolean } = {}): Promise<GateResult> {
+export async function gateGroupClaim(g: GroupKey, ipHash: string, deps: GateDeps, opts: { embedded?: boolean; signedIn?: boolean } = {}): Promise<GateResult> {
   for (const b of groupClaimBuckets(g, ipHash)) {
     let ok = false;
     try {
@@ -57,7 +59,8 @@ export async function gateGroupClaim(g: GroupKey, ipHash: string, deps: GateDeps
   if (!error && typeof data === "string" && data) return { hold: data };
   if (error?.code === "XG429") {
     const sid = typeof error.details === "string" && /^cs_[A-Za-z0-9_]{1,250}$/.test(error.details) ? error.details : null;
-    if (sid) {
+    // Only to the proven owner: a signed-in buyer (the claim matched their uid).
+    if (sid && opts.signedIn) {
       try {
         const cs = await deps.openSession(sid);
         if (cs?.status === "open") {

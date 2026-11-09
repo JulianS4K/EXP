@@ -51,22 +51,34 @@ Deno.test("over a limit: 429, no claim, no Stripe", async () => {
   assertEquals(calls, ["rate group-claim"]);
 });
 
-Deno.test("a re-claim within 2 minutes gets the open page back, never a new one", async () => {
+Deno.test("a signed-in re-claim within 2 minutes gets the open page back, never a new one", async () => {
   const xg = { data: null, error: { code: "XG429", message: "your checkout for this seat is already open", details: "cs_test_open" } };
   const open = deps({ claim: xg, session: { status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_open" } });
-  assertEquals(await gateGroupClaim({ seat: SEAT, cover: null }, IP, open.d), {
+  assertEquals(await gateGroupClaim({ seat: SEAT, cover: null }, IP, open.d, { signedIn: true }), {
     status: 200, body: { url: "https://checkout.stripe.com/c/pay/cs_test_open", session_id: "cs_test_open", reused: true },
   });
   assertEquals(open.calls, ["rate group-claim", "rate group-seat", "claim", "stripe retrieve cs_test_open"]);
   const embed = deps({ claim: xg, session: { status: "open", client_secret: "cs_secret" } });
-  const re = await gateGroupClaim({ seat: SEAT, cover: null }, IP, embed.d, { embedded: true });
+  const re = await gateGroupClaim({ seat: SEAT, cover: null }, IP, embed.d, { embedded: true, signedIn: true });
   assertEquals("status" in re && re.body.client_secret, "cs_secret");
   // Closed at Stripe, or no order attached yet (still being created): 429.
   const closed = deps({ claim: xg, session: { status: "expired", url: null } });
-  assertEquals((await gateGroupClaim({ seat: SEAT, cover: null }, IP, closed.d) as { status: number }).status, 429);
+  assertEquals((await gateGroupClaim({ seat: SEAT, cover: null }, IP, closed.d, { signedIn: true }) as { status: number }).status, 429);
   const pending = deps({ claim: { data: null, error: { code: "XG429", message: "m", details: "" } } });
   assertEquals((await gateGroupClaim({ seat: SEAT, cover: null }, IP, pending.d) as { status: number }).status, 429);
   assertEquals(pending.calls.some((c) => c.startsWith("stripe")), false);
+});
+
+Deno.test("a guest re-claim never gets the open page back (security review)", async () => {
+  const xg = { data: null, error: { code: "XG429", message: "your checkout for this seat is already open", details: "cs_test_open" } };
+  const guest = deps({ claim: xg, session: { status: "open", url: "https://checkout.stripe.com/c/pay/cs_test_open", client_secret: "cs_secret" } });
+  const r = await gateGroupClaim({ seat: SEAT, cover: null }, IP, guest.d);
+  assertEquals("status" in r && r.status, 429);
+  assertEquals("status" in r && (r.body.url ?? r.body.client_secret ?? null), null);
+  assertEquals(guest.calls.some((c) => c.startsWith("stripe")), false, "no Stripe lookup for a guest");
+  const embedGuest = deps({ claim: xg, session: { status: "open", client_secret: "cs_secret" } });
+  const re = await gateGroupClaim({ seat: SEAT, cover: null }, IP, embedGuest.d, { embedded: true });
+  assertEquals("status" in re && re.status, 429);
 });
 
 Deno.test("other claim errors keep exos-checkout's reasons", async () => {

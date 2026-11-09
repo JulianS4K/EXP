@@ -952,7 +952,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           return { status: cs.status, url: cs.url, client_secret: cs.client_secret };
         },
         reason: groupReason,
-      }, { embedded });
+      }, { embedded, signedIn: !!buyerUid });
       if (!("hold" in gate)) return json(gate.body, gate.status);
       groupHold = gate.hold;
     }
