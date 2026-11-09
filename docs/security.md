@@ -647,7 +647,12 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   reject, invite approval, OAuth app deletes, voucher issue, price steps,
   channel prices, and the fans and audience exports. Each call sits on the
   action's success path, after its replay checks, so a retried or
-  concurrent action logs once (`tests/exos/race_org_audit.sh`).
+  concurrent action logs once (`tests/exos/race_org_audit.sh`). An RPC
+  that logs its own row and also writes a trigger-audited row keeps the
+  trigger out of it, so one action is one row: member approve / reject
+  (`exos.audit_member_rpc`) and the price-step writes, dashboard and API
+  (`exos.audit_tier_rpc`, mig 20261111100000; their `tier.price_steps` row
+  carries the tier's price and door price as [old, new]).
   `exos_set_org_comp_budget` and `exos_void_ticket` predate 20260926, so
   their patches skip with a NOTICE when prod's body lacks the anchor.
 - **Reading it.** `exos_org_audit_list` (authenticated: owner / manager /
