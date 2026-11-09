@@ -87,6 +87,7 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
 - **Inventory that can't oversell.** Quotas, holds, vouchers and a waitlist that holds the seat
   for the next buyer. This is pretty much pretix-grade.
 - **Web-first checkout built for Instagram's in-app browser.** No app install; DICE requires one.
+- **Moving off DICE is one token.** Import from DICE brings a promoter's events, ticket holders (their DICE barcodes scan at the Exos door) and opted-in fans over; field-by-field mapping in `docs/dice-coverage.md`.
 
 ## Where Exos is behind (the gaps that lose deals)
 

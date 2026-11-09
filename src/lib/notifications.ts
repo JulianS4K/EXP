@@ -28,6 +28,8 @@ import { listInboundTransfers, listOutboundTransfers, listMyTickets } from './ti
 import { supabase } from './supabase';
 import { listSavedEvents } from './saves';
 import { allInPrice, nextPriceStep } from './pricing';
+import { parseUnitFees } from './fees';
+import { listPublicFeeRules, withTierFees } from './feeRules';
 import { formatInTz } from './datetime';
 import { formatCurrency } from './utils';
 import { Event, Ticket, Transfer } from '../types';
@@ -202,10 +204,13 @@ export interface RescheduleRow {
 
 /** Minimal tier shape needed for price-step nudges (exos_public_tiers). */
 export interface TierRow {
+  id?: string;
   event_id: string;
   name: string | null;
   price_schedule: unknown;
   exclusive_tax_percent?: number | null;
+  /** The event's passed-on fees for this tier (fee rules, inside the all-in price). */
+  passed_on_fees?: unknown;
 }
 
 function eventMs(e: Event | undefined): number {
@@ -388,7 +393,7 @@ export function priceStepItems(
       const at = Date.parse(step.startsAt);
       if (at - now > PRICE_STEP_WINDOW_MS) continue;
       // All-in: the nudge quotes what the buyer will actually pay.
-      if (!best || at < best.at) best = { at, tier: t.name ?? 'Tickets', price: allInPrice(step.price, t.exclusive_tax_percent) };
+      if (!best || at < best.at) best = { at, tier: t.name ?? 'Tickets', price: allInPrice(step.price, t.exclusive_tax_percent, parseUnitFees(t.passed_on_fees)) };
     }
     if (!best) continue;
     const when = formatInTz(new Date(best.at), e.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -459,9 +464,12 @@ function fetchReschedules(): Promise<SourceResult<RescheduleRow>> {
 
 function fetchPublicTiers(eventIds: string[]): Promise<SourceResult<TierRow>> {
   if (eventIds.length === 0) return Promise.resolve({ rows: [] });
-  return selectRows<TierRow>('tiers', () =>
-    supabase.from('exos_public_tiers').select('event_id, name, price_schedule, exclusive_tax_percent').in('event_id', eventIds),
-  );
+  return Promise.all([
+    selectRows<TierRow>('tiers', () =>
+      supabase.from('exos_public_tiers').select('id, event_id, name, price_schedule, exclusive_tax_percent').in('event_id', eventIds),
+    ),
+    listPublicFeeRules(eventIds),
+  ]).then(([res, fees]) => ({ ...res, rows: withTierFees(res.rows, fees) }));
 }
 
 export interface NotificationFeed {

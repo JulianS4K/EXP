@@ -1,0 +1,617 @@
+{
+  "file": "inbound-submissions",
+  "name": "Inbound submissions",
+  "order": 61.5,
+  "description": "Booking requests from outside: an artist or agent asks to play a venue or date. They arrive from the organization's public form (/book/<org slug>, off until an owner or manager turns it on in Booking requests; rate limited per network and per email, with a honeypot field) or from your own systems through POST /v1/inbound-submissions. Staff review them (new, reviewing, accepted, declined), turn one into a hold, or delete it. Opendate's inbound_submission[...] fields are accepted (name, spotify, instagram, venue_ownership_id; team_id and AppId are ignored: the key's organization decides) and /v1/inbound_submissions answers too. Reads need `booking:read`, writes `booking:write`.",
+  "endpoints": [
+    {
+      "id": "list-inbound-submissions",
+      "method": "GET",
+      "path": "/v1/inbound-submissions",
+      "summary": "List inbound submissions",
+      "description": "Newest first (sort=created_at asc for oldest first; q[s] is accepted too).",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status (or all, the default).",
+          "enum": [
+            "new",
+            "reviewing",
+            "accepted",
+            "declined",
+            "all"
+          ],
+          "example": "new"
+        },
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only requests for this venue."
+        },
+        {
+          "name": "sort",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "created_at desc (default) or created_at asc.",
+          "enum": [
+            "created_at desc",
+            "created_at asc"
+          ],
+          "example": "created_at desc"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "status": "new",
+                "source": "form",
+                "artist_name": "The Ramblers",
+                "contact_name": "Jo Agent",
+                "contact_role": "agent",
+                "email": "jo@agency.example",
+                "phone": null,
+                "company": "Agency",
+                "message": "Touring in March.",
+                "links": {
+                  "spotify": "https://open.spotify.com/artist/1"
+                },
+                "genres": [
+                  "folk"
+                ],
+                "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "preferred_dates": [
+                  "2027-03-05",
+                  "2027-03-06"
+                ],
+                "dates_flexible": true,
+                "expected_draw": 200,
+                "hold_id": null,
+                "staff_note": "",
+                "reviewed_by": null,
+                "reviewed_at": null,
+                "created_at": "2026-11-02T15:04:05.000Z",
+                "updated_at": "2026-11-02T15:04:05.000Z"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-inbound-submission",
+      "method": "POST",
+      "path": "/v1/inbound-submissions",
+      "summary": "Create an inbound submission",
+      "description": "Records a request your own form or CRM took (source api). Plain JSON or Opendate's wrapped / form-encoded inbound_submission[...] body.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "artist_name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The act, 1-150 characters.",
+          "example": "The Ramblers"
+        },
+        {
+          "name": "contact_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Who asks, at most 100 characters (name is accepted too)."
+        },
+        {
+          "name": "contact_role",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "artist, agent, manager, promoter or other.",
+          "enum": [
+            "artist",
+            "agent",
+            "manager",
+            "promoter",
+            "other"
+          ],
+          "example": "agent"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Their email.",
+          "example": "jo@agency.example"
+        },
+        {
+          "name": "phone",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 40 characters."
+        },
+        {
+          "name": "company",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 100 characters."
+        },
+        {
+          "name": "message",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 5000 characters."
+        },
+        {
+          "name": "links",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "https URLs: spotify, instagram, website, youtube, tiktok, bandcamp, soundcloud (each also accepted as a top-level field)."
+        },
+        {
+          "name": "genres",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10 strings (a comma-separated string is accepted too)."
+        },
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The venue asked for (venue_ownership_id is accepted too)."
+        },
+        {
+          "name": "preferred_dates",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Up to 10 dates (YYYY-MM-DD)."
+        },
+        {
+          "name": "dates_flexible",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether other dates work (default true)."
+        },
+        {
+          "name": "expected_draw",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Expected attendance."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "new",
+              "source": "api",
+              "artist_name": "The Ramblers",
+              "contact_name": "Jo Agent",
+              "contact_role": "agent",
+              "email": "jo@agency.example",
+              "phone": null,
+              "company": "Agency",
+              "message": "Touring in March.",
+              "links": {
+                "spotify": "https://open.spotify.com/artist/1"
+              },
+              "genres": [
+                "folk"
+              ],
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "preferred_dates": [
+                "2027-03-05",
+                "2027-03-06"
+              ],
+              "dates_flexible": true,
+              "expected_draw": 200,
+              "hold_id": null,
+              "staff_note": "",
+              "reviewed_by": null,
+              "reviewed_at": null,
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad field; the message names it.",
+          "example": {
+            "error": "artist_name is required."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "inbound_submission": {
+          "artist_name": "The Ramblers",
+          "name": "Jo Agent",
+          "email": "jo@agency.example",
+          "spotify": "https://open.spotify.com/artist/1"
+        }
+      }
+    },
+    {
+      "id": "get-inbound-submission",
+      "method": "GET",
+      "path": "/v1/inbound-submissions/:id",
+      "summary": "Get an inbound submission",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The submission.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "new",
+              "source": "form",
+              "artist_name": "The Ramblers",
+              "contact_name": "Jo Agent",
+              "contact_role": "agent",
+              "email": "jo@agency.example",
+              "phone": null,
+              "company": "Agency",
+              "message": "Touring in March.",
+              "links": {
+                "spotify": "https://open.spotify.com/artist/1"
+              },
+              "genres": [
+                "folk"
+              ],
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "preferred_dates": [
+                "2027-03-05",
+                "2027-03-06"
+              ],
+              "dates_flexible": true,
+              "expected_draw": 200,
+              "hold_id": null,
+              "staff_note": "",
+              "reviewed_by": null,
+              "reviewed_at": null,
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-inbound-submission",
+      "method": "PATCH",
+      "path": "/v1/inbound-submissions/:id",
+      "summary": "Review an inbound submission",
+      "description": "Set its status and / or a staff note.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The submission.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The review status.",
+          "enum": [
+            "new",
+            "reviewing",
+            "accepted",
+            "declined"
+          ],
+          "example": "reviewing"
+        },
+        {
+          "name": "staff_note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "At most 2000 characters, staff only."
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "reviewing",
+              "source": "form",
+              "artist_name": "The Ramblers",
+              "contact_name": "Jo Agent",
+              "contact_role": "agent",
+              "email": "jo@agency.example",
+              "phone": null,
+              "company": "Agency",
+              "message": "Touring in March.",
+              "links": {
+                "spotify": "https://open.spotify.com/artist/1"
+              },
+              "genres": [
+                "folk"
+              ],
+              "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "preferred_dates": [
+                "2027-03-05",
+                "2027-03-06"
+              ],
+              "dates_flexible": true,
+              "expected_draw": 200,
+              "hold_id": null,
+              "staff_note": "",
+              "reviewed_by": null,
+              "reviewed_at": "2026-11-02T15:04:05.000Z",
+              "created_at": "2026-11-02T15:04:05.000Z",
+              "updated_at": "2026-11-02T15:04:05.000Z"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-inbound-submission",
+      "method": "DELETE",
+      "path": "/v1/inbound-submissions/:id",
+      "summary": "Delete an inbound submission",
+      "description": "A hold made from it stays.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The submission.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-inbound-submission-hold",
+      "method": "POST",
+      "path": "/v1/inbound-submissions/:id/hold",
+      "summary": "Hold dates for a submission",
+      "description": "Creates a hold (as POST /v1/holds: positions required; title defaults to the artist, notes to the message), marks the submission accepted and links it. Once per submission.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The submission.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "positions",
+          "location": "body",
+          "type": "array",
+          "required": true,
+          "description": "The nights, as on POST /v1/holds."
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the artist."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Defaults to the message."
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "submission_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "hold": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "The Ramblers",
+                "status": "active"
+              }
+            }
+          }
+        },
+        {
+          "status": 409,
+          "description": "A hold was already made from it, or a night clashes.",
+          "example": {
+            "error": "This submission already has a hold"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ],
+      "request_example": {
+        "positions": [
+          {
+            "date": "2027-03-05",
+            "venue_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+          }
+        ]
+      }
+    }
+  ]
+}

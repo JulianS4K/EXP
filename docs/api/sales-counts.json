@@ -1,0 +1,975 @@
+{
+  "file": "sales-counts",
+  "name": "Sales counts",
+  "order": 35,
+  "description": "Tickets an organization sold somewhere other than Exos: a box office, a consignment, or another platform (DICE, Resident Advisor, Posh, Shotgun, Ticketmaster…). Each event keeps up to 20 entries, one per manual label or imported platform. An entry is counts and amounts only, never buyer data, and is never added to Exos's own orders, revenue or check-ins; reports show it beside them. Amounts are integers in minor units of the entry's currency. Reads need `finance:read`; creating, changing, deleting and importing need `finance:write`. These are the first routes that change data: they touch sales counts only. The public event pages show only the total sold elsewhere for a published event, never the entries.",
+  "endpoints": [
+    {
+      "id": "list-sales-counts",
+      "method": "GET",
+      "path": "/v1/sales-counts",
+      "summary": "List sales counts",
+      "description": "Every entry of the organization's events, most recently changed first. `available` is capacity − sold when a capacity is known, else null.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's entries.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "kind",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only typed-in counts (manual) or file imports (import).",
+          "example": "manual",
+          "enum": [
+            "manual",
+            "import"
+          ]
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1,
+          "default": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50,
+          "default": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "kind": "manual",
+                "platform": null,
+                "label": "Box office",
+                "sold": 12,
+                "gross_cents": 24000,
+                "currency": "USD",
+                "capacity": 50,
+                "tiers": [],
+                "note": "Cash, Friday",
+                "file_name": null,
+                "row_count": null,
+                "created_at": "2026-11-13T22:10:04.511+00:00",
+                "updated_at": "2026-11-14T01:02:44.090+00:00",
+                "available": 38
+              },
+              {
+                "id": "c2a9e7f1-3d5b-4c8a-9e0f-1b2d3c4e5f60",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "kind": "import",
+                "platform": "dice",
+                "label": "DICE",
+                "sold": 80,
+                "gross_cents": 190000,
+                "currency": "USD",
+                "capacity": 200,
+                "tiers": [
+                  {
+                    "name": "Early",
+                    "sold": 50,
+                    "gross_cents": 100000,
+                    "capacity": 50
+                  },
+                  {
+                    "name": "GA",
+                    "sold": 30,
+                    "gross_cents": 90000,
+                    "capacity": 150
+                  }
+                ],
+                "note": null,
+                "file_name": "dice-sales.csv",
+                "row_count": 31,
+                "created_at": "2026-11-10T15:00:00.000+00:00",
+                "updated_at": "2026-11-12T09:30:12.400+00:00",
+                "available": 120
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "kind must be manual or import."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-sales-count",
+      "method": "GET",
+      "path": "/v1/sales-counts/:id",
+      "summary": "Get a sales count",
+      "description": "One entry, with its ticket types.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The sales count's id. One of another organization answers 404.",
+          "example": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "c2a9e7f1-3d5b-4c8a-9e0f-1b2d3c4e5f60",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "kind": "import",
+              "platform": "dice",
+              "label": "DICE",
+              "sold": 80,
+              "gross_cents": 190000,
+              "currency": "USD",
+              "capacity": 200,
+              "tiers": [
+                {
+                  "name": "Early",
+                  "sold": 50,
+                  "gross_cents": 100000,
+                  "capacity": 50
+                },
+                {
+                  "name": "GA",
+                  "sold": 30,
+                  "gross_cents": 90000,
+                  "capacity": 150
+                }
+              ],
+              "note": null,
+              "file_name": "dice-sales.csv",
+              "row_count": 31,
+              "created_at": "2026-11-10T15:00:00.000+00:00",
+              "updated_at": "2026-11-12T09:30:12.400+00:00",
+              "available": 120
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such entry in the key's organization.",
+          "example": {
+            "error": "sales count not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-sales-count",
+      "method": "POST",
+      "path": "/v1/sales-counts",
+      "summary": "Add a manual sales count",
+      "description": "Records tickets sold outside Exos for one of the organization's events. Saving a label the event already has replaces that count (200, or 200 with the same values when nothing changed); a new label answers 201. An event keeps at most 20 entries. Send a JSON body.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event, which must belong to the key's organization.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Where the tickets were sold, 1-40 characters (\"Box office\", \"Consignment\", a platform without an export). An event has one count per label, case-insensitively: sending a label it already has replaces that count.",
+          "example": "Box office"
+        },
+        {
+          "name": "sold",
+          "location": "body",
+          "type": "integer",
+          "required": true,
+          "description": "Tickets sold there, 0-10,000,000.",
+          "example": 12
+        },
+        {
+          "name": "gross_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "What those tickets brought in, in minor units of currency (24000 = $240.00). Default 0.",
+          "example": 24000
+        },
+        {
+          "name": "price_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Instead of gross_cents: the price of one ticket; gross_cents becomes price_cents × sold.",
+          "example": 2000
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "3-letter code. Default: the event's currency. Totals are never added across currencies.",
+          "example": "USD"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Tickets that channel had to sell.",
+          "example": 50
+        },
+        {
+          "name": "available",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Instead of capacity: tickets still unsold there; capacity becomes sold + available.",
+          "example": 38
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 200 characters, for staff.",
+          "example": "Cash, Friday"
+        },
+        {
+          "name": "tiers",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Optional per ticket type: [{ name, sold, gross_cents, capacity }], at most 50; lines with the same name (any case) are added up. When given, sold and gross_cents are their sums.",
+          "example": []
+        }
+      ],
+      "request_example": {
+        "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+        "label": "Box office",
+        "sold": 12,
+        "gross_cents": 24000,
+        "currency": "USD",
+        "capacity": 50,
+        "note": "Cash, Friday"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "kind": "manual",
+              "platform": null,
+              "label": "Box office",
+              "sold": 12,
+              "gross_cents": 24000,
+              "currency": "USD",
+              "capacity": 50,
+              "tiers": [],
+              "note": "Cash, Friday",
+              "file_name": null,
+              "row_count": null,
+              "created_at": "2026-11-13T22:10:04.511+00:00",
+              "updated_at": "2026-11-14T01:02:44.090+00:00",
+              "available": 38
+            }
+          }
+        },
+        {
+          "status": 200,
+          "description": "A count with that label existed and was replaced (or already had these values)."
+        },
+        {
+          "status": 400,
+          "description": "A missing or invalid field, or the event already has 20 entries.",
+          "example": {
+            "error": "a label (where these tickets were sold) of 1-40 characters is required"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 415,
+          "description": "The body is not JSON.",
+          "example": {
+            "error": "send a JSON body (Content-Type: application/json)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-sales-count",
+      "method": "PUT",
+      "path": "/v1/sales-counts/:id",
+      "summary": "Change a sales count",
+      "description": "Changes the fields sent and keeps the rest; `note: null` clears the note. A manual count can be renamed (409 when the event already has that label). An entry with ticket types (an import) takes new numbers only as `tiers`; to refresh an import, import the file again. The entry stays on its event.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The sales count's id. One of another organization answers 404.",
+          "example": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84"
+        },
+        {
+          "name": "label",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Where the tickets were sold, 1-40 characters (\"Box office\", \"Consignment\", a platform without an export). An event has one count per label, case-insensitively: sending a label it already has replaces that count.",
+          "example": "Box office"
+        },
+        {
+          "name": "sold",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Tickets sold there, 0-10,000,000.",
+          "example": 12
+        },
+        {
+          "name": "gross_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "What those tickets brought in, in minor units of currency (24000 = $240.00). Default 0.",
+          "example": 24000
+        },
+        {
+          "name": "price_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Instead of gross_cents: the price of one ticket; gross_cents becomes price_cents × sold.",
+          "example": 2000
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "3-letter code. Default: the event's currency. Totals are never added across currencies.",
+          "example": "USD"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Tickets that channel had to sell.",
+          "example": 50
+        },
+        {
+          "name": "available",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Instead of capacity: tickets still unsold there; capacity becomes sold + available.",
+          "example": 38
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 200 characters, for staff.",
+          "example": "Cash, Friday"
+        },
+        {
+          "name": "tiers",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Optional per ticket type: [{ name, sold, gross_cents, capacity }], at most 50; lines with the same name (any case) are added up. When given, sold and gross_cents are their sums.",
+          "example": []
+        }
+      ],
+      "request_example": {
+        "sold": 15,
+        "gross_cents": 30000
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "kind": "manual",
+              "platform": null,
+              "label": "Box office",
+              "sold": 15,
+              "gross_cents": 30000,
+              "currency": "USD",
+              "capacity": 50,
+              "tiers": [],
+              "note": "Cash, Friday",
+              "file_name": null,
+              "row_count": null,
+              "created_at": "2026-11-13T22:10:04.511+00:00",
+              "updated_at": "2026-11-14T01:02:44.090+00:00",
+              "available": 35
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "An invalid field.",
+          "example": {
+            "error": "sold must be a whole number, 0 or more."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such entry in the key's organization.",
+          "example": {
+            "error": "sales count not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The new label is taken on this event, or numbers were sent without tiers for an entry that has ticket types.",
+          "example": {
+            "error": "this event already has an entry called \"Door\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-sales-count",
+      "method": "DELETE",
+      "path": "/v1/sales-counts/:id",
+      "summary": "Delete a sales count",
+      "description": "Removes a manual count, or an import (for a wrong file).",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The sales count's id. One of another organization answers 404.",
+          "example": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Deleted.",
+          "example": {
+            "data": {
+              "id": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such entry in the key's organization.",
+          "example": {
+            "error": "sales count not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-event-sales-counts",
+      "method": "GET",
+      "path": "/v1/events/:id/sales-counts",
+      "summary": "An event's sales counts and totals",
+      "description": "The event's entries plus `totals`, one per currency (amounts are never added across currencies), and `sold`, the tickets sold elsewhere in all. What settlements read.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d1e4c2a-0b9f-4e3d-8a6c-5f2b1e0d9c84",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "kind": "manual",
+                "platform": null,
+                "label": "Box office",
+                "sold": 12,
+                "gross_cents": 24000,
+                "currency": "USD",
+                "capacity": 50,
+                "tiers": [],
+                "note": "Cash, Friday",
+                "file_name": null,
+                "row_count": null,
+                "created_at": "2026-11-13T22:10:04.511+00:00",
+                "updated_at": "2026-11-14T01:02:44.090+00:00",
+                "available": 38
+              },
+              {
+                "id": "c2a9e7f1-3d5b-4c8a-9e0f-1b2d3c4e5f60",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "kind": "import",
+                "platform": "dice",
+                "label": "DICE",
+                "sold": 80,
+                "gross_cents": 190000,
+                "currency": "USD",
+                "capacity": 200,
+                "tiers": [
+                  {
+                    "name": "Early",
+                    "sold": 50,
+                    "gross_cents": 100000,
+                    "capacity": 50
+                  },
+                  {
+                    "name": "GA",
+                    "sold": 30,
+                    "gross_cents": 90000,
+                    "capacity": 150
+                  }
+                ],
+                "note": null,
+                "file_name": "dice-sales.csv",
+                "row_count": 31,
+                "created_at": "2026-11-10T15:00:00.000+00:00",
+                "updated_at": "2026-11-12T09:30:12.400+00:00",
+                "available": 120
+              }
+            ],
+            "totals": [
+              {
+                "currency": "USD",
+                "sold": 92,
+                "gross_cents": 214000
+              }
+            ],
+            "sold": 92
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "import-sales-counts",
+      "method": "POST",
+      "path": "/v1/events/:id/sales-counts/import",
+      "summary": "Import a platform's sales from a CSV",
+      "description": "Reads another platform's sales export for this event and stores it as that platform's entry, summed per ticket type. Rows are added up, so a file with one row per ticket type and one with one row per order both work; rows whose status column says refunded, cancelled, void or failed are left out. Importing again replaces the platform's entry instead of adding to it, so the same file twice changes nothing (`status: unchanged`). Columns are matched from the headers; `mapping` overrides any of them. With any error nothing is written (422, each error with its line and field). `dry_run: true` answers the same summary without writing. JSON body; the CSV text is at most 2 MB and 2,000 rows.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "platform",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Where the file comes from.",
+          "example": "dice",
+          "enum": [
+            "eventbrite",
+            "dice",
+            "ra",
+            "posh",
+            "shotgun",
+            "ticketmaster",
+            "axs",
+            "seetickets",
+            "tixr",
+            "etix",
+            "partiful",
+            "luma",
+            "other"
+          ]
+        },
+        {
+          "name": "csv",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The file's text (comma, semicolon or tab separated; the first line is the header). Send this or rows.",
+          "example": "Ticket Type,Tickets Sold,Gross\nEarly,50,1000.00\nGA,30,900.00"
+        },
+        {
+          "name": "rows",
+          "location": "body",
+          "type": "array",
+          "required": false,
+          "description": "Instead of csv: objects keyed by column header, or arrays whose first is the header.",
+          "example": [
+            {
+              "Ticket Type": "Early",
+              "Tickets Sold": 50,
+              "Gross": "1000.00"
+            }
+          ]
+        },
+        {
+          "name": "mapping",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Field → column header, for any column the headers don't name clearly; null unmaps one. Fields: tier, sold (required), gross (total), price (each; gross = price × sold when there is no gross), capacity, currency, event, status.",
+          "example": {
+            "sold": "Qty",
+            "gross": "Total paid"
+          }
+        },
+        {
+          "name": "event",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "When the file covers several events: the value of the event column whose rows belong to this event (any case).",
+          "example": "Warehouse Party"
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The amounts' currency when there is no currency column (default: the event's). A file mixing currencies is refused.",
+          "example": "USD"
+        },
+        {
+          "name": "file_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Shown with the entry, up to 200 characters.",
+          "example": "dice-sales.csv"
+        },
+        {
+          "name": "dry_run",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "true: check the file and answer what would be imported, writing nothing.",
+          "example": false
+        }
+      ],
+      "request_example": {
+        "platform": "dice",
+        "csv": "Ticket Type,Tickets Sold,Gross,Capacity\nEarly,50,1000.00,50\nGA,30,900.00,150",
+        "file_name": "dice-sales.csv"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "The platform's entry was created (200 when it replaced an earlier import, with status updated or unchanged).",
+          "example": {
+            "data": {
+              "id": "c2a9e7f1-3d5b-4c8a-9e0f-1b2d3c4e5f60",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "kind": "import",
+              "platform": "dice",
+              "label": "DICE",
+              "sold": 80,
+              "gross_cents": 190000,
+              "currency": "USD",
+              "capacity": 200,
+              "tiers": [
+                {
+                  "name": "Early",
+                  "sold": 50,
+                  "gross_cents": 100000,
+                  "capacity": 50
+                },
+                {
+                  "name": "GA",
+                  "sold": 30,
+                  "gross_cents": 90000,
+                  "capacity": 150
+                }
+              ],
+              "note": null,
+              "file_name": "dice-sales.csv",
+              "row_count": 31,
+              "created_at": "2026-11-10T15:00:00.000+00:00",
+              "updated_at": "2026-11-12T09:30:12.400+00:00",
+              "available": 120
+            },
+            "status": "created",
+            "import": {
+              "platform": "dice",
+              "currency": "USD",
+              "sold": 80,
+              "gross_cents": 190000,
+              "capacity": 200,
+              "tiers": [
+                {
+                  "name": "Early",
+                  "sold": 50,
+                  "gross_cents": 100000,
+                  "capacity": 50
+                },
+                {
+                  "name": "GA",
+                  "sold": 30,
+                  "gross_cents": 90000,
+                  "capacity": 150
+                }
+              ],
+              "rows": 2,
+              "other_event_rows": 0,
+              "voided_rows": 0,
+              "mapping": {
+                "tier": "Ticket Type",
+                "sold": "Tickets Sold",
+                "gross": "Gross",
+                "capacity": "Capacity"
+              },
+              "warnings": []
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "No platform, no file, a bad mapping, or the event already has 20 entries.",
+          "example": {
+            "error": "mapping.sold: column \"Qty\" is not in the file."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 413,
+          "description": "The body or the CSV is too large.",
+          "example": {
+            "error": "the CSV is larger than 2 MB."
+          }
+        },
+        {
+          "status": 422,
+          "description": "The file has errors; nothing was imported.",
+          "example": {
+            "error": "the file has errors; nothing was imported",
+            "errors": [
+              {
+                "row": 4,
+                "field": "sold",
+                "message": "\"1.5\" is not a whole number of tickets."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "find-eventbrite-event",
+      "method": "GET",
+      "path": "/v1/eventbrite-events/:id",
+      "summary": "Find an event by its Eventbrite id",
+      "description": "The organization's event linked to this Eventbrite event (the link made in Exos Door → Eventbrite sync), with the link's details. Needs `events:read`.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The Eventbrite event id (digits).",
+          "example": "812345678901"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "name": "Warehouse Night",
+              "slug": "warehouse-night",
+              "status": "published",
+              "starts_at": "2026-12-05T03:00:00+00:00",
+              "currency": "USD",
+              "tickets_sold": 57,
+              "total_tickets": 400,
+              "created_at": "2026-10-01T15:12:09.120+00:00",
+              "eventbrite": {
+                "id": "812345678901",
+                "name": "Warehouse Night",
+                "linked_at": "2026-10-02T10:00:00+00:00",
+                "last_synced_at": "2026-11-14T01:00:00+00:00"
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No event of the key's organization is linked to that Eventbrite id.",
+          "example": {
+            "error": "no event is linked to that Eventbrite event"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -10,12 +10,22 @@ import type { CompBatchRow, CompOutcome } from './compsModel';
 
 export * from './compsModel';
 
+/** A fresh request key for one comp batch (mig 20261105100000): the same key
+ *  sent again (double click, retry after a lost response) returns the first
+ *  result instead of issuing twice. */
+export function newCompRequestKey(): string {
+  return `comp-${crypto.randomUUID()}`;
+}
+
 export async function issueCompBatch(input: {
   eventId: string;
   tierId?: string | null;
   emails: string[];
   qtyEach?: number;
   promoterId?: string | null;
+  /** One key per batch (newCompRequestKey); without one, the server still
+   *  folds an identical batch by the same person within 10 minutes. */
+  requestKey?: string | null;
 }): Promise<CompBatchRow[]> {
   const { data, error } = await supabase.rpc('exos_issue_comp_batch', {
     p_event_id: input.eventId,
@@ -23,6 +33,7 @@ export async function issueCompBatch(input: {
     p_emails: input.emails,
     p_qty_each: input.qtyEach ?? 1,
     p_promoter_id: input.promoterId ?? null,
+    p_request_key: input.requestKey ?? null,
   });
   if (error) throw error;
   return (data ?? []).map((r: any) => ({

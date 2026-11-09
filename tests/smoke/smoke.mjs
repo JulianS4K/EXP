@@ -6,18 +6,27 @@ import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables } from './mock.mjs';
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const IG = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.2.23.108 (iPhone15,2; iOS 17_5; en_US; en; scale=3.00; 1179x2556; 624443862)';
-const browser = await chromium.launch();
+const FB_ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-S918U Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.71 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/471.0.0.35.80;]';
+// SMOKE_CHROMIUM: a local browser binary when Playwright's own download isn't available.
+const browser = await chromium.launch(process.env.SMOKE_CHROMIUM ? { executablePath: process.env.SMOKE_CHROMIUM } : {});
 const results = [];
 async function run(name, fn, opts = {}) {
   const ctx = await browser.newContext({ ...devices[opts.device || 'iPhone 13'], ...(opts.ua ? { userAgent: opts.ua } : {}) });
   const log = []; const errors = [];
+  // In-app browsers that block storage (Instagram / Facebook with cookies off):
+  // touching localStorage or sessionStorage throws, as it does there.
+  if (opts.noStorage) await ctx.addInitScript(() => {
+    for (const k of ['localStorage', 'sessionStorage']) {
+      Object.defineProperty(window, k, { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } });
+    }
+  });
   // Third-party hosts (pixel vendors, fonts) never load: fast, offline, and a
   // test asserts on what the app injected, not on what a vendor did.
   await ctx.route((u) => !u.href.startsWith('http://localhost') && !u.href.startsWith('https://mock.supabase.test/'), (r) => r.abort());
   await ctx.route('https://mock.supabase.test/**', (r) => handle(r, log, opts.mock));
   // A visitor who already answered the cookie banner (declined), so it stays
   // out of the way; the consent tests start fresh.
-  if (!opts.freshConsent) await ctx.addInitScript(() => {
+  if (!opts.freshConsent && !opts.noStorage) await ctx.addInitScript(() => {
     if (!localStorage.getItem('exos.consent.v2')) localStorage.setItem('exos.consent.v2', JSON.stringify({ analytics: 'denied', advertising: 'denied' }));
   });
   if (opts.gpc) await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: () => true, configurable: true }));
@@ -170,6 +179,168 @@ await run('Instagram in-app banner', async (page) => {
   await page.goto(BASE + '/event/' + EV);
   await expectText(page, 'You can buy right here in Instagram');
 }, { ua: IG });
+
+// ── In-app browser checkout (roadmap 7a): Instagram iOS and Facebook Android,
+// storage blocked, guest checkout through a stubbed Stripe page and back. ──
+// Stripe Checkout, stubbed: a page whose "Pay" goes to the success URL.
+async function stubStripe(page, checkout) {
+  await page.route('https://checkout.stripe.com/**', (r) => {
+    // Stripe goes back to the session's success_url: the one exos-checkout
+    // gave it (with the #pt= fragment for a guest), else the page's.
+    const back = String(checkout.successBack ?? checkout.body?.success_url ?? '').replace('{CHECKOUT_SESSION_ID}', 'cs_test_iab');
+    return r.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Stripe</title><h1>Stripe test checkout</h1><a id="pay" href="${back}">Pay</a>` });
+  });
+}
+const checkoutFn = (into) => ({ fns: { 'exos-checkout': (body) => {
+  into.body = body;
+  return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_iab', session_id: 'cs_test_iab' } };
+} } });
+// A guest order waiting for proof of the email (mig 20261105100000), as
+// exos-checkout answers it: the browser token in the body, and the same token
+// on Stripe's success_url fragment (withProofFragment), since storage may be
+// blocked. The proof RPCs accept only that token, and the code 123456.
+const PROOF_TOKEN = 'smokeProofToken_0123456789abcdefghijklmnopq';
+const proofCheckoutFn = (into) => ({
+  fns: { 'exos-checkout': (body) => {
+    into.body = body;
+    into.successBack = body.success_url + '#pt=' + PROOF_TOKEN;
+    return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_iab', session_id: 'cs_test_iab', proof_token: PROOF_TOKEN } };
+  } },
+  rpcs: {
+    exos_order_proof_status: (b) => (b.p_session_id === 'cs_test_iab' && b.p_token === PROOF_TOKEN
+      ? { status: into.proven ? 'proven' : 'pending', email: 'fa…@example.com', attempts_left: 5, attached: false, tickets: [] }
+      : { status: 'unknown' }),
+    exos_order_proof_verify: (b) => {
+      if (b.p_session_id !== 'cs_test_iab' || b.p_token !== PROOF_TOKEN) return { ok: false, error: 'unknown' };
+      if (b.p_code !== '123456') return { ok: false, error: 'wrong_code', attempts_left: 4 };
+      into.proven = true;
+      return { ok: true, status: 'proven', attached: false, tickets: [{ ticket_id: 't1', path: '/claim/abc' }, { ticket_id: 't2', path: '/claim/def' }] };
+    },
+  },
+});
+const until = async (cond, what, ms = 5000) => {
+  for (let i = 0; i < ms / 100 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert(await cond(), 'timed out waiting for ' + what);
+};
+const storageThrows = (page) => page.evaluate(() => { try { localStorage.getItem('x'); return false; } catch { return true; } });
+async function rejectCookies(page) {
+  // No storage, so the consent banner asks on every load; the choice holds for the page.
+  const b = page.getByRole('dialog').filter({ hasText: 'analytics and advertising cookies' });
+  await b.waitFor({ timeout: 8000 });
+  await b.getByRole('button', { name: 'Reject all' }).click();
+  await b.waitFor({ state: 'hidden' });
+}
+async function payAsGuest(page, email) {
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  const dlg = page.getByRole('dialog').filter({ hasText: 'Where should we send your tickets?' });
+  await dlg.waitFor({ timeout: 8000 });
+  // Read before paying: the page leaves for Stripe right after.
+  const text = (await dlg.innerText()).replace(/\s+/g, ' ');
+  await dlg.getByLabel('Email').fill(email);
+  await dlg.getByRole('button', { name: 'Continue to payment' }).click();
+  return text;
+}
+
+const igCheckout = {};
+await run('Instagram iOS, no storage: checkout link keeps the cart, guest pays by card, back from Stripe', async (page, log) => {
+  const popups = [];
+  page.context().on('page', (p) => popups.push(p.url()));
+  await stubStripe(page, igCheckout);
+  await page.goto(BASE + '/checkout?products=' + TIER2 + ':2&utm_source=instagram&utm_medium=story&fbclid=IwAR_iab1');
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  assert(await storageThrows(page), 'storage is blocked in this context');
+  await expectText(page, 'Fall Party');
+  await rejectCookies(page);
+  // The cart survives without sessionStorage: VIP x 2 = $100.
+  await until(async () => /\$100/.test(await page.locator('body').innerText()), 'VIP x 2 pre-filled from the URL');
+  // The escape hatch: menu steps, copy link, and a URL carrying cart + attribution + iab_from.
+  const hatch = page.getByTestId('in-app-escape').first();
+  await expectText(page, 'You can buy right here in Instagram. For Apple Pay, open this page in Safari.');
+  await expectText(page, 'Open in external browser');
+  const escape = await hatch.getAttribute('data-url');
+  assert(escape.includes('/checkout?') && escape.includes('products=' + TIER2 + '%3A2') && escape.includes('utm_source=instagram')
+    && escape.includes('fbclid=IwAR_iab1') && escape.includes('iab_from=instagram'), 'escape URL carries the cart: ' + escape);
+  // http://localhost can't become x-safari-https:, so only steps + copy here (vitest covers the link).
+  assert(await hatch.getByRole('link', { name: /Open in Safari/ }).count() === 0, 'no x-safari link for an http page');
+  const dlg = await payAsGuest(page, 'fan@example.com');
+  assert(/Pay with card, and we/.test(dlg) && dlg.includes('Card works right here.'), 'no Apple Pay promise inside Instagram: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = igCheckout.body;
+  assert(b && b.in_app_browser === 'instagram', 'records the in-app browser: ' + JSON.stringify(b));
+  assert(b.guest_email === 'fan@example.com' && b.tier_id === TIER2 && b.quantity === 2, 'guest VIP x2: ' + JSON.stringify(b));
+  assert(b.attribution?.utm_source === 'instagram' && b.attribution?.fbclid === 'IwAR_iab1', 'attribution kept: ' + JSON.stringify(b.attribution));
+  assert(b.success_url.includes('guest=1') && b.success_url.includes('to=f***%40example.com'), 'masked inbox on the return URL: ' + b.success_url);
+  assert(!b.success_url.includes('#'), 'the page asks for no fragment; exos-checkout adds it: ' + b.success_url);
+  // Stripe's "Pay" goes to success_url + #pt=: the token rides in the
+  // fragment, never in the query.
+  const pay = await page.locator('#pay').getAttribute('href');
+  assert(new URL(pay).hash === '#pt=' + PROOF_TOKEN && !new URL(pay).search.includes(PROOF_TOKEN), 'token in the fragment only: ' + pay);
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+  // Proof of email: storage is blocked, so the token can only have come
+  // from the fragment (the Stripe page was a full page load).
+  await expectText(page, 'Confirm your email');
+  await expectText(page, 'enter the 6-digit code we emailed to');
+  await until(() => log.some((l) => l.startsWith('rpc exos_order_proof_status ') && l.includes('"p_token":"' + PROOF_TOKEN + '"')
+    && l.includes('"p_session_id":"cs_test_iab"')), 'status asked with the fragment token');
+  // ...and it's gone from the address bar (and from history) once read.
+  const here = await page.evaluate(() => location.href);
+  assert(!here.includes(PROOF_TOKEN) && !here.includes('pt='), 'token stripped from the URL: ' + here);
+  assert(await storageThrows(page), 'still no storage');
+  // A wrong code first, then the mailed one.
+  const codeBox = page.getByLabel('6-digit code');
+  await codeBox.fill('000000');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expectText(page, "That code isn't right. 4 tries left.");
+  await codeBox.fill('123 456');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expectText(page, 'Confirmed.');
+  await expectText(page, 'Claim ticket 2');
+  assert(log.some((l) => l.startsWith('rpc exos_order_proof_verify ') && l.includes('"p_token":"' + PROOF_TOKEN + '"') && l.includes('"p_code":"123456"')),
+    'verify sent the fragment token and the code: ' + log.filter((l) => l.includes('proof')).join(' | '));
+  assert(!(await page.evaluate(() => location.href)).includes(PROOF_TOKEN), 'still not in the URL');
+  assert(popups.length === 0, 'no popup or new tab: ' + popups.join(', '));
+}, { ua: IG, noStorage: true, mock: proofCheckoutFn(igCheckout) });
+
+const fbCheckout = {};
+await run('Facebook Android, no storage: intent escape, guest checkout to Stripe and back', async (page) => {
+  const popups = [];
+  page.context().on('page', (p) => popups.push(p.url()));
+  await stubStripe(page, fbCheckout);
+  await page.goto(BASE + '/event/' + EV + '?utm_source=facebook&utm_medium=post');
+  await expectText(page, 'Fall Party');
+  assert(await storageThrows(page), 'storage is blocked in this context');
+  await rejectCookies(page);
+  await expectText(page, 'You can buy right here in Facebook. For Google Pay, open this page in your browser.');
+  const escape = await page.getByTestId('in-app-escape').first().getAttribute('data-url');
+  assert(escape.includes('utm_source=facebook') && escape.includes('iab_from=facebook'), 'escape URL: ' + escape);
+  const dlg = await payAsGuest(page, 'Guest@Example.com');
+  assert(/Card works right here/.test(dlg), 'the modal offers the escape for Google Pay: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(fbCheckout.body?.in_app_browser === 'facebook' && fbCheckout.body.guest_email === 'guest@example.com', 'body: ' + JSON.stringify(fbCheckout.body));
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+  await expectText(page, 'g***@example.com');
+  // Back from the confirmation, then back from Stripe: the Buy button works again.
+  await page.goBack();
+  await page.goBack();
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /Buy Tickets/i }).first().isEnabled(), 'Buy is enabled after coming back');
+  assert(popups.length === 0, 'no popup or new tab: ' + popups.join(', '));
+}, { ua: FB_ANDROID, device: 'Pixel 7', noStorage: true, mock: checkoutFn(fbCheckout) });
+
+const plainCheckout = {};
+await run('a normal browser is unchanged: no banner, wallets offered, recorded as none', async (page) => {
+  await stubStripe(page, plainCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  assert(await page.getByTestId('in-app-escape').count() === 0, 'no escape hatch in Safari');
+  const dlg = await payAsGuest(page, 'fan@example.com');
+  assert(/Apple Pay, Google Pay or card/.test(dlg) && !dlg.includes('Card works right here'), 'wallets offered: ' + dlg);
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(plainCheckout.body?.in_app_browser === 'none', 'recorded as a real browser: ' + JSON.stringify(plainCheckout.body));
+}, { mock: checkoutFn(plainCheckout) });
 
 // ── This week's screens: consent, marketing settings, sources, money, payouts, wallet ──
 
@@ -389,6 +560,66 @@ await run('event report: Sources by UTM, promoter and ad platform, with CSV', as
   assert(lines.includes(',,,dj-kay,,,1,1,20.00,1,USD'), 'promoter row (refunded): ' + lines.join(' | '));
 }, { signedIn: true, mock: reportMock });
 
+await run('event report: where buyers checked out (in-app vs browser)', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Where buyers checked out' }) });
+  await section.waitFor({ timeout: 8000 });
+  const text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['Instagram app', 'Browser, opened from Instagram', 'In-app conversion is 50% against 67% in browsers', '25% below the browser', '$75.00']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_in_app_report') && l.includes(EV)), 'report RPC called');
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: { exos_event_in_app_report: () => ({ currency: 'usd', rows: [
+  { in_app_browser: 'instagram', escaped_from: null, started: 4, paid: 2, tickets: 3, gross_cents: 7500 },
+  { in_app_browser: 'none', escaped_from: 'instagram', started: 1, paid: 1, tickets: 2, gross_cents: 5000 },
+  { in_app_browser: 'none', escaped_from: null, started: 2, paid: 1, tickets: 1, gross_cents: 2500 },
+] }) } }) });
+
+// ── claude/exos-buyer-geo-genre (mig 20261106140000): where buyers are, genre chips ──
+const GEO = (orders) => ({
+  orders, tickets: orders + 1, located_orders: orders - 1, unknown_orders: 1, other_tickets: 2,
+  countries: [{ country: 'US', currency: 'USD', orders: orders - 2, tickets: orders - 1, gross_cents: 10500 },
+    { country: 'GB', currency: 'USD', orders: 1, tickets: 1, gross_cents: 3000 }],
+  cities: [{ country: 'US', region: 'NY', city: 'Brooklyn', currency: 'USD', orders: orders - 2, tickets: orders - 1, gross_cents: 10500 }],
+  unknown: [{ country: null, currency: 'USD', orders: 1, tickets: 1, gross_cents: 0 }],
+});
+await run('event report: where buyers are (countries, cities, unknown; org-wide)', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+  const section = page.locator('section', { has: page.getByRole('heading', { name: 'Where buyers are' }) });
+  await section.getByText('Brooklyn, NY').waitFor({ timeout: 8000 });
+  let text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['United States', 'United Kingdom', 'Unknown', '$105.00', '3 of 4 orders have a location', '2 more tickets came from RSVPs']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_buyer_geo') && l.includes(EV)), 'event RPC called');
+  await section.getByRole('button', { name: 'All events' }).click();
+  await section.getByText('9 of 10 orders').waitFor({ timeout: 8000 });
+  assert(log.some((l) => l.startsWith('rpc exos_org_buyer_geo') && l.includes(ORG)), 'org RPC called');
+}, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: {
+  exos_event_buyer_geo: () => GEO(4), exos_org_buyer_geo: () => GEO(10),
+} }) });
+
+await run('home: genre chips filter the events', async (page, log) => {
+  await page.goto(BASE + '/');
+  const chips = page.getByRole('group', { name: 'Filter by genre' });
+  await chips.getByRole('button', { name: 'JAZZ' }).waitFor({ timeout: 8000 });
+  await expectText(page, 'Fall Party');
+  await expectText(page, 'Late Jazz');
+  await chips.getByRole('button', { name: 'JAZZ' }).click();
+  await page.getByText('Fall Party').first().waitFor({ state: 'detached', timeout: 8000 });
+  await expectText(page, 'Late Jazz');
+  assert(log.some((l) => l.startsWith('rpc exos_api_public') && l.includes('genres.list')), 'genres from public discovery');
+  assert(log.some((l) => l.startsWith('GET exos_public_events') && l.includes('genres=ov.')), 'the genre read: ' + log.filter((l) => l.includes('exos_public_events')).join(' | '));
+  await chips.getByRole('button', { name: 'ALL' }).click();
+  await expectText(page, 'Fall Party');
+}, { mock: { tables: { exos_public_events: [
+  { ...baseTables.exos_public_events[0], genres: ['House'] },
+  { ...baseTables.exos_public_events[0], id: '99999999-9999-4999-8999-999999999991', slug: 'late-jazz', name: 'Late Jazz', genres: ['Jazz'] },
+] }, rpcs: { exos_api_public: () => [
+  { genre: 'house', name: 'House', events: 1, variants: ['House'] },
+  { genre: 'jazz', name: 'Jazz', events: 1, variants: ['Jazz'] },
+] } } });
+
 await run('event report: Money summary from the order money view', async (page, log) => {
   await page.goto(BASE + '/dashboard/event/' + EV);
   const section = page.locator('section', { has: page.getByRole('heading', { name: 'Money' }) });
@@ -569,6 +800,127 @@ await run('door: a ticket refunded on Eventbrite is refused at the door', async 
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
+
+// --- Walk-up sales at the door (mig 20261107100000) -------------------------
+const WALKUP_TIER = '88888888-8888-4888-8888-888888888888';
+const WALKUP_ORDER = '99999999-9999-4999-8999-999999999999';
+const WALKUP_DRAWER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const WALKUP_TICKET = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+let walkupSold = false;
+const walkupOrder = () => ({
+  id: WALKUP_ORDER, event_id: EV, status: 'paid', payment_method: 'cash', currency: 'usd', total_cents: 2500, tax_cents: 0,
+  tenders: { cash: 2500, comp: 0, card: 0 }, tier_id: WALKUP_TIER, tier_name: 'Door GA', quantity: 1, comp_quantity: 0,
+  ticket_ids: [WALKUP_TICKET], tickets_scanned: 0, buyer_name: null, buyer_email: null, rung_by_me: true,
+  created_at: new Date().toISOString(), can_void: true, can_refund: true, can_hand_over: true, replay: false,
+});
+const walkupPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': return { body: { data: {
+      event: { id: EV, name: 'Fall Party', status: 'published', currency: 'USD' }, role: 'owner', can_comp: true,
+      card: { connected: false, message: "Card at the door isn't connected yet." }, fee_base: 'card-tickets',
+      tiers: [{ tier_id: WALKUP_TIER, name: 'Door GA', price_cents: 2500, price_source: 'door', step_name: null, step_remaining: null,
+        tax: null, unit_total_cents: 2500, remaining: walkupSold ? 41 : 42 }],
+      questions: [],
+      drawers: [{ id: WALKUP_DRAWER, device_id: null, mine: true, opened_at: new Date().toISOString(), open_float_cents: 10000,
+        cash_cents: walkupSold ? 12500 : 10000 }] } } };
+    case 'recent_sales': return { body: { data: walkupSold ? [walkupOrder()] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'cash' || b.tier_id !== WALKUP_TIER || b.quantity !== 1 || b.drawer_id !== WALKUP_DRAWER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected sale ' + JSON.stringify(b) } };
+      }
+      walkupSold = true;
+      return { body: { data: walkupOrder() } };
+    case 'order_codes': return { body: { data: { tickets: [{ ticket_id: WALKUP_TICKET,
+      print_code: 'P-' + WALKUP_TICKET + ':AbCdEfGhIjKlMnOpQrStUv', event_name: 'Fall Party', starts_at: null, tier_name: 'Door GA' }], skipped: [] } } };
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: the Sell tab sells one cash ticket and shows the QR', async (page, log) => {
+  walkupSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  await expectText(page, '42 left');
+  await page.getByRole('button', { name: '$25.00', exact: true }).first().click();  // quick cash: exact
+  await page.getByRole('button', { name: '$50.00', exact: true }).click();
+  await expectText(page, 'Change $25.00');
+  assert(await page.getByRole('radio', { name: /Card/ }).isDisabled(), 'card is disabled');
+  await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).click();
+  await expectText(page, 'Sold 1 × Door GA');
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && !/card_number|cvc|"pan"/.test(sale), 'the sale went to exos-pos without card data: ' + sale);
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  assert((await qr.getAttribute('src')).startsWith('data:image/svg+xml'), 'the QR is drawn locally');
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"order_codes"')), 'asked for the print code');
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupPos } }) });
+
+// --- Card at the door (mig 20261107130000): the switch on, a mocked reader ---
+const CARD_READER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+let cardPolls = 0;
+let cardSold = false;
+const cardOrder = (paid) => ({ ...walkupOrder(), payment_method: paid ? 'card' : null, status: paid ? 'paid' : 'pending',
+  tenders: { cash: 0, comp: 0, card: paid ? 2500 : 0 }, ticket_ids: paid ? [WALKUP_TICKET] : [],
+  card: { status: paid ? 'succeeded' : 'awaiting', mode: 'reader', payment_intent: paid ? 'pi_smoke' : null, decline_code: null } });
+const cardPos = (b) => {
+  switch (b.action) {
+    case 'walkup_catalog': {
+      const c = walkupPos(b).body.data;
+      return { body: { data: { ...c, card: { connected: true, switched_on: true, message: 'Charge the card on a reader.',
+        readers: [{ device_id: CARD_READER, label: 'Door S700', device_type: 'stripe_s700' }], has_location: true, can_manage: true,
+        tap_to_pay: false } } } };
+    }
+    case 'recent_sales': return { body: { data: cardSold ? [cardOrder(true)] : [] } };
+    case 'mint_walkup':
+      if (b.payment !== 'card' || b.drawer_id || b.comp_quantity !== 0 || b.tier_id !== WALKUP_TIER || !b.order_key) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected card sale ' + JSON.stringify(b) } };
+      }
+      return { body: { data: cardOrder(false) } };
+    case 'card_payment':
+      if (b.mode !== 'reader' || b.reader_device_id !== CARD_READER || b.order_id !== WALKUP_ORDER) {
+        return { status: 400, body: { error: 'refused', message: 'unexpected charge ' + JSON.stringify(b) } };
+      }
+      return { body: { data: { order_id: WALKUP_ORDER, card: { status: 'processing', mode: 'reader', payment_intent: 'pi_smoke' } } } };
+    case 'card_status':
+      cardPolls += 1;
+      if (cardPolls < 2) return { body: { data: { state: 'waiting', order_id: WALKUP_ORDER } } };
+      cardSold = true;
+      return { body: { data: { state: 'succeeded', order: cardOrder(true) } } };
+    case 'order_codes': return walkupPos(b);
+    default: return { status: 400, body: { error: 'unknown action' } };
+  }
+};
+await run('door: with card on, the Sell tab charges on a reader and shows the QR', async (page, log) => {
+  cardPolls = 0; cardSold = false;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  const card = page.getByRole('radio', { name: /Card/ });
+  assert(!(await card.isDisabled()), 'card is enabled with a reader');
+  await card.click();
+  await expectText(page, 'on Door S700');
+  await page.getByRole('button', { name: /Charge \$25\.00 on reader/ }).click();
+  await expectText(page, 'Tap, insert or swipe');
+  await expectText(page, 'Sold 1 × Door GA', 12000);
+  const sale = log.find((l) => l.startsWith('fn exos-pos') && l.includes('"mint_walkup"'));
+  assert(sale && sale.includes('"payment":"card"') && !/card_number|cvc|"pan"|exp_month/.test(sale), 'a card sale with no card data: ' + sale);
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"card_payment"')), 'charged on the reader');
+  assert(log.filter((l) => l.startsWith('fn exos-pos') && l.includes('"card_status"')).length >= 2, 'polled until captured');
+  await page.getByRole('button', { name: 'Show QR' }).click();
+  const qr = page.getByRole('img', { name: 'Ticket QR code' });
+  await qr.waitFor({ timeout: 8000 });
+  await expectText(page, 'gets in once');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': cardPos } }) });
 
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
@@ -805,6 +1157,142 @@ await run('ticket holds the join link back until the reveal time', async (page) 
   assert(await page.getByRole('link', { name: /Join the event/ }).count() === 0, 'no link yet');
 }, { signedIn: true, mock: onlineTicketMock({ state: 'later', join_url: null, join_note: null,
   available_at: new Date(Date.now() + 2 * 864e5).toISOString() }) });
+
+// ── Price steps (mig 20261106130000): the event page shows the current step's
+// price (exos_public_tiers.price already is it) and when it goes up; the mocked
+// exos-checkout charges exos_tier_current_price x quantity, as the real one does,
+// and that matches what the page showed. ──
+const STEP = { price_cents: 2000, source: 'step', step_id: 'step-eb', step_name: 'Early bird', step_index: 1, step_count: 3,
+  step_remaining: 37, step_ends_at: new Date(Date.now() + 10 * 864e5).toISOString(), next_price_cents: 2500, next_step_name: 'GA',
+  door_price_cents: 3500 };
+const stepCheckout = {};
+await run('price steps: the event page shows the step price and when it goes up; the charge matches it', async (page) => {
+  await stubStripe(page, stepCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  const nudge = page.getByTestId('price-step-nudge');
+  await nudge.waitFor({ timeout: 8000 });
+  const line = (await nudge.innerText()).replace(/\s+/g, ' ');
+  assert(/goes up to \$25\.00/i.test(line) && /after 37 more are sold/i.test(line), 'the next price and when: ' + line);
+  const shown = (await page.locator('p.disp.neon').first().innerText()).trim();
+  const shownCents = Math.round(parseFloat(shown.replace(/[^0-9.]/g, '')) * 100);
+  assert(shownCents === 2000, 'the event page shows the step price: ' + shown);
+  assert(!/fee/i.test(await page.locator('p.disp.neon').first().innerText()), 'no fee line in the price');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(stepCheckout.amount === shownCents * Number(stepCheckout.body.quantity),
+    `the Stripe amount ${stepCheckout.amount} = shown ${shownCents} x ${stepCheckout.body.quantity}`);
+}, { mock: {
+  tables: { exos_public_price_steps: [{ tier_id: baseTables.exos_public_tiers[0].id, event_id: EV, price_step: STEP, door_price_cents: 3500 }] },
+  fns: { 'exos-checkout': (body) => {
+    stepCheckout.body = body;
+    // The server's price: the current step (exos_tier_current_price), all-in (no fee rules here).
+    stepCheckout.amount = STEP.price_cents * Number(body.quantity);
+    return { body: { url: 'https://checkout.stripe.com/c/pay/cs_test_steps', session_id: 'cs_test_steps' } };
+  } },
+} });
+// ── Checkout questions (mig 20261106110000): a guest answers the organizer's
+// required questions, pays on the stubbed Stripe page, and the organizer's
+// answers table shows what they answered. ──
+const Q_SIZE = 'c0000000-0000-4000-8000-000000000001';
+const Q_AGREE = 'c0000000-0000-4000-8000-000000000002';
+const QUESTIONS = { questions: [
+  { id: Q_SIZE, label: 'T-shirt size', help_text: null, kind: 'single_choice', options: ['S', 'M', 'L'], required: true,
+    scope: 'ticket', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 0 },
+  { id: Q_AGREE, label: "I agree to the venue's photo policy", help_text: null, kind: 'checkbox', options: [], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 1 },
+], party_sizes: {} };
+const qCheckout = {};
+// The attendees tab's other panels (refunds, guest lists, ...) read RPCs this
+// test doesn't care about: answer them empty.
+const withEmptyRpcs = (m) => ({ ...m, rpcs: new Proxy(m.rpcs, { get: (t, k) => (k in t ? t[k] : () => []) }) });
+await run('checkout questions: required answers before paying, sent with the order, through Stripe and back', async (page, log) => {
+  await stubStripe(page, qCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'A few questions from the organizer');
+  // Buy without answering: inline errors, nothing sent.
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  await expectText(page, 'This answer is required.');
+  const size = page.getByRole('group', { name: 'Ticket 1' });
+  assert(await size.locator('[aria-invalid="true"]').count() > 0, 'the size field is marked invalid');
+  assert(!log.some((l) => l.startsWith('fn exos-checkout')), 'no checkout before the answers');
+  // Answer (labels are real labels: the radio by its option, the box by the question).
+  await size.getByLabel('M', { exact: true }).check();
+  await page.getByLabel("I agree to the venue's photo policy").check();
+  await until(async () => (await page.getByText('This answer is required.').count()) === 0, 'errors clear once answered');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const a = qCheckout.body?.answers;
+  assert(a && a.order?.[Q_AGREE] === true && Array.isArray(a.tickets) && a.tickets.length === 1 && a.tickets[0][Q_SIZE] === 'M',
+    'answers ride in the checkout request: ' + JSON.stringify(qCheckout.body));
+  await page.locator('#pay').click();
+  await page.waitForURL(/\/my-tickets/, { timeout: 8000 });
+}, { mock: { ...checkoutFn(qCheckout), rpcs: { exos_public_event_questions: () => QUESTIONS } } });
+
+await run('checkout questions: the organizer sees the buyer\'s answer in the report, with a CSV', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=attendees');
+  const panel = page.getByTestId('question-answers');
+  await panel.waitFor({ timeout: 8000 });
+  const text = (await panel.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('T-shirt size') && text.includes('M') && text.includes('Ticket 1') && text.includes('Yes'), 'answers table: ' + text);
+  assert(log.some((l) => l.startsWith('rpc exos_event_question_answers') && l.includes(EV)), 'asked the answers RPC');
+  const { text: csv } = await download(page, () => panel.getByRole('button', { name: /Answers CSV/ }).click());
+  const lines = firstLines(csv);
+  assert(lines[0].startsWith('order_ref,ticket_id,ticket_number'), 'csv header ' + lines[0]);
+  assert(lines.some((l) => l.includes('cs_test_iab') && l.includes('T-shirt size') && l.endsWith(',M,checkout,2026-11-05T12:00:00.000Z')), 'csv row: ' + lines.join(' | '));
+}, { signedIn: true, mock: withEmptyRpcs(ownerMock({ tables: { exos_tickets: [], exos_discount_codes: [] }, rpcs: {
+  // What exos_event_question_answers returns for the order above (its answers, as sent).
+  exos_event_question_answers: () => [
+    { answer_id: 'a1', question_id: Q_AGREE, order_ref: 'cs_test_iab', ticket_id: null, ticket_index: null, scope: 'order',
+      label: "I agree to the venue's photo policy", current_label: "I agree to the venue's photo policy", kind: 'checkbox',
+      value: qCheckout.body?.answers?.order?.[Q_AGREE] ?? null, display: qCheckout.body?.answers?.order?.[Q_AGREE] ? 'Yes' : '',
+      source: 'checkout', attendee_name: null, tier_name: null, ticket_status: null, buyer_email: 'fan@example.com',
+      question_archived: false, created_at: '2026-11-05T12:00:00Z' },
+    { answer_id: 'a2', question_id: Q_SIZE, order_ref: 'cs_test_iab', ticket_id: TICKET, ticket_index: 1, scope: 'ticket',
+      label: 'T-shirt size', current_label: 'T-shirt size', kind: 'single_choice',
+      value: qCheckout.body?.answers?.tickets?.[0]?.[Q_SIZE] ?? null, display: qCheckout.body?.answers?.tickets?.[0]?.[Q_SIZE] ?? '',
+      source: 'checkout', attendee_name: 'Ada', tier_name: 'GA', ticket_status: 'active', buyer_email: 'fan@example.com',
+      question_archived: false, created_at: '2026-11-05T12:00:00Z' },
+  ],
+} })) });
+
+// ── Conditional checkout questions (mig 20261107110000): "Guest name" shows
+// only once "Bringing a guest?" is answered Yes, goes again on No, and its
+// stale answer is left out of the request. ──
+const Q_GUEST = 'd6c00000-0000-4000-8000-000000000001';
+const Q_GUESTNAME = 'd6c00000-0000-4000-8000-000000000002';
+const COND_QUESTIONS = { questions: [
+  { id: Q_GUEST, label: 'Bringing a guest?', help_text: null, kind: 'single_choice', options: ['Yes', 'No'], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 0,
+    parent_question_id: null, parent_values: null },
+  { id: Q_GUESTNAME, label: "Your guest's name", help_text: null, kind: 'text', options: [], required: true,
+    scope: 'order', tier_ids: null, max_length: null, min_choices: null, max_choices: null, min_value: null, max_value: null, sort_order: 1,
+    parent_question_id: Q_GUEST, parent_values: ['Yes'] },
+], party_sizes: {} };
+const condCheckout = {};
+await run('conditional questions: the buyer sees B only after answering A, and B rides in the request only when shown', async (page, log) => {
+  await stubStripe(page, condCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Bringing a guest?');
+  const guestName = page.getByLabel("Your guest's name");
+  assert(await guestName.count() === 0, 'B is hidden before A is answered');
+  await page.getByLabel('Yes', { exact: true }).check();
+  await guestName.waitFor({ timeout: 5000 });
+  // Required once shown: buying without it shows the error, nothing is sent.
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().click();
+  await expectText(page, 'This answer is required.');
+  assert(!log.some((l) => l.startsWith('fn exos-checkout')), 'no checkout while B is unanswered');
+  await guestName.fill('Grace');
+  // A changes to No: B goes, and its answer is left out.
+  await page.getByLabel('No', { exact: true }).check();
+  await until(async () => (await page.getByLabel("Your guest's name").count()) === 0, 'B hides again on No');
+  await until(async () => (await page.getByText('This answer is required.').count()) === 0, 'no error left');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const a = condCheckout.body?.answers;
+  assert(a && a.order?.[Q_GUEST] === 'No' && !(Q_GUESTNAME in (a.order ?? {})),
+    'only A rides in the request: ' + JSON.stringify(condCheckout.body?.answers));
+}, { mock: { ...checkoutFn(condCheckout), rpcs: { exos_public_event_questions: () => COND_QUESTIONS } } });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

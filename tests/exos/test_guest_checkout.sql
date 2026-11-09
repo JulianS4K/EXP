@@ -6,8 +6,11 @@
 --   G3 five guest holds per network per 10 minutes
 --   G4 live guest holds reserve at most a quarter of what's left (>= 10)
 --   G5 maxPerAccount counts per email (bought with it + its account's tickets)
---   G6 no account: parked on the org owner, claim links mailed, add-ons follow the claim
---   G7 a confirmed account with that email gets the tickets directly
+--   G6 no account: parked on the org owner until the email is proven (mig
+--      20261105100000: a code mail, no claim before proof); then the claim
+--      links are mailed and add-ons follow the claim
+--   G7 a confirmed account with that email gets the tickets only once the
+--      buyer proves the email (never straight away)
 --   G8 an unconfirmed account with that email doesn't: parked
 --   G9 a session without a buyer must be a guest session with an email
 --   G10 the per-email limit is re-checked at fulfilment
@@ -38,7 +41,7 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUE
   ('9c000000-0000-0000-0000-0000000000d3','9c000000-0000-0000-0000-0000000000e3','GA',20,20,0),
   ('9c000000-0000-0000-0000-0000000000d4','9c000000-0000-0000-0000-0000000000e4','GA',20,100,0);
 INSERT INTO public.exos_event_addons(id,event_id,name,price,capacity,sold) VALUES
-  ('9c000000-0000-0000-0000-0000000000a1','9c000000-0000-0000-0000-0000000000e1','Poster',10,0,0);
+  ('9c000000-0000-0000-0000-0000000000a1','9c000000-0000-0000-0000-0000000000e1','Poster',10,100,0);
 
 CREATE OR REPLACE FUNCTION pg_temp.hold_err(p_event uuid, p_tier uuid, p_qty int, p_email text, p_ip text)
 RETURNS text LANGUAGE plpgsql AS $$
@@ -52,9 +55,15 @@ CREATE OR REPLACE FUNCTION pg_temp.guest_session(p_id text, p_event uuid, p_tier
                                                  p_email text, p_addons jsonb) RETURNS void
 LANGUAGE sql AS $$
   INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,buyer_email,guest,
-                                           quantity,amount_cents,status,addons)
+                                           quantity,amount_cents,status,addons,proof_token_hash)
   VALUES (p_id,p_event,p_tier,'9c000000-0000-0000-0000-000000000001',NULL,p_email,true,
-          p_qty,2000*p_qty,'pending',p_addons);
+          p_qty,2000*p_qty,'pending',p_addons,
+          encode(extensions.digest('tok-' || p_id || '-0123456789abcdef', 'sha256'), 'hex'));
+$$;
+-- The proof code in the latest code mail to an address (mig 20261105100000).
+CREATE OR REPLACE FUNCTION pg_temp.proof_code(p_email text) RETURNS text LANGUAGE sql AS $$
+  SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+   WHERE to_email = lower(p_email) AND template = 'rsvp-code' ORDER BY created_at DESC, id DESC LIMIT 1;
 $$;
 
 -- G1 -------------------------------------------------------------------------
@@ -157,17 +166,32 @@ BEGIN
   SELECT count(*) INTO n FROM public.exos_transfers
    WHERE ticket_id = ANY(ids) AND status = 'pending' AND receiver_email = 'newfan@x.com';
   ASSERT n = 2, 'G6: one pending transfer per ticket to the guest email';
-  SELECT * INTO m FROM public.exos_mail WHERE to_email = 'newfan@x.com' ORDER BY created_at DESC LIMIT 1;
-  ASSERT m.template = 'transfer-initiated', 'G6: claim mail, got ' || coalesce(m.template, 'none');
-  ASSERT m.html LIKE '%{{app_url}}/claim/%' AND m.html LIKE '%Claim ticket 2%', 'G6: a claim link per ticket';
+  ASSERT (SELECT status FROM public.exos_order_proofs WHERE session_id = '9c-g6') = 'pending', 'G6: waits for proof';
+  SELECT * INTO m FROM public.exos_mail WHERE to_email = 'newfan@x.com' ORDER BY created_at DESC, id DESC LIMIT 1;
+  ASSERT m.template = 'rsvp-code' AND m.html NOT LIKE '%/claim/%', 'G6: a code mail, no claim links yet, got ' || coalesce(m.template, 'none');
   ASSERT m.html LIKE '%9C &lt;Show&gt;%', 'G6: event name escaped';
-  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'newfan@x.com' AND template = 'ticket-issued'),
-    'G6: no "in your wallet" mail for a parked order';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail WHERE to_email = 'newfan@x.com' AND template IN ('ticket-issued', 'transfer-initiated')),
+    'G6: no tickets mailed before proof';
   ASSERT (SELECT owner_id FROM public.exos_order_addons WHERE order_ref = '9c-g6') IS NULL, 'G6: add-on unowned until claimed';
   ASSERT (SELECT status FROM public.exos_checkout_sessions WHERE session_id = '9c-g6') = 'fulfilled', 'G6: session fulfilled';
+  -- No claim before proof, even with the link.
+  SELECT pending_transfer_id INTO tr FROM public.exos_tickets WHERE id = ids[1];
+  PERFORM set_config('app.uid', '9c000000-0000-0000-0000-0000000000b3', true);
+  PERFORM set_config('app.jwt', '{"email":"9c-claimer@x.com"}', true);
+  BEGIN
+    PERFORM public.exos_test_claim(tr);
+    RAISE EXCEPTION 'G6: claimed before proof';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM set_config('app.uid', '', true);
+  -- The buyer types the mailed code on the paying page: proven, links mailed.
+  ASSERT (public.exos_order_proof_verify('9c-g6', 'tok-9c-g6-0123456789abcdef', pg_temp.proof_code('newfan@x.com')) ->> 'ok')::boolean,
+    'G6: proof by email code';
+  SELECT * INTO m FROM public.exos_mail WHERE to_email = 'newfan@x.com' AND template = 'transfer-initiated' LIMIT 1;
+  ASSERT m.template = 'transfer-initiated' AND m.html LIKE '%{{app_url}}/claim/%' AND m.html LIKE '%Claim ticket 2%',
+    'G6: a claim link per ticket once proven';
 
   -- Claim one ticket into a fresh account: the add-on follows it.
-  SELECT pending_transfer_id INTO tr FROM public.exos_tickets WHERE id = ids[1];
   PERFORM set_config('app.uid', '9c000000-0000-0000-0000-0000000000b3', true);
   PERFORM set_config('app.jwt', '{"email":"9c-claimer@x.com"}', true);
   PERFORM public.exos_test_claim(tr);
@@ -176,7 +200,7 @@ BEGIN
   ASSERT (SELECT owner_id FROM public.exos_order_addons WHERE order_ref = '9c-g6') = '9c000000-0000-0000-0000-0000000000b3',
     'G6: add-on follows the first claimed ticket';
   ASSERT public.exos_fulfill_checkout('9c-g6') = ids, 'G6: re-fulfilment is idempotent';
-  RAISE NOTICE 'OK  G6 guest without an account: parked, claim links mailed, add-ons follow';
+  RAISE NOTICE 'OK  G6 guest without an account: parked until the email is proven, then claim links mailed, add-ons follow';
 END $$;
 
 -- G7 -------------------------------------------------------------------------
@@ -185,12 +209,16 @@ DECLARE ids uuid[]; n int;
 BEGIN
   PERFORM pg_temp.guest_session('9c-g7','9c000000-0000-0000-0000-0000000000e1','9c000000-0000-0000-0000-0000000000d1',1,'9C-Member@x.com',NULL);
   ids := public.exos_fulfill_checkout('9c-g7');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = '9c000000-0000-0000-0000-0000000000a0', 'G7: parked, not the account';
+  ASSERT (SELECT pending_transfer_id FROM public.exos_tickets WHERE id = ids[1]) IS NOT NULL, 'G7: in transfer until proof';
+  ASSERT (public.exos_order_proof_verify('9c-g7', 'tok-9c-g7-0123456789abcdef', pg_temp.proof_code('9c-member@x.com')) ->> 'attached')::boolean,
+    'G7: proven by email: attached to the account';
   ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = ids[1]) = '9c000000-0000-0000-0000-0000000000b1', 'G7: into the account';
-  ASSERT (SELECT pending_transfer_id FROM public.exos_tickets WHERE id = ids[1]) IS NULL, 'G7: no transfer';
+  ASSERT (SELECT pending_transfer_id FROM public.exos_tickets WHERE id = ids[1]) IS NULL, 'G7: no transfer left';
   SELECT count(*) INTO n FROM public.exos_mail WHERE to_email = '9c-member@x.com' AND template = 'ticket-issued'
-     AND html LIKE '%Sign in to Exos with this email%';
-  ASSERT n = 1, 'G7: wallet mail tells a guest to sign in with the email';
-  RAISE NOTICE 'OK  G7 confirmed account with that email gets the tickets directly';
+     AND html LIKE '%Email confirmed%';
+  ASSERT n = 1, 'G7: wallet mail once proven';
+  RAISE NOTICE 'OK  G7 confirmed account with that email gets the tickets once the buyer proves the email';
 END $$;
 
 -- G8 -------------------------------------------------------------------------

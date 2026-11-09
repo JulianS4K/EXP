@@ -11,11 +11,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install deps
@@ -32,6 +32,16 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+      # The partner API reference (docs/api/*.json) against the route table,
+      # and the Opendate coverage table (docs/opendate-coverage.json) against
+      # both: every Opendate endpoint accounted for, every Exos route it names
+      # real and documented, docs/opendate-coverage.md current.
+      - name: API reference (api-spec --check)
+        run: node scripts/api-spec.mjs --check
+
+      - name: Opendate coverage
+        run: node scripts/check-opendate-coverage.mjs
+
       - name: Build (Vite)
         # Placeholder Supabase keys — the build succeeds without a live connection.
         env:
@@ -47,7 +57,7 @@ jobs:
     # parts shared with the app (_shared/marketplace, pricing, scrub) are
     # type-checked by `npm run lint`, but each function's index.ts only here.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: denoland/setup-deno@v2
         with:
@@ -70,19 +80,19 @@ jobs:
           done
           exit $fail
 
-      - name: Deno tests (ssrf, ticket backends, sms)
-        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts
+      - name: Deno tests (ssrf, ticket backends, sms, posh)
+        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install deps
@@ -96,7 +106,7 @@ jobs:
 
       - name: Failure screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-screenshots
           path: tests/smoke/fail-*.png
@@ -128,7 +138,7 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client

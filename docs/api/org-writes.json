@@ -1,0 +1,1702 @@
+{
+ "file": "org-writes",
+ "name": "Organization writes: series, fee rules, API keys and more",
+ "order": 62.5,
+ "description": "Writes the dashboard had and the API didn't: event series, an event's fee rules (Opendate organizer fee components), the organization's API keys, releasing orphaned seats, importing attendees, membership scans and gifts, cancelling a membership, gift card quotes and issue, offline donations. Each needs an organization API key (sk_live_…) whose creator holds the role named on the route now, and the scope as the key carries it now (a role the owner narrowed applies at once). A write runs as that member through the dashboard's own SQL, is pinned to the key's organization and is logged; an Idempotency-Key makes it safe to resend.",
+ "endpoints": [
+  {
+   "id": "list-api-keys",
+   "method": "GET",
+   "path": "/v1/api-keys",
+   "summary": "List API keys",
+   "description": "The organization's API keys, newest first: name, prefix, scopes as stored, last use, revoked. Never a key or its hash. Opendate GET /admin/teams/{team_id}/api_keys.",
+   "auth": "api_key",
+   "scope": "org:admin",
+   "parameters": [],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": [
+       {
+        "id": "6b6b6b6b-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "CRM sync",
+        "key_prefix": "sk_live_3f9a1c2d",
+        "scopes": [
+         "orders:read"
+        ],
+        "last_used_at": null,
+        "revoked_at": null,
+        "created_at": "2026-11-01T12:00:00+00:00"
+       }
+      ]
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks org:admin.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "org:admin"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-api-key",
+   "method": "POST",
+   "path": "/v1/api-keys",
+   "summary": "Create an API key",
+   "description": "Mints a key for this organization with at most the scopes of the key that makes it (never a user scope, never above the creator's role's set). The key is answered once and never logged; an Idempotency-Key replay answers without it. Opendate POST /admin/teams/{team_id}/api_keys. Needs an organization API key whose creator is an organization owner now.",
+   "auth": "api_key",
+   "scope": "org:admin",
+   "parameters": [
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 80 characters.",
+     "example": "CRM sync"
+    },
+    {
+     "name": "scopes",
+     "location": "body",
+     "type": "array of string",
+     "required": true,
+     "description": "Scope names.",
+     "example": [
+      "orders:read"
+     ]
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "6b6b6b6b-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "CRM sync",
+       "key_prefix": "sk_live_3f9a1c2d",
+       "scopes": [
+        "orders:read"
+       ],
+       "created_at": "2026-11-05T12:00:00+00:00",
+       "key": "sk_live_3f9a1c2d…"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks org:admin.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "org:admin"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+     }
+    }
+   ],
+   "request_example": {
+    "name": "CRM sync",
+    "scopes": [
+     "orders:read"
+    ]
+   }
+  },
+  {
+   "id": "revoke-api-key",
+   "method": "DELETE",
+   "path": "/v1/api-keys/:id",
+   "summary": "Revoke an API key",
+   "description": "Revokes one of the organization's keys at once. Opendate DELETE /admin/teams/{team_id}/api_keys/{id}. Needs an organization API key whose creator is an organization owner now.",
+   "auth": "api_key",
+   "scope": "org:admin",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The key id.",
+     "example": "6b6b6b6b-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "6b6b6b6b-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "revoked": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks org:admin.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "org:admin"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"org:admin\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "create-series",
+   "method": "POST",
+   "path": "/v1/series",
+   "summary": "Create a series",
+   "description": "A recurring series from one of your events as its template, with a rule (freq weekly / monthly / custom, startDate, time, …) as in the dashboard. Opendate POST /admin/event_series. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "template_event_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The template event (event_id is accepted too).",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The series name.",
+     "example": "Jazz Fridays"
+    },
+    {
+     "name": "rule",
+     "location": "body",
+     "type": "object",
+     "required": true,
+     "description": "The recurrence rule.",
+     "example": {
+      "freq": "weekly",
+      "startDate": "2026-12-04",
+      "time": "20:00"
+     }
+    },
+    {
+     "name": "description",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "Shown on the series page.",
+     "example": "Every Friday."
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Jazz Fridays",
+       "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "rule": {
+        "freq": "weekly",
+        "startDate": "2026-12-04",
+        "time": "20:00"
+       },
+       "status": "active"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+    "name": "Jazz Fridays",
+    "rule": {
+     "freq": "weekly",
+     "startDate": "2026-12-04",
+     "time": "20:00"
+    }
+   }
+  },
+  {
+   "id": "update-series",
+   "method": "PATCH",
+   "path": "/v1/series/:id",
+   "summary": "Update a series",
+   "description": "Changes the series' name, description, image_url, rule or status. Opendate PATCH /admin/event_series/:id. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "New name.",
+     "example": "Jazz Fridays Live"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "updated": true
+       },
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "active"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "name": "Jazz Fridays Live"
+   }
+  },
+  {
+   "id": "cancel-series",
+   "method": "POST",
+   "path": "/v1/series/:id/cancel",
+   "summary": "Cancel a series",
+   "description": "scope series_only (stop making dates), all_shows (also cancel every upcoming date) or selected (event_ids). Cancelled dates refund as any cancelled event. Opendate POST /admin/event_series/:id/cancel. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "scope",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "series_only (default), all_shows or selected.",
+     "example": "series_only"
+    },
+    {
+     "name": "event_ids",
+     "location": "body",
+     "type": "array of string (UUID)",
+     "required": false,
+     "description": "With selected: the dates to cancel.",
+     "example": [
+      "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+     ]
+    },
+    {
+     "name": "reason",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 500 characters.",
+     "example": "Venue closed"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "cancelled_events": 0
+       },
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "cancelled"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "scope": "series_only"
+   }
+  },
+  {
+   "id": "delete-series",
+   "method": "DELETE",
+   "path": "/v1/series/:id",
+   "summary": "Delete a series",
+   "description": "Deletes a series with no sold dates (its events stay as single events). Opendate DELETE /admin/event_series/:id. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "deleted": true
+       },
+       "series": null
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "attach-series-event",
+   "method": "POST",
+   "path": "/v1/series/:id/events",
+   "summary": "Add an event to a series",
+   "description": "Attaches one of your events as a date of the series. Opendate POST /admin/event_series/:event_series_id/event_series_events. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "event_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event (confirm_id is accepted too).",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "attached": true
+       },
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "active"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+   }
+  },
+  {
+   "id": "detach-series-event",
+   "method": "DELETE",
+   "path": "/v1/series/:id/events/:eid",
+   "summary": "Remove an event from a series",
+   "description": "The event stays as a single event. Opendate DELETE /admin/event_series/:event_series_id/event_series_events/:id. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "eid",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "detached": true,
+        "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+       },
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "active"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "generate-series-dates",
+   "method": "POST",
+   "path": "/v1/series/:id/generate",
+   "summary": "Generate dates",
+   "description": "Creates draft dates from the template for the listed days (1-366 { date, time }). Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "dates",
+     "location": "body",
+     "type": "array of object",
+     "required": true,
+     "description": "[{ date: YYYY-MM-DD, time: HH:MM }]",
+     "example": [
+      {
+       "date": "2026-12-11",
+       "time": "20:00"
+      }
+     ]
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": {
+        "created": 1
+       },
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "active"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "dates": [
+     {
+      "date": "2026-12-11",
+      "time": "20:00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "cancel-series-date",
+   "method": "POST",
+   "path": "/v1/series/:id/cancel-date",
+   "summary": "Cancel one date",
+   "description": "Cancels the series' date on one day (and skips it from the rule). Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The series id.",
+     "example": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "date",
+     "location": "body",
+     "type": "string (date)",
+     "required": true,
+     "description": "YYYY-MM-DD.",
+     "example": "2026-12-18"
+    },
+    {
+     "name": "reason",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "At most 500 characters.",
+     "example": "Holiday"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "result": true,
+       "series": {
+        "id": "5e1e5e1e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "org_id": "3c40e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "name": "Jazz Fridays",
+        "template_event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "rule": {
+         "freq": "weekly",
+         "startDate": "2026-12-04",
+         "time": "20:00"
+        },
+        "status": "active"
+       }
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "date": "2026-12-18"
+   }
+  },
+  {
+   "id": "create-event-fee-rule",
+   "method": "POST",
+   "path": "/v1/events/:id/fee-rules",
+   "summary": "Add a fee rule to an event",
+   "description": "An event fee rule (Opendate organizer_fee_components): passed on inside the all-in price (buyers see one price, never a fee line) or absorbed. calc percent or fixed; Opendate's calculation / amount (dollars) / passed_to_buyer are accepted. docs/fees.md. Opendate POST /admin/confirms/{confirm_id}/organizer_fee_components. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "name",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "At most 60 characters.",
+     "example": "Facility fee"
+    },
+    {
+     "name": "calc",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "percent (default) or fixed.",
+     "example": "fixed"
+    },
+    {
+     "name": "amount_cents",
+     "location": "body",
+     "type": "integer",
+     "required": false,
+     "description": "With fixed.",
+     "example": 150
+    },
+    {
+     "name": "percent",
+     "location": "body",
+     "type": "number",
+     "required": false,
+     "description": "With percent, 0-100.",
+     "example": 5
+    },
+    {
+     "name": "kind",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "passed_on (default) or absorbed.",
+     "example": "passed_on"
+    },
+    {
+     "name": "tier_ids",
+     "location": "body",
+     "type": "array of string (UUID) or null",
+     "required": false,
+     "description": "Only these ticket types (default every type).",
+     "example": null
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "fee00001-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Facility fee",
+       "recipient": "org",
+       "kind": "passed_on",
+       "calc": "fixed",
+       "percent": null,
+       "amount_cents": 150,
+       "cap_cents": null,
+       "per": "ticket",
+       "taxable": true,
+       "applies_to_addons": false,
+       "tier_ids": null,
+       "active": true,
+       "sort_order": 0,
+       "created_at": "2026-11-05T12:00:00+00:00",
+       "updated_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "name": "Facility fee",
+    "calc": "fixed",
+    "amount_cents": 150
+   }
+  },
+  {
+   "id": "update-event-fee-rule",
+   "method": "PATCH",
+   "path": "/v1/events/:id/fee-rules/:rid",
+   "summary": "Change an event fee rule",
+   "description": "Changes the fields sent. Opendate PATCH /admin/confirms/{confirm_id}/organizer_fee_components/{id}. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "rid",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The fee rule id.",
+     "example": "fee00001-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "amount_cents",
+     "location": "body",
+     "type": "integer",
+     "required": false,
+     "description": "New amount.",
+     "example": 200
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "fee00001-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "name": "Facility fee",
+       "recipient": "org",
+       "kind": "passed_on",
+       "calc": "fixed",
+       "percent": null,
+       "amount_cents": 200,
+       "cap_cents": null,
+       "per": "ticket",
+       "taxable": true,
+       "applies_to_addons": false,
+       "tier_ids": null,
+       "active": true,
+       "sort_order": 0,
+       "created_at": "2026-11-05T12:00:00+00:00",
+       "updated_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "amount_cents": 200
+   }
+  },
+  {
+   "id": "delete-event-fee-rule",
+   "method": "DELETE",
+   "path": "/v1/events/:id/fee-rules/:rid",
+   "summary": "Delete an event fee rule",
+   "description": "Opendate DELETE /admin/confirms/{confirm_id}/organizer_fee_components/{id}. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "events:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "rid",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The fee rule id.",
+     "example": "fee00001-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "fee00001-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "deleted": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks events:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "events:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "release-orphan-seats",
+   "method": "POST",
+   "path": "/v1/events/:id/seat-reconciliation/release-orphans",
+   "summary": "Release orphaned seats",
+   "description": "Frees seats the seat reconciliation found held or sold without a live ticket or hold (GET /v1/events/:id/seat-reconciliation lists them). Opendate POST /admin/confirms/:confirm_id/seat_reconciliation/release_orphans. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "tickets:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The event id.",
+     "example": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "seat_ids",
+     "location": "body",
+     "type": "array of string",
+     "required": true,
+     "description": "1-500 seat ids.",
+     "example": [
+      "A-12",
+      "A-13"
+     ]
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "event_id": "2b30d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "released": 2
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks tickets:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "seat_ids": [
+     "A-12",
+     "A-13"
+    ]
+   }
+  },
+  {
+   "id": "import-migrated-attendees",
+   "method": "POST",
+   "path": "/v1/migrated-attendees/bulk",
+   "summary": "Import attendees in bulk",
+   "description": "Adds attendees from another system to one of your guest lists (the door's import), 1-5000 rows of { name, email, quantity, note }. Opendate POST /admin/migrated_attendees/bulk. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "tickets:write",
+   "parameters": [
+    {
+     "name": "list_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The guest list (guest_list_id is accepted too).",
+     "example": "1157a1b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "rows",
+     "location": "body",
+     "type": "array of object",
+     "required": true,
+     "description": "The attendees (migrated_attendees is accepted too).",
+     "example": [
+      {
+       "name": "Sam Lee",
+       "email": "sam@example.com",
+       "quantity": 2
+      }
+     ]
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "inserted": 1,
+       "skipped": 0
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks tickets:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "tickets:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "list_id": "1157a1b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+    "rows": [
+     {
+      "name": "Sam Lee",
+      "quantity": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "create-membership-scan",
+   "method": "POST",
+   "path": "/v1/membership-scans",
+   "summary": "Scan a membership",
+   "description": "Checks a member's card at the door: valid, its benefits and today's use. Opendate POST /membership_scans. Needs an organization API key whose creator is an organization owner, manager or scanner now.",
+   "auth": "api_key",
+   "scope": "checkin:write",
+   "parameters": [
+    {
+     "name": "membership_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The membership (membership_token is accepted too).",
+     "example": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "ok": true,
+       "status": "active",
+       "product_name": "Friends of the Room"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks checkin:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "checkin:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"checkin:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "membership_id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+   }
+  },
+  {
+   "id": "gift-membership",
+   "method": "POST",
+   "path": "/v1/membership-products/:id/gifts",
+   "summary": "Gift a membership",
+   "description": "Gives a membership of a giftable product to someone by email (comp); they claim it from the mail. Opendate POST /memberships/:membership_id/gift. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The membership product id.",
+     "example": "77aa88bb-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "to_email",
+     "location": "body",
+     "type": "string",
+     "required": true,
+     "description": "The recipient.",
+     "example": "alex@example.com"
+    },
+    {
+     "name": "from_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "Shown in the mail.",
+     "example": "Blue Room"
+    },
+    {
+     "name": "message",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "A note.",
+     "example": "Welcome!"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "product_id": "77aa88bb-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "product_name": "Friends of the Room",
+       "status": "pending",
+       "holder_email": "alex@example.com",
+       "current_period_end": null,
+       "source": "gift",
+       "gift": {
+        "to_email": "alex@example.com"
+       },
+       "created_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "to_email": "alex@example.com"
+   }
+  },
+  {
+   "id": "cancel-membership-gift",
+   "method": "DELETE",
+   "path": "/v1/memberships/:id/gift",
+   "summary": "Cancel a membership gift",
+   "description": "Cancels an unclaimed gift. Opendate DELETE /memberships/:membership_id/gift. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The membership id.",
+     "example": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "product_id": "77aa88bb-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "product_name": "Friends of the Room",
+       "status": "cancelled",
+       "holder_email": "alex@example.com",
+       "current_period_end": null,
+       "source": "gift",
+       "gift": null,
+       "created_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel-membership",
+   "method": "POST",
+   "path": "/v1/memberships/:id/cancel",
+   "summary": "Cancel a membership",
+   "description": "Cancels a membership now (as PATCH /v1/memberships/:id with status cancelled). Opendate POST /admin/memberships/:id/cancel. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The membership id.",
+     "example": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "id": "8a80c9e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "status": "cancelled"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "quote-gift-card-product",
+   "method": "GET",
+   "path": "/v1/gift-card-products/:id/quote",
+   "summary": "Quote a gift card",
+   "description": "What a gift card of this product costs for an amount (the price is the amount: no fee on top). Opendate GET /gift_card_products/{id}/quote.",
+   "auth": "api_key",
+   "scope": "commerce:read",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The gift card product id.",
+     "example": "9c9c9c9c-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "amount_cents",
+     "location": "query",
+     "type": "integer",
+     "required": false,
+     "description": "The card's amount (default the product's first / minimum).",
+     "example": 5000
+    }
+   ],
+   "responses": [
+    {
+     "status": 200,
+     "description": "OK.",
+     "example": {
+      "data": {
+       "product_id": "9c9c9c9c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "currency": "usd",
+       "amount_cents": 5000,
+       "total_cents": 5000,
+       "fees_cents": 0
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:read.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:read"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:read\""
+     }
+    }
+   ]
+  },
+  {
+   "id": "issue-gift-card",
+   "method": "POST",
+   "path": "/v1/gift-card-products/:id/gift-card-orders",
+   "summary": "Issue a gift card",
+   "description": "Issues a gift card of the product (box office: comp, cash, check or card taken elsewhere). The code is emailed to the recipient (or purchaser) and never returned. Opendate POST /gift_card_products/{id}/gift_card_orders. Needs an organization API key whose creator is an organization owner or manager now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The gift card product id.",
+     "example": "9c9c9c9c-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "amount_cents",
+     "location": "body",
+     "type": "integer",
+     "required": true,
+     "description": "100-100000000 (amount in dollars is accepted too).",
+     "example": 5000
+    },
+    {
+     "name": "recipient_email",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "Where the code goes.",
+     "example": "alex@example.com"
+    },
+    {
+     "name": "payment_method",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "comp (default), cash, check or card.",
+     "example": "cash"
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "9d9d9d9d-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "last4": "7Q2K",
+       "amount_cents": 5000,
+       "currency": "usd",
+       "product_id": "9c9c9c9c-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "emailed": true
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "amount_cents": 5000,
+    "recipient_email": "alex@example.com",
+    "payment_method": "cash"
+   }
+  },
+  {
+   "id": "create-offline-donation",
+   "method": "POST",
+   "path": "/v1/giving-campaigns/:id/offline-donations",
+   "summary": "Record an offline donation",
+   "description": "A donation taken outside Exos (cash, check, other) to a giving campaign. Opendate POST /giving_campaigns/{id}/offline_donations. Needs an organization API key whose creator is an organization owner, manager or finance now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "id",
+     "location": "path",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The giving campaign id.",
+     "example": "60606060-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "amount_cents",
+     "location": "body",
+     "type": "integer",
+     "required": true,
+     "description": "At least 1.",
+     "example": 2500
+    },
+    {
+     "name": "method",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "cash, check or other (default).",
+     "example": "check"
+    },
+    {
+     "name": "donor_name",
+     "location": "body",
+     "type": "string",
+     "required": false,
+     "description": "The donor.",
+     "example": "Pat Kim"
+    },
+    {
+     "name": "anonymous",
+     "location": "body",
+     "type": "boolean",
+     "required": false,
+     "description": "Hide the name publicly.",
+     "example": false
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "61616161-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "campaign_id": "60606060-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "amount_cents": 2500,
+       "currency": "usd",
+       "method": "check",
+       "donor_name": "Pat Kim",
+       "donor_email": null,
+       "anonymous": false,
+       "status": "succeeded",
+       "created_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "amount_cents": 2500,
+    "method": "check"
+   }
+  },
+  {
+   "id": "create-donation",
+   "method": "POST",
+   "path": "/v1/donations",
+   "summary": "Record a donation",
+   "description": "The same as POST /v1/giving-campaigns/:id/offline-donations, with campaign_id in the body (Opendate POST /admin/donations). Online donations are taken at checkout. Needs an organization API key whose creator is an organization owner, manager or finance now.",
+   "auth": "api_key",
+   "scope": "commerce:write",
+   "parameters": [
+    {
+     "name": "campaign_id",
+     "location": "body",
+     "type": "string (UUID)",
+     "required": true,
+     "description": "The giving campaign.",
+     "example": "60606060-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+    },
+    {
+     "name": "amount_cents",
+     "location": "body",
+     "type": "integer",
+     "required": true,
+     "description": "At least 1.",
+     "example": 2500
+    },
+    {
+     "name": "Idempotency-Key",
+     "location": "header",
+     "type": "string",
+     "required": false,
+     "description": "8-100 letters, digits, _ . : or -. Resending the same request with the same key returns the first answer.",
+     "example": "req-2026-11-05-a"
+    }
+   ],
+   "responses": [
+    {
+     "status": 201,
+     "description": "Created.",
+     "example": {
+      "data": {
+       "id": "61616161-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "campaign_id": "60606060-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+       "amount_cents": 2500,
+       "currency": "usd",
+       "method": "other",
+       "donor_name": null,
+       "donor_email": null,
+       "anonymous": false,
+       "status": "succeeded",
+       "created_at": "2026-11-05T12:00:00+00:00"
+      }
+     }
+    },
+    {
+     "status": 403,
+     "description": "The credential lacks commerce:write.",
+     "example": {
+      "error": "insufficient scope",
+      "required_scope": "commerce:write"
+     },
+     "headers": {
+      "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+     }
+    }
+   ],
+   "request_example": {
+    "campaign_id": "60606060-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+    "amount_cents": 2500
+   }
+  }
+ ]
+}

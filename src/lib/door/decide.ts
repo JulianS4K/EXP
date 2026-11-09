@@ -31,12 +31,19 @@
 //     offline (or with this ticket's scans still queued on a re-entry list,
 //     which the server hasn't seen yet) the saved list and this device's
 //     marks do.
+//   * Add-on entry codes (A-, mig 20261107110000): an add-on with its own code
+//     scans at a list that admits add-ons, and only there ('tickets-only-list'
+//     at a ticket list or with no list; 'wrong-list' at a list for other
+//     add-ons). A ticket at a list that admits add-on codes only is
+//     'addon-only-list'. The saved list carries the event's passes
+//     (exos_event_addon_passes) as entries with `addon` set.
 //   * The same read twice within DUPLICATE_READ_MS is ignored (camera double
 //     decodes), and a camera re-read of the ticket just admitted is ignored for
 //     SAME_TICKET_HOLD_MS so the green verdict isn't replaced by "already used".
 
-import { extractTicketIdFromAny } from '../barcode';
+import { extractTicketIdFromAny, normalizeCodePrefix } from '../barcode';
 import {
+  addonListRefusal,
   effectiveDirection,
   listAdmitsTier,
   listWindow,
@@ -44,6 +51,7 @@ import {
   type DoorDirection,
   type ListState,
 } from './lists';
+import { parseNameCheckinMode, type NameCheckinMode } from './nameCheckinMode';
 
 export const DUPLICATE_READ_MS = 2_000;
 export const SAME_TICKET_HOLD_MS = 8_000;
@@ -65,8 +73,8 @@ export interface ParsedDoorCode {
 /** A camera read is never a bare override: a scanned bare id is a forgery
  *  downgrade and fails the signature check. */
 export function parseDoorCode(raw: string, source: DoorSource): ParsedDoorCode {
-  const v = (raw || '').trim();
-  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.includes(':');
+  const v = normalizeCodePrefix((raw || '').trim());
+  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.startsWith('A-') && !v.includes(':');
   const id = v ? extractTicketIdFromAny(v) || v : null;
   // Ticket ids are UUIDs: anything over 128 chars can't be one.
   return { raw: v, ticketId: id && id.length <= 128 ? id : null, bare };
@@ -84,6 +92,10 @@ export interface DoorCachedTicket {
   tierId?: string | null;
   /** Last direction per re-entry list (roster list_state + local marks). */
   lists?: ListState;
+  /** An add-on's own entry code, not a ticket (mig 20261107110000). */
+  addon?: boolean;
+  /** The add-on it is for (null: the add-on was deleted). */
+  addonId?: string | null;
 }
 
 export interface DoorGate {
@@ -102,13 +114,7 @@ export interface RecentRead {
   admitted: boolean;
 }
 
-/** exos_events.door_name_checkin. */
-export type NameCheckinMode = 'staff' | 'managers' | 'off';
-
-/** The column's value, or null when the database doesn't have it yet. */
-export function parseNameCheckinMode(v: unknown): NameCheckinMode | null {
-  return v === 'staff' || v === 'managers' || v === 'off' ? v : null;
-}
+export { parseNameCheckinMode, type NameCheckinMode };
 
 /** May this person check someone in by name? `isManager` = owner, manager or
  *  platform admin. Per-event scanner scope is the server's (the page only
@@ -169,7 +175,13 @@ export type DoorRejectReason =
   /** Re-entry list: the last scan on it was an entry (no exit since). */
   | 'already-inside'
   /** An exit where the list doesn't allow re-entry (or there is no list). */
-  | 'exit-not-allowed';
+  | 'exit-not-allowed'
+  /** An exit for a ticket that was never admitted. */
+  | 'not-inside'
+  /** An add-on's entry code at a list that scans tickets only (or no list). */
+  | 'tickets-only-list'
+  /** A ticket at a list that scans add-on entry codes only. */
+  | 'addon-only-list';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -243,7 +255,8 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
     // local copy says why (clock skew, screenshot).
-    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key') {
+    // 'printed' too: the paper may have been voided since the download.
+    if (entry && v && !v.ok && v.reason !== 'signature-mismatch' && v.reason !== 'no-key' && v.reason !== 'printed') {
       return { action: 'reject', ticketId, reason: 'invalid-barcode' };
     }
     return { action: 'ask-server', ticketId };
@@ -270,7 +283,14 @@ function decideOnSavedList(
   const list = input.list ?? null;
   const direction = effectiveDirection(list, input.direction ?? 'entry');
   const named = byName ? { byName: true } : {};
-  if (list && !listAdmitsTier(list, entry.tierId)) return { action: 'reject', ticketId, reason: 'wrong-list' };
+  if (entry.addon) {
+    const refusal = addonListRefusal(list, entry.addonId);
+    if (refusal) return { action: 'reject', ticketId, reason: refusal };
+  } else if (list?.admits === 'addons') {
+    return { action: 'reject', ticketId, reason: 'addon-only-list' };
+  } else if (list && !listAdmitsTier(list, entry.tierId)) {
+    return { action: 'reject', ticketId, reason: 'wrong-list' };
+  }
   if (direction === 'entry' && list && listWindow(list, now) !== 'open') {
     return { action: 'reject', ticketId, reason: 'invalid-time' };
   }
@@ -280,6 +300,12 @@ function decideOnSavedList(
   if (direction === 'exit') {
     // Exits aren't held by the doors time; in the test window nothing counts.
     if (testWindow) return { action: 'admit', ticketId, test: true, queue: false, ...named, direction: 'exit' };
+    // Never admitted (as far as this device knows): an exit would let them in
+    // without using the ticket (a phone left in Exit mode). The server
+    // refuses it too (mig 20261104120000).
+    if (!entry.used && !Object.values(entry.lists ?? {}).includes('entry')) {
+      return { action: 'reject', ticketId, reason: 'not-inside' };
+    }
     return { action: 'admit', ticketId, test: false, queue: true, ...named, direction: 'exit' };
   }
   if (entry.pendingTransferId && !(byName && entry.parked)) return { action: 'reject', ticketId, reason: 'in-transfer' };

@@ -49,3 +49,17 @@ describe('captureAttribution', () => {
     expect(url).not.toContain('ai_ref');
   });
 });
+
+describe('in-app escape marker (iab_from)', () => {
+  it('is kept from the URL when it names a known in-app browser', () => {
+    expect(attributionFromSearch('?utm_source=instagram&iab_from=instagram')).toEqual({ utm_source: 'instagram', iab_from: 'instagram' });
+    expect(attributionFromSearch('?iab_from=webview').iab_from).toBe('webview');
+    expect(attributionFromSearch('?iab_from=none').iab_from).toBeUndefined();
+    expect(attributionFromSearch('?iab_from=%3Cscript%3E').iab_from).toBeUndefined();
+  });
+  it('never travels on a shared link', () => {
+    const url = withAttribution('https://x.example/e/1', { utm_source: 'instagram', iab_from: 'instagram' });
+    expect(url).toContain('utm_source=instagram');
+    expect(url).not.toContain('iab_from');
+  });
+});

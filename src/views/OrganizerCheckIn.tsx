@@ -29,7 +29,8 @@ import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
-import { verifyBarcode, type VerifyResult } from '../lib/barcode';
+import { isAddonCode, verifyBarcode, type VerifyResult } from '../lib/barcode';
+import TicketAnswersCard from '../components/TicketAnswersCard';
 import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
 import {
   deviceLabel,
@@ -40,10 +41,13 @@ import {
   type QueuedScan,
 } from '../lib/offlineCheckins';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
+import { getSeatRoster } from '../lib/seatingApi';
 import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
+import DoorSellPanel from '../components/DoorSellPanel'; // claude/exos-pos-walkup
+import { EventScheduleReadOnly } from '../components/booking/EventBookingPanels';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
   getDoorExtras,
@@ -104,7 +108,10 @@ import {
   type RosterMarks,
   type RosterProtection,
 } from '../lib/door/roster';
-import { fetchDoorEvent, pingServer } from '../lib/door/api';
+import { fetchAddonRoster, fetchDoorEvent, pingServer } from '../lib/door/api';
+// timed entry (mig 20261030150000): "Admit anyway" outside a slot's entry window.
+import { admitOutsideWindow } from '../lib/seriesTimedApi';
+import { entryWindowMessage } from '../lib/slots';
 
 // The cached roster holds every ticket's barcode secret, so it is dropped
 // 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
@@ -165,11 +172,18 @@ const REFUSAL_TEXT: Record<string, string> = {
   'wrong-list': "This ticket type isn't on this check-in list. Send them to the right door, or switch the list if this device covers it.",
   'invalid-time': "This check-in list isn't open right now (outside its hours).",
   'exit-not-allowed': "This list doesn't allow re-entry, so there's nothing to scan out. Switch to Entry.",
+  'not-inside': "This ticket hasn't been checked in, so it can't be scanned out. Switch to Entry to let them in.",
   'unknown-list': 'This check-in list no longer exists. Pick another list.',
   'already-inside': 'Already inside on this list. Scan them out first if they are leaving.',
   'name-needs-manager': 'Ask a manager. This event lets only owners and managers check people in by name.',
   'name-checkin-off':
     'Check-in by name is off for this event (QR only). Ask the holder to open their ticket and show the live code.',
+  // Printed tickets (mig 20261105120000, docs/wallet.md "Printed tickets").
+  printed: 'This ticket was printed, so only the paper gets in. Scan the printed ticket, or the box office can void the paper.',
+  'print-code-used': 'This printed ticket was already used. A paper ticket admits once.',
+  // Add-on entry codes (mig 20261107110000).
+  'tickets-only-list': "This is an add-on's own entry code (a VIP lounge, a merch pickup). It scans at that add-on's check-in list, not here. Switch the list if this device covers it.",
+  'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -337,7 +351,8 @@ export default function OrganizerCheckIn() {
   // The last read, for the duplicate-read guard (lib/door/decide).
   const lastReadRef = useRef<RecentRead | null>(null);
   // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
-  const [mode, setMode] = useState<'tickets' | 'guests'>('tickets');
+  // + 'sell': walk-up sales at the door (mig 20261107100000).
+  const [mode, setMode] = useState<'tickets' | 'guests' | 'sell'>('tickets');
   // Exos Door (mig 20261013090000): a code from another platform read in
   // Tickets mode is handed to the guest-list door, which checks it in.
   const [guestCode, setGuestCode] = useState<{ text: string; at: number } | null>(null);
@@ -346,6 +361,27 @@ export default function OrganizerCheckIn() {
   const [doorExtras, setDoorExtras] = useState<DoorExtras | null>(null);
   const [extrasSyncing, setExtrasSyncing] = useState(false);
   const tableByTicket = React.useMemo(() => indexTablesByTicket(doorExtras?.tables ?? []), [doorExtras]);
+  // Reserved seating (mig 20261030140000): ticket id → seat label, cached on
+  // the device so the result card shows the seat offline too (labels only).
+  const [seatByTicket, setSeatByTicket] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!eventId) return undefined;
+    const key = `exos.door.seats.${eventId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) setSeatByTicket(JSON.parse(raw) as Record<string, string>);
+    } catch { /* storage blocked */ }
+    let live = true;
+    const pull = () => getSeatRoster(eventId).then((m) => {
+      if (!live || m.size === 0) return;
+      const next = Object.fromEntries(m);
+      setSeatByTicket(next);
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage full or blocked */ }
+    }).catch(() => undefined);
+    void pull();
+    const id = window.setInterval(() => void pull(), 60_000);
+    return () => { live = false; window.clearInterval(id); };
+  }, [eventId]);
   // A door-only event (no Exos tickets, guests imported from another
   // platform) opens on the guest-list door.
   useEffect(() => {
@@ -754,6 +790,17 @@ export default function OrganizerCheckIn() {
         // ticket's door keys so the offline HMAC check works.
         roster = buildRoster(await listEventTicketsForRegistry(eventId));
       }
+      // Add-on entry codes (mig 20261107110000): saved with the tickets so an
+      // A- code is checked offline too. A failed read keeps the last ones.
+      const withPasses: Record<string, OfflineTicketEntry> = { ...roster };
+      try {
+        Object.assign(withPasses, await fetchAddonRoster(eventId));
+      } catch (err) {
+        console.warn('add-on entry codes unavailable', err);
+        const before: Record<string, OfflineTicketEntry> = rosterSyncRef.current?.base ?? {};
+        for (const k of Object.keys(before)) if (before[k].addon && !withPasses[k]) withPasses[k] = before[k];
+      }
+      roster = withPasses;
       // The page moved to another event while this ran: drop the result.
       if (eventIdRef.current !== eventId) return null;
       const count = Object.keys(roster).length;
@@ -997,6 +1044,24 @@ export default function OrganizerCheckIn() {
       return;
     }
     pushScan(ticketId, name, 'DENIED');
+    // timed entry (mig 20261030150000): outside the ticket's slot window.
+    // Nothing is written until staff decide; "Admit anyway" records the
+    // override and the next scan of this ticket checks them in.
+    if (result.reason === 'outside-entry-window') {
+      const w = result as CheckInResult & { window?: 'early' | 'late'; entry_from?: string; entry_until?: string };
+      const now = serverNow();
+      const msg = w.window && w.entry_from && w.entry_until
+        ? entryWindowMessage({ ok: false, window: w.window, from: Date.parse(w.entry_from), until: Date.parse(w.entry_until) }, now)
+        : 'Outside this ticket’s entry window.';
+      setStatus('invalid-barcode');
+      setInvalidReason(`Outside entry window. ${msg}.`);
+      if (eventId && window.confirm(`${name || 'This ticket'}: ${msg}.\n\nAdmit anyway?`)) {
+        void admitOutsideWindow(ticketId, eventId)
+          .then(() => setInvalidReason(`Admit anyway recorded for ${name || 'this ticket'}. Scan the ticket again to check them in.`))
+          .catch((e: unknown) => setInvalidReason(`Could not record the override: ${e instanceof Error ? e.message : String(e)}`));
+      }
+      return;
+    }
     if (result.reason === 'used' || result.reason === 'already-inside') {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });
@@ -1007,7 +1072,8 @@ export default function OrganizerCheckIn() {
       return;
     }
     // The list changed since the header was saved (deleted, re-tiered): pick it up.
-    if (result.reason === 'unknown-list' || result.reason === 'wrong-list' || result.reason === 'invalid-time') {
+    if (result.reason === 'unknown-list' || result.reason === 'wrong-list' || result.reason === 'invalid-time'
+        || result.reason === 'tickets-only-list' || result.reason === 'addon-only-list') {
       void loadEventHeader({ quiet: true });
     }
     // The server is the authority: bring the saved list in line with it.
@@ -1037,11 +1103,12 @@ export default function OrganizerCheckIn() {
     // Who may do what is not a problem with the ticket: not audited.
     if (
       result.reason === 'needs-manager' || result.reason === 'name-needs-manager' || result.reason === 'name-checkin-off' ||
-      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list'
+      result.reason === 'exit-not-allowed' || result.reason === 'unknown-list' || result.reason === 'not-inside'
     ) return;
     const audit =
       result.reason === 'barcode-expired' ? 'expired-code'
-      : result.reason === 'barcode-rejected' ? 'invalid-barcode'
+      : result.reason === 'barcode-rejected' || result.reason === 'printed' ? 'invalid-barcode'
+      : result.reason === 'print-code-used' ? 'used'
       : result.reason === 'voided' || result.reason === 'in-transfer' || result.reason === 'wrong-event' ? result.reason
       : 'not-found';
     void writeScanReject(audit, src, { ticketIdAttempted: ticketId, reasonDetail: result.reason });
@@ -1151,12 +1218,15 @@ export default function OrganizerCheckIn() {
         }
         return;
       case 'wrong-list':
+      case 'tickets-only-list':
+      case 'addon-only-list':
       case 'invalid-time':
       case 'exit-not-allowed':
+      case 'not-inside':
         setStatus('invalid-barcode');
         setInvalidReason(REFUSAL_TEXT[d.reason]);
         if (id) pushScan(id, ctx.name, 'DENIED');
-        if (canAudit && d.reason !== 'exit-not-allowed') {
+        if (canAudit && d.reason !== 'exit-not-allowed' && d.reason !== 'not-inside') {
           void writeScanReject('not-found', ctx.src, { ticketIdAttempted: id, reasonDetail: d.reason });
         }
         return;
@@ -1341,7 +1411,8 @@ export default function OrganizerCheckIn() {
       setStatus('searching');
       try {
         let scanTicket: ScanTicket | null = null;
-        if (!cached) {
+        // An add-on's entry code (A-) isn't a ticket: the check-in RPC reads it.
+        if (!cached && !isAddonCode(raw)) {
           // Staff-gated read. null when the ticket doesn't exist OR the caller
           // isn't staff of its org — both are "not a valid ticket for this door".
           scanTicket = await withDeadline(() => getTicketForScan(ticketId), DOOR_REQUEST_TIMEOUT_MS);
@@ -1379,7 +1450,7 @@ export default function OrganizerCheckIn() {
           // ticket's secret, which only the server can check.
           if (!code.bare && scanTicket.doorKeys) {
             const v = await verifyBarcode(raw, scanTicket.doorKeys, { now: serverNow() });
-            if (!v.ok && v.reason !== 'no-key' && v.reason !== 'signature-mismatch') {
+            if (!v.ok && v.reason !== 'no-key' && v.reason !== 'signature-mismatch' && v.reason !== 'printed') {
               setFoundTicket(scanTicket);
               setBuyerName(scanTicket.ownerName);
               denyLocal(scanTicket.id, scanTicket.ownerName, v, src);
@@ -1404,8 +1475,9 @@ export default function OrganizerCheckIn() {
           showRefusal(result, ticketId, who, src);
           return;
         }
-        admitted(scanTicket ?? ({ id: ticketId, tierName: cached?.tier } as Ticket), who, result.reason === 'test-scan', false,
-          result.reason === 'checked-out' ? 'exit' : 'entry');
+        const addonName = (result as CheckInResult & { addon_name?: string | null }).addon_name;
+        admitted(scanTicket ?? ({ id: ticketId, tierName: addonName ?? cached?.tier } as Ticket), addonName && !who ? addonName : who,
+          result.reason === 'test-scan', false, result.reason === 'checked-out' ? 'exit' : 'entry');
         if (result.reason !== 'test-scan') admittedId = ticketId;
       } catch (err) {
         if (isServerAnswer(err)) {
@@ -1720,14 +1792,14 @@ export default function OrganizerCheckIn() {
         </div>
       )}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
-        {(['tickets', 'guests'] as const).map((m) => (
+        {(['tickets', 'guests', 'sell'] as const).map((m) => (
           <button
             key={m}
             type="button"
             role="tab"
             aria-selected={mode === m}
             onClick={() => {
-              if (m === 'guests' && scanning) {
+              if (m !== 'tickets' && scanning) {
                 void stopScanner();
                 setScanning(false);
               }
@@ -1736,11 +1808,17 @@ export default function OrganizerCheckIn() {
             }}
             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
           >
-            {m === 'tickets' ? 'Tickets' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+            {m === 'tickets' ? 'Tickets' : m === 'sell' ? 'Sell' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
           </button>
         ))}
       </div>
-      {mode === 'guests' && eventId ? (
+      {mode === 'sell' && eventId ? (
+      <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {effectiveOffline
+          ? <p role="alert" className="text-sm text-amber-700">Selling needs a connection: the sale, the tickets and the cash are recorded on the server.</p>
+          : <DoorSellPanel eventId={eventId} />}
+      </div>
+      ) : mode === 'guests' && eventId ? (
       <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <GuestListDoor
           eventId={eventId}
@@ -1751,6 +1829,7 @@ export default function OrganizerCheckIn() {
           syncing={extrasSyncing}
           incomingCode={guestCode}
           onIncomingHandled={() => setGuestCode(null)}
+          canUndo={canOverride}
         />
       </div>
       ) : (
@@ -1945,6 +2024,13 @@ export default function OrganizerCheckIn() {
                 </div>
               )}
 
+              {/* Checkout answers (mig 20261106110000): read, add or correct at the door. */}
+              {eventId && !testScan && (
+                <div className="w-full mb-4">
+                  <TicketAnswersCard ticketId={foundTicket.id} eventId={eventId} tierId={foundTicket.tierId ?? null} />
+                </div>
+              )}
+
               <div className="w-full space-y-4">
                  <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-green-50">
                     <div className="flex items-center space-x-3 text-left">
@@ -1959,6 +2045,12 @@ export default function OrganizerCheckIn() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
+                 {seatByTicket[foundTicket.id] && (
+                   <div className="p-4 bg-white rounded-2xl border border-green-50 text-left" data-testid="door-seat">
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
+                     <p className="font-bold text-slate-900">{seatByTicket[foundTicket.id]}</p>
+                   </div>
+                 )}
                  {tableByTicket[foundTicket.id] && (() => {
                    const tb = tableByTicket[foundTicket.id];
                    return (
@@ -2327,6 +2419,9 @@ export default function OrganizerCheckIn() {
 
           {/* Refused-scan audit — reads exos_scan_rejects (written by the
               scanner above on every refusal); polled, exportable. */}
+          {/* Day-of schedule (load in, doors, sets, curfew), read-only (mig 20261030100000). */}
+          {eventId && <EventScheduleReadOnly eventId={eventId} light />}
+
           {eventId && <ScanRejectAudit eventId={eventId} eventTitle={event.title} />}
         </div>
       </div>

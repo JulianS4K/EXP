@@ -19,6 +19,9 @@ export interface ChargeLike {
   application_fee_amount?: number | null;
   transfer?: Id;
   balance_transaction?: string | { id?: string | null; fee?: number | null; net?: number | null } | null;
+  // Read by the buyer-location fallback (_shared/buyerLocation.ts, mig 20261106140000).
+  billing_details?: { address?: unknown } | null;
+  payment_method_details?: { card?: { country?: string | null } | null } | null;
 }
 
 export interface FeeActuals {
@@ -49,6 +52,9 @@ function cents(v: unknown): number | null {
 export function feeActualsFromCharge(
   charge: ChargeLike | null | undefined,
   fallbackApplicationFeeCents: number | null = null,
+  // Commissions inside the Exos fee (mig 20261104190000): the part of the
+  // application fee that is a promoter's, held for them, not Exos's net.
+  commissionInFeeCents = 0,
 ): FeeActuals {
   const bt = charge?.balance_transaction;
   const btObj = bt && typeof bt === "object" ? bt : null;
@@ -61,7 +67,7 @@ export function feeActualsFromCharge(
     application_fee_id: idOf(charge?.application_fee),
     application_fee_cents: appFee,
     transfer_id: idOf(charge?.transfer),
-    net_cents: appFee != null && stripeFee != null ? appFee - stripeFee : null,
+    net_cents: appFee != null && stripeFee != null ? appFee - stripeFee - Math.max(Math.trunc(commissionInFeeCents) || 0, 0) : null,
   };
 }
 
@@ -106,7 +112,11 @@ export async function recordFeeActuals(
   stripe: FeeStripe,
   sessionId: string,
   paymentIntent: string,
-  opts: { timeoutMs?: number; log?: (msg: string, err?: unknown) => void; force?: boolean } = {},
+  opts: {
+    timeoutMs?: number; log?: (msg: string, err?: unknown) => void; force?: boolean;
+    /** Handed the charge this read fetched (stripe-webhook's buyer-location fallback); its errors are logged, never thrown. */
+    onCharge?: (charge: ChargeLike) => void | Promise<void>;
+  } = {},
 ): Promise<FeeRecordOutcome> {
   const log = opts.log ?? ((msg: string, err?: unknown) => console.error(msg, err ?? ""));
   try {
@@ -130,10 +140,24 @@ export async function recordFeeActuals(
       log(`fee actuals: no charge on ${paymentIntent} for ${sessionId} yet`);
       return "no_charge";
     }
+    if (opts.onCharge) {
+      try {
+        await opts.onCharge(charge);
+      } catch (e) {
+        log(`fee actuals: onCharge failed for ${sessionId}`, e);
+      }
+    }
     const { data: sess } = await sb.from("exos_checkout_sessions")
       .select("application_fee_cents").eq("session_id", sessionId).maybeSingle();
     const recorded = (sess as { application_fee_cents?: number | null } | null)?.application_fee_cents ?? null;
-    const a = feeActualsFromCharge(charge, recorded);
+    // Stripe's fee larger than the Exos fee recorded: a commission rides in it.
+    let inFee = 0;
+    if (recorded != null && typeof charge.application_fee_amount === "number" && charge.application_fee_amount > recorded) {
+      const { data: cp, error: cpErr } = await sb.from("exos_checkout_commission_plans")
+        .select("commission_fee_cents").eq("session_id", sessionId).maybeSingle();
+      if (!cpErr) inFee = Number((cp as { commission_fee_cents?: number } | null)?.commission_fee_cents ?? 0) || 0;
+    }
+    const a = feeActualsFromCharge(charge, recorded, inFee);
     const { error } = await sb.rpc("exos_record_payment_fees", {
       p_payment_intent: paymentIntent,
       p_charge_id: a.charge_id,

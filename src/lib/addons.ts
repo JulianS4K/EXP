@@ -6,6 +6,9 @@
 // lib/checkout.ts); $0 extras attach to a free claim via exos_claim_free_addons.
 
 import { supabase } from './supabase';
+import { parseUnitFees, type UnitFee } from './fees';
+import { listPublicFeeRules, withAddonFees } from './feeRules';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 export interface PublicAddon {
   id: string;
@@ -13,13 +16,15 @@ export interface PublicAddon {
   name: string;
   description: string | null;
   price: number;
-  capacity: number;       // 0 = unlimited
+  capacity: number;       // 0 = closed (mig 20261105100000); never unlimited
   sold: number;
   maxPerOrder: number | null;
   imageUrl: string | null;
   sortOrder: number;
   /** Exclusive tax on top of `price` (0 when included) — for all-in display. */
   exclusiveTaxPercent: number;
+  /** Passed-on fees inside the all-in price (fee rules, mig 20261027100000; [] = none). */
+  passedOnFees: UnitFee[];
 }
 
 export interface AddonInput {
@@ -32,6 +37,9 @@ export interface AddonInput {
   visibility?: 'public' | 'hidden';
   imageUrl?: string | null;
   sortOrder?: number;
+  /** Each unit sold gets its own entry code, scanned at a list that admits
+   *  add-ons (mig 20261107110000; DICE Extra.hasSeparateAccessBarcode). */
+  separateAccessBarcode?: boolean;
 }
 
 function mapPublic(r: any): PublicAddon {
@@ -47,33 +55,36 @@ function mapPublic(r: any): PublicAddon {
     imageUrl: r.image_url ?? null,
     sortOrder: Number(r.sort_order) || 0,
     exclusiveTaxPercent: Number(r.exclusive_tax_percent) || 0,
+    passedOnFees: parseUnitFees(r.passed_on_fees),
   };
 }
 
 /** Buyer-facing: public add-ons for a published event. */
 export async function listPublicAddons(eventId: string): Promise<PublicAddon[]> {
-  const { data, error } = await supabase
-    .from('exos_public_addons')
-    .select('*')
-    .eq('event_id', eventId)
-    .order('sort_order', { ascending: true });
+  const [{ data, error }, fees] = await Promise.all([
+    supabase.from('exos_public_addons').select('*').eq('event_id', eventId).order('sort_order', { ascending: true }),
+    listPublicFeeRules([eventId]),
+  ]);
   if (error) throw error;
-  return (data ?? []).map(mapPublic);
+  return withAddonFees(data ?? [], fees.get(eventId) ?? []).map(mapPublic);
 }
 
 /** Organizer: full catalog (incl. hidden) for an event. Staff RLS. */
-export async function listEventAddons(eventId: string): Promise<(PublicAddon & { visibility: 'public' | 'hidden' })[]> {
+export async function listEventAddons(eventId: string): Promise<(PublicAddon & { visibility: 'public' | 'hidden'; separateAccessBarcode: boolean })[]> {
   const { data, error } = await supabase
     .from('exos_event_addons')
     .select('*')
     .eq('event_id', eventId)
     .order('sort_order', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({ ...mapPublic(r), visibility: r.visibility }));
+  return (data ?? []).map((r: any) => ({ ...mapPublic(r), visibility: r.visibility, separateAccessBarcode: r.separate_access_barcode === true }));
 }
 
 /** Organizer: create or update an add-on. Staff RLS gates the write. */
 export async function saveAddon(eventId: string, input: AddonInput): Promise<string> {
+  // A new add-on needs a capacity (0 = closed, there is no unlimited); an
+  // existing one may be set to 0 to stop selling it.
+  if (!input.id && !isSellableCapacity(Number(input.capacity))) throw new Error(`An add-on ${CAPACITY_REQUIRED}.`);
   const row = {
     event_id: eventId,
     name: input.name.trim(),
@@ -84,6 +95,7 @@ export async function saveAddon(eventId: string, input: AddonInput): Promise<str
     visibility: input.visibility ?? 'public',
     image_url: input.imageUrl?.trim() || null,
     sort_order: Number(input.sortOrder) || 0,
+    ...(input.separateAccessBarcode !== undefined ? { separate_access_barcode: input.separateAccessBarcode } : {}),
   };
   if (input.id) {
     const { error } = await supabase.from('exos_event_addons').update(row).eq('id', input.id);

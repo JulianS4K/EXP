@@ -8,8 +8,10 @@
 // minimal cut — owners can rename an org's name freely; slug renaming
 // is deferred until the white-label sprint.
 
+import PaymentMethodsPanel from '../components/PaymentMethodsPanel';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import OrgTypePanel from '../components/OrgTypePicker';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +27,7 @@ import { uploadOrgLogo } from '../lib/orgLogo';
 import { Organization } from '../types';
 import WebsitePanel from '../components/WebsitePanel';
 import IntegrationsPanel from '../components/IntegrationsPanel';
+import PoshIntegrationPanel from '../components/PoshIntegrationPanel';
 import DeveloperSettings from '../components/DeveloperSettings';
 import PixelIdsEditor, { pixelIdsSavable } from '../components/PixelIdsEditor';
 import { paymentsEnabled } from '../lib/payments';
@@ -33,6 +36,17 @@ import CatalogFeedPanel from '../components/CatalogFeedPanel';
 import AudienceExportPanel from '../components/AudienceExportPanel';
 import AdConversionsSettings from '../components/AdConversionsSettings';
 import OrgLegalSettings from '../components/OrgLegalSettings';
+import FeeRulesEditor from '../components/FeeRulesEditor';
+import OAuthFinish from '../components/OAuthFinish';
+import { readOAuthReturn, stripOAuthHash, stripOAuthReturn, type OAuthReturn } from '../lib/oauthReturn';
+import ListingFeedPanel from '../components/ListingFeedPanel';
+import OrgGiftCardsPanel from '../components/OrgGiftCardsPanel';
+import OrgGivingPanel from '../components/OrgGivingPanel';
+import OrgMembershipsPanel from '../components/OrgMembershipsPanel';
+import DistributionPartnersPanel from '../components/DistributionPartnersPanel';
+import OrgConnectedApps from '../components/OrgConnectedApps';
+import RoleApiScopesPanel from '../components/RoleApiScopesPanel';
+import PartnerPresalePanel from '../components/PartnerPresalePanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -72,6 +86,18 @@ export default function OrgSettings() {
   const { activeRole } = useOrganization();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Back from Google / Eventbrite (mig 20261029140000): keep the state and the
+  // finish token in memory and take them out of the address bar at once; the
+  // confirm screen (OAuthFinish) sends them only when the user clicks Confirm.
+  const [oauthRet, setOauthRet] = useState<OAuthReturn | null>(() => readOAuthReturn(location.search, location.hash));
+  useEffect(() => {
+    if (!oauthRet) return;
+    navigate({ pathname: location.pathname, search: stripOAuthReturn(location.search), hash: stripOAuthHash(location.hash) },
+      { replace: true });
+    // eslint-disable-next-line
+  }, []);
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [name, setName] = useState('');
@@ -130,6 +156,9 @@ export default function OrgSettings() {
         </div>
       </div>
     );
+  }
+  if (oauthRet) {
+    return <OAuthFinish ret={oauthRet} orgName={org?.name ?? null} onClose={() => setOauthRet(null)} />;
   }
   if (!org) {
     return (
@@ -309,6 +338,18 @@ export default function OrgSettings() {
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >
             Limit flags
+          </button>
+          <button
+            onClick={() => navigate(`/orgs/${org.id}/seat-maps`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Seat maps
+          </button>
+          <button
+            onClick={() => navigate(`/orgs/${org.id}/artists`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Artists
           </button>
           {canSeeMoney(activeRole, isAdmin) && (
             <button
@@ -602,8 +643,55 @@ export default function OrgSettings() {
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
+            {/* Fee rules every event inherits: passed on (inside the all-in price) or absorbed (mig 20261027100000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <FeeRulesEditor orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
+
+            {/* Posh: webhooks in, unmatched orders, event links (mig 20261029150000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
+              <PoshIntegrationPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
+            )}
+
+            {/* Listing feed: per-partner shared keys (mig 20261030110000). Owners only. */}
+            {(isAdmin || activeRole === 'owner') && <ListingFeedPanel orgId={org.id} />}
+
+            {/* Gift cards and giving (mig 20261030130000). */}
+            {(isAdmin || ['owner', 'manager', 'finance', 'scanner'].includes(activeRole ?? '')) && (
+              <OrgGiftCardsPanel orgId={org.id}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canSell={isAdmin || ['owner', 'manager', 'scanner'].includes(activeRole ?? '')} />
+            )}
+            {(isAdmin || ['owner', 'manager', 'finance'].includes(activeRole ?? '')) && (
+              <OrgGivingPanel orgId={org.id} orgSlug={org.slug}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canRecord={isAdmin || ['owner', 'manager', 'finance'].includes(activeRole ?? '')} />
+            )}
+
+            {/* Memberships, season passes, flex packs (mig 20261030130500). */}
+            {(isAdmin || ['owner', 'manager', 'finance', 'scanner'].includes(activeRole ?? '')) && (
+              <OrgMembershipsPanel orgId={org.id}
+                canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'}
+                canScan={isAdmin || ['owner', 'manager', 'scanner'].includes(activeRole ?? '')} />
+            )}
+
             {/* Developer — API keys + outbound webhooks (self-contained CRUD). */}
             <DeveloperSettings orgId={org.id} canEdit={canEdit} />
+
+            {/* API permissions per role: owner edits, staff read (mig 20261104180000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <RoleApiScopesPanel orgId={org.id} />}
+
+            {/* Distribution partners: keys for the partner sales API (mig 20261031130000). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+              <DistributionPartnersPanel orgId={org.id} canEdit={activeRole === 'owner'} />
+            )}
+            {/* Partners during member presales: block / allow (mig 20261104180000). Owners set it. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && (
+              <PartnerPresalePanel orgId={org.id} canEdit={activeRole === 'owner'} />
+            )}
+
+            {/* OAuth apps members connected (mig 20261031130500). Owners. */}
+            {activeRole === 'owner' && <OrgConnectedApps orgId={org.id} />}
           </div>
 
           {/* Sidebar */}
@@ -640,6 +728,7 @@ export default function OrgSettings() {
                     >
                       {paymentsBusy ? 'Opening Stripe…' : label}
                     </button>
+                    <PaymentMethodsPanel orgId={org.id} canEdit={canEdit} />
                   </>
                 );
               })() : (
@@ -656,6 +745,10 @@ export default function OrgSettings() {
             {/* S4K network (owner): S4K may list this org's events on the
                 marketplaces from the Exos feed (docs/marketplace/s4k-feed.md). */}
             <S4kNetworkCard orgId={org.id} initial={org.s4kNetwork === true} canEdit={activeRole === 'owner'} />
+            {/* Organizer / promoter / collective (mig 20261105130000): a label and defaults. */}
+            {org.orgType !== undefined && (
+              <OrgTypePanel orgId={org.id} initial={org.orgType} canEdit={isAdmin || activeRole === 'owner'} />
+            )}
 
             {/* Meta info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-xs text-slate-500 space-y-2">

@@ -31,6 +31,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
+import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
@@ -64,11 +65,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   };
   const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
 
-  // 1. Pending-but-maybe-paid: ask Stripe the source of truth.
+  // 1. Pending-but-maybe-paid: ask Stripe the source of truth. PayPal
+  //    sessions (pp_…, mig 20261031220000) are exos-paypal's reconcile's.
   const { data: pending } = await sb
     .from("exos_checkout_sessions")
     .select("session_id")
     .eq("status", "pending")
+    .not("session_id", "like", "pp\\_%")
     .lt("created_at", cutoff)
     .order("created_at", { ascending: false })
     .limit(BATCH);
@@ -124,6 +127,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .from("exos_checkout_sessions")
     .select("session_id, failure_reason")
     .eq("status", "failed")
+    .not("session_id", "like", "pp\\_%")
     .is("reconcile_done_at", null)
     .lt("created_at", cutoff)
     .or(`reconcile_next_at.is.null,reconcile_next_at.lte.${new Date().toISOString()}`)
@@ -181,7 +185,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // Same key + params as stripe-webhook's auto-refund (_shared/auto-refund.ts):
       // if both paths fire for one session, Stripe returns the first refund.
       const refund = await stripe.refunds.create(
-        autoRefundParams(pi, row.session_id),
+        autoRefundParams(pi, row.session_id, chargeModelFromMetadata(cs.metadata as Record<string, string> | null)),
         { idempotencyKey: autoRefundIdempotencyKey(row.session_id) },
       );
       // Ledger row by Stripe refund id (idempotent); it also moves the

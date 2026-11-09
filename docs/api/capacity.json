@@ -1,0 +1,715 @@
+{
+  "file": "capacity",
+  "name": "Shared capacity and price steps",
+  "order": 15.8,
+  "description": "Two inventory tools on top of ticket types. **Shared limits** (capacity pools; DICE's TicketPool): one allocation across several ticket types, e.g. a 500-cap room selling GA, VIP and Student while VIP keeps its own 50. A type sells only while every limit it is in has room, so its availability everywhere (the event page, GET /v1/public/…, the Google and catalog feeds, MCP) is the smallest of its own remaining and each limit's remaining; it shows sold out as soon as one of them is full. Holds, comps, partner reservations, marketplace allocations and refunds count against a limit exactly as they count against a type's capacity. allocation is required: 0 closes sales, there is no unlimited, and it can't go below what's sold. Publishing is blocked by a limit with no ticket types, or a ticket type on sale inside a closed limit. **Price steps** (DICE's PriceTier): one ticket type moves through prices on its own, e.g. Early bird $20 for the first 100 or until Dec 1, then $25 for 200, then $30, plus an optional door price. A step ends when its count is reached (tickets sold at it plus live checkouts holding it) or at its time, whichever comes first; the last step is the final price and has no end. Once a step's count has sold it stays ended (a refund doesn't bring the lower price back). An order is priced at one step: if it asks for more than the step has left, checkout answers 409 `price_step_remaining` with how many are left at this price (the cap rule). The price is locked when checkout reserves the tickets, so the buyer pays what they were shown even if the step moves while they pay. Every price a buyer sees (the event page, the public API, the feeds, MCP, partner sales) is the current step's, and the all-in price adds the organizer's passed-on fees and tax to it the same way everywhere; there are no fee lines. The door price is charged at the door (POS) when set. The older `price_schedule` field of a ticket type is the time-only form of its steps and stays readable and writable; a type whose steps end on a count has `price_schedule: []` and refuses a schedule write. Money is integer cents here. **Who may write:** an organization API key (sk_live_…), acting as the member who created it: pool and price-step writes (and `door_price_cents` on PATCH /v1/events/:id/ticket-types/:tier) need that member to be an owner or manager now, as any ticket-type edit does; a key created by finance, content or scanner gets 403 even with events:write. Personal and OAuth tokens read these routes only. Reads need events:read, with no role rule (as GET ticket-type).",
+  "endpoints": [
+    {
+      "id": "list-capacity-pools",
+      "method": "GET",
+      "path": "/v1/events/:id/capacity-pools",
+      "summary": "List an event's shared limits",
+      "description": "Every shared limit of the event with what it has sold, what live checkouts hold and what's left (after vouchers that reserve inventory and marketplace allocations).",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Room",
+                "allocation": 500,
+                "closed": false,
+                "ticket_type_ids": [
+                  "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+                  "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+                  "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+                ],
+                "sold": 312,
+                "held": 6,
+                "remaining": 182,
+                "sold_out": false,
+                "created_at": "2026-11-05T12:00:00+00:00",
+                "updated_at": "2026-11-05T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-capacity-pool",
+      "method": "POST",
+      "path": "/v1/events/:id/capacity-pools",
+      "summary": "Create a shared limit",
+      "description": "Body: the fields below, or wrapped as `{ \"capacity_pool\": {...} }`.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A name for the organizer (up to 80 characters). Required on create.",
+          "example": "Room"
+        },
+        {
+          "name": "allocation",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "How many tickets the ticket types in it can sell together. Required on create. 0 closes sales on every type in it; there is no unlimited (null is refused). Can't go below what it has already sold (409).",
+          "example": 500
+        },
+        {
+          "name": "closed",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Pause the limit without changing its allocation (it sells nothing while true).",
+          "example": false
+        },
+        {
+          "name": "ticket_type_ids",
+          "location": "body",
+          "type": "array of string (UUID)",
+          "required": false,
+          "description": "The ticket types it covers, this event's only; replaces the list. A type may be in several limits.",
+          "example": [
+            "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+            "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f"
+          ]
+        }
+      ],
+      "request_example": {
+        "name": "Room",
+        "allocation": 500,
+        "ticket_type_ids": [
+          "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+          "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+          "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+        ]
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created: the limit with its counts.",
+          "example": {
+            "data": {
+              "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Room",
+              "allocation": 500,
+              "closed": false,
+              "ticket_type_ids": [
+                "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+                "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+                "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+              ],
+              "sold": 0,
+              "held": 0,
+              "remaining": 500,
+              "sold_out": false,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad or unknown field, no allocation, or a ticket type of another event.",
+          "example": {
+            "error": "allocation is required (0 closes sales; there is no unlimited)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The types already sold more than the allocation.",
+          "example": {
+            "error": "this shared limit has already sold 312; its allocation can't be lower (0 stops sales)"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-capacity-pool",
+      "method": "GET",
+      "path": "/v1/events/:id/capacity-pools/:pool",
+      "summary": "Get a shared limit",
+      "description": "One shared limit with its counts.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "pool",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The shared limit's id.",
+          "example": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Room",
+              "allocation": 500,
+              "closed": false,
+              "ticket_type_ids": [
+                "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+                "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+                "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+              ],
+              "sold": 312,
+              "held": 6,
+              "remaining": 182,
+              "sold_out": false,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events, or no such shared limit on it.",
+          "example": {
+            "error": "shared limit not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-capacity-pool",
+      "method": "PATCH",
+      "path": "/v1/events/:id/capacity-pools/:pool",
+      "summary": "Update a shared limit",
+      "description": "Changes the fields sent; `ticket_type_ids` replaces the list. allocation 0 closes sales on every type in it.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "pool",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The shared limit's id.",
+          "example": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "A name for the organizer (up to 80 characters). Required on create.",
+          "example": "Room"
+        },
+        {
+          "name": "allocation",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "How many tickets the ticket types in it can sell together. Required on create. 0 closes sales on every type in it; there is no unlimited (null is refused). Can't go below what it has already sold (409).",
+          "example": 500
+        },
+        {
+          "name": "closed",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Pause the limit without changing its allocation (it sells nothing while true).",
+          "example": false
+        },
+        {
+          "name": "ticket_type_ids",
+          "location": "body",
+          "type": "array of string (UUID)",
+          "required": false,
+          "description": "The ticket types it covers, this event's only; replaces the list. A type may be in several limits.",
+          "example": [
+            "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+            "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f"
+          ]
+        }
+      ],
+      "request_example": {
+        "allocation": 450
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the limit with its counts.",
+          "example": {
+            "data": {
+              "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "event_id": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Room",
+              "allocation": 450,
+              "closed": false,
+              "ticket_type_ids": [
+                "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+                "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+                "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a"
+              ],
+              "sold": 312,
+              "held": 6,
+              "remaining": 132,
+              "sold_out": false,
+              "created_at": "2026-11-05T12:00:00+00:00",
+              "updated_at": "2026-11-05T12:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad or unknown field.",
+          "example": {
+            "error": "allocation must be a whole number, 0 or more (0 closes sales; there is no unlimited)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Below what it has already sold (0 is always allowed).",
+          "example": {
+            "error": "this shared limit has already sold 312; its allocation can't be lower (0 stops sales)"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events, or no such shared limit on it.",
+          "example": {
+            "error": "shared limit not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-capacity-pool",
+      "method": "DELETE",
+      "path": "/v1/events/:id/capacity-pools/:pool",
+      "summary": "Delete a shared limit",
+      "description": "The types keep their own capacities; tickets already sold stay.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "pool",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The shared limit's id.",
+          "example": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Deleted.",
+          "example": {
+            "data": {
+              "id": "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events, or no such shared limit on it.",
+          "example": {
+            "error": "shared limit not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-price-steps",
+      "method": "GET",
+      "path": "/v1/events/:id/ticket-types/:tier/price-steps",
+      "summary": "Get a ticket type's price steps",
+      "description": "The steps in order with what each sold and holds, the door price, and `current`: the step the type sells at now (the same answer GET /v1/events/:id/ticket-types/:tier gives as `current_price`). `current.source` is `step`, `base` (no steps: the type's own price) or `door`.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "tier",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket type's id.",
+          "example": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "ticket_type_id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "door_price_cents": 3500,
+              "current": {
+                "price_cents": 2000,
+                "source": "step",
+                "step_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "step_name": "Early bird",
+                "step_index": 1,
+                "step_count": 3,
+                "step_remaining": 37,
+                "step_ends_at": "2026-12-01T05:00:00+00:00",
+                "next_price_cents": 2500,
+                "next_step_name": "GA",
+                "door_price_cents": 3500
+              },
+              "steps": [
+                {
+                  "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                  "name": "Early bird",
+                  "price_cents": 2000,
+                  "ends_after_count": 100,
+                  "ends_at": "2026-12-01T05:00:00+00:00",
+                  "sold_out_at": null,
+                  "sold": 61,
+                  "held": 2
+                },
+                {
+                  "id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                  "name": "GA",
+                  "price_cents": 2500,
+                  "ends_after_count": 200,
+                  "ends_at": null,
+                  "sold_out_at": null,
+                  "sold": 0,
+                  "held": 0
+                },
+                {
+                  "id": "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
+                  "name": "Final",
+                  "price_cents": 3000,
+                  "ends_after_count": null,
+                  "ends_at": null,
+                  "sold_out_at": null,
+                  "sold": 0,
+                  "held": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events, or no such ticket type on it.",
+          "example": {
+            "error": "ticket type not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-price-steps",
+      "method": "PUT",
+      "path": "/v1/events/:id/ticket-types/:tier/price-steps",
+      "summary": "Set a ticket type's price steps",
+      "description": "Replaces the steps (send each existing step's `id` to keep its sales on it) and/or sets the door price. Every step but the last needs an end (`ends_after_count`, `ends_at` or both) and the last has none; times can't go backwards; 20 steps at most; `steps: []` removes them (the type sells at its own price). The type's `price` becomes the first step's and its `price_schedule` the time-only form. Body: the fields below, or wrapped as `{ \"price_steps\": {...} }`.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. Another organization's answers 404.",
+          "example": "3f2a9c10-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "tier",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The ticket type's id.",
+          "example": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e"
+        },
+        {
+          "name": "steps",
+          "location": "body",
+          "type": "array of object",
+          "required": false,
+          "description": "In order: { id?, name?, price_cents, ends_after_count?, ends_at? }. price_cents is the face price before fees and tax, in cents; ends_after_count counts tickets sold at that step; ends_at is a date-time.",
+          "example": [
+            {
+              "name": "Early bird",
+              "price_cents": 2000,
+              "ends_after_count": 100,
+              "ends_at": "2026-12-01T05:00:00Z"
+            },
+            {
+              "name": "GA",
+              "price_cents": 2500,
+              "ends_after_count": 200
+            },
+            {
+              "name": "Final",
+              "price_cents": 3000
+            }
+          ]
+        },
+        {
+          "name": "door_price_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "The price at the door (POS), in cents; null removes it. Left as is when absent.",
+          "example": 3500
+        }
+      ],
+      "request_example": {
+        "steps": [
+          {
+            "name": "Early bird",
+            "price_cents": 2000,
+            "ends_after_count": 100,
+            "ends_at": "2026-12-01T05:00:00Z"
+          },
+          {
+            "name": "GA",
+            "price_cents": 2500,
+            "ends_after_count": 200
+          },
+          {
+            "name": "Final",
+            "price_cents": 3000
+          }
+        ],
+        "door_price_cents": 3500
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the steps as GET answers them.",
+          "example": {
+            "data": {
+              "ticket_type_id": "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+              "door_price_cents": 3500,
+              "current": {
+                "price_cents": 2000,
+                "source": "step",
+                "step_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "step_name": "Early bird",
+                "step_index": 1,
+                "step_count": 3,
+                "step_remaining": 37,
+                "step_ends_at": "2026-12-01T05:00:00+00:00",
+                "next_price_cents": 2500,
+                "next_step_name": "GA",
+                "door_price_cents": 3500
+              },
+              "steps": [
+                {
+                  "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                  "name": "Early bird",
+                  "price_cents": 2000,
+                  "ends_after_count": 100,
+                  "ends_at": "2026-12-01T05:00:00+00:00",
+                  "sold_out_at": null,
+                  "sold": 61,
+                  "held": 2
+                },
+                {
+                  "id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                  "name": "GA",
+                  "price_cents": 2500,
+                  "ends_after_count": 200,
+                  "ends_at": null,
+                  "sold_out_at": null,
+                  "sold": 0,
+                  "held": 0
+                },
+                {
+                  "id": "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
+                  "name": "Final",
+                  "price_cents": 3000,
+                  "ends_after_count": null,
+                  "ends_at": null,
+                  "sold_out_at": null,
+                  "sold": 0,
+                  "held": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A step without an end (or the last with one), times going backwards, a bad or unknown field.",
+          "example": {
+            "error": "step 1: give it an end (a number sold, a date, or both); only the last step has none"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator isn't an owner or manager now (finance, content and scanner keys can't change prices or limits).",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not one of your events, or no such ticket type on it.",
+          "example": {
+            "error": "ticket type not found"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,860 @@
+{
+  "file": "artists",
+  "name": "Artists and lineups",
+  "order": 12,
+  "description": "The organization's artists (one canonical Spotify id each, a unique permalink, photo, genres and links) and each event's lineup: ordered slots with an act type (headline, support, opener, dj, host, other) and an optional set time. Saving a lineup also rewrites the event's performer names (the first 10), so emails and the other feeds follow it. Duplicate artists are merged: the merged artist stays as an alias with canonical_artist_id set, and its slots move to the artist it was merged into. Reads need `events:read`, writes `events:write`. Guide: docs/listing-feed.md.",
+  "endpoints": [
+    {
+      "id": "list-artists",
+      "method": "GET",
+      "path": "/v1/artists",
+      "summary": "List artists",
+      "description": "The organization's artists, by name. Merged artists (aliases) are left out unless include_merged=true.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Name contains this text (case-insensitive). q[name_cont] works too.",
+          "example": "lum"
+        },
+        {
+          "name": "spotify_id",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only the artists with this Spotify id (a link or URI is normalized first).",
+          "example": "4Z8W4fKeB5YxbusRsdQVPb"
+        },
+        {
+          "name": "include_merged",
+          "location": "query",
+          "type": "boolean",
+          "required": false,
+          "default": "false",
+          "description": "true also returns artists merged into another.",
+          "example": "true"
+        },
+        {
+          "name": "q[s]",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "default": "name asc",
+          "description": "Sort: name, created_at or updated_at, then asc or desc. sort works too.",
+          "example": "updated_at desc"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "name": "Lumen",
+                "permalink": "lumen",
+                "bio": "Brooklyn house duo.",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "links": {
+                  "instagram": "https://instagram.com/lumen.music"
+                },
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                "canonical_artist_id": null,
+                "created_at": "2026-10-20T09:15:40.112+00:00",
+                "updated_at": "2026-10-22T18:02:11.904+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter, sort, page or per_page.",
+          "example": {
+            "error": "sort must be name, created_at or updated_at, then asc or desc."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-artist",
+      "method": "POST",
+      "path": "/v1/artists",
+      "summary": "Create an artist",
+      "description": "JSON body with the fields below, or Opendate-style: wrapped as { \"artist\": { … } }, or form-encoded as artist[name]=….",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Display name, 1-120 characters. Names need not be unique (merge duplicates).",
+          "example": "Lumen"
+        },
+        {
+          "name": "permalink",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Lowercase letters, digits and dashes, unique in the organization. Generated from the name when left out (lumen, then lumen-2, …); an explicit one that is taken is a 409.",
+          "example": "lumen"
+        },
+        {
+          "name": "spotify",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The artist's Spotify link, spotify:artist: URI or 22-character id, normalized to one id; spotify_id, spotify_url and spotify_uri are accepted under those names too. Album, track or playlist links are a 400. \"\" or null clears it. Exos never calls Spotify.",
+          "example": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb?si=1a2b"
+        },
+        {
+          "name": "bio",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 4000 characters.",
+          "example": "Brooklyn house duo."
+        },
+        {
+          "name": "genres",
+          "location": "body",
+          "type": "array of strings",
+          "required": false,
+          "description": "Up to 10, 40 characters each; duplicates (any case) are dropped.",
+          "example": [
+            "House",
+            "Disco"
+          ]
+        },
+        {
+          "name": "links",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "http(s) URLs keyed by website, instagram, facebook, twitter, tiktok, youtube, soundcloud, bandcamp or apple_music. An empty value drops the link; an unknown key is a 400.",
+          "example": {
+            "instagram": "https://instagram.com/lumen.music"
+          }
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string (URL) or null",
+          "required": false,
+          "description": "An https URL of the photo. image_thumb_url likewise; without one the thumbnail is the photo.",
+          "example": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+        }
+      ],
+      "request_example": {
+        "name": "Lumen",
+        "spotify": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+        "genres": [
+          "House",
+          "Disco"
+        ]
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+              "org_id": "5d2e8c1a-3b4f-4e6a-9c7d-1f2e3a4b5c6d",
+              "name": "Lumen",
+              "permalink": "lumen",
+              "bio": "Brooklyn house duo.",
+              "genres": [
+                "House",
+                "Disco"
+              ],
+              "links": {
+                "instagram": "https://instagram.com/lumen.music"
+              },
+              "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+              "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+              "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+              "canonical_artist_id": null,
+              "created_at": "2026-10-20T09:15:40.112+00:00",
+              "updated_at": "2026-10-22T18:02:11.904+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A missing name or an invalid field; the message names it.",
+          "example": {
+            "error": "spotify: not a Spotify artist link, URI or id"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 409,
+          "description": "The permalink is taken.",
+          "example": {
+            "error": "artist: permalink \"lumen\" is taken"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-artist",
+      "method": "GET",
+      "path": "/v1/artists/:id",
+      "summary": "Get an artist",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The artist's id. An artist of another organization answers 404.",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+              "name": "Lumen",
+              "permalink": "lumen",
+              "bio": "Brooklyn house duo.",
+              "genres": [
+                "House",
+                "Disco"
+              ],
+              "links": {
+                "instagram": "https://instagram.com/lumen.music"
+              },
+              "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+              "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+              "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+              "canonical_artist_id": null,
+              "created_at": "2026-10-20T09:15:40.112+00:00",
+              "updated_at": "2026-10-22T18:02:11.904+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such artist in the key's organization.",
+          "example": {
+            "error": "artist not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-artist",
+      "method": "PATCH",
+      "path": "/v1/artists/:id",
+      "summary": "Update an artist",
+      "description": "Only the fields sent change. A rename shows at once on every lineup the artist is on (and in those events' performer names). The permalink stays unless one is sent.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The artist's id.",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Display name, 1-120 characters. Names need not be unique (merge duplicates).",
+          "example": "Lumen"
+        },
+        {
+          "name": "permalink",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Lowercase letters, digits and dashes, unique in the organization. Generated from the name when left out (lumen, then lumen-2, …); an explicit one that is taken is a 409.",
+          "example": "lumen"
+        },
+        {
+          "name": "spotify",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The artist's Spotify link, spotify:artist: URI or 22-character id, normalized to one id; spotify_id, spotify_url and spotify_uri are accepted under those names too. Album, track or playlist links are a 400. \"\" or null clears it. Exos never calls Spotify.",
+          "example": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb?si=1a2b"
+        },
+        {
+          "name": "bio",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Up to 4000 characters.",
+          "example": "Brooklyn house duo."
+        },
+        {
+          "name": "genres",
+          "location": "body",
+          "type": "array of strings",
+          "required": false,
+          "description": "Up to 10, 40 characters each; duplicates (any case) are dropped.",
+          "example": [
+            "House",
+            "Disco"
+          ]
+        },
+        {
+          "name": "links",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "http(s) URLs keyed by website, instagram, facebook, twitter, tiktok, youtube, soundcloud, bandcamp or apple_music. An empty value drops the link; an unknown key is a 400.",
+          "example": {
+            "instagram": "https://instagram.com/lumen.music"
+          }
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string (URL) or null",
+          "required": false,
+          "description": "An https URL of the photo. image_thumb_url likewise; without one the thumbnail is the photo.",
+          "example": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg"
+        }
+      ],
+      "request_example": {
+        "spotify": ""
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the artist as saved.",
+          "example": {
+            "data": {
+              "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+              "org_id": "5d2e8c1a-3b4f-4e6a-9c7d-1f2e3a4b5c6d",
+              "name": "Lumen",
+              "permalink": "lumen",
+              "bio": "Brooklyn house duo.",
+              "genres": [
+                "House",
+                "Disco"
+              ],
+              "links": {
+                "instagram": "https://instagram.com/lumen.music"
+              },
+              "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+              "spotify_id": null,
+              "spotify_uri": null,
+              "spotify_url": null,
+              "canonical_artist_id": null,
+              "created_at": "2026-10-20T09:15:40.112+00:00",
+              "updated_at": "2026-10-22T18:02:11.904+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "An invalid field.",
+          "example": {
+            "error": "artist: link \"website\" must be an http(s) URL"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such artist in the key's organization.",
+          "example": {
+            "error": "artist not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The permalink is taken.",
+          "example": {
+            "error": "artist: permalink \"lumen\" is taken"
+          }
+        }
+      ]
+    },
+    {
+      "id": "merge-artist",
+      "method": "POST",
+      "path": "/v1/artists/:id/merge",
+      "summary": "Merge an artist into another",
+      "description": "For the same act entered twice. The artist in the path becomes an alias of target_artist_id (canonical_artist_id); its lineup slots move to the target, a slot on an event that already has the target is removed and the lineup renumbered, and artists merged into it follow. Later lineup saves that name it get the target. Merging a merged artist, or into one, is a 409.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The artist to merge's id.",
+          "example": "9c3e1a4d-6f8b-4cad-9e2f-4a5b6c7d8e9f"
+        },
+        {
+          "name": "target_artist_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The artist to keep.",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        }
+      ],
+      "request_example": {
+        "target_artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the merged artist and how many events' lineups changed.",
+          "example": {
+            "data": {
+              "artist": {
+                "id": "9c3e1a4d-6f8b-4cad-9e2f-4a5b6c7d8e9f",
+                "org_id": "5d2e8c1a-3b4f-4e6a-9c7d-1f2e3a4b5c6d",
+                "name": "Lumen",
+                "permalink": "lumen-2",
+                "bio": "Brooklyn house duo.",
+                "genres": [
+                  "House",
+                  "Disco"
+                ],
+                "links": {
+                  "instagram": "https://instagram.com/lumen.music"
+                },
+                "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                "canonical_artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "created_at": "2026-10-20T09:15:40.112+00:00",
+                "updated_at": "2026-10-22T18:02:11.904+00:00"
+              },
+              "events_updated": 2
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "No target, or the artist itself.",
+          "example": {
+            "error": "artist: pick another artist to merge into"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Either artist is not in the key's organization.",
+          "example": {
+            "error": "merge target not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already merged, or the target was merged.",
+          "example": {
+            "error": "artist: already merged into another artist"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-artist-events",
+      "method": "GET",
+      "path": "/v1/artists/:id/events",
+      "summary": "List an artist's events",
+      "description": "Every event of the organization with this artist (or an artist merged into it) on the bill, latest start first, with the slot.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The artist's id.",
+          "example": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "name": "Warehouse Night",
+                "slug": "warehouse-night",
+                "status": "published",
+                "starts_at": "2026-12-05T03:00:00+00:00",
+                "performer_id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "act_type": "headline",
+                "position": 1
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such artist in the key's organization.",
+          "example": {
+            "error": "artist not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-lineup",
+      "method": "GET",
+      "path": "/v1/events/:id/lineup",
+      "summary": "Get an event's lineup",
+      "description": "The slots in running order. `id` is the slot (the listing feed's performer_id); `artist` is the artist's public block.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "act_type": "headline",
+                "position": 1,
+                "set_time": "2026-12-05T04:30:00+00:00",
+                "updated_at": "2026-10-22T18:05:00+00:00",
+                "artist": {
+                  "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                  "name": "Lumen",
+                  "permalink": "lumen",
+                  "updated_at": "2026-10-22T18:02:11.904+00:00",
+                  "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                  "canonical_artist_id": null
+                }
+              },
+              {
+                "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                "act_type": "opener",
+                "position": 2,
+                "set_time": null,
+                "updated_at": "2026-10-22T18:05:00+00:00",
+                "artist": {
+                  "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                  "name": "Nova Echo",
+                  "permalink": "nova-echo",
+                  "updated_at": "2026-10-21T11:00:00+00:00",
+                  "image_url": null,
+                  "image_thumb_url": null,
+                  "spotify_id": null,
+                  "spotify_uri": null,
+                  "spotify_url": null,
+                  "canonical_artist_id": null
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "set-lineup",
+      "method": "PUT",
+      "path": "/v1/events/:id/lineup",
+      "summary": "Replace an event's lineup",
+      "description": "The whole lineup in running order; positions come from the order (1..n). At most 20 slots. Every artist must be the organization's; a merged artist is replaced by the one it was merged into; the same artist twice is a 400. act_type defaults to headline for the first slot and support after. A slot whose artist, act type, position and set time are unchanged keeps its id and updated_at. An empty list clears the lineup. The event's performer names follow (first 10).",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "lineup",
+          "location": "body",
+          "type": "array of objects",
+          "required": true,
+          "description": "[{ artist_id, act_type?, set_time? (ISO 8601) }]. A bare JSON array works too.",
+          "example": [
+            {
+              "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+              "act_type": "headline",
+              "set_time": "2026-12-05T04:30:00Z"
+            },
+            {
+              "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+              "act_type": "opener"
+            }
+          ]
+        }
+      ],
+      "request_example": {
+        "lineup": [
+          {
+            "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+            "act_type": "headline",
+            "set_time": "2026-12-05T04:30:00Z"
+          },
+          {
+            "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+            "act_type": "opener"
+          }
+        ]
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the lineup as saved.",
+          "example": {
+            "data": [
+              {
+                "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f",
+                "artist_id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                "act_type": "headline",
+                "position": 1,
+                "set_time": "2026-12-05T04:30:00+00:00",
+                "updated_at": "2026-10-22T18:05:00+00:00",
+                "artist": {
+                  "id": "7a1c9e2b-4d6f-4a8b-9c0d-2e3f4a5b6c7d",
+                  "name": "Lumen",
+                  "permalink": "lumen",
+                  "updated_at": "2026-10-22T18:02:11.904+00:00",
+                  "image_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "image_thumb_url": "https://<project-ref>.supabase.co/storage/v1/object/public/exos-media/event-images/0f1e2d3c/artist-lumen.jpg",
+                  "spotify_id": "4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+                  "spotify_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+                  "canonical_artist_id": null
+                }
+              },
+              {
+                "id": "d2e3f4a5-b6c7-4d8e-9fa0-1b2c3d4e5f60",
+                "artist_id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                "act_type": "opener",
+                "position": 2,
+                "set_time": null,
+                "updated_at": "2026-10-22T18:05:00+00:00",
+                "artist": {
+                  "id": "8b2d0f3c-5e7a-4b9c-8d1e-3f4a5b6c7d8e",
+                  "name": "Nova Echo",
+                  "permalink": "nova-echo",
+                  "updated_at": "2026-10-21T11:00:00+00:00",
+                  "image_url": null,
+                  "image_thumb_url": null,
+                  "spotify_id": null,
+                  "spotify_uri": null,
+                  "spotify_url": null,
+                  "canonical_artist_id": null
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad slot; the message names it.",
+          "example": {
+            "error": "lineup: slot 2 names an artist this organization does not have"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in the key's organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    }
+  ]
+}

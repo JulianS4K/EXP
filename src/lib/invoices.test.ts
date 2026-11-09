@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allInNote,
   addressLines,
   documentFileName,
   documentTitle,
@@ -130,5 +131,20 @@ describe('org legal + money helpers', () => {
       { id: 'i2', number: 'INV-000002', session_id: null, total_cents: 1, currency: 'usd', issued_at: '' },
     ]);
     expect([...m.keys()]).toEqual(['cs_1']);
+  });
+});
+
+describe('allInNote (fee rules, mig 20261027100000)', () => {
+  const inv = { id: 'i', number: 'A-1', issued_at: '', currency: 'usd', subtotal_cents: 0, tax_cents: 0, total_cents: 9600, status: 'issued', session_id: 's' };
+  it('says what the prices include', () => {
+    expect(allInNote({ invoice: inv, fees: [{ name: 'Facility fee', recipient: 'venue', amount_cents: 600 }] }))
+      .toBe('Prices are all-in: they include $6.00 facility fee; nothing was added at checkout.');
+    expect(allInNote({ invoice: { ...inv, tax_cents: 50 }, fees: [{ name: 'Facility fee', recipient: null, amount_cents: 600 }] }))
+      .toMatch(/include \$6.00 facility fee and tax;/);
+  });
+  it('falls back to the plain note without fees; nothing for a free order', () => {
+    expect(allInNote({ invoice: inv })).toBe('Prices are all-in: tax is included and no fees were added at checkout.');
+    expect(allInNote({ invoice: inv, fees: [] })).toMatch(/no fees were added/);
+    expect(allInNote({ invoice: { ...inv, total_cents: 0 } })).toBe('');
   });
 });

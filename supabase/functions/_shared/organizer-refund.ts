@@ -18,6 +18,15 @@
 //                              it out of their balance). Matches the auto-refund
 //                              in _shared/auto-refund.ts by default.
 
+//
+// Commission methods (mig 20261104190000): `mode` is decided once per refund
+// request in SQL (exos_refund_charge_prepare; refundRun asks). Split orders
+// send neither Connect flag (the organizer's part was reversed from their
+// transfer first); a fee that still holds a promoter commission is always
+// refunded; once the commission went out the fee is kept (keep_fee). Default
+// 'standard': as before.
+import { type RefundMode, refundFlagsForMode } from "./payouts/commissionMethods.ts";
+
 export function organizerRefundIdempotencyKey(requestId: string): string {
   return `exos_refund_${requestId}`;
 }
@@ -30,13 +39,16 @@ export interface ClaimedRequest {
   scope: string;
 }
 
-export function organizerRefundParams(req: ClaimedRequest, keepPlatformFee: boolean) {
+export function organizerRefundParams(
+  req: ClaimedRequest,
+  keepPlatformFee: boolean,
+  mode: RefundMode = "standard",
+) {
   return {
     payment_intent: req.payment_intent,
     amount: req.amount_cents,
     reason: "requested_by_customer" as const,
-    reverse_transfer: true,
-    refund_application_fee: !keepPlatformFee,
+    ...refundFlagsForMode(mode, keepPlatformFee),
     metadata: {
       exos_refund_request_id: req.request_id,
       exos_session_id: req.session_id,

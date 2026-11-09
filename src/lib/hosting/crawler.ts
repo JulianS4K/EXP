@@ -20,7 +20,7 @@ const CRAWLER_UA_TOKENS = [
   'google-inspectiontool',
   'bingbot',
   'applebot', // Apple / Siri / Spotlight + iMessage
-  'tiktok', // TikTok in-app browser + bytespider unfurl
+  'tiktok', // TikTok's unfurl fetcher (people in TikTok's in-app browser are let through below)
   'bytespider',
   'embedly', // generic unfurl service used by many apps
   'vkshare',
@@ -35,5 +35,12 @@ const CRAWLER_UA_TOKENS = [
 export function isLinkCrawler(userAgent: string | null | undefined, opts: { ai?: boolean } = {}): boolean {
   if (!userAgent) return false;
   const ua = userAgent.toLowerCase();
-  return CRAWLER_UA_TOKENS.some((t) => ua.includes(t)) || (opts.ai === true && isAiAgent(ua));
+  // 'tiktok' and 'pinterest' are also in the in-app browsers' own user agents
+  // (a person tapping a link inside TikTok): a full mobile WebKit page view
+  // with one of them is a human and gets the plain app.
+  const human = APP_NAME_TOKENS.some((t) => ua.includes(t)) && /\bapplewebkit\//.test(ua) && /\bmobile\b/.test(ua);
+  return CRAWLER_UA_TOKENS.some((t) => ua.includes(t) && !(human && APP_NAME_TOKENS.includes(t)))
+    || (opts.ai === true && isAiAgent(ua));
 }
+
+const APP_NAME_TOKENS = ['tiktok', 'pinterest'];

@@ -13,12 +13,16 @@
 --      pool is released
 --   R7 the operator setting changes the number
 --   R8 grants
--- Self-contained (a8 prefix), rolled back. The harness sets the rule to 0
--- for older fixtures; this file puts the default (250) back first.
+-- Self-contained (a8 prefix), rolled back. Since mig 20261029090000 the
+-- rule is "max capacity over free_tier_max_capacity, and opted in"; this file
+-- keeps the 250 cases by setting the cutoff to 249 with no opt-in needed
+-- (test_free_tier_resale.sql covers the 150 default and the opt-in). The
+-- harness turns the rules off for older fixtures.
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
-DELETE FROM public.exos_platform_settings WHERE key = 'resale_min_capacity';
+DELETE FROM public.exos_platform_settings WHERE key IN ('free_tier_max_capacity', 'resale_consent_required');
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_capacity', '249'), ('resale_consent_required', 'false');
 
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('a8000000-0000-0000-0000-0000000000a0','a8-owner@x.com',now());
@@ -27,7 +31,7 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('a8000000-0000-0000-0000-000000000001','a8000000-0000-0000-0000-0000000000a0','owner');
 -- e1: 200 (100 + 100). e2: 260 (200 + 60). e3: cap 300 over types of 120.
--- e4: cap 300 with an uncapped type. e5: no cap, 100 + an uncapped type.
+-- e4: cap 300 over types of 300. e5: no cap, 100 + a closed type (capacity 0, mig 20261105100000).
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
   ('a8000000-0000-0000-0000-0000000000e1','a8000000-0000-0000-0000-000000000001','Small Room','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
   ('a8000000-0000-0000-0000-0000000000e2','a8000000-0000-0000-0000-000000000001','Big Room','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
@@ -41,7 +45,7 @@ INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibi
   ('a8000000-0000-0000-0000-0000000000d4','a8000000-0000-0000-0000-0000000000e2','VIP',90,60,0,'public',2),
   ('a8000000-0000-0000-0000-0000000000d5','a8000000-0000-0000-0000-0000000000e3','GA',40,120,0,'public',1),
   ('a8000000-0000-0000-0000-0000000000d6','a8000000-0000-0000-0000-0000000000e4','GA',40,100,0,'public',1),
-  ('a8000000-0000-0000-0000-0000000000d7','a8000000-0000-0000-0000-0000000000e4','RSVP',0,0,0,'public',2),
+  ('a8000000-0000-0000-0000-0000000000d7','a8000000-0000-0000-0000-0000000000e4','RSVP',0,200,0,'public',2),
   ('a8000000-0000-0000-0000-0000000000d8','a8000000-0000-0000-0000-0000000000e5','GA',40,100,0,'public',1),
   ('a8000000-0000-0000-0000-0000000000d9','a8000000-0000-0000-0000-0000000000e5','RSVP',0,0,0,'public',2);
 
@@ -69,12 +73,12 @@ BEGIN
   ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 200, 'R1: e1';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e2')) = 260, 'R1: e2';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 120, 'R1: e3 cap above its types';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 300, 'R1: e4 cap with an uncapped type';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e5')) = 100, 'R1: e5 uncapped type adds nothing';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 300, 'R1: e4 cap over its types';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e5')) = 100, 'R1: e5 a closed type adds nothing';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e1')) AND public.exos_resale_unlocked(pg_temp.u('e2'))
      AND NOT public.exos_resale_unlocked(pg_temp.u('e3')) AND public.exos_resale_unlocked(pg_temp.u('e4'))
      AND NOT public.exos_resale_unlocked(pg_temp.u('e5')), 'R1: unlocked';
-  ASSERT public.exos_resale_min_capacity() = 250, 'R1: default 250';
+  ASSERT public.exos_resale_min_capacity() = 250, 'R1: 250 (cutoff 249 + 1)';
 END $$;
 
 -- R1. A table counts as its party size: 100 GA + 100 tables of 2 = 300.
@@ -96,9 +100,9 @@ BEGIN
   ASSERT (pg_temp.event_row('e2', 'stubhub')).status = 'pending', 'R3: event row at 260';
   PERFORM pg_temp.act('a8000000-0000-0000-0000-0000000000a0');
   ASSERT pg_temp.refused($q$SELECT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 10)$q$,
-                         'unlock at a max capacity of 250; this event''s is 200'), 'R2: allocation';
+                         'need a max capacity over 249 (events of 249 or less are the free tier: no Exos fee, never resold); this event''s is 200'), 'R2: allocation';
   ASSERT pg_temp.refused($q$SELECT public.exos_request_distribution(pg_temp.u('e1'), ARRAY['stubhub'])$q$,
-                         'unlock at a max capacity of 250'), 'R2: request';
+                         'need a max capacity over 249'), 'R2: request';
   ASSERT public.exos_set_channel_allocation(pg_temp.u('e2'), 'stubhub', pg_temp.u('d3'), 10) = 10, 'R2: 260 allocates';
   -- Setting 0 is always fine (taking seats off).
   ASSERT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 0) = 0, 'R2: 0 allowed';
@@ -164,16 +168,16 @@ BEGIN
            WHERE tier_id = pg_temp.u('d3') AND channel = 's4k') = 0, 'R6: S4K pool released';
   PERFORM pg_temp.act('a8000000-0000-0000-0000-0000000000a0');
   ASSERT pg_temp.refused($q$SELECT public.exos_set_s4k_split(pg_temp.u('e2'), '[{"tier_id":"a8000000-0000-0000-0000-0000000000d3","seats":5}]')$q$,
-                         'unlock at a max capacity of 250'), 'R6: no split under 250';
+                         'need a max capacity over 249'), 'R6: no split under 250';
 END $$;
 
 -- R7. The operator setting.
 DO $$
 BEGIN
-  INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_min_capacity', '100');
+  UPDATE public.exos_platform_settings SET value = '99' WHERE key = 'free_tier_max_capacity';
   ASSERT public.exos_resale_min_capacity() = 100 AND public.exos_resale_unlocked(pg_temp.u('e5')), 'R7: 100';
-  UPDATE public.exos_platform_settings SET value = '"oops"' WHERE key = 'resale_min_capacity';
-  ASSERT public.exos_resale_min_capacity() = 250, 'R7: a bad value falls back to 250';
+  UPDATE public.exos_platform_settings SET value = '"oops"' WHERE key = 'free_tier_max_capacity';
+  ASSERT public.exos_resale_min_capacity() = 151, 'R7: a bad value falls back to the 150 default';
 END $$;
 
 -- R8. Grants.

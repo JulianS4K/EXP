@@ -34,6 +34,7 @@ the details with counsel.)
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
 - [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
       delayed methods would outlive the 30-minute seat hold.
+- [ ] Stripe Checkout must collect the billing address: `exos-checkout` sets `billing_address_collection: "auto"` (country and postal code; never `"required"`, which adds a full address form), and stripe-webhook stores country / region / city / postal code for "Where buyers are" (mig 20261106140000).
 - [ ] Apple Pay and Google Pay switched on (no code: `payment_method_types: ["card"]` already
       carries both wallets). In the live Dashboard: Settings → Payment methods → Apple Pay and
       Google Pay on. The event-page checkout runs on `checkout.stripe.com`, so nothing else is needed
@@ -153,7 +154,7 @@ for each case.
 | 3 | Refund $10 of it in the Stripe dashboard | Session `partially_refunded`, tickets **still active**, one refund row with Stripe's `re_…` id |
 | 4 | Refund the rest | Session `refunded`, **both tickets voided**, tier `sold` back down by 2 |
 | 5 | Buy 1 ticket, then open a dispute (test card `4000 0000 0000 0259`) | Session keeps its status and gets `dispute_status`; tickets stay valid. Lose it (submit losing evidence in test mode) → tickets voided |
-| 6 | On a tier with nothing sold, start checkout for 2, then set the tier's `capacity` to 1 in SQL and pay. (`capacity = 0` means *unlimited*, so don't use 0) | Session `failed`, automatic refund with `reverse_transfer` (the connected account's balance goes down, not the platform's) |
+| 6 | On a tier with nothing sold, start checkout for 2, then set the tier's `capacity` to 1 in SQL and pay. (`capacity = 0` means *closed*, so 0 would refuse the sale outright rather than test the refund path) | Session `failed`, automatic refund with `reverse_transfer` (the connected account's balance goes down, not the platform's) |
 | 7 | Start checkout and leave it for 30 minutes | Session `expired`, hold released. Stripe sessions expire at 30 minutes |
 | 8 | Hidden tier: buy by UUID with no voucher | 409 from exos-checkout, no Stripe session |
 | 9 | Tier with a `price_schedule` step already started | The Stripe line item shows the scheduled price, which is also what the storefront shows |
@@ -227,6 +228,58 @@ counted per email; five guest holds per network per 10 minutes (salted IP hash, 
 capped at a quarter of what's left for the event (at least 10 seats). Organizers switch guests off per event with
 **Guest checkout** in Edit event (`purchase_limits.guestCheckout = false`). Capacity-bypass codes and free claims
 still need an account. The embedded (venue-site iframe) checkout still signs in first.
+
+**Proof of email before the tickets are released (mig 20261105100000).** A typo in the guest's email used to
+send the claim links to a stranger, or straight into a stranger's account when the typo was a real address. Now
+the order is paid and the seats are kept, but the tickets stay parked on the org owner until the buyer proves the
+email (the 6-digit code mailed to it, or its "confirm here" link) or a phone (an SMS code), on the page they paid
+on: `exos-checkout` returns a random `proof_token` that the browser keeps (localStorage; where an in-app browser blocks
+storage, it comes back in the return URL's fragment, `#pt=`, see [`guest-checkout.md`](guest-checkout.md)) and the session stores only
+its SHA-256 (`exos_checkout_sessions.proof_token_hash`). The code without that browser does nothing, so a mistyped
+inbox that belongs to someone else gets nothing. Until proven the tickets don't scan, can't be claimed (link or the
+email's own account) and aren't attached to any account; the door can still check the buyer in by name. Proven by
+email: an account with that email gets the tickets, else the claim links are mailed; proven by phone: the claim
+links are on the page. Limits: 5 wrong codes lock the code until a new one is sent; 5 code mails and 3 SMS per
+order, 60 s apart on each channel; 3 SMS per number per 10 minutes. The organizer sees the orders still waiting on
+**Orders** (pick the event) and can **Send to another email** (`exos_order_proof_resend`: the old links die, the
+original email is kept). A signed-in account whose email isn't confirmed proves it the same way (its own account
+then gets the tickets); a confirmed one skips it. SMS codes need the org's texting set up (the RSVP outbox).
+
+**Hold timing (mig 20261105100000).** `exos-checkout` sets the Stripe session's `expires_at` (30 minutes, Stripe's
+minimum) and records it (`provider_expires_at`); the seat hold lasts until then + 10 minutes, so a payment made just
+before the page closed whose webhook is late still finds its seat, and the next buyer waits instead of paying and
+being refunded. `checkout.session.expired` releases the hold at once.
+
+## Venmo / PayPal and Cash App Pay (mig 20261031220000)
+
+Operator approval 2026-10-30: PayPal is a second processor, to take Venmo. Its only writes are order create,
+capture and refund on the **platform's** PayPal account (`_shared/paypal/client.ts` refuses anything else).
+
+1. **Apply `20261031220000` first.** `exos-checkout` refuses a PayPal order it can't record with its processor.
+2. **Secrets:** `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (the sandbox app's first), `PAYPAL_WEBHOOK_ID`.
+   `EXOS_PAYPAL_ENV=live` (and the live app's keys) switches to live; anything else is sandbox. Optional:
+   `EXOS_PAYPAL_FEE_BPS` / `EXOS_PAYPAL_FEE_FIXED_CENTS` (default 349 / 49, PayPal's US rate, used in the fee
+   split exactly as Stripe's card fee is), `EXOS_PAYPAL_BRAND_NAME`.
+3. **Deploy** `exos-paypal` with `--no-verify-jwt` (PayPal can't send a JWT; the webhook signature, the order id
+   and `CRON_SECRET` are the gates) and redeploy `exos-checkout`, `exos-refund`, `exos-reconcile-checkouts` and
+   `exos-mail-drain` (PayPal dispute mails).
+4. **Webhook:** in the PayPal app, add `https://<project>.supabase.co/functions/v1/exos-paypal` with
+   `CHECKOUT.ORDER.APPROVED`, `PAYMENT.CAPTURE.COMPLETED`, `.PENDING`, `.DECLINED`, `.DENIED`, `.REFUNDED`,
+   `.REVERSED` and `CUSTOMER.DISPUTE.CREATED`, `.UPDATED`, `.RESOLVED`. Its id is `PAYPAL_WEBHOOK_ID`.
+5. **SPA:** build with `VITE_PAYPAL_CLIENT_ID` (the public client id, sandbox first). Organizers switch
+   "Venmo / PayPal" on in org settings; the event page then shows **Pay with Venmo / PayPal**.
+6. **Reconcile:** `{"action":"reconcile"}` to `exos-paypal` with the cron secret settles stuck PayPal orders,
+   refunds paid-but-unissued ones and returns a read-only report against PayPal's transactions. Not scheduled
+   (a cron change is operator-gated); run it daily next to `exos-reconcile-stripe`.
+
+**Paying organizers is not automated.** PayPal money stays on the platform's PayPal account.
+`exos_paypal_order_owed` / `exos_paypal_org_balances` say what each org is owed (net of the same fees as a card
+sale, net of refunds, held while a dispute is open, nothing once one is lost); the operator pays it out by hand
+and records it with `exos_record_paypal_remittance(org, cents, reference)`. The org sees the balance in org settings.
+
+**Cash App Pay** is a Stripe method: set `EXOS_STRIPE_CASHAPP=on` and the org switches it on; USD events then
+offer it next to cards on Stripe Checkout. It settles at once like a card, so `stripe-webhook`, holds, refunds
+and disputes work unchanged. Turn Cash App Pay on in the Stripe dashboard (Settings → Payment methods) too.
 
 ## Known gaps (see `KANBAN.md`)
 

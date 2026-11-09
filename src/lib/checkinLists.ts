@@ -33,6 +33,11 @@ export async function saveCheckinList(eventId: string, input: CheckinListInput, 
     valid_from: input.validFrom || null,
     valid_until: input.validUntil || null,
     ...(sortOrder != null ? { sort_order: sortOrder } : {}),
+    // Add-on entry codes (mig 20261107110000); a ticket list keeps no add-ons.
+    ...(input.admits ? {
+      admits: input.admits,
+      addon_ids: input.admits !== 'tickets' && input.addonIds && input.addonIds.length > 0 ? input.addonIds : null,
+    } : {}),
   };
   if (id) {
     const { error } = await supabase.from('exos_checkin_lists').update(row).eq('id', id);
@@ -54,4 +59,21 @@ export async function saveCheckinList(eventId: string, input: CheckinListInput, 
 export async function deleteCheckinList(id: string): Promise<void> {
   const { error } = await supabase.from('exos_checkin_lists').delete().eq('id', id);
   if (error) throw error;
+}
+
+export interface AccessAddon { id: string; name: string; separateAccessBarcode: boolean }
+
+/** The event's add-ons, with whether each has its own entry code (a list can
+ *  scan those). [] before mig 20261107110000. */
+export async function listEventAccessAddons(eventId: string): Promise<AccessAddon[]> {
+  const { data, error } = await supabase.from('exos_event_addons')
+    .select('id, name, separate_access_barcode').eq('event_id', eventId).order('sort_order', { ascending: true });
+  if (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42703' || code === 'PGRST204' || code === '42P01' || code === 'PGRST205') return [];
+    throw error;
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id), name: String(r.name ?? ''), separateAccessBarcode: r.separate_access_barcode === true,
+  }));
 }

@@ -14,6 +14,9 @@
 // dashboard. The Navbar's "Get Started" link routes here for new
 // signups.
 
+import { OrgTypeChoice } from '../components/OrgTypePicker';
+import { setOrgType } from '../lib/eventLocationApi';
+import type { OrgType } from '../lib/eventLocation';
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -65,6 +68,8 @@ export default function OrganizerOnboarding() {
   const [orgSlug, setOrgSlug] = useState('');
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [creatingOrg, setCreatingOrg] = useState(false);
+  // Organizer / promoter / collective (mig 20261105130000): saved once the org exists.
+  const [orgType, setOrgTypeChoice] = useState<OrgType>('organizer');
 
   // Step 3 state (theme)
   const [primary, setPrimary] = useState('#FFE714');
@@ -143,6 +148,14 @@ export default function OrganizerOnboarding() {
         slug: orgSlug,
         ownerUid: user.uid,
       });
+      if (orgType !== 'organizer') {
+        try {
+          await setOrgType(orgId, orgType);
+        } catch (typeErr) {
+          console.error('org type not saved:', typeErr);
+          toast({ kind: 'error', message: 'Created, but the kind of organization did not save. Set it in Org settings.' });
+        }
+      }
       await refresh();
       setActiveOrg(orgId);
       toast({ kind: 'success', message: 'Org created.' });
@@ -321,6 +334,10 @@ export default function OrganizerOnboarding() {
               <p className="text-slate-400 text-xs mt-1">
                 Your storefront URL — share this once you're set up.
               </p>
+            </div>
+            <div>
+              <p className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">What kind of organization?</p>
+              <OrgTypeChoice value={orgType} onChange={setOrgTypeChoice} name="ob-org-type" />
             </div>
             <div className="flex justify-between pt-4">
               <button

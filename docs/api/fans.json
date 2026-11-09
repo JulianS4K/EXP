@@ -1,0 +1,692 @@
+{
+  "file": "fans",
+  "name": "Fans",
+  "order": 35,
+  "description": "Fan profiles: one per person (email) who bought from the organization, signed up through one of its signup forms, or was added by hand. Built automatically from orders and signups. Personal data is kept minimal (email, an optional name, whether there is an Exos account). Consent is shown on the profile but can't be changed through the API or the dashboard: fans join and leave lists themselves (double opt-in signup forms, the ticket page, unsubscribe links). Reads need `fans:read`, changes `fans:write`. A fan's tags are under Tags.",
+  "endpoints": [
+    {
+      "id": "list-fans",
+      "method": "GET",
+      "path": "/v1/fans",
+      "summary": "List fans",
+      "description": "The organization's fans, newest first by default. `email_list` is subscribed, pending (a confirm mail is out), unsubscribed or none.",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Matches email or name, case-insensitive, anywhere in it (at most 100 characters). q[email_cont] and q[first_name_cont] are accepted too.",
+          "example": "dana"
+        },
+        {
+          "name": "email",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only the fan with exactly this email (any case).",
+          "example": "dana@example.com"
+        },
+        {
+          "name": "tag_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only fans with this tag.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        },
+        {
+          "name": "updated_after",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Only fans changed after this time; with order_by=updated_at for incremental sync.",
+          "example": "2026-10-01T00:00:00Z"
+        },
+        {
+          "name": "order_by",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Sort column.",
+          "enum": [
+            "created_at",
+            "updated_at",
+            "last_order_at",
+            "email"
+          ],
+          "default": "created_at",
+          "example": "updated_at"
+        },
+        {
+          "name": "order",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Sort direction.",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "default": "desc",
+          "example": "asc"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+                "email": "dana@example.com",
+                "first_name": "Dana",
+                "last_name": "Lee",
+                "has_account": true,
+                "source": "order",
+                "orders_count": 3,
+                "first_order_at": "2026-06-01T20:11:00+00:00",
+                "last_order_at": "2026-10-04T14:01:02+00:00",
+                "email_list": "subscribed",
+                "tags": [
+                  {
+                    "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+                    "name": "VIP",
+                    "color": "#7c3aed",
+                    "tagged_item_id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b"
+                  }
+                ],
+                "created_at": "2026-06-01T20:11:00+00:00",
+                "updated_at": "2026-10-04T14:01:02+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page or filter value.",
+          "example": {
+            "error": "order_by must be created_at, updated_at, last_order_at or email."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "lookup-fans",
+      "method": "GET",
+      "path": "/v1/fans/lookup",
+      "summary": "Look up fans",
+      "description": "A narrow search for a person at the door or on the phone: each field given matches partially and case-insensitively, all must match, and at most 3 fans come back (by id, no paging).",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [
+        {
+          "name": "first_name",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Part of the first name.",
+          "example": "dan"
+        },
+        {
+          "name": "last_name",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Part of the last name.",
+          "example": "le"
+        },
+        {
+          "name": "email",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Part of the email.",
+          "example": "example.com"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+                "email": "dana@example.com",
+                "first_name": "Dana",
+                "last_name": "Lee"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "No field given.",
+          "example": {
+            "error": "give first_name, last_name or email."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-fan",
+      "method": "GET",
+      "path": "/v1/fans/{id}",
+      "summary": "Get a fan",
+      "description": "One fan: contact, stats (orders, tickets, money per currency from the payment ledger), consent as the fan left it (the organization's email list, following the organization, the latest advertising choice at checkout, the platform-wide marketing opt-out, texts with a masked number), the last 20 orders, tags and signups.",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Fan id.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+              "email": "dana@example.com",
+              "first_name": "Dana",
+              "last_name": "Lee",
+              "has_account": true,
+              "source": "order",
+              "created_at": "2026-06-01T20:11:00+00:00",
+              "updated_at": "2026-10-04T14:01:02+00:00",
+              "stats": {
+                "orders": 3,
+                "tickets": 5,
+                "first_order_at": "2026-06-01T20:11:00+00:00",
+                "last_order_at": "2026-10-04T14:01:02+00:00",
+                "money": [
+                  {
+                    "currency": "usd",
+                    "paid_cents": 16300,
+                    "refunded_cents": 3260,
+                    "orders": 3
+                  }
+                ]
+              },
+              "consent": {
+                "email_list": {
+                  "status": "subscribed",
+                  "since": "2026-06-02T08:00:00+00:00",
+                  "source": "signup_form:1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a",
+                  "unsubscribed_at": null
+                },
+                "follows_org": true,
+                "ad_consent": "granted",
+                "marketing_mail_opt_out": false,
+                "sms": {
+                  "status": "subscribed",
+                  "phone_hint": "…0100",
+                  "since": "2026-06-02T08:01:00+00:00",
+                  "opted_out_at": null,
+                  "source": "signup_form"
+                }
+              },
+              "orders": [
+                {
+                  "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                  "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                  "event_name": "Late Show",
+                  "starts_at": "2026-11-14T01:00:00+00:00",
+                  "quantity": 2,
+                  "amount_cents": 6520,
+                  "currency": "usd",
+                  "status": "fulfilled",
+                  "created_at": "2026-10-04T14:01:02+00:00"
+                }
+              ],
+              "tags": [
+                {
+                  "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+                  "name": "VIP",
+                  "color": "#7c3aed",
+                  "tagged_item_id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b"
+                }
+              ],
+              "signups": [
+                {
+                  "form_id": "1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a",
+                  "form_name": "Website footer",
+                  "created_at": "2026-06-02T07:58:00+00:00",
+                  "email_requested": true,
+                  "confirmed_at": "2026-06-02T08:00:00+00:00",
+                  "sms_requested": true,
+                  "sms_confirmed_at": "2026-06-02T08:01:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such fan in the key's organization (or it was removed).",
+          "example": {
+            "error": "fan not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-fan",
+      "method": "POST",
+      "path": "/v1/fans",
+      "summary": "Add a fan",
+      "description": "Adds a contact by hand. Only email (required), first_name and last_name are taken; the body may be wrapped as {\"fan\": {...}} or form-encoded as fan[email]=... A fan added this way is on no list: consent fields (subscribe_to_marketing and the like) are refused with 400. Adding the email of a removed fan brings that profile back. At most 1000 a day.",
+      "auth": "api_key",
+      "scope": "fans:write",
+      "parameters": [
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Email address.",
+          "example": "sam@example.com"
+        },
+        {
+          "name": "first_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "First name, at most 60 characters.",
+          "example": "Sam"
+        },
+        {
+          "name": "last_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Last name, at most 60 characters.",
+          "example": "Park"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "8c2f5d3b-4e6a-4b7c-9d0e-1f2a3b4c5d6e",
+              "email": "sam@example.com",
+              "first_name": "Sam",
+              "last_name": "Park",
+              "has_account": false,
+              "source": "api",
+              "created_at": "2026-06-01T20:11:00+00:00",
+              "updated_at": "2026-10-04T14:01:02+00:00",
+              "stats": {
+                "orders": 0,
+                "tickets": 0,
+                "first_order_at": null,
+                "last_order_at": null,
+                "money": []
+              },
+              "consent": {
+                "email_list": {
+                  "status": "none",
+                  "since": null,
+                  "source": null,
+                  "unsubscribed_at": null
+                },
+                "follows_org": false,
+                "ad_consent": null,
+                "marketing_mail_opt_out": false,
+                "sms": {
+                  "status": "none"
+                }
+              },
+              "orders": [],
+              "tags": [],
+              "signups": []
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad email or name, or a consent field.",
+          "example": {
+            "error": "exos_fans: consent can't be set for a fan; they opt in themselves (signup form, ticket page)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A fan with this email exists.",
+          "example": {
+            "error": "exos_fans: a fan with this email already exists"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "fan": {
+          "email": "sam@example.com",
+          "first_name": "Sam",
+          "last_name": "Park"
+        }
+      }
+    },
+    {
+      "id": "update-fan",
+      "method": "PATCH",
+      "path": "/v1/fans/{id}",
+      "summary": "Update a fan",
+      "description": "Changes first_name and / or last_name (null clears). The email can't change and consent fields are refused.",
+      "auth": "api_key",
+      "scope": "fans:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Fan id.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "first_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "First name.",
+          "example": "Dana"
+        },
+        {
+          "name": "last_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Last name.",
+          "example": "Lee-Park"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+              "email": "dana@example.com",
+              "first_name": "Dana",
+              "last_name": "Lee-Park",
+              "has_account": true,
+              "source": "order",
+              "created_at": "2026-06-01T20:11:00+00:00",
+              "updated_at": "2026-10-04T14:01:02+00:00",
+              "stats": {
+                "orders": 3,
+                "tickets": 5,
+                "first_order_at": "2026-06-01T20:11:00+00:00",
+                "last_order_at": "2026-10-04T14:01:02+00:00",
+                "money": [
+                  {
+                    "currency": "usd",
+                    "paid_cents": 16300,
+                    "refunded_cents": 3260,
+                    "orders": 3
+                  }
+                ]
+              },
+              "consent": {
+                "email_list": {
+                  "status": "subscribed",
+                  "since": "2026-06-02T08:00:00+00:00",
+                  "source": "signup_form:1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a",
+                  "unsubscribed_at": null
+                },
+                "follows_org": true,
+                "ad_consent": "granted",
+                "marketing_mail_opt_out": false,
+                "sms": {
+                  "status": "subscribed",
+                  "phone_hint": "…0100",
+                  "since": "2026-06-02T08:01:00+00:00",
+                  "opted_out_at": null,
+                  "source": "signup_form"
+                }
+              },
+              "orders": [
+                {
+                  "session_id": "cs_live_a1B2c3D4e5F6g7H8i9J0",
+                  "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                  "event_name": "Late Show",
+                  "starts_at": "2026-11-14T01:00:00+00:00",
+                  "quantity": 2,
+                  "amount_cents": 6520,
+                  "currency": "usd",
+                  "status": "fulfilled",
+                  "created_at": "2026-10-04T14:01:02+00:00"
+                }
+              ],
+              "tags": [
+                {
+                  "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+                  "name": "VIP",
+                  "color": "#7c3aed",
+                  "tagged_item_id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b"
+                }
+              ],
+              "signups": [
+                {
+                  "form_id": "1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a",
+                  "form_name": "Website footer",
+                  "created_at": "2026-06-02T07:58:00+00:00",
+                  "email_requested": true,
+                  "confirmed_at": "2026-06-02T08:00:00+00:00",
+                  "sms_requested": true,
+                  "sms_confirmed_at": "2026-06-02T08:01:00+00:00"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A consent field or an email change.",
+          "example": {
+            "error": "exos_fans: a fan's email can't be changed"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such fan in the key's organization (or it was removed).",
+          "example": {
+            "error": "fan not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "fan": {
+          "last_name": "Lee-Park"
+        }
+      }
+    },
+    {
+      "id": "discard-fan",
+      "method": "DELETE",
+      "path": "/v1/fans/{id}",
+      "summary": "Remove a fan",
+      "description": "Removes the contact: hidden from lists and exports, names cleared, tags taken off. Orders stay (they are the organization's records) and so does the fan's own consent. A later order or signup by the same email brings the profile back.",
+      "auth": "api_key",
+      "scope": "fans:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Fan id.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+              "discarded": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such fan in the key's organization (or it was removed).",
+          "example": {
+            "error": "fan not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-signup-forms",
+      "method": "GET",
+      "path": "/v1/signup-forms",
+      "summary": "List signup forms",
+      "description": "The organization's signup forms (archived ones left out). Fans fill them in on the organization's site (an embedded iframe); submissions go to the public exos-signup function, never this API.",
+      "auth": "api_key",
+      "scope": "fans:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "1c3e5a7b-9d1f-4c3e-8a5b-7d9f1b3d5f7a",
+                "name": "Website footer",
+                "title": "Get the newsletter",
+                "intro": "New shows first.",
+                "button_label": "Sign up",
+                "ask_name": true,
+                "offer_sms": true,
+                "default_tag_ids": [
+                  "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+                ],
+                "status": "active",
+                "created_at": "2026-05-30T12:00:00+00:00",
+                "updated_at": "2026-05-30T12:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks fans:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "fans:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"fans:read\""
+          }
+        }
+      ]
+    }
+  ]
+}

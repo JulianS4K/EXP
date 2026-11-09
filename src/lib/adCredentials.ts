@@ -191,14 +191,18 @@ export async function startGoogleAdsConnect(orgId: string): Promise<string> {
   return body.url;
 }
 
-/** Finish the sign-in after Google sent the browser back (?google_ads=finish). */
-export async function finishGoogleAdsConnect(state: string): Promise<void> {
+/**
+ * Finish the sign-in after Google sent the browser back and the user clicked
+ * Confirm (components/OAuthFinish.tsx). `finish` is the token from the URL
+ * fragment (mig 20261029140000); it goes nowhere else.
+ */
+export async function finishGoogleAdsConnect(state: string, finish: string): Promise<void> {
   const base = oauthBase();
   if (!base) throw Object.assign(new Error('not configured'), { reason: 'not_configured' });
   const res = await fetch(`${base}/finish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ state, finish }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok || body?.connected !== true) throw oauthError(res.status, body);

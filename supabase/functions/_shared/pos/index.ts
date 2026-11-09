@@ -7,3 +7,4 @@ export * from './split.ts';
 export * from './drawer.ts';
 export * from './settlement.ts';
 export * from './terminal.ts';
+export * from './walkup.ts';

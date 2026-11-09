@@ -8,6 +8,7 @@
 // localStorage with a pending-arrival queue, like the ticket registry.
 
 import { supabase } from './supabase';
+import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
 import {
   mapGuestEntry,
   mapGuestListMeta,
@@ -103,6 +104,7 @@ export interface GuestInput {
 }
 
 export async function addGuest(listId: string, g: GuestInput): Promise<string> {
+  assertNotEmailName(g.guestName);
   const { data, error } = await supabase.rpc('exos_add_guest', {
     p_list_id: listId, p_guest_name: g.guestName, p_email: g.email || null, p_phone: g.phone || null,
     p_plus_ones: g.plusOnes, p_note: g.note || null,
@@ -112,6 +114,7 @@ export async function addGuest(listId: string, g: GuestInput): Promise<string> {
 }
 
 export async function updateGuest(entryId: string, g: GuestInput): Promise<void> {
+  assertNotEmailName(g.guestName);
   const { error } = await supabase.rpc('exos_update_guest', {
     p_entry_id: entryId, p_guest_name: g.guestName, p_email: g.email || null, p_phone: g.phone || null,
     p_plus_ones: g.plusOnes, p_note: g.note || null,
@@ -157,6 +160,7 @@ export async function getPromoterGuestLists(token: string): Promise<PromoterGues
 export async function promoterAddGuest(
   token: string, listId: string, g: { guestName: string; plusOnes: number; email?: string; phone?: string },
 ): Promise<string> {
+  assertNotEmailName(g.guestName);
   const { data, error } = await supabase.rpc('exos_promoter_add_guest', {
     p_token: token, p_list_id: listId, p_guest_name: g.guestName, p_plus_ones: g.plusOnes,
     p_email: g.email || null, p_phone: g.phone || null,
@@ -209,6 +213,20 @@ export async function guestCheckIn(
 ): Promise<GuestCheckInResult> {
   const { data, error } = await supabase.rpc('exos_guest_check_in', {
     p_entry_id: entryId, p_count: count, p_event_id: eventId, p_client_ref: clientRef, p_source: source,
+  });
+  if (error) throw error;
+  return (data ?? { ok: false, reason: 'unknown' }) as GuestCheckInResult;
+}
+
+/** Undo a guest-list arrival (owner / manager, with a reason; logged in
+ *  exos_guest_checkin_undos, mig 20261104120000). `count` defaults to every
+ *  arrival on the entry. Reasons: 'undone' | 'needs-manager' |
+ *  'reason-required' | 'not-checked-in' | 'bad-count' | 'wrong-event' | 'not-found'. */
+export async function guestUndoArrival(
+  eventId: string, entryId: string, reason: string, count?: number,
+): Promise<GuestCheckInResult> {
+  const { data, error } = await supabase.rpc('exos_guest_undo_arrival', {
+    p_entry_id: entryId, p_event_id: eventId, p_count: count ?? null, p_reason: reason,
   });
   if (error) throw error;
   return (data ?? { ok: false, reason: 'unknown' }) as GuestCheckInResult;

@@ -40,6 +40,43 @@
 //                       (dispute-opened / -won / -lost, once per dispute and
 //                       person). A mail problem never fails the event.
 //   account.updated  -> exos_record_org_stripe() (Connect onboarding status).
+//   payment_intent.amount_capturable_updated / .succeeded / .payment_failed /
+//   .canceled with metadata.exos_pos_order (card at the door, mig
+//                       20261107130000, _shared/pos/stripeTerminal.ts): a door
+//                       sale whose app lost its connection still completes
+//                       (authorized -> captured -> tickets; a capture that
+//                       can't become tickets is refunded) or gives its places
+//                       back (declined / cancelled). Every step is gated on the
+//                       order's state in SQL, so a replay, or an event after
+//                       the door finished, changes nothing. A door card
+//                       refund's later state (charge.refunded, refund.updated,
+//                       refund.failed) lands on its reversal ledger row.
+//
+// exos: commerce orders (mig 20261030130000, docs/gift-cards.md, giving.md,
+// memberships.md). A session whose metadata.exos_kind is gift_card, donation,
+// pass or membership was made by exos-commerce, not exos-checkout: completed ->
+// exos_commerce_fulfill (idempotent; a refused order is auto-refunded),
+// expired -> the order row expires, a full refund -> exos_commerce_refund (the
+// gift card's balance is voided, the donation marked refunded, ...).
+//   invoice.paid, customer.subscription.updated / .deleted -> exos_membership_sync
+//                    (membership subscriptions, mig 20261030130500): renewals move
+//                    the period end, status mirrors Stripe, deleted = cancelled.
+//                    Both API shapes (subscription.current_period_end and
+//                    items.data[].current_period_end; invoice.subscription and
+//                    invoice.parent.subscription_details.subscription) are read.
+//   exos: monthly gifts (mig 20261102110000, _shared/recurringDonation.ts):
+//                    metadata.exos_kind recurring_donation is a commerce order
+//                    (completed -> the plan gets its subscription); invoice.paid
+//                    -> exos_recurring_donation_invoice records one donation per
+//                    invoice (idempotent on the invoice id); invoice.payment_failed
+//                    -> past_due; customer.subscription.updated / .deleted ->
+//                    exos_recurring_donation_sync; a full refund of a later
+//                    monthly charge -> exos_recurring_donation_refund.
+//
+// Buyer location (mig 20261106140000, _shared/buyerLocation.ts): a settled
+// paid order records the country, region, city and postal code of the
+// billing address (session customer_details.address, else the charge the
+// fee read below already fetches). Best effort; never a street, never an IP.
 //
 // Fee actuals (mig 20260929131000): after a settled session is fulfilled and
 // its payment recorded, Stripe's actual fee, the platform net, the transfer
@@ -58,6 +95,14 @@
 // the best-effort session.payment_intent column — so a dropped column write
 // can't strand a refund/dispute.
 //
+// Commission methods (mig 20261104190000, docs/payouts.md): a split-at-sale
+// order is a separate charge on the platform (metadata.exos_charge_model =
+// 'split', no transfer_data). Fulfilment, the payment row, refunds and
+// disputes go through the same calls; only the auto-refund drops the two
+// Connect flags (chargeModelFromMetadata, the same value the reconcile sweep
+// derives). A refund on a split order trues the organizer's share up in SQL
+// (exos_order_refunds trigger). Destination orders are unchanged.
+//
 // Required secrets (operator, at deploy): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 // SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (platform-injected). Optional:
 // STRIPE_CONNECT_WEBHOOK_SECRET — the signing secret of the second endpoint that
@@ -70,7 +115,71 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
+import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { type DisputeFields, disputeFields } from "../_shared/disputes.ts";
+import { locationFromStripeCharge, locationFromStripeSession, recordBuyerLocation } from "../_shared/buyerLocation.ts";
+import { type CardDb, handlePosIntentEvent, posOrderOf } from "../_shared/pos/stripeTerminal.ts";
+import { terminalStripe } from "../_shared/pos/stripeAdapter.ts";
+
+// exos: commerce orders (exos-commerce). Stripe metadata.exos_kind values.
+const COMMERCE_KINDS = new Set(["gift_card", "donation", "pass", "membership", "recurring_donation"]);
+
+// exos: fulfil a settled commerce session; auto-refund one the database refused
+// (sold out pass, amount mismatch). Throws on transient errors (-> 500, retry).
+async function fulfillCommerceSession(sb: SupabaseClient, session: Stripe.Checkout.Session): Promise<void> {
+  let pi = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
+  const sub = typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null;
+  // A subscription session has no PaymentIntent of its own: the first
+  // invoice's is the one a refund of this purchase will carry.
+  const invoiceId = typeof session.invoice === "string" ? session.invoice : session.invoice?.id ?? null;
+  if (!pi && sub && invoiceId) {
+    try {
+      const inv = await stripe.invoices.retrieve(invoiceId);
+      const ipi = (inv as unknown as { payment_intent?: string | { id: string } | null }).payment_intent;
+      pi = typeof ipi === "string" ? ipi : ipi?.id ?? null;
+    } catch (e) {
+      throw new Error(`invoice lookup failed for ${session.id}: ${(e as Error).message}`);
+    }
+  }
+  let periodEnd: string | null = null;
+  if (sub) {
+    try {
+      const s = await stripe.subscriptions.retrieve(sub);
+      // Old API shape (current_period_end on the subscription) and new (per item).
+      const raw = (s as unknown as { current_period_end?: number }).current_period_end
+        ?? (s.items?.data?.[0] as unknown as { current_period_end?: number } | undefined)?.current_period_end;
+      if (typeof raw === "number") periodEnd = new Date(raw * 1000).toISOString();
+    } catch (e) {
+      throw new Error(`subscription lookup failed for ${session.id}: ${(e as Error).message}`);
+    }
+  }
+  // A membership subscription keeps its Stripe customer (billing portal).
+  const customer = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
+  if (customer && /^cus_[A-Za-z0-9]{1,250}$/.test(customer)) {
+    const { error: cErr } = await sb.from("exos_commerce_orders").update({ stripe_customer_id: customer })
+      .eq("session_id", session.id).is("stripe_customer_id", null);
+    if (cErr && cErr.code !== "42703" && cErr.code !== "PGRST204") throw new Error(`customer record failed: ${cErr.message}`);
+  }
+  const { data: status, error } = await sb.rpc("exos_commerce_fulfill", {
+    p_session_id: session.id, p_payment_intent: pi, p_amount_cents: session.amount_total ?? 0,
+    p_subscription_id: sub, p_period_end: periodEnd,
+  });
+  if (error) throw new Error(`commerce fulfill failed for ${session.id}: ${error.message}`);
+  if (status === "failed" && session.payment_status === "paid") {
+    if (pi) {
+      try {
+        await stripe.refunds.create(autoRefundParams(pi, session.id), { idempotencyKey: autoRefundIdempotencyKey(session.id) });
+      } catch (e) {
+        throw new Error(`commerce auto-refund failed for ${session.id}: ${(e as Error).message}`);
+      }
+    }
+    if (sub) {
+      try { await stripe.subscriptions.cancel(sub); } catch (e) { console.error(`stripe-webhook: cancel ${sub} failed`, e); }
+    }
+    const { error: rErr } = await sb.rpc("exos_commerce_refund", { p_session_id: session.id, p_reason: "auto-refund: refused at fulfillment" });
+    if (rErr) throw new Error(`commerce refund record failed for ${session.id}: ${rErr.message}`);
+  }
+}
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -230,7 +339,7 @@ async function fulfillSettledSession(
         // Same key + params as the reconcile sweep (_shared/auto-refund.ts), so
         // the two can never both refund one session.
         refund = await stripe.refunds.create(
-          autoRefundParams(pi, session.id),
+          autoRefundParams(pi, session.id, chargeModelFromMetadata(session.metadata)),
           { idempotencyKey: autoRefundIdempotencyKey(session.id) },
         );
       } catch (e) {
@@ -254,12 +363,27 @@ async function fulfillSettledSession(
     }
   }
 
+  // Buyer location (mig 20261106140000): country / region / city / postal
+  // code of the billing address in this payload; never a street, never an
+  // IP lookup. Best effort, never throws; the first location an order gets
+  // is kept, so a replay changes nothing. Free orders have none.
+  const located = (session.amount_total ?? 0) > 0 ? locationFromStripeSession(session) : null;
+  const logLoc = (msg: string, err?: unknown) => console.error(`stripe-webhook: ${msg}`, err ?? "");
+  if (located) await recordBuyerLocation(sb, session.id, located, logLoc);
+
   // What Stripe actually took (fee, platform net, transfer). Best effort and
   // never throws, so it can't fail fulfilment or cause a retry loop; skipped
-  // on a replay once recorded.
+  // on a replay once recorded. When the session had no address, the charge
+  // this read fetches gives the card's billing address or country instead
+  // (no extra Stripe call).
   if (pi && session.payment_status === "paid") {
     await recordFeeActuals(sb, stripe, session.id, pi, {
       log: (msg, err) => console.error(`stripe-webhook: ${msg}`, err ?? ""),
+      ...(located || (session.amount_total ?? 0) <= 0 ? {} : {
+        onCharge: async (charge) => {
+          await recordBuyerLocation(sb, session.id, locationFromStripeCharge(charge), logLoc);
+        },
+      }),
     });
   }
 }
@@ -320,6 +444,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded": {
         const session = event.data.object as Stripe.Checkout.Session;
+        if (COMMERCE_KINDS.has(session.metadata?.exos_kind ?? "")) {
+          if (session.payment_status === "paid" || session.payment_status === "no_payment_required") {
+            try {
+              await fulfillCommerceSession(sb, session);
+            } catch (e) {
+              console.error(`stripe-webhook: commerce handler error for ${session.id}`, e);
+              return new Response("fulfillment error", { status: 500 });
+            }
+          }
+          break;
+        }
         if (session.payment_status === "paid" || session.payment_status === "no_payment_required") {
           try {
             await fulfillSettledSession(sb, session);
@@ -349,6 +484,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         await sb.from("exos_checkout_sessions")
           .update({ status: "expired" })
           .eq("session_id", session.id).eq("status", "pending");
+        // exos: a held gift card part comes back through the session's status
+        // trigger (mig 20261030130000); a commerce order just expires.
+        if (COMMERCE_KINDS.has(session.metadata?.exos_kind ?? "")) {
+          await sb.from("exos_commerce_orders").update({ status: "expired" })
+            .eq("session_id", session.id).eq("status", "pending");
+        }
         break;
       }
 
@@ -387,7 +528,76 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const pi = typeof obj.payment_intent === "string" ? obj.payment_intent : obj.payment_intent?.id;
         if (!pi) break;
         const sessionId = await sessionIdForPaymentIntent(sb, pi);
+        // exos: a card refund at the door (mig 20261107130000): the refund's
+        // state on its reversal ledger row (or the card row of a capture that
+        // couldn't be fulfilled). Not a checkout session. Door PaymentIntents
+        // are the platform's (a connected account's event never reaches here:
+        // see the event.account gate above, repeated for clarity). The metadata
+        // only names a candidate order: the SQL changes nothing unless this
+        // PaymentIntent is the one recorded for it, and the refund id matches
+        // a stored one. Unmatched: logged, 200, no retry.
+        const posOrder = sessionId || event.account ? null : posOrderOf(obj as { metadata?: Record<string, string> | null });
+        if (posOrder) {
+          const refunds = obj.object === "refund" ? [obj as Stripe.Refund] : ((obj as Stripe.Charge).refunds?.data ?? []);
+          for (const rf of refunds) {
+            const rfPi = typeof rf.payment_intent === "string" ? rf.payment_intent : rf.payment_intent?.id ?? pi;
+            if (rfPi !== pi) {
+              console.error(`stripe-webhook: door card refund ${rf.id} isn't on ${pi}; ignored`);
+              continue;
+            }
+            const { data: rec, error } = await sb.rpc("_exos_pos_card_refund_record", {
+              p_order: posOrder, p_pi: pi, p_refund_ref: rf.id, p_status: ledgerRefundStatus(rf.status), p_error: rf.failure_reason ?? null,
+            });
+            if (error) {
+              console.error(`stripe-webhook: door card refund record failed for ${posOrder}`, error);
+              return new Response("refund handling error", { status: 500 });
+            }
+            if ((rec as { recorded?: boolean } | null)?.recorded !== true) {
+              console.error(`stripe-webhook: door card refund ${rf.id} on ${pi} doesn't match order ${posOrder}'s record; ignored`);
+            }
+          }
+          break;
+        }
         if (!sessionId) {
+          // exos: a commerce order (gift card, donation, pass, membership term).
+          const { data: co } = await sb.from("exos_commerce_orders").select("session_id, subscription_id")
+            .eq("payment_intent", pi).maybeSingle();
+          if (co?.session_id && obj.object === "charge") {
+            const ch = obj as Stripe.Charge;
+            if (ch.refunded || (ch.amount_refunded ?? 0) >= (ch.amount ?? 0)) {
+              const { error } = await sb.rpc("exos_commerce_refund", { p_session_id: co.session_id, p_reason: "stripe refund" });
+              if (error) {
+                console.error(`stripe-webhook: commerce refund failed for ${co.session_id}`, error);
+                return new Response("refund handling error", { status: 500 });
+              }
+              // A refunded membership stops billing too (platform account).
+              // Already cancelled is fine; anything else retries.
+              if (co.subscription_id) {
+                try {
+                  await stripe.subscriptions.cancel(co.subscription_id);
+                } catch (e) {
+                  const code = (e as { code?: string }).code;
+                  if (code !== "resource_missing" && !/canceled/i.test((e as Error).message ?? "")) {
+                    console.error(`stripe-webhook: cancel ${co.subscription_id} failed`, e);
+                    return new Response("subscription cancel error", { status: 500 });
+                  }
+                }
+              }
+            }
+            break;
+          }
+          // exos: a later monthly gift charge (mig 20261102110000).
+          if (obj.object === "charge") {
+            const ch = obj as Stripe.Charge;
+            if (ch.refunded || (ch.amount_refunded ?? 0) >= (ch.amount ?? 0)) {
+              const { data: n, error: rdErr } = await sb.rpc("exos_recurring_donation_refund", { p_payment_intent: pi });
+              if (rdErr && rdErr.code !== "PGRST202") {
+                console.error(`stripe-webhook: monthly gift refund failed for PI ${pi}`, rdErr);
+                return new Response("refund handling error", { status: 500 });
+              }
+              if (Number(n ?? 0) > 0) break;
+            }
+          }
           console.error(`stripe-webhook: ${event.type} — no session for PI ${pi}`);
           break;
         }
@@ -482,6 +692,59 @@ Deno.serve(async (req: Request): Promise<Response> => {
         break;
       }
 
+      // exos: membership subscriptions (mig 20261030130500).
+      case "invoice.paid":
+      case "customer.subscription.updated":
+      case "customer.subscription.deleted": {
+        const sync = membershipSyncArgs(event);
+        if (!sync) break;
+        const { error } = await sb.rpc("exos_membership_sync", sync);
+        if (error && error.code !== "PGRST202") {
+          console.error(`stripe-webhook: membership sync failed for ${sync.p_subscription_id}`, error);
+          return new Response("membership sync error", { status: 500 });
+        }
+        // exos: monthly gifts (mig 20261102110000). Not one of ours -> ignored in SQL.
+        const gift = event.type === "invoice.paid"
+          ? await sb.rpc("exos_recurring_donation_invoice", recurringInvoiceArgs(event, "paid"))
+          : await sb.rpc("exos_recurring_donation_sync", {
+            p_subscription_id: sync.p_subscription_id, p_event: sync.p_event, p_status: sync.p_status,
+          });
+        if (gift.error && gift.error.code !== "PGRST202") {
+          console.error(`stripe-webhook: monthly gift sync failed for ${sync.p_subscription_id}`, gift.error);
+          return new Response("monthly gift sync error", { status: 500 });
+        }
+        break;
+      }
+
+      // exos: a monthly gift's charge failed (Stripe retries on its schedule).
+      case "invoice.payment_failed": {
+        const args = recurringInvoiceArgs(event, "failed");
+        if (!args.p_subscription_id && !args.p_recurring_id) break;
+        const { error } = await sb.rpc("exos_recurring_donation_invoice", args);
+        if (error && error.code !== "PGRST202") {
+          console.error(`stripe-webhook: monthly gift failure record failed for ${args.p_invoice_id}`, error);
+          return new Response("monthly gift sync error", { status: 500 });
+        }
+        break;
+      }
+
+      // exos: card at the door (mig 20261107130000). Not a door sale: ignored.
+      case "payment_intent.amount_capturable_updated":
+      case "payment_intent.succeeded":
+      case "payment_intent.payment_failed":
+      case "payment_intent.canceled": {
+        // Door PaymentIntents are the platform's: a connected account's event is never one.
+        if (event.account) break;
+        try {
+          const r = await handlePosIntentEvent(posCardDb(sb), terminalStripe(stripe), event);
+          if (r.ignored) console.error(`stripe-webhook: door card ${event.type} ${(event.data.object as { id?: string }).id} ignored: ${r.ignored}`);
+        } catch (e) {
+          console.error(`stripe-webhook: door card ${event.type} failed for ${(event.data.object as { id?: string }).id}`, e);
+          return new Response("pos card handling error", { status: 500 });
+        }
+        break;
+      }
+
       default:
         break; // ignore unhandled event types
     }
@@ -495,3 +758,76 @@ Deno.serve(async (req: Request): Promise<Response> => {
     headers: { "content-type": "application/json" },
   });
 });
+
+// exos: the exos_membership_sync arguments for a subscription / invoice event,
+// or null when it isn't one of ours (no subscription id).
+function membershipSyncArgs(event: Stripe.Event): {
+  p_subscription_id: string; p_event: string; p_status: string | null; p_period_end: string | null;
+  p_cancel_at_period_end: boolean | null;
+} | null {
+  const iso = (n: unknown) => (typeof n === "number" ? new Date(n * 1000).toISOString() : null);
+  if (event.type === "invoice.paid") {
+    // deno-lint-ignore no-explicit-any
+    const inv = event.data.object as any;
+    const sub = typeof inv.subscription === "string" ? inv.subscription
+      : inv.subscription?.id ?? inv.parent?.subscription_details?.subscription ?? null;
+    if (!sub) return null;
+    const line = inv.lines?.data?.[0];
+    return {
+      p_subscription_id: sub, p_event: "invoice_paid", p_status: null,
+      p_period_end: iso(line?.period?.end ?? inv.period_end), p_cancel_at_period_end: null,
+    };
+  }
+  // deno-lint-ignore no-explicit-any
+  const s = event.data.object as any;
+  if (typeof s?.id !== "string" || !s.id.startsWith("sub_")) return null;
+  return {
+    p_subscription_id: s.id,
+    p_event: event.type === "customer.subscription.deleted" ? "deleted" : "updated",
+    p_status: typeof s.status === "string" ? s.status : null,
+    p_period_end: iso(s.current_period_end ?? s.items?.data?.[0]?.current_period_end),
+    p_cancel_at_period_end: typeof s.cancel_at_period_end === "boolean" ? s.cancel_at_period_end : null,
+  };
+}
+
+// exos: exos_recurring_donation_invoice arguments for invoice.paid /
+// invoice.payment_failed. The plan id comes from the subscription metadata
+// Stripe copies onto the invoice (both API shapes); the SQL falls back to the
+// subscription id, and ignores an invoice that is neither.
+function recurringInvoiceArgs(event: Stripe.Event, kind: "paid" | "failed") {
+  // deno-lint-ignore no-explicit-any
+  const inv = event.data.object as any;
+  const sub = typeof inv.subscription === "string" ? inv.subscription
+    : inv.subscription?.id ?? inv.parent?.subscription_details?.subscription ?? null;
+  const meta = inv.subscription_details?.metadata ?? inv.parent?.subscription_details?.metadata ?? {};
+  const rid = typeof meta?.exos_recurring_id === "string" && /^[0-9a-f-]{36}$/i.test(meta.exos_recurring_id)
+    ? meta.exos_recurring_id : null;
+  const pi = typeof inv.payment_intent === "string" ? inv.payment_intent : inv.payment_intent?.id ?? null;
+  const line = inv.lines?.data?.[0];
+  const end = line?.period?.end ?? inv.period_end;
+  return {
+    p_recurring_id: rid,
+    p_subscription_id: typeof sub === "string" ? sub : null,
+    p_customer_id: typeof inv.customer === "string" ? inv.customer : inv.customer?.id ?? null,
+    p_invoice_id: String(inv.id ?? ""),
+    p_payment_intent: pi,
+    p_amount_cents: kind === "paid" ? Number(inv.amount_paid ?? 0) : Number(inv.amount_due ?? 0),
+    p_currency: typeof inv.currency === "string" ? inv.currency : null,
+    p_period_end: typeof end === "number" ? new Date(end * 1000).toISOString() : null,
+    p_event: kind,
+    p_event_key: event.id,
+    p_failure: kind === "failed"
+      ? `payment failed (attempt ${Number(inv.attempt_count ?? 1)})`
+      : null,
+  };
+}
+
+// exos: the service-role client as the door card flows' CardDb (mig 20261107130000).
+function posCardDb(sb: SupabaseClient): CardDb {
+  return {
+    rpc: async (fn, args) => {
+      const { data, error } = await sb.rpc(fn, args);
+      return { data, error: error ? { code: error.code, message: error.message, hint: error.hint } : null };
+    },
+  };
+}

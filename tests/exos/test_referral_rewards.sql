@@ -29,10 +29,10 @@ INSERT INTO public.exos_events(id,org_id,name,status,starts_at) VALUES
   ('a7000000-0000-0000-0000-0000000000e1','a7000000-0000-0000-0000-000000000001','RR Night','published',now()+interval '10 days'),
   ('a7000000-0000-0000-0000-0000000000e2','a7000000-0000-0000-0000-000000000001','RR Later','published',now()+interval '30 days');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,visibility) VALUES
-  ('a7000000-0000-0000-0000-0000000000d0','a7000000-0000-0000-0000-0000000000e0','GA',20,0,'public'),
-  ('a7000000-0000-0000-0000-0000000000d1','a7000000-0000-0000-0000-0000000000e1','GA',20,0,'public'),
-  ('a7000000-0000-0000-0000-0000000000d2','a7000000-0000-0000-0000-0000000000e1','Friend reward',20,0,'hidden'),
-  ('a7000000-0000-0000-0000-0000000000d3','a7000000-0000-0000-0000-0000000000e2','GA',40,0,'public');
+  ('a7000000-0000-0000-0000-0000000000d0','a7000000-0000-0000-0000-0000000000e0','GA',20,100,'public'),
+  ('a7000000-0000-0000-0000-0000000000d1','a7000000-0000-0000-0000-0000000000e1','GA',20,100,'public'),
+  ('a7000000-0000-0000-0000-0000000000d2','a7000000-0000-0000-0000-0000000000e1','Friend reward',20,100,'hidden'),
+  ('a7000000-0000-0000-0000-0000000000d3','a7000000-0000-0000-0000-0000000000e2','GA',40,100,'public');
 
 -- Fans hold tickets (needed for a referral code).
 INSERT INTO public.exos_tickets(event_id,org_id,tier_id,buyer_id,owner_id,buyer_email,status,price_paid,order_ref,barcode_secret) VALUES

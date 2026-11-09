@@ -3,11 +3,13 @@
 // re-entry" (off unless turned on). Self-contained CRUD embedded in EditEvent
 // next to the door settings; it saves on its own buttons, not the event form.
 // Nothing here is required: an event with no lists admits every ticket once.
+// A list can scan add-on entry codes instead of (or as well as) tickets
+// (mig 20261107110000): a VIP lounge that takes only the lounge add-on's codes.
 
 import { useEffect, useState } from 'react';
 import { DoorOpen, Pencil, Plus, Trash2 } from 'lucide-react';
-import { deleteCheckinList, listCheckinLists, saveCheckinList } from '../lib/checkinLists';
-import { checkinListInputError, describeList, type CheckinListInput, type DoorCheckinList } from '../lib/door/lists';
+import { deleteCheckinList, listCheckinLists, listEventAccessAddons, saveCheckinList, type AccessAddon } from '../lib/checkinLists';
+import { checkinListInputError, describeList, type CheckinListInput, type DoorCheckinList, type ListAdmits } from '../lib/door/lists';
 import { getBrowserTimezone, utcToZonedWallClock, zonedWallClockToUtc } from '../lib/datetime';
 import { useToast } from '../context/ToastContext';
 
@@ -21,9 +23,14 @@ interface Form {
   /** datetime-local wall clock in the event's zone ('' = open-ended). */
   from: string;
   until: string;
+  admits: ListAdmits;
+  allAddons: boolean;
+  addonIds: string[];
 }
 
-const BLANK: Form = { name: '', allTiers: true, tierIds: [], allowReentry: false, from: '', until: '' };
+const BLANK: Form = {
+  name: '', allTiers: true, tierIds: [], allowReentry: false, from: '', until: '', admits: 'tickets', allAddons: true, addonIds: [],
+};
 
 const inputCls =
   'w-full bg-black border border-white/20 py-3 px-4 font-bold text-white focus:outline-none ' +
@@ -46,11 +53,13 @@ export default function CheckinListsEditor({
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Form>(BLANK);
+  const [addons, setAddons] = useState<AccessAddon[]>([]);
   const tz = timezone || getBrowserTimezone();
 
   const reload = async () => {
     try {
       setRows(await listCheckinLists(eventId));
+      setAddons(await listEventAccessAddons(eventId).catch(() => []));
     } catch (e) {
       console.error('listCheckinLists failed:', e);
     } finally {
@@ -62,6 +71,8 @@ export default function CheckinListsEditor({
   if (!loaded || rows === null) return null;
 
   const tierName = (id: string) => tiers.find((t) => t.id === id)?.name ?? 'a removed ticket type';
+  const addonName = (id: string) => addons.find((a) => a.id === id)?.name ?? 'a removed add-on';
+  const accessAddons = addons.filter((a) => a.separateAccessBarcode);
   const toIso = (wall: string) => (wall ? zonedWallClockToUtc(wall, tz)?.toISOString() ?? null : null);
   const toWall = (iso: string | null) => (iso ? utcToZonedWallClock(new Date(iso), tz) : '');
 
@@ -71,6 +82,8 @@ export default function CheckinListsEditor({
     allowReentry: form.allowReentry,
     validFrom: toIso(form.from),
     validUntil: toIso(form.until),
+    admits: form.admits,
+    addonIds: form.admits === 'tickets' || form.allAddons ? null : form.addonIds,
   });
 
   const startNew = () => { setEditing(null); setForm(BLANK); setOpen(true); };
@@ -83,6 +96,9 @@ export default function CheckinListsEditor({
       allowReentry: l.allowReentry,
       from: toWall(l.validFrom),
       until: toWall(l.validUntil),
+      admits: l.admits ?? 'tickets',
+      allAddons: !l.addonIds,
+      addonIds: l.addonIds ?? [],
     });
     setOpen(true);
   };
@@ -139,7 +155,7 @@ export default function CheckinListsEditor({
               <div className="min-w-0 pr-3">
                 <p className="font-bold text-white text-sm truncate">{l.name}</p>
                 <p className="text-white/50 text-xs">
-                  {describeList(l, tierName)}
+                  {describeList(l, tierName, addonName)}
                   {l.validFrom || l.validUntil
                     ? ` · ${l.validFrom ? `from ${toWall(l.validFrom).replace('T', ' ')}` : ''}${l.validFrom && l.validUntil ? ' ' : ''}${
                         l.validUntil ? `until ${toWall(l.validUntil).replace('T', ' ')}` : ''
@@ -182,7 +198,38 @@ export default function CheckinListsEditor({
               className={inputCls}
             />
           </div>
-          <fieldset className="space-y-2">
+          {(accessAddons.length > 0 || form.admits !== 'tickets') && (
+            <fieldset className="space-y-2" data-testid="list-admits">
+              <legend className="type text-[10px] text-white/60 uppercase tracking-widest mb-1">Scans</legend>
+              <select aria-label="What this list scans" value={form.admits}
+                onChange={(e) => setForm({ ...form, admits: e.target.value as ListAdmits })} className={inputCls}>
+                <option value="tickets">Tickets</option>
+                <option value="addons">Add-on entry codes only (a VIP lounge, a merch pickup)</option>
+                <option value="both">Tickets and add-on entry codes</option>
+              </select>
+              {form.admits !== 'tickets' && (<>
+                <label className="flex items-center gap-2 text-sm text-white">
+                  <input type="checkbox" checked={form.allAddons} onChange={(e) => setForm({ ...form, allAddons: e.target.checked })} />
+                  Every add-on with its own entry code
+                </label>
+                {!form.allAddons && (
+                  <div className="flex flex-wrap gap-2">
+                    {accessAddons.map((a) => (
+                      <label key={a.id} className="flex items-center gap-2 text-xs font-bold text-white/80 border border-white/10 px-3 py-2">
+                        <input type="checkbox" checked={form.addonIds.includes(a.id)}
+                          onChange={(e) => setForm({ ...form, addonIds: e.target.checked ? [...form.addonIds, a.id] : form.addonIds.filter((x) => x !== a.id) })} />
+                        {a.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-white/50">
+                  {form.admits === 'addons' ? 'Tickets are refused here; ' : ''}add-on codes are refused at every list that scans tickets only.
+                </p>
+              </>)}
+            </fieldset>
+          )}
+          {form.admits !== 'addons' && <fieldset className="space-y-2">
             <legend className="type text-[10px] text-white/60 uppercase tracking-widest mb-1">Ticket types</legend>
             <label className="flex items-center gap-2 text-sm text-white">
               <input type="checkbox" checked={form.allTiers} onChange={(e) => setForm({ ...form, allTiers: e.target.checked })} />
@@ -211,7 +258,7 @@ export default function CheckinListsEditor({
                 </div>
               )
             )}
-          </fieldset>
+          </fieldset>}
           <label className="flex items-start gap-2 text-sm text-white">
             <input
               type="checkbox"

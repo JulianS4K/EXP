@@ -10,15 +10,20 @@
 
 import { Timestamp } from './timestamp';
 import { parseAccessibility, type EventAccessibility } from './accessibility';
-import { parseNameCheckinMode, type NameCheckinMode } from './door/decide';
+import { parseNameCheckinMode, type NameCheckinMode } from './door/nameCheckinMode';
 import { parseFaq, parseGallery, parseLineup, parseMinAge, parseRefundPolicy } from './storeContent';
 import { parseEventFormat } from './onlineEvents';
+import { parseLocationMode } from './eventLocation';
 import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/listingStandard.ts';
 import { supabase } from './supabase';
+import { parseUnitFees } from './fees';
+import { listPublicFeeRules, withTierFees } from './feeRules';
+import { fetchPublicLinkOuts, type PublicLinkOut } from './linkOut';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
 import { eventTypeForCategory } from './eventTaxonomy';
 import { Event } from '../types';
+import { CAPACITY_REQUIRED, isSellableCapacity } from '../../supabase/functions/_shared/capacity.ts';
 
 const toTs = (iso?: string | null): Timestamp => Timestamp.fromDate(iso ? new Date(iso) : new Date(0));
 
@@ -39,6 +44,7 @@ export function mapTier(t: any): Tier {
     salesEnd: t.sales_end ? toTs(t.sales_end) : null,
     priceSchedule: Array.isArray(t.price_schedule) ? t.price_schedule : undefined,
     exclusiveTaxPercent: Number(t.exclusive_tax_percent) || 0,
+    passedOnFees: parseUnitFees(t.passed_on_fees),
     accessible: t.accessible === true,
     accessibleNote: t.accessible_note || undefined,
     marketSplit: parseMarketSplit(t.market_split),
@@ -133,9 +139,17 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     // Where tickets are sold (mig 20261016100000); likewise.
     ...('ticket_backend' in row
       ? {
-          ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
+          ticketBackend: (['eventbrite', 'pretix', 'hievents', 'luma', 'posh', 'dice'].includes(row.ticket_backend) ? row.ticket_backend : 'exos') as Event['ticketBackend'],
           externalTicketUrl: typeof row.external_ticket_url === 'string' && row.external_ticket_url.startsWith('https://')
             ? row.external_ticket_url : undefined,
+        }
+      : {}),
+    // Location mode (mig 20261105130000); likewise.
+    ...('location_mode' in row
+      ? {
+          locationMode: parseLocationMode(row.location_mode),
+          locationRevealAt: row.location_reveal_at ?? null,
+          tbaAllowSales: typeof row.tba_allow_sales === 'boolean' ? row.tba_allow_sales : null,
         }
       : {}),
   };
@@ -157,27 +171,57 @@ export function hasStoreColumns(): Promise<boolean> {
 // --- Public reads (anon + signed-in buyers) — column-narrowed views --------
 
 // Listing cards show an all-in "from $X" price, which needs each event's public
-// tiers; one extra query for the whole page rather than one per event.
+// tiers and passed-on fee rules; one extra query each for the whole page rather
+// than one per event.
 async function withPublicTiers(rows: any[]): Promise<Event[]> {
   if (rows.length === 0) return [];
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .in('event_id', rows.map((r) => r.id))
-    .order('sort_order', { ascending: true });
+  const linkOuts = linkOutsFor(rows);
+  const ids = rows.map((r) => r.id);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').in('event_id', ids).order('sort_order', { ascending: true }),
+    listPublicFeeRules(ids),
+  ]);
   const byEvent = new Map<string, any[]>();
-  for (const t of tiers ?? []) {
+  for (const t of withTierFees(tiers ?? [], fees)) {
     const list = byEvent.get(t.event_id) ?? [];
     list.push(t);
     byEvent.set(t.event_id, list);
   }
-  return rows.map((r) => mapEvent(r, byEvent.get(r.id) ?? []));
+  const los = await linkOuts;
+  return rows.map((r) => withLinkOut(mapEvent(r, byEvent.get(r.id) ?? []), los.get(r.id)));
+}
+
+// Link-out events (mig 20261029170500) have no Exos ticket types: their card
+// price is the imported lowest price. Only events another platform sells can
+// be link-outs, so the others cost no query.
+function linkOutsFor(rows: any[]): Promise<Map<string, PublicLinkOut>> {
+  const ids = rows.filter((r) => r.ticket_backend && r.ticket_backend !== 'exos').map((r) => r.id);
+  return ids.length ? fetchPublicLinkOuts(ids) : Promise.resolve(new Map());
+}
+
+function withLinkOut(e: Event, lo: PublicLinkOut | undefined): Event {
+  return lo ? { ...e, linkOut: lo, price: lo.priceMin ?? e.price } : e;
 }
 
 export async function listPublicEvents(limit = 50): Promise<Event[]> {
   const { data, error } = await supabase
     .from('exos_public_events')
     .select('*')
+    .order('starts_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return withPublicTiers(data ?? []);
+}
+
+// Published events with any of these genres (exact spellings: the variants
+// exos_api_public 'genres.list' returns), for Home's genre chips (mig 20261106140000).
+export async function listPublicEventsWithGenres(variants: string[], limit = 50): Promise<Event[]> {
+  const spellings = [...new Set(variants.map((v) => v.trim()).filter(Boolean))].slice(0, 20);
+  if (spellings.length === 0) return [];
+  const { data, error } = await supabase
+    .from('exos_public_events')
+    .select('*')
+    .overlaps('genres', spellings)
     .order('starts_at', { ascending: true })
     .limit(limit);
   if (error) throw error;
@@ -199,24 +243,22 @@ export async function getPublicEvent(id: string): Promise<Event | null> {
   const { data, error } = await supabase.from('exos_public_events').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .eq('event_id', id)
-    .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').eq('event_id', id).order('sort_order', { ascending: true }),
+    listPublicFeeRules([id]),
+  ]);
+  return withLinkOut(mapEvent(data, withTierFees(tiers ?? [], fees)), (await linkOutsFor([data])).get(data.id));
 }
 
 export async function getPublicEventBySlug(slug: string): Promise<Event | null> {
   const { data, error } = await supabase.from('exos_public_events').select('*').eq('slug', slug).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { data: tiers } = await supabase
-    .from('exos_public_tiers')
-    .select('*')
-    .eq('event_id', data.id)
-    .order('sort_order', { ascending: true });
-  return mapEvent(data, tiers ?? []);
+  const [{ data: tiers }, fees] = await Promise.all([
+    supabase.from('exos_public_tiers').select('*').eq('event_id', data.id).order('sort_order', { ascending: true }),
+    listPublicFeeRules([data.id]),
+  ]);
+  return withLinkOut(mapEvent(data, withTierFees(tiers ?? [], fees)), (await linkOutsFor([data])).get(data.id));
 }
 
 // --- Staff reads (org dashboard / editor) — base tables, RLS-gated ---------
@@ -355,6 +397,9 @@ const EVENT_COL: Array<[keyof EventInput, string]> = [
 ];
 
 function tierInsertRow(eventId: string, t: TierInput, idx: number) {
+  // A new ticket type needs a capacity: there is no unlimited, and 0 is closed
+  // (mig 20261105100000). Closing an existing one is an update, not this.
+  if (!isSellableCapacity(t.capacity)) throw new Error(`Ticket type "${t.name}" ${CAPACITY_REQUIRED}.`);
   return {
     event_id: eventId,
     name: t.name,

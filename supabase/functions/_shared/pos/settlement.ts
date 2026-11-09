@@ -12,6 +12,10 @@
 //                       OPERATOR DECISION (docs/pos.md): the fee is charged on
 //                       CARD TICKET sales only for now; bar, merch and cash
 //                       are not charged. feeBase lets the operator widen it.
+//                       'all-tickets' (cash walk-up tickets too) is the one
+//                       the SQL setting exos_pos_walkup_fee_base can switch
+//                       to (mig 20261107100000); cash ticket sales are
+//                       floor(ticket gross x cash / order total) per order.
 //   organizer net       cash + card - Exos fee (card processing comes off the
 //                       Stripe payout; estimated separately below)
 //   promoters           per promoter: ticket lines net of tax, paid share
@@ -70,7 +74,7 @@ export type PromoterSplitHook = (row: PromoterBase) => number;
  */
 export const STRIPE_TERMINAL_FEE: CardFee = { bps: 270, fixedCents: 5 };
 
-export type FeeBase = 'card-tickets' | 'card-all' | 'all-sales';
+export type FeeBase = 'card-tickets' | 'all-tickets' | 'card-all' | 'all-sales';
 
 export interface SettlementOptions {
   /** The org's Exos rate now (exosFeeBpsAt(fee_free_until, now)); 0 during its free months. */
@@ -90,6 +94,8 @@ export interface SettlementReport {
   tenders: Record<PosTenderMethod, number>;
   tips: { cash: number; card: number; total: number };
   cardTicketCents: number;
+  /** Ticket sales paid in cash (walk-ups at the door): per order floor(ticket gross x cash / total). */
+  cashTicketCents: number;
   feeBps: number;
   feeBase: FeeBase;
   feeBaseCents: number;
@@ -110,7 +116,7 @@ export function buildSettlement(
   const gross = { ticket: 0, bar: 0, merch: 0, total: 0 };
   const tenders = { cash: 0, card: 0, comp: 0 };
   const tips = { cash: 0, card: 0, total: 0 };
-  let tax = 0, paidOrders = 0, openOrders = 0, cardTicket = 0, cardAll = 0, processing = 0;
+  let tax = 0, paidOrders = 0, openOrders = 0, cardTicket = 0, cashTicket = 0, cardAll = 0, processing = 0;
   const promo = new Map<string, PromoterBase>();
   const cardFee = opts.cardFee ?? STRIPE_TERMINAL_FEE;
 
@@ -143,6 +149,7 @@ export function buildSettlement(
       }
     }
     cardTicket += share(ticketGross, pay.card, o.totalCents);
+    cashTicket += share(ticketGross, pay.cash, o.totalCents);
     cardAll += pay.card;
     tenders.cash += pay.cash;
     tenders.card += pay.card;
@@ -152,7 +159,9 @@ export function buildSettlement(
   tips.total = tips.cash + tips.card;
 
   const feeBase = opts.feeBase ?? 'card-tickets';
-  const feeBaseCents = feeBase === 'card-tickets' ? cardTicket : feeBase === 'card-all' ? cardAll : tenders.cash + tenders.card;
+  const feeBaseCents = feeBase === 'card-tickets' ? cardTicket
+    : feeBase === 'all-tickets' ? cardTicket + cashTicket
+    : feeBase === 'card-all' ? cardAll : tenders.cash + tenders.card;
   const fee = exosFeeCents(feeBaseCents, opts.feeBps);
 
   const d = { open: 0, closed: 0, floatCents: 0, expectedCents: 0, countedCents: 0, varianceCents: 0 };
@@ -173,6 +182,7 @@ export function buildSettlement(
     tenders,
     tips,
     cardTicketCents: cardTicket,
+    cashTicketCents: cashTicket,
     feeBps: opts.feeBps,
     feeBase,
     feeBaseCents,

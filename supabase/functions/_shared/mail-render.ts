@@ -39,3 +39,14 @@ export function renderMail(
   if (/^https?:\/\/[^\s<>]+$/.test(unsub)) headers["List-Unsubscribe"] = `<${unsub}>`;
   return { ok: true, html: fill(html), headers };
 }
+
+/**
+ * A text message that links into the app (the weekly channel report text,
+ * mig 20261029120000) carries {{app_url}} like a mail row. Returns the filled
+ * text, or null when it needs the URL and none is configured: such a text is
+ * held back, not sent with a dead link.
+ */
+export function fillAppUrl(text: string, appUrl: string | null): string | null {
+  if (!text.includes(APP_URL_TOKEN)) return text;
+  return appUrl ? text.split(APP_URL_TOKEN).join(appUrl) : null;
+}
