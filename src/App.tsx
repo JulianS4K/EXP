@@ -19,6 +19,8 @@ const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
 const PayPalCheckout = lazy(() => import('./views/PayPalCheckout'));
 const SplitWithFriends = lazy(() => import('./views/SplitWithFriends'));
+const GroupPaySeat = lazy(() => import('./views/GroupPaySeat'));
+const GroupPayHost = lazy(() => import('./views/GroupPayHost'));
 const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
 const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
@@ -188,6 +190,8 @@ export default function App() {
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
+                    <Route path="/group-pay/seat/:token" element={<GroupPaySeat />} />
+                    <Route path="/group-pay/:groupId" element={<GroupPayHost />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
                     <Route path="/offer/:offerId" element={<OfferRespond />} />
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />
