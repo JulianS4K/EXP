@@ -28,6 +28,7 @@ const OFF_WORDS: Record<string, string[]> = {
   'card-at-door': ['card reader', 'tap to pay', 'tap-to-pay', 'card at the door', 'card payments at the door'],
   'dice-import': ['DICE events', 'import from DICE', 'opted-in fans'],
   'promoter-payouts': ['commission straight', 'paid their commission', 'pay promoters', 'promoter payouts'],
+  'follower-new-event-email': ['email your followers', 'emails your followers', 'followers get an email', 'new event email'],
 };
 
 /** Every text node on its own line, so words from neighbouring elements don't run together. */
