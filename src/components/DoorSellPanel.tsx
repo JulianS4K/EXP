@@ -16,6 +16,11 @@
 // hidden until the native wrapper (Terminal iOS SDK + Apple's entitlement)
 // exists; it will use connection_token and card_payment mode "sdk".
 //
+// Checkout questions (mig 20261108110000): the event's required questions are
+// required at the door too. While one is unanswered the sale button waits and
+// "Skip questions" sells anyway: the seller's explicit choice, logged on the
+// server (exos_pos_question_skips), so a queue never stalls on a form.
+//
 // Every rule is enforced in SQL (exos-pos → exos_pos_*); this screen only
 // mirrors them (lib/pos walkup.ts) to show the right buttons.
 
@@ -25,8 +30,8 @@ import { useToast } from '../context/ToastContext';
 import { formatCents } from '../lib/refunds';
 import { parseCash } from '../lib/drawerRecount';
 import {
-  CARD_POLL_GIVE_UP_MS, CARD_POLL_MS, cardStateDone, cardStateText, changeDue, quickCash, reverseOption, walkupQuote,
-  WALKUP_CARD_MESSAGE, type CardSaleState,
+  CARD_POLL_GIVE_UP_MS, CARD_POLL_MS, cardStateDone, cardStateText, changeDue, doorQuestions, missingAnswersText, quickCash, reverseOption,
+  walkupMissingRequired, walkupQuote, WALKUP_CARD_MESSAGE, type CardSaleState,
 } from '../lib/pos';
 import {
   beginCardSale, cancelCardSale, cardStatus, chargeOnReader, closeDrawer, emailSale, getRecentSales, getWalkupCatalog,
@@ -111,6 +116,10 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
   }) : null, [tier, qty, payment]);
   const ticketTiers = useMemo(() => (tierId ? ticketTiersFor(tierId, qty) : []), [tierId, qty]);
   const asks = cat && tierId ? hasQuestions(cat.questions, ticketTiers) : false;
+  // Required answers still missing (shown questions only; hidden-from-checkout ones never required).
+  const missing = useMemo(
+    () => (cat && asks ? walkupMissingRequired(cat.questions, ticketTiers, answersBody(cat.questions, ticketTiers, draft) ?? {}) : []),
+    [cat, asks, ticketTiers, draft]);
   const maxQty = Math.max(1, Math.min(10, tier?.remaining ?? 10));
   const drawer = cat?.drawers.find((d) => d.id === drawerId) ?? null;
   const needsDrawer = payment === 'cash' && (quote?.cashDueCents ?? 0) > 0;
@@ -123,7 +132,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
     setOrderKey(newOrderKey());
   };
 
-  const sell = async () => {
+  const sell = async (skipQuestions = false) => {
     if (!cat || !tier || !quote) return;
     if (needsDrawer && !drawer) { toast({ kind: 'error', message: 'Open a cash drawer first.' }); return; }
     setBusy(true);
@@ -132,13 +141,14 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
         eventId, tierId: tier.tier_id, quantity: qty, orderKey, payment,
         compQuantity: payment === 'comp' ? qty : 0, drawerId: needsDrawer ? drawer?.id : null,
         buyerName: name, buyerEmail: email, answers: asks ? answersBody(cat.questions, ticketTiers, draft) : undefined,
+        skipQuestions: skipQuestions && missing.length > 0,
       });
       setDone(o);
       setCodes(null);
       setCodeAt(0);
       setSendTo(o.buyer_email ?? '');
       resetSale();
-      toast({ kind: 'success', message: `Sold ${o.quantity} × ${o.tier_name}` });
+      toast({ kind: 'success', message: `Sold ${o.quantity} × ${o.tier_name}${o.questions_skipped ? ' (questions skipped)' : ''}` });
       void load();
     } catch (e) {
       // The same key retries the same sale; a refusal keeps it for a fix and retry.
@@ -192,7 +202,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
     return () => { stop = true; clearTimeout(t); };
   }, [cardSale, finishCard, cancelCard]);
 
-  const chargeCard = async () => {
+  const chargeCard = async (skipQuestions = false) => {
     if (!cat || !tier || !quote || !reader) return;
     setBusy(true);
     let pending: WalkupOrder | null = null;
@@ -200,6 +210,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       pending = await beginCardSale({
         eventId, tierId: tier.tier_id, quantity: qty, orderKey, buyerName: name, buyerEmail: email,
         answers: asks ? answersBody(cat.questions, ticketTiers, draft) : undefined,
+        skipQuestions: skipQuestions && missing.length > 0,
       });
       setCardSale({ order: pending, state: 'starting', startedAt: Date.now(), polls: 0 });
       await chargeOnReader(pending.id, reader.device_id);
@@ -515,11 +526,12 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
               </label>
               {asks && (
                 <div>
-                  <button type="button" aria-expanded={showQs} onClick={() => setShowQs(!showQs)} className="text-sm font-bold underline min-h-[44px]">
-                    {showQs ? 'Hide' : 'Ask'} the event's questions (optional at the door)
+                  <button type="button" aria-expanded={showQs} onClick={() => setShowQs(!showQs)} className="text-sm font-bold underline min-h-[44px]"
+                    data-testid="walkup-questions-toggle">
+                    {showQs ? 'Hide' : 'Ask'} the event's questions{missing.length > 0 ? ` (${missing.length} required)` : ''}
                   </button>
                   {showQs && (
-                    <CheckoutQuestionsForm questions={cat.questions} ticketTiers={ticketTiers} value={draft} onChange={setDraft}
+                    <CheckoutQuestionsForm questions={doorQuestions(cat.questions)} ticketTiers={ticketTiers} value={draft} onChange={setDraft}
                       problems={{}} showErrors={false} tone="light" />
                   )}
                 </div>
@@ -527,6 +539,9 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
             </div>
 
             {needsDrawer && !drawer && <p role="alert" className="text-sm text-amber-700">Open a cash drawer below to take cash.</p>}
+            {missing.length > 0 && !cardSale && (
+              <p className="text-sm text-amber-700" data-testid="walkup-missing">{missingAnswersText(missing)}. Ask them, or skip the questions.</p>
+            )}
             {cardSale ? (
               <div role="status" aria-live="polite" className="rounded-2xl border-2 border-sky-500 bg-sky-50 p-4 space-y-3">
                 <p className="text-lg font-black flex items-center gap-2">
@@ -539,19 +554,37 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                 </button>
               </div>
             ) : payment === 'card' ? (
-              <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0}
-                onClick={() => void chargeCard()}
-                className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
-                {busy && <Loader2 className="w-5 h-5 animate-spin" />}
-                <CreditCard className="w-5 h-5" /> Charge {money(quote.totalCents)} on reader
-              </button>
+              <>
+                <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0 || missing.length > 0}
+                  onClick={() => void chargeCard()}
+                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                  {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+                  <CreditCard className="w-5 h-5" /> Charge {money(quote.totalCents)} on reader
+                </button>
+                {missing.length > 0 && (
+                  <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0}
+                    onClick={() => void chargeCard(true)} data-testid="walkup-skip-questions"
+                    className={`${BIG} w-full border-2 border-amber-500 text-amber-800 bg-white disabled:opacity-50`}>
+                    Skip questions · charge {money(quote.totalCents)}
+                  </button>
+                )}
+              </>
             ) : (
-              <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty)}
-                onClick={() => void sell()}
-                className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
-                {busy && <Loader2 className="w-5 h-5 animate-spin" />}
-                {payment === 'comp' ? `Comp ${qty} ticket${qty === 1 ? '' : 's'}` : `Take ${money(quote.cashDueCents)} · sell ${qty}`}
-              </button>
+              <>
+                <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty) || missing.length > 0}
+                  onClick={() => void sell()}
+                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                  {busy && <Loader2 className="w-5 h-5 animate-spin" />}
+                  {payment === 'comp' ? `Comp ${qty} ticket${qty === 1 ? '' : 's'}` : `Take ${money(quote.cashDueCents)} · sell ${qty}`}
+                </button>
+                {missing.length > 0 && (
+                  <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty)}
+                    onClick={() => void sell(true)} data-testid="walkup-skip-questions"
+                    className={`${BIG} w-full border-2 border-amber-500 text-amber-800 bg-white disabled:opacity-50`}>
+                    Skip questions · {payment === 'comp' ? `comp ${qty}` : `sell ${qty}`}
+                  </button>
+                )}
+              </>
             )}
           </>
         )}

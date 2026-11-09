@@ -177,7 +177,8 @@ for m in \
          20261107100000_exos_pos_walkup \
          20261107110000_exos_dice_gaps_6 \
          20261107120000_exos_partner_steps \
-         20261107130000_exos_pos_terminal; do
+         20261107130000_exos_pos_terminal \
+         20261108110000_exos_dice_leftovers; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -395,7 +396,8 @@ for m in \
          20261107100000_exos_pos_walkup \
          20261107110000_exos_dice_gaps_6 \
          20261107120000_exos_partner_steps \
-         20261107130000_exos_pos_terminal; do
+         20261107130000_exos_pos_terminal \
+         20261108110000_exos_dice_leftovers; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -505,5 +507,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_walku
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_terminal.sql"
 # claude/exos-dice-gaps-6 (mig 20261107110000): fee-change log (append-only, refunds, RLS), add-on entry codes at their own lists (online + offline), conditional checkout questions (race: race_dice_gaps_6.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_gaps_6.sql"
+# claude/exos-dice-leftovers (mig 20261108110000): walk-up questions (required, logged skip), POST fee adjustments (API core), undo an add-on scan (online + offline merge), add-on wallet codes at the door (race: race_dice_leftovers.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_leftovers.sql"
 # claude/exos-partner-steps: partner + organizer reservations lock a price step; one pool lock order on complete (mig 20261107120000; race: race_partner_steps.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_steps.sql"

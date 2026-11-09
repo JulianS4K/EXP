@@ -22,6 +22,7 @@ import { mapEvent } from './events';
 import { Event, Ticket, Transfer } from '../types';
 import { estimateOffset, restoreClockOffset, saveClockOffset, setClockOffset } from './serverClock';
 import type { QueuedScan } from './offlineCheckins';
+import { undoAddonCheckIn } from './addonUndo';
 import { fetchAllPages } from './pagedRead';
 import { parseListState, type ListState } from './door/lists';
 import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../supabase/functions/_shared/doorKeys.ts';
@@ -609,6 +610,13 @@ export async function checkInOffline(
   eventId: string,
   device?: string,
 ): Promise<CheckInResult> {
+  // An add-on scan undone offline (mig 20261108110000): its own RPC, same ref rules.
+  if (scan.kind === 'addon-undo') {
+    const r = await undoAddonCheckIn(scan.ticketId, eventId, scan.reason ?? '', {
+      clientRef: scan.ref, undoneAt: scan.scannedAt, device,
+    });
+    return r as unknown as CheckInResult;
+  }
   // A check-in by name replays through its own RPC, with the same ref rules.
   const door: DoorScanTarget | undefined = scan.direction ? { listId: scan.listId ?? null, direction: scan.direction } : undefined;
   if (scan.kind === 'name') {

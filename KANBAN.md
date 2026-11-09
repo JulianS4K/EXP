@@ -81,8 +81,9 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
 2. **[built: claude/exos-checkout-questions] Checkout questions** (mig `20261106110000`). The organizer adds questions per event or per
    ticket type: text, choice, checkbox, required or optional, per order or per ticket. Answers are kept on each
    ticket, shown and exported on the dashboard, and exposed in the API. DICE equivalent: `fanSurveyAnswers`.
-   References: pretix `Question`, hi.events `Question`. Left: POS walk-up mints (not wired yet), partner
-   `/public/...` reservations and conditional questions (show B only if A); docs/checkout-questions.md.
+   References: pretix `Question`, hi.events `Question`. Left: partner `/public/...` reservations. POS walk-up
+   mints ask them now: required ones too, unless the seller taps "Skip questions", which is logged
+   (claude/exos-dice-leftovers, mig `20261108110000`); conditional questions came with item 6; docs/checkout-questions.md.
 3. **[built: claude/exos-capacity-pricing] Shared capacity** (mig `20261106120000`). One limit across several ticket types (500 total
    across GA + VIP), enforced at reserve and mint. DICE equivalent: `TicketPool`. Reference: pretix quotas.
    Built on the existing `exos_quotas` (no second pool table); left: partner reservations across several types lock pools per type, not in one global order.
@@ -97,7 +98,7 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
 5. **[built: claude/exos-buyer-geo-genre] Buyer location + genre filter** (mig `20261106140000`). Each order records the country and
    city of the card's billing address, taken from Stripe (we don't geolocate IPs). Event lists can be filtered
    by genre. DICE equivalents: `Order.ipCity` / `ipCountry`, `genreTypes`. Left: orders paid before the
-   migration have no location (no backfill), and the organizer dashboard has no genre filter yet (API and Home only).
+   migration have no location (no backfill). The organizer dashboard's event list filters by genre now (claude/exos-dice-leftovers).
 6. **[built: claude/exos-dice-gaps-6] Fee-change log, add-on entry codes, conditional questions** (mig `20261107110000`).
    `exos_fee_adjustments` (DICE `Adjustment`): append-only; refunds log the buyer-fee part of what they return, finance adds
    manual changes with a note (Orders → Fees); `GET /v1/orders/:id/adjustments`, `/v1/events/:id/fee-adjustments`, settlement
@@ -105,7 +106,8 @@ webhooks, OpenAPI and MCP. These are the parts of DICE's data model Exos lacks, 
    ticket and scanned at a check-in list that admits add-ons (online, offline, offline merge); a ticket is refused there and
    an add-on code at a ticket list. Checkout questions can be "show only if" another is answered a given way (SQL + TS rules,
    builder, buyer form). Left: refunds don't reverse `exos_order_fees` (the log records the fee share; settlement fee lines
-   don't read it yet), add-on codes in Apple / Google Wallet, undoing an add-on scan, and a POST for manual adjustments in the API.
+   don't read it yet). Built in claude/exos-dice-leftovers (mig `20261108110000`): `POST /v1/orders/:id/adjustments`, undoing an
+   add-on scan (online and offline), add-on codes as their own Apple / Google Wallet passes (code and tests only; no SPA button or reissue yet).
 
 ## Discovery + distribution status 2026-10-20 (review against prod state above)
 

@@ -14,7 +14,7 @@
 --   W12 settlement totals and the fee setting
 --   W13 delivery: print codes scan like any ticket; email (account / claim link)
 --   W14 pending (the card path): reserve, cancel, expiry gives places back
---   W15 checkout answers at the door attach to the tickets
+--   W15 checkout answers at the door attach to the tickets (required ones required)
 --   W16 partner API cores: list, void by an owner / manager key, other orgs
 --   W17 cross-org isolation through RLS and the RPCs
 --   W18 handing over: only the seller or an owner / manager; unconfirmed
@@ -511,13 +511,17 @@ BEGIN
   PERFORM pg_temp.act(pg_temp.u('a1'));
   q := public.exos_save_event_question(pg_temp.u('e1'),
          '{"label":"T-shirt size","kind":"single_choice","options":["S","M","L"],"required":true,"scope":"ticket"}');
-  -- Optional at the door: a sale without answers goes through.
-  ASSERT pg_temp.sell_st('a2', 'd2', 1, '80', 0, 'cash', pg_temp.u('82')) = 'ok', 'W15: no answers needed';
+  -- Required at the door too since mig 20261108110000 (the seller may skip
+  -- them explicitly: test_dice_leftovers.sql DL1).
+  ASSERT pg_temp.sell_st('a2', 'd2', 1, '80', 0, 'cash', pg_temp.u('82')) = '22023', 'W15: a required answer is required';
   r := pg_temp.sell('a2', 'd2', 1, '81', 0, 'cash', pg_temp.u('82'), NULL,
                     jsonb_build_object('tickets', jsonb_build_array(jsonb_build_object(q ->> 'id', 'M'))));
   ASSERT (SELECT a.display FROM public.exos_question_answers a JOIN public.exos_tickets t ON t.id = a.ticket_id
            WHERE t.order_ref = 'pos:' || (r ->> 'id')) = 'M', 'W15: the answer is on the ticket';
-  RAISE NOTICE 'OK W15 checkout answers at the door are optional and attach to the walk-up tickets';
+  -- The later sections sell without answers: the question goes.
+  PERFORM pg_temp.act(pg_temp.u('a1'));
+  PERFORM public.exos_archive_event_question((q ->> 'id')::uuid);
+  RAISE NOTICE 'OK W15 checkout answers at the door are required (or skipped, DL1) and attach to the walk-up tickets';
 END $$;
 
 -- ── W16 ─────────────────────────────────────────────────────────────────────

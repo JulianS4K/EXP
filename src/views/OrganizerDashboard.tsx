@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Event } from '../types';
 import { eventGrossSales, listOrgEvents } from '../lib/events';
+import { genreChips, matchesGenre } from '../lib/genres';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import AccessDenied from '../components/AccessDenied';
@@ -31,6 +32,11 @@ export default function OrganizerDashboard() {
   // we cross 1000 events per organizer we'll move this server-side.
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // Genre filter (mig 20261106140000; DICE genreTypes): the genres on this
+  // organizer's own events, compared by key like Home and the API
+  // (lib/genres: any case and spacing; an event without genres counts under
+  // its category). null = every genre.
+  const [genreFilter, setGenreFilter] = useState<string | null>(null);
   // Onboarding nudge: surfaces when user is signed in but has no
   // orgs yet AND hasn't dismissed the prompt. Reads the same
   // localStorage key the onboarding flow writes on completion.
@@ -78,6 +84,7 @@ export default function OrganizerDashboard() {
   const filteredEvents = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return events.filter((ev) => {
+      if (!matchesGenre(ev, genreFilter)) return false;
       if (statusFilter !== 'all') {
         const status = ev.status ?? 'published'; // legacy events default to published
         if (status !== statusFilter) return false;
@@ -86,7 +93,8 @@ export default function OrganizerDashboard() {
       const haystack = `${ev.title || ''} ${ev.location || ''} ${ev.category || ''}`.toLowerCase();
       return haystack.includes(term);
     });
-  }, [events, searchTerm, statusFilter]);
+  }, [events, searchTerm, statusFilter, genreFilter]);
+  const genres = useMemo(() => genreChips([], events, 50), [events]);
 
   // Onboarding nudge condition: signed in, no orgs, not dismissed.
   // Admins skip — they're not running events themselves.
@@ -314,6 +322,18 @@ export default function OrganizerDashboard() {
               <option value="draft">Drafts</option>
               <option value="cancelled">Cancelled</option>
             </select>
+            {genres.length > 0 && (
+              <select
+                value={genreFilter ?? ''}
+                onChange={(e) => setGenreFilter(e.target.value || null)}
+                aria-label="Filter by genre"
+                data-testid="dashboard-genre-filter"
+                className="bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary"
+              >
+                <option value="">All genres</option>
+                {genres.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+              </select>
+            )}
           </div>
         )}
 

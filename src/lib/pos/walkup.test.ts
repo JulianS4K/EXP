@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildSettlement, CARD_POLL_GIVE_UP_MS, cardStateDone, cardStateText, changeDue, drawerCashCents, paidOutProblem, quickCash,
-  reconcileDrawer, reverseOption, walkupQuote, WALKUP_VOID_WINDOW_HOURS, type SettlementOrder,
+  buildSettlement, CARD_POLL_GIVE_UP_MS, cardStateDone, cardStateText, changeDue, doorQuestions, drawerCashCents,
+  missingAnswersText, paidOutProblem, quickCash, reconcileDrawer, reverseOption, walkupMissingRequired, walkupQuote,
+  WALKUP_VOID_WINDOW_HOURS, type DoorQuestion, type SettlementOrder,
 } from './index';
 
 // The same numbers as tests/exos/test_pos_walkup.sql (W2, W5, W7).
@@ -97,5 +98,46 @@ describe('card at the door (screen text)', () => {
     expect(cardStateDone('starting')).toBe(false);
     for (const s of ['succeeded', 'declined', 'canceled', 'refunded'] as const) expect(cardStateDone(s)).toBe(true);
     expect(CARD_POLL_GIVE_UP_MS).toBeGreaterThan(5 * 60_000);
+  });
+});
+
+// Checkout questions at the door (mig 20261108110000; tests/exos/test_dice_leftovers.sql DL1).
+describe('walk-up checkout questions', () => {
+  const company: DoorQuestion = { id: 'q-co', label: 'Company', kind: 'text', required: true, scope: 'order' };
+  const size: DoorQuestion = { id: 'q-size', label: 'Size', kind: 'single_choice', options: ['S', 'M', 'L'], required: true, scope: 'ticket' };
+  const allergy: DoorQuestion = { id: 'q-al', label: 'Allergy?', kind: 'checkbox', required: false, scope: 'ticket' };
+  const which: DoorQuestion = {
+    id: 'q-which', label: 'Which allergy', kind: 'text', required: true, scope: 'ticket', parent_question_id: 'q-al', parent_values: ['true'],
+  };
+  const band: DoorQuestion = { id: 'q-band', label: 'Wristband colour', kind: 'text', required: true, scope: 'ticket', hidden: true };
+  const qs = [company, size, allergy, which, band];
+  const two = ['tier', 'tier'];
+
+  it('lists the required answers missing, per order and per ticket', () => {
+    expect(walkupMissingRequired(qs, two, {}).map((m) => [m.label, m.ticket])).toEqual([
+      ['Company', null], ['Size', 1], ['Size', 2],
+    ]);
+    expect(walkupMissingRequired(qs, two, { order: { 'q-co': 'Acme' }, tickets: [{ 'q-size': 'M' }] }))
+      .toEqual([{ question_id: 'q-size', label: 'Size', ticket: 2 }]);
+  });
+  it('a "show only if" question is required only when shown', () => {
+    const base = { order: { 'q-co': 'Acme' }, tickets: [{ 'q-size': 'M', 'q-al': true }, { 'q-size': 'L' }] };
+    expect(walkupMissingRequired(qs, two, base)).toEqual([{ question_id: 'q-which', label: 'Which allergy', ticket: 1 }]);
+    expect(walkupMissingRequired(qs, two, { ...base, tickets: [{ ...base.tickets[0], 'q-which': 'Peanuts' }, base.tickets[1]] })).toEqual([]);
+  });
+  it('a question hidden from checkout is never required at the door', () => {
+    expect(doorQuestions([band])[0].required).toBe(false);
+    expect(doorQuestions([size])[0]).toBe(size);
+    expect(walkupMissingRequired([band], ['tier'], {})).toEqual([]);
+  });
+  it('nothing to ask: nothing missing', () => {
+    expect(walkupMissingRequired([], two, {})).toEqual([]);
+    expect(walkupMissingRequired(qs, [], {})).toEqual([]);
+  });
+  it('says what is missing in one line', () => {
+    expect(missingAnswersText([])).toBe('');
+    expect(missingAnswersText([{ question_id: 'a', label: 'Company', ticket: null }])).toBe('1 required answer missing: Company');
+    expect(missingAnswersText(walkupMissingRequired(qs, ['t', 't', 't'], {})))
+      .toBe('4 required answers missing: Company, Size (ticket 1), Size (ticket 2) and 1 more');
   });
 });
