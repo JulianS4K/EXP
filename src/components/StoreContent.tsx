@@ -24,7 +24,7 @@ export function EventLineup({ lineup }: { lineup?: LineupEntry[] }) {
             <div className="min-w-0">
               <p className={act.role === 'headliner' ? 'disp text-2xl tracking-tight text-white' : 'disp text-xl tracking-tight text-white/80'}>
                 {act.name}
-                <span className="type text-[10px] text-white/40 uppercase tracking-widest ml-3 align-middle">{roleLabel(act.role)}</span>
+                <span className="type text-[10px] text-white/60 uppercase tracking-widest ml-3 align-middle">{roleLabel(act.role)}</span>
               </p>
               {act.bio && <p className="type text-sm text-white/60 leading-relaxed mt-1 whitespace-pre-line">{act.bio}</p>}
             </div>
