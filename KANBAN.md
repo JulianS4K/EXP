@@ -554,7 +554,10 @@ How we build it (techniques):
     buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
     (`docs/organizer-guide.md` "Changing the date").
 - 🟡 **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
-  change). **v2 built 2026-11-09** (mig `20261108120000_exos_group_pay`, branch `claude/exos-group-pay`; not on prod):
+  change); unaffected. **v2: PAUSED (operator 2026-11-09): dormant behind `group_pay_enabled` + `EXOS_GROUP_PAY`;
+  no further work** (mig `20261111120000_exos_group_pay_off`, branch `claude/exos-group-pay-off`: every entry point
+  refuses by default, the UI also needs `VITE_EXOS_GROUP_PAY=on`; tables, functions and tests kept, the tests turn
+  the switch on for themselves). **v2 built 2026-11-09** (mig `20261108120000_exos_group_pay`, branch `claude/exos-group-pay`; not on prod):
   each friend pays their own seat within a 30-min group window: N one-seat holds through `exos_create_hold` that end
   at the deadline, `exos-checkout` claims and attaches the seat's hold (`group_seat` / `group_cover`), fulfilment needs
   the hold live and its own (late payments fail and are auto-refunded), unpaid seats return to sale through the
@@ -564,7 +567,7 @@ How we build it (techniques):
   expired by `exos-reconcile-checkouts` once their seat is gone (deadline, cancel, cover, a restart; late-payment
   refund stays as the backstop), timed types (one slot per group), price-step types (one locked step per group, CAP),
   host-only seat labels, cover / cancel in the org audit log; abuse limits after review (maxPerAccount over the whole
-  group, a per-event ceiling on group seats, 3 starts an hour, seat-link rate limit before Stripe). Left: API / MCP routes; still refused by design:
+  group, a per-event ceiling on group seats, 3 starts an hour, seat-link rate limit before Stripe). Not planned (paused): API / MCP routes; still refused by design:
   reserved seating, add-ons / gift cards / donations on a group seat. Never a multi-day hold: card authorizations
   last ~7 days and ticketing can't use Stripe's extended authorization.
 
