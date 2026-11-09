@@ -8,6 +8,7 @@
 
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { Plus, Settings, Users, Check, Megaphone, Layers, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -28,6 +29,7 @@ const roleChip = (r: string) => ROLE_CHIP[r] ?? 'bg-slate-100 text-slate-600 bor
 const AVATAR_PALETTE = ['#00FF00', '#FF00FF', '#FFE714', '#026cdf', '#FF3B3B', '#8B5CF6'];
 
 export default function Orgs() {
+  const motionGate = useMotionGate();
   const { user, openAuthModal } = useAuth();
   const { orgs, activeOrg, setActiveOrg, loading } = useOrganization();
   const navigate = useNavigate();
@@ -63,7 +65,7 @@ export default function Orgs() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-tm-gray text-slate-900"
     >

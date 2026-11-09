@@ -129,7 +129,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl p-6 shadow-sm h-[200px] flex items-center justify-center text-slate-300 text-xs font-bold uppercase tracking-widest animate-pulse">
+      <div className="bg-white rounded-2xl p-6 shadow-sm h-[200px] flex items-center justify-center text-slate-500 text-xs font-bold uppercase tracking-widest animate-pulse">
         Loading scan log…
       </div>
     );
@@ -141,7 +141,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
         <h3 className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
           <Activity size={14} /> Door scans
         </h3>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-500">
           {error ?? 'No scans yet. As door staff check attendees in, this report fills in live — no refresh needed.'}
         </p>
       </div>
@@ -200,7 +200,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
       {stats.buckets.length > 0 && (
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h3 className="text-sm font-bold text-slate-700 mb-1">Scan rate</h3>
-          <p className="text-xs text-slate-400 mb-3">
+          <p className="text-xs text-slate-500 mb-3">
             {formatClockTime(stats.firstScan!)} → {formatClockTime(stats.lastScan!)} ·
             per-minute buckets
           </p>
@@ -219,7 +219,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
               {stats.stations.map((s) => (
                 <tr key={s.name} className="border-b border-slate-50 last:border-b-0">
                   <td className="py-2 text-slate-700 font-bold">{s.name}</td>
-                  <td className="py-2 text-slate-500 text-right">{s.count}</td>
+                  <td className="py-2 text-slate-600 text-right">{s.count}</td>
                 </tr>
               ))}
             </tbody>
@@ -236,7 +236,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
               {stats.scanners.map((s) => (
                 <tr key={s.uid} className="border-b border-slate-50 last:border-b-0">
                   <td className="py-2 text-slate-700 font-mono text-xs truncate max-w-[200px]">{s.uid}</td>
-                  <td className="py-2 text-slate-500 text-right">{s.count}</td>
+                  <td className="py-2 text-slate-600 text-right">{s.count}</td>
                 </tr>
               ))}
             </tbody>
@@ -250,7 +250,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
           <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
             <AlertTriangle size={14} /> Offline conflicts ({forcedRows.length})
           </h3>
-          <p className="text-xs text-slate-400 mb-3">
+          <p className="text-xs text-slate-500 mb-3">
             Admitted by a door while offline, then refused on upload. They count as checked in; the ticket itself was not
             changed. {totals.conflicts.map((c) => `${c.count} ${conflictText({ reason: c.reason, forced: false })}`).join(' · ')}
           </p>
@@ -264,7 +264,7 @@ export default function ScanReport({ eventId, totalSold }: Props) {
                     {c.gate ? ` · ${c.gate}` : ''}{c.device ? ` · ${c.device}` : ''}
                   </div>
                 </div>
-                <div className="text-xs text-slate-500 font-mono flex-shrink-0">{c.at ? formatClockTime(c.at) : '—'}</div>
+                <div className="text-xs text-slate-600 font-mono flex-shrink-0">{c.at ? formatClockTime(c.at) : '—'}</div>
               </div>
             ))}
           </div>
@@ -284,18 +284,18 @@ export default function ScanReport({ eventId, totalSold }: Props) {
             >
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-mono text-slate-700 truncate">{c.ticketId}</div>
-                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
                   {c.direction === 'exit' ? 'exit · ' : ''}{c.forced ? 'offline conflict · ' : ''}
                   {c.station} · {c.scanner.slice(0, 12)}{c.scanner.length > 12 ? '…' : ''}
                 </div>
               </div>
-              <div className="text-xs text-slate-500 font-mono flex-shrink-0">
+              <div className="text-xs text-slate-600 font-mono flex-shrink-0">
                 {c.at ? formatClockTime(c.at) : '—'}
               </div>
             </div>
           ))}
           {checkIns.length > RECENT_SCANS_DEFAULT && (
-            <p className="text-xs text-slate-400 mt-3 text-center">
+            <p className="text-xs text-slate-500 mt-3 text-center">
               Showing {RECENT_SCANS_DEFAULT} of {checkIns.length}. Older scans available via the CSV export on the check-in page.
             </p>
           )}
@@ -423,11 +423,11 @@ function Stat({
   return (
     <div className="bg-white p-5 rounded border border-slate-200 shadow-sm">
       <div className="flex justify-between items-start mb-3">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{label}</p>
-        {icon && <span className="text-slate-400">{icon}</span>}
+        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">{label}</p>
+        {icon && <span className="text-slate-500">{icon}</span>}
       </div>
       <p className="text-2xl font-bold text-slate-900 tracking-tight">{value}</p>
-      {sub && <p className="text-[10px] text-slate-400 mt-1">{sub}</p>}
+      {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
     </div>
   );
 }

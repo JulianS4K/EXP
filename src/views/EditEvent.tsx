@@ -1012,8 +1012,8 @@ export default function EditEvent() {
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Title</label>
-                <input 
+                <label htmlFor="edit-event-title" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Title</label>
+                <input id="edit-event-title" 
                   required
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.title}
@@ -1021,8 +1021,8 @@ export default function EditEvent() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Category</label>
-                <select 
+                <label htmlFor="edit-event-category" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Category</label>
+                <select id="edit-event-category" 
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors appearance-none"
                   value={eventData.category}
                   onChange={(e) => setEventData({ ...eventData, category: e.target.value })}
@@ -1054,8 +1054,8 @@ export default function EditEvent() {
               </div>
 
               <div className="space-y-2 md:col-span-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Custom Subgenres</label>
-                <input
+                <label htmlFor="edit-event-custom-subgenres" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Custom Subgenres</label>
+                <input id="edit-event-custom-subgenres"
                   type="text"
                   placeholder="e.g. Ambient, Techno, Deep House (Comma separated)"
                   className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1078,8 +1078,8 @@ export default function EditEvent() {
               )}
               {!hasLineup && (<>
               <div className="space-y-2 md:col-span-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
-                <input
+                <label htmlFor="edit-event-performers" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
+                <input id="edit-event-performers"
                   type="text"
                   placeholder="e.g. Skrillex, Boys Noize, Boombox Cartel (max 10, comma-separated)"
                   className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1102,7 +1102,7 @@ export default function EditEvent() {
                   social destinations per performer, rendered next to each
                   artist on the public event page. */}
               <div className="space-y-2 md:col-span-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Artist links (optional)</label>
+                <span className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Artist links (optional)</span>
                 <ArtistLinksEditor
                   performers={eventData.performers || []}
                   value={eventData.artistLinks || []}
@@ -1115,8 +1115,8 @@ export default function EditEvent() {
            {/* With the store-page columns, the markdown "About" below replaces this. */}
            {!storeSupported && (
            <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Narrative Description</label>
-              <textarea 
+              <label htmlFor="edit-event-narrative-description" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Narrative Description</label>
+              <textarea id="edit-event-narrative-description" 
                 rows={4}
                 className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.description}
@@ -1170,10 +1170,10 @@ export default function EditEvent() {
                read the top-level field. */}
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Date</label>
+                <label htmlFor="edit-event-date" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Date</label>
                 <div className="relative">
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
-                  <input
+                  <input id="edit-event-date"
                     type="datetime-local"
                     className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.date as Timestamp | undefined, eventData.timezone)}
@@ -1191,10 +1191,10 @@ export default function EditEvent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Doors Open</label>
+                <label htmlFor="edit-event-doors-open" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Doors Open</label>
                 <div className="relative">
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
-                  <input
+                  <input id="edit-event-doors-open"
                     type="datetime-local"
                     className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.doorsOpen, eventData.timezone)}
@@ -1218,10 +1218,10 @@ export default function EditEvent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show Start</label>
+                <label htmlFor="edit-event-show-start" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show Start</label>
                 <div className="relative">
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
-                  <input
+                  <input id="edit-event-show-start"
                     type="datetime-local"
                     className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.startTime, eventData.timezone)}
@@ -1246,10 +1246,10 @@ export default function EditEvent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show End</label>
+                <label htmlFor="edit-event-show-end" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show End</label>
                 <div className="relative">
                   <CalendarIcon className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none" aria-hidden="true" />
-                  <input
+                  <input id="edit-event-show-end"
                     type="datetime-local"
                     className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                     value={timestampToLocalInput(eventData.timing?.endTime, eventData.timezone)}
@@ -1355,8 +1355,8 @@ export default function EditEvent() {
                 })()}
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total Venue Capacity</label>
-                <input
+                <label htmlFor="edit-event-total-venue-capacity" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total Venue Capacity</label>
+                <input id="edit-event-total-venue-capacity"
                   type="number"
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.totalTickets}
@@ -1399,8 +1399,8 @@ export default function EditEvent() {
            </div>
 
            <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Seating Structure</label>
-              <textarea 
+              <label htmlFor="edit-event-seating-structure" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Seating Structure</label>
+              <textarea id="edit-event-seating-structure" 
                 placeholder="Section A: Row 1-10 (VIP), Section B: Row 1-20 (GA)..."
                 className="w-full bg-black border border-white/20 py-4 px-6 font-medium text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                 value={eventData.seatingManifest || ''}
@@ -1418,8 +1418,8 @@ export default function EditEvent() {
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per transaction</label>
-                <input 
+                <label htmlFor="edit-event-max-per-transaction" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per transaction</label>
+                <input id="edit-event-max-per-transaction" 
                   type="number"
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerOrder || 8}
@@ -1430,8 +1430,8 @@ export default function EditEvent() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per user account</label>
-                <input 
+                <label htmlFor="edit-event-max-per-user-account" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max per user account</label>
+                <input id="edit-event-max-per-user-account" 
                   type="number"
                   className="w-full bg-black border border-white/20 py-4 px-6 font-bold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                   value={eventData.purchaseLimits?.maxPerAccount || 8}
@@ -1493,8 +1493,8 @@ export default function EditEvent() {
                    
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       <div className="space-y-2 md:col-span-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Designation (e.g. Platinum, VIP, Parking)</label>
-                         <input 
+                         <label htmlFor={`tier-${tier.id}-name`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Designation (e.g. Platinum, VIP, Parking)</label>
+                         <input id={`tier-${tier.id}-name`} 
                            required 
                            type="text"
                            placeholder="Enter tier name..."
@@ -1504,8 +1504,8 @@ export default function EditEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Price (USD)</label>
-                         <input 
+                         <label htmlFor={`tier-${tier.id}-price`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Price (USD)</label>
+                         <input id={`tier-${tier.id}-price`} 
                            required 
                            type="number"
                            min="0"
@@ -1527,8 +1527,8 @@ export default function EditEvent() {
                          />
                       </div>
                       <div className="space-y-2 md:col-span-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Benefits & Access Rights</label>
-                         <textarea
+                         <label htmlFor={`tier-${tier.id}-benefits`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Tier Benefits & Access Rights</label>
+                         <textarea id={`tier-${tier.id}-benefits`}
                            required
                            placeholder="Describe the exclusivity of this tier..."
                            className="w-full bg-black border border-white/20 py-4 px-6 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1585,8 +1585,8 @@ export default function EditEvent() {
                         </summary>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/10">
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
-                            <select
+                            <label htmlFor={`tier-${tier.id}-type`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
+                            <select id={`tier-${tier.id}-type`}
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).ticketType ?? 'paid'}
                               onChange={(e) => updateTier(tier.id, 'ticketType', e.target.value)}
@@ -1597,8 +1597,8 @@ export default function EditEvent() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
-                            <select
+                            <label htmlFor={`tier-${tier.id}-visibility`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
+                            <select id={`tier-${tier.id}-visibility`}
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={(tier as any).visibility ?? 'public'}
                               onChange={(e) => updateTier(tier.id, 'visibility', e.target.value)}
@@ -1608,8 +1608,8 @@ export default function EditEvent() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
-                            <input
+                            <label htmlFor={`tier-${tier.id}-sales-open`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
+                            <input id={`tier-${tier.id}-sales-open`}
                               type="datetime-local"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesStart, eventData.timezone)}
@@ -1629,8 +1629,8 @@ export default function EditEvent() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
-                            <input
+                            <label htmlFor={`tier-${tier.id}-sales-close`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
+                            <input id={`tier-${tier.id}-sales-close`}
                               type="datetime-local"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                               value={timestampToLocalInput((tier as any).salesEnd, eventData.timezone)}
@@ -1755,9 +1755,9 @@ export default function EditEvent() {
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Signature (HEX)</label>
+                <label htmlFor="edit-event-primary-color" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Signature (HEX)</label>
                 <div className="flex space-x-4">
-                  <input 
+                  <input id="edit-event-primary-color" 
                     className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.primaryColor || ''}
                     onChange={(e) => setEventData({ 
@@ -1769,9 +1769,9 @@ export default function EditEvent() {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Signature (HEX)</label>
+                <label htmlFor="edit-event-accent-color" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Signature (HEX)</label>
                 <div className="flex space-x-4">
-                  <input
+                  <input id="edit-event-accent-color"
                     className="flex-grow bg-black border border-white/20 py-4 px-6 font-mono text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                     value={eventData.branding?.accentColor || ''}
                     onChange={(e) => setEventData({
@@ -1830,10 +1830,10 @@ export default function EditEvent() {
            </div>
 
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Artwork</label>
+              <label htmlFor="edit-event-artwork" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event Artwork</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="relative border border-dashed border-white/20 p-8 flex flex-col items-center justify-center bg-black/40 hover:bg-black/60 transition-all cursor-pointer group">
-                  <input
+                  <input id="edit-event-artwork"
                     type="file"
                     accept="image/*"
                     className="absolute inset-0 opacity-0 cursor-pointer"

@@ -126,12 +126,32 @@ export const PRODUCT_FACTS: ProductFact[] = [
     claim: 'Orders get receipts and invoices, with sales tax rules per ticket type.',
     code: ['src/lib/invoices.ts', 'src/lib/tax.ts'],
   },
+  {
+    id: 'money-journal', audience: 'organizer', status: 'live',
+    claim: 'Each organizer gets a double-entry money journal of their sales, refunds, fees and door cash, with a trial balance, a journal CSV export and a sales tax report by jurisdiction.',
+    code: ['src/lib/journal.ts', 'src/lib/journalApi.ts', 'src/components/finance/JournalPanel.tsx',
+      'src/components/finance/SalesTaxTable.tsx', 'src/components/finance/EventSalesTax.tsx',
+      'supabase/functions/exos-api/journal.ts', 'supabase/migrations/20261108100000_exos_money_journal.sql'],
+    note: 'Door cash sales and $0 orders post today; online card sales and refunds post once payments are on (docs/payments-go-live.md).',
+  },
+  {
+    id: 'api-fee-adjustments', audience: 'organizer', status: 'live',
+    claim: 'Through the Exos API, an organizer\'s systems can record a fee change on an order (POST /v1/orders/:id/adjustments); it is logged with a note and moves no money.',
+    code: ['supabase/functions/exos-api/feeAdjustments.ts', 'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
+  },
 
   // ---- Fans ---------------------------------------------------------------
   {
     id: 'transfers', audience: 'fan', status: 'live',
     claim: 'Tickets can be transferred to a friend at face value; the old code stops working when the friend claims it.',
     code: ['src/views/TransferTicket.tsx', 'src/views/ClaimTicket.tsx'],
+  },
+  {
+    id: 'group-pay', audience: 'fan', status: 'at_launch',
+    claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes and texts each friend a link to pay for their own seat, and can cover whatever is left.',
+    code: ['src/lib/groupPay.ts', 'src/components/GroupPayStart.tsx', 'src/views/GroupPayHost.tsx', 'src/views/GroupPaySeat.tsx',
+      'supabase/migrations/20261108120000_exos_group_pay.sql'],
+    note: 'Each friend pays in the normal checkout, so it works once paid checkout is on.',
   },
   {
     id: 'refunds', audience: 'fan', status: 'at_launch',
@@ -198,6 +218,17 @@ export const PRODUCT_FACTS: ProductFact[] = [
     claim: 'The Exos Door app is free for any event, including tickets sold on Eventbrite, Posh, DICE, Shotgun or RA (import their attendee CSV).',
     code: ['src/views/DoorApp.tsx', 'src/lib/door/imports.ts', 'supabase/migrations/20261013090000_exos_door_imports.sql'],
   },
+  {
+    id: 'walkup-questions', audience: 'organizer', status: 'live',
+    claim: 'Walk-up sales at the door ask the same checkout questions as online; staff can skip them to keep the line moving, and every skip is logged.',
+    code: ['src/components/DoorSellPanel.tsx', 'supabase/functions/_shared/pos/walkup.ts',
+      'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
+  },
+  {
+    id: 'addon-scan-undo', audience: 'organizer', status: 'live',
+    claim: 'A mistaken add-on scan (a VIP lounge, a merch pickup) can be undone from the scan log, with a reason, by the scanner within 10 minutes or by a manager any time.',
+    code: ['src/lib/addonUndo.ts', 'src/views/OrganizerCheckIn.tsx', 'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
+  },
 
   // ---- Discovery ----------------------------------------------------------
   {
@@ -228,6 +259,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
     claim: 'Tickets can be added to Apple Wallet and Google Wallet.',
     code: ['supabase/functions/exos-wallet/index.ts', 'src/views/WalletPass.tsx'],
     note: 'Needs an Apple Pass Type ID certificate and a Google Wallet issuer account.',
+  },
+  {
+    id: 'addon-wallet-passes', audience: 'fan', status: 'off',
+    claim: 'An add-on with its own entry code (a VIP lounge, a merch pickup) gets its own Apple Wallet or Google Wallet pass.',
+    code: ['supabase/functions/_shared/wallet/addonPass.ts', 'supabase/functions/exos-wallet/index.ts',
+      'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
+    note: 'Built server side (POST /exos-wallet/addon-pass), but wallets are not configured (the same Apple certificate and Google issuer account as wallet-passes), and the ticket page has no add-to-wallet button for add-ons yet. The add-on codes themselves (AddonPassesCard) work at the door today.',
   },
   {
     id: 'sms', audience: 'organizer', status: 'off',

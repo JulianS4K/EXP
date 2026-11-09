@@ -20,6 +20,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { Organization, Event } from '../types';
 import { getPublicOrgBySlug, followOrg, unfollowOrg, isFollowingOrg } from '../lib/orgs';
 import { listPublicEventsForOrg } from '../lib/events';
@@ -60,6 +61,7 @@ const DEMO_CARD_IMAGES = [
 ];
 
 function StorefrontInner({ org }: ResolvedOrg) {
+  const motionGate = useMotionGate();
   const { theme } = useTheme();
   const { user, signIn } = useAuth();
   const [events, setEvents] = useState<Event[]>([]);
@@ -232,7 +234,7 @@ function StorefrontInner({ org }: ResolvedOrg) {
       {/* ---- Event grid ---- */}
       <motion.main
         id="events"
-        initial={{ opacity: 0 }}
+        initial={motionGate.enter({ opacity: 0 })}
         animate={{ opacity: 1 }}
         className="max-w-6xl mx-auto px-4 sm:px-6 py-12"
       >
