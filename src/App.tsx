@@ -74,6 +74,8 @@ const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
+// The apps suite's public landing pages (docs/strategy.md "Apps"; claude/exos-apps-pages).
+const AppLanding = lazy(() => import('./views/AppLanding'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 // Series, collections, timed entry (mig 20261030150000).
@@ -234,6 +236,10 @@ export default function App() {
                     <Route path="/create-event" element={<CreateEvent />} />
                     <Route path="/checkin/:eventId" element={<OrganizerCheckIn />} />
                     <Route path="/door" element={<DoorApp />} />
+                    <Route path="/apps/door" element={<AppLanding app="door" />} />
+                    <Route path="/apps/events" element={<AppLanding app="events" />} />
+                    <Route path="/apps/promote" element={<AppLanding app="promote" />} />
+                    <Route path="/apps/money" element={<AppLanding app="money" />} />
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />

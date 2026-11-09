@@ -220,6 +220,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/views/DoorApp.tsx', 'src/lib/door/imports.ts', 'supabase/migrations/20261013090000_exos_door_imports.sql'],
   },
   {
+    id: 'door-name-checkin', audience: 'organizer', status: 'live',
+    claim: 'Door staff can check guests in by name as well as by scanning, on as many phones as they need.',
+    code: ['src/views/OrganizerCheckIn.tsx', 'src/lib/door/roster.ts', 'src/views/DoorApp.tsx'],
+    note: 'An organizer can turn check-in by name off for an event (QR only).',
+  },
+  {
     id: 'walkup-questions', audience: 'organizer', status: 'live',
     claim: 'Walk-up sales at the door ask the same checkout questions as online; staff can skip them to keep the line moving, and every skip is logged.',
     code: ['src/components/DoorSellPanel.tsx', 'supabase/functions/_shared/pos/walkup.ts',

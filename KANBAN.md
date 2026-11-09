@@ -240,8 +240,9 @@ pass revenue reconciles to Stripe.
    each free, with Exos earning only per ticket sold. ✅ **Door** (`/door`, mig `20261013090000`, not applied):
    door-only events, import an Eventbrite / Posh / DICE / Shotgun / RA / spreadsheet attendee CSV, scan their
    barcodes or check in by name (offline too), own install manifest; the door download is now scanner-scoped.
-   Next: landing pages for Events, Promote and Money; a public "free door app" page for organizers on other
-   platforms.
+   ✅ **Landing pages** (built 2026-11-09, no migration): `/apps/door` (the free door app for organizers on other
+   platforms), `/apps/events`, `/apps/promote`, `/apps/money`; bullets and prices come only from the facts
+   registry. Next: Box Office, once Stripe Terminal lands (Phase 3).
 1. **Door:** ✅ end-of-night door summary and roster delta RPC (mig `20261008090000`). ✅ **Per-day door keys**
    (built 2026-10-19, mig `20261019100000`, not applied; `docs/wallet.md` "Door keys"): door phones get three
    days of keys per ticket, never its barcode secret; the secret view answers only the holder, buyer and admins.

@@ -239,6 +239,20 @@ await check('transfer a ticket', async (page, run) => {
   await run();
 }, { signedIn: true, mock: ticketMock });
 
+// ── Apps suite landing pages (public, signed out) ─────────────────────────
+for (const [id, headline, device] of [
+  ['door', 'The free door app for any event.', 'iPhone 13'],
+  ['events', 'Create an event page and sell tickets.', 'Desktop Chrome'],
+  ['promote', 'Get people to your event, and see who brought them.', 'iPhone 13'],
+  ['money', 'Your sales, settlements and books in one place.', 'Desktop Chrome'],
+]) {
+  await check(`app landing (/apps/${id})`, async (page, run) => {
+    await page.goto(BASE + '/apps/' + id);
+    await page.getByRole('heading', { level: 1, name: headline }).waitFor({ timeout: 8000 });
+    await run();
+  }, { device });
+}
+
 // ── Door app ────────────────────────────────────────────────────────────────
 await check('door app (signed out)', async (page, run) => {
   await page.goto(BASE + '/door');
